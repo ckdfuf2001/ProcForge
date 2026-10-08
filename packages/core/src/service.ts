@@ -21,7 +21,7 @@ import { createMemoryStore } from "./store.js";
 import type { Store } from "@procforge/shared/store.js";
 import { defaultEvaluate } from "./evaluate.js";
 import { adviceToConstraints } from "./advice.js";
-import { compareNodeIds } from "./ids.js";
+import { compareNodeIds } from "@procforge/shared/ids.js";
 
 function newAttemptId(): string {
   return randomUUID();
@@ -442,7 +442,7 @@ export class CoreService implements CoreClient {
           status: "leaf",
           tool: { server: input.tool.server, name: input.tool.name, schemaHash: cat.schemaHash },
           args: input.argSpecs,
-          golden: { fixtures: [...last.artifacts], output: last.resultSummary },
+          golden: { fixtures: [...last!.artifacts], output: last!.resultSummary, attemptId: last!.id, ignore: input.goldenIgnore ?? [] },
         };
         if (input.sideEffect) next.sideEffect = input.sideEffect;
         next.hash = computeNodeHash({ goal: next.goal, args: next.args, constraints: next.constraints, dependsOn: next.dependsOn });

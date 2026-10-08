@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
-import type { ArgSpec } from "@procforge/shared/schema.js";
+import type { ArgSpec, Attempt } from "@procforge/shared/schema.js";
 
 // 인자 해석 (M3): fixed 그대로, var는 params+이전 출력, generated는 replay 기록값/live 에러.
 
@@ -8,7 +8,10 @@ export function resolveArgs(input: {
   specs: Record<string, ArgSpec>;
   params: Record<string, string>;
   outputs: Map<string, unknown>;
-  lastAttemptArgs: Record<string, unknown>;
+  /** generated 인자 출처 탐색용 (M3.1-5) */
+  attempts: Attempt[];
+  /** golden.attemptId (없으면 마지막 pass attempt로 마이그레이션) */
+  goldenAttemptId?: string;
   live: boolean;
 }): Record<string, unknown> {
   const out: Record<string, unknown> = {};
@@ -19,11 +22,24 @@ export function resolveArgs(input: {
       out[k] = resolveVar((spec as { ref: string }).ref, input.params, input.outputs);
     } else {
       if (input.live) throw new Error(`generated 인자 '${k}'는 live 모드 미지원 (M5 이후)`);
-      if (!(k in input.lastAttemptArgs)) throw new Error(`generated 인자 '${k}'의 기록값 없음 (golden/attempt 부재)`);
-      out[k] = input.lastAttemptArgs[k];
+      out[k] = resolveGenerated(k, input.attempts, input.goldenAttemptId);
     }
   }
   return out;
+}
+
+/** generated 인자는 golden.attemptId attempt의 args에서만 (M3.1-5) */
+export function resolveGenerated(k: string, attempts: Attempt[], goldenAttemptId?: string): unknown {
+  if (goldenAttemptId) {
+    const a = attempts.find((x) => x.id === goldenAttemptId);
+    if (!a) throw new Error(`golden attempt 없음: ${goldenAttemptId}`);
+    if (!(k in a.args)) throw new Error(`golden attempt에 인자 없음: ${k}`);
+    return a.args[k];
+  }
+  const last = [...attempts].reverse().find((x) => x.verdict === "pass");
+  if (!last) throw new Error(`pass attempt 없음: generated '${k}' 해석 불가`);
+  if (!(k in last.args)) throw new Error(`generated 인자 '${k}'의 기록값 없음`);
+  return last.args[k];
 }
 
 function getByDot(root: unknown, path: string): unknown {

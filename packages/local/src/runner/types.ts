@@ -16,7 +16,7 @@ export type RunOptions = {
   runId?: string;
 };
 
-export type NodeResultStatus = "pass" | "fail" | "unverified" | "skipped";
+export type NodeResultStatus = "pass" | "fail" | "unverified" | "skipped" | "blocked";
 
 export type NodeResult = {
   nodeId: string;
@@ -33,7 +33,7 @@ export type RunReport = {
   mode: RunMode;
   at: string;
   results: NodeResult[];
-  summary: { pass: number; fail: number; unverified: number; skipped: number };
+  summary: { pass: number; fail: number; unverified: number; skipped: number; blocked: number };
   nodeHashes: Record<string, string>;
 };
 

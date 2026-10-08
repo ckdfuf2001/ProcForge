@@ -40,6 +40,10 @@ async function main(): Promise<number> {
     console.error(`bad --mode: ${mode}`);
     return 2;
   }
+  if (mode === "replay" && values["update-golden"]) {
+    console.error("--update-golden은 record/passthrough에서만 허용 (replay 불가)");
+    return 2;
+  }
   const projectRoot = resolve(values["project-root"] ?? process.env.PROCFORGE_PROJECT_ROOT ?? process.cwd());
   const procforgeDir = resolve(values["procforge-dir"] ?? process.env.PROCFORGE_DIR ?? `${projectRoot}/.procforge`);
   try {
@@ -54,8 +58,8 @@ async function main(): Promise<number> {
       changed: values.changed ?? false,
     });
     if (values.junit) writeFileSync(resolve(values.junit), toJUnit(report));
-    const { pass, fail, unverified, skipped } = report.summary;
-    console.log(`run ${report.runId}: pass=${pass} fail=${fail} unverified=${unverified} skipped=${skipped}`);
+    const { pass, fail, unverified, skipped, blocked } = report.summary;
+    console.log(`run ${report.runId}: pass=${pass} fail=${fail} unverified=${unverified} skipped=${skipped} blocked=${blocked}`);
     console.log(`report: ${procforgeDir}/runs/${report.runId}/report.json`);
     return fail > 0 ? 1 : 0;
   } catch (e) {

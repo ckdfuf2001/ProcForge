@@ -1,32 +1,20 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { compareNormalized } from "@procforge/shared/normalize.js";
+import { compareNodeIds } from "@procforge/shared/ids.js";
 import type { Node } from "@procforge/shared/schema.js";
 import { FileStore } from "../filestore.js";
 import { evaluateAll } from "../checker.js";
 import { logger } from "../logger.js";
 import { ConnectionPool } from "./connections.js";
 import { findRecording, loadCassette, recordKey, saveRecording, toToolResponse } from "./recordings.js";
-import { resolveArgs, rewritePaths } from "./resolve.js";
+import { resolveArgs } from "./resolve.js";
+import { inferPathRole, rewritePaths, type PathRole } from "./paths.js";
 import { setupRunFs } from "./workdir.js";
 import type { NodeResult, RunMode, RunOptions, RunReport, ToolResponse } from "./types.js";
 
-/** 노드 id 세그먼트 숫자 비교 (core compareNodeIds와 동일, local 자족용 복제) */
-function compareNodeIds(a: string, b: string): number {
-  const pa = a.split(".").map(Number);
-  const pb = b.split(".").map(Number);
-  const len = Math.max(pa.length, pb.length);
-  for (let i = 0; i < len; i++) {
-    const x = pa[i] ?? 0;
-    const y = pb[i] ?? 0;
-    if (x !== y) return x < y ? -1 : 1;
-  }
-  return 0;
-}
-
 function orderNodes(nodes: Node[]): Node[] {
-  // dependsOn 위상 정렬 + id 순서
-  const byId = new Map(nodes.map((n) => [n.id, n]));
   const inScope = new Set(nodes.map((n) => n.id));
   const done = new Set<string>();
   const out: Node[] = [];
@@ -36,7 +24,6 @@ function orderNodes(nodes: Node[]): Node[] {
     const i = pending.findIndex((n) => n.dependsOn.filter((d) => inScope.has(d)).every((d) => done.has(d)));
     if (i === -1) throw new Error(`의존 해소 불가(순환?): ${pending.map((n) => n.id).join(",")}`);
     const [n] = pending.splice(i, 1);
-    void byId;
     done.add(n.id);
     out.push(n);
   }
@@ -77,8 +64,13 @@ export function toJUnit(report: RunReport): string {
   const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
   const cases = report.results
     .map((r) => {
-      const fail = r.status === "fail" ? `<failure message="${esc(r.detail ?? "failed")}">${esc(r.failedConstraints.join(","))}</failure>` : "";
-      return `    <testcase classname="procforge" name="${esc(r.nodeId)}" time="${(r.durationMs / 1000).toFixed(3)}">${fail}</testcase>`;
+      if (r.status === "fail") {
+        return `    <testcase classname="procforge" name="${esc(r.nodeId)}" time="${(r.durationMs / 1000).toFixed(3)}"><failure message="${esc(r.detail ?? "failed")}">${esc(r.failedConstraints.join(","))}</failure></testcase>`;
+      }
+      if (r.status === "unverified" || r.status === "skipped" || r.status === "blocked") {
+        return `    <testcase classname="procforge" name="${esc(r.nodeId)}" time="${(r.durationMs / 1000).toFixed(3)}"><skipped message="${esc(r.detail ?? r.status)}"/></testcase>`;
+      }
+      return `    <testcase classname="procforge" name="${esc(r.nodeId)}" time="${(r.durationMs / 1000).toFixed(3)}"/>`;
     })
     .join("\n");
   const failures = report.results.filter((r) => r.status === "fail").length;
@@ -87,6 +79,9 @@ export function toJUnit(report: RunReport): string {
 
 export async function runSession(opts: RunOptions): Promise<RunReport> {
   const mode: RunMode = opts.mode ?? "replay";
+  if (mode === "replay" && opts.updateGolden) {
+    throw Object.assign(new Error("--update-golden은 record/passthrough에서만 허용 (replay 불가)"), { code: "bad_request" });
+  }
   const store = new FileStore(opts.procforgeDir);
   const session = store.getSession(opts.sessionId);
   if (!session) throw Object.assign(new Error(`세션 없음: ${opts.sessionId}`), { code: "session_not_found" });
@@ -122,9 +117,9 @@ export async function runSession(opts: RunOptions): Promise<RunReport> {
     }
     const ordered = orderNodes(all);
     const outputs = new Map<string, unknown>();
-    // 범위 밖 의존 출력은 golden에서 공급
+    // 범위 밖 의존 출력만 golden에서 공급 (M3.1-4: 범위 내 선주입 금지)
     for (const n of all) {
-      if (n.golden && !outputs.has(n.id)) {
+      if (!targets.has(n.id) && n.golden && !outputs.has(n.id)) {
         try {
           outputs.set(n.id, JSON.parse(n.golden.output));
         } catch {
@@ -134,26 +129,48 @@ export async function runSession(opts: RunOptions): Promise<RunReport> {
     }
 
     const results: NodeResult[] = [];
+    const resultOf = new Map<string, NodeResult>();
     for (const n of ordered) {
       const start = Date.now();
       if (!targets.has(n.id)) {
-        results.push({ nodeId: n.id, status: "skipped", failedConstraints: [], detail: "scope/changes 제외", durationMs: 0 });
+        const r: NodeResult = { nodeId: n.id, status: "skipped", failedConstraints: [], detail: "scope/changes 제외", durationMs: 0 };
+        results.push(r);
+        resultOf.set(n.id, r);
         continue;
       }
       if (n.status !== "leaf" || !n.tool) {
-        results.push({ nodeId: n.id, status: "skipped", failedConstraints: [], detail: `leaf 아님(${n.status})`, durationMs: 0 });
+        const r: NodeResult = { nodeId: n.id, status: "skipped", failedConstraints: [], detail: `leaf 아님(${n.status})`, durationMs: 0 };
+        results.push(r);
+        resultOf.set(n.id, r);
+        continue;
+      }
+      // 실패 전파 (M3.1-4): 범위 내 의존이 fail/blocked이거나 출력이 없으면 blocked
+      const badDep = n.dependsOn.find((d) => {
+        if (!targets.has(d)) return false; // 범위 밖은 golden 선주입됨
+        const dr = resultOf.get(d);
+        if (!dr) return true;
+        return dr.status === "fail" || dr.status === "blocked" || !outputs.has(d);
+      });
+      if (badDep) {
+        const r: NodeResult = { nodeId: n.id, status: "blocked", failedConstraints: [], detail: `blocked by ${badDep}`, durationMs: Date.now() - start };
+        results.push(r);
+        resultOf.set(n.id, r);
         continue;
       }
       try {
-        results.push(await execNode(opts, session.params, outputs, pool, fsDir, n, mode));
+        const r = await execNode(opts, session.params, outputs, pool, fsDir, n, mode);
+        results.push(r);
+        resultOf.set(n.id, r);
       } catch (e) {
-        results.push({
+        const r: NodeResult = {
           nodeId: n.id,
           status: "fail",
           failedConstraints: [],
           detail: e instanceof Error ? e.message : String(e),
           durationMs: Date.now() - start,
-        });
+        };
+        results.push(r);
+        resultOf.set(n.id, r);
       }
     }
 
@@ -162,6 +179,7 @@ export async function runSession(opts: RunOptions): Promise<RunReport> {
       fail: results.filter((r) => r.status === "fail").length,
       unverified: results.filter((r) => r.status === "unverified").length,
       skipped: results.filter((r) => r.status === "skipped").length,
+      blocked: results.filter((r) => r.status === "blocked").length,
     };
     const report: RunReport = {
       runId,
@@ -195,20 +213,27 @@ async function execNode(
   mode: RunMode,
 ): Promise<NodeResult> {
   const start = Date.now();
-  const last = n.attempts[n.attempts.length - 1];
+  const inputSchema = catalogInputSchema(opts, n);
+  const roles: Record<string, PathRole | undefined> = {};
+  for (const [k, spec] of Object.entries(n.args ?? {})) {
+    roles[k] = (spec as { path?: PathRole }).path ?? inferPathRole(k, inputSchema);
+  }
   const args = rewritePaths(
     resolveArgs({
       specs: n.args ?? {},
       params,
       outputs,
-      lastAttemptArgs: last?.args ?? {},
+      attempts: n.attempts,
+      goldenAttemptId: n.golden?.attemptId,
       live: mode === "passthrough",
     }),
+    roles,
     fsDir,
+    opts.projectRoot,
   );
   const server = n.tool!.server;
   const tool = n.tool!.name;
-  const key = recordKey(fsDir, server, tool, args);
+  const key = recordKey(fsDir, opts.projectRoot, server, tool, args);
   let resp: ToolResponse;
   let mocked = false;
 
@@ -222,6 +247,7 @@ async function execNode(
       resp = { resultText: "[mock external]", resultJson: { mock: true } };
     }
   } else if (mode === "replay") {
+    // M3.1-1: replay는 녹화 적중 + constraints만. golden 비교 없음.
     const rec = findRecording(loadCassette(opts.procforgeDir, opts.sessionId, n.id), key);
     if (!rec) throw new Error(`녹화 없음: ${server}/${tool} (키 ${key}). record 모드로 먼저 녹화하라.`);
     resp = toToolResponse(rec);
@@ -242,9 +268,10 @@ async function execNode(
 
   outputs.set(n.id, resp.resultJson ?? resp.resultText);
 
-  // golden 비교 (replay만). updateGolden이면 비교 대신 갱신.
-  if (mode === "replay" && n.golden) {
-    if (resp.resultText !== n.golden.output) {
+  // drift 검출: passthrough에서만 golden 정규화 비교 (M3.1-1/2)
+  if (mode === "passthrough" && n.golden) {
+    const d = compareNormalized(n.golden.output, resp.resultText, n.golden.ignore ?? [], fsDir);
+    if (!d.equal) {
       if (opts.updateGolden) {
         updateNodeGolden(opts, n, resp);
       } else {
@@ -252,13 +279,13 @@ async function execNode(
           nodeId: n.id,
           status: "fail",
           failedConstraints: [],
-          detail: `golden 불일치. expected=${JSON.stringify(n.golden.output).slice(0, 200)} actual=${JSON.stringify(resp.resultText).slice(0, 200)}`,
+          detail: `golden drift @${d.path}. expected=${d.expectedExcerpt} actual=${d.actualExcerpt}`,
           durationMs: Date.now() - start,
         };
       }
     }
   }
-  if (opts.updateGolden && mode !== "replay") {
+  if (opts.updateGolden && mode === "record") {
     updateNodeGolden(opts, n, resp);
   }
 
@@ -280,12 +307,23 @@ async function execNode(
   return { nodeId: n.id, status: "pass", failedConstraints: [], durationMs };
 }
 
+function catalogInputSchema(_opts: RunOptions, _n: Node): Record<string, unknown> | undefined {
+  // 세션 카탈로그에서 해당 tool inputSchema 조회 (추론 보조)
+  try {
+    const store = new FileStore(_opts.procforgeDir);
+    const s = store.getSession(_opts.sessionId);
+    const e = s?.toolCatalog.find((t) => t.server === _n.tool?.server && t.name === _n.tool?.name);
+    return e?.inputSchema as Record<string, unknown> | undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function updateNodeGolden(opts: RunOptions, n: Node, resp: ToolResponse): void {
   const store = new FileStore(opts.procforgeDir);
   const cur = store.getNode(opts.sessionId, n.id);
   if (!cur) return;
-  // updateGolden은 golden.output만 갱신 (fixtures는 pf_report 확정 경로가 소유).
-  // 파일 산출물 갱신이 필요하면 호스트가 pf_report로 다시 확정한다. (DECISIONS M3)
-  const next: Node = { ...cur, golden: { fixtures: [...(cur.golden?.fixtures ?? [])], output: resp.resultText } };
+  // updateGolden은 golden.output만 갱신 (fixtures는 pf_report 소유). (DECISIONS M3)
+  const next: Node = { ...cur, golden: { fixtures: [...(cur.golden?.fixtures ?? [])], output: resp.resultText, attemptId: cur.golden?.attemptId, ignore: cur.golden?.ignore ?? [] } };
   store.saveNode(opts.sessionId, next);
 }

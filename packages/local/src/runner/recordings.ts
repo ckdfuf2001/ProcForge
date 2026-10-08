@@ -25,14 +25,20 @@ function stable(v: unknown): unknown {
   return v;
 }
 
-function normalizeArgs(fsDir: string, args: Record<string, unknown>): unknown {
+function normalizeArgs(fsDir: string, projectRoot: string | undefined, args: Record<string, unknown>): unknown {
   const norm = (v: unknown): unknown => {
-    if (typeof v === "string" && (v.startsWith(fsDir) || v.includes("RUNFS/"))) {
-      try {
-        return relativizeRunPath(fsDir, v.replace("RUNFS/", `${fsDir}/`));
-      } catch {
-        return v;
+    if (typeof v === "string") {
+      if (v.startsWith(fsDir)) {
+        try {
+          return relativizeRunPath(fsDir, v);
+        } catch {
+          return v;
+        }
       }
+      if (projectRoot && v.startsWith(projectRoot)) {
+        return `PROJECT/${v.slice(projectRoot.length).replace(/\\/g, "/").replace(/^\//, "")}`;
+      }
+      return v;
     }
     if (Array.isArray(v)) return v.map(norm);
     if (v !== null && typeof v === "object") {
@@ -45,8 +51,14 @@ function normalizeArgs(fsDir: string, args: Record<string, unknown>): unknown {
   return stable(norm(args));
 }
 
-export function recordKey(fsDir: string, server: string, tool: string, args: Record<string, unknown>): string {
-  return createHash("sha256").update(JSON.stringify({ server, tool, args: normalizeArgs(fsDir, args) })).digest("hex").slice(0, 16);
+export function recordKey(
+  fsDir: string,
+  projectRoot: string | undefined,
+  server: string,
+  tool: string,
+  args: Record<string, unknown>,
+): string {
+  return createHash("sha256").update(JSON.stringify({ server, tool, args: normalizeArgs(fsDir, projectRoot, args) })).digest("hex").slice(0, 16);
 }
 
 function cassetteFile(procforgeDir: string, sessionId: string, nodeId: string): string {

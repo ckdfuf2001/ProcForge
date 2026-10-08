@@ -61,6 +61,8 @@ export type PfResolveInput = {
   plan?: { tool: { server: string; name: string }; args: Record<string, unknown> };
   /** retry/ask_human 사유 기록용 (M2.6-4) */
   note?: string;
+  /** leaf 확정 시 golden.ignore로 기록할 JSON 경로 (M3.1-2) */
+  goldenIgnore?: string[];
 };
 
 export type PfResolveOutput = {

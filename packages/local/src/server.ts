@@ -100,14 +100,16 @@ const CatalogEntryShape = z.object({
   inputSchema: z.record(z.unknown()),
   schemaHash: z.string().min(1),
 });
+const PathHintShape = z.enum(["in", "out"]).optional();
 const ArgSpecShape = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("fixed"), value: z.unknown() }),
-  z.object({ kind: z.literal("var"), ref: z.string().min(1) }),
+  z.object({ kind: z.literal("fixed"), value: z.unknown(), path: PathHintShape }),
+  z.object({ kind: z.literal("var"), ref: z.string().min(1), path: PathHintShape }),
   z.object({
     kind: z.literal("generated"),
     instruction: z.string().min(1),
     inputs: z.array(z.string()).default([]),
     constraints: z.array(z.string()).default([]),
+    path: PathHintShape,
   }),
 ]);
 
@@ -333,21 +335,16 @@ export function buildServer(deps: ServerDeps): McpServer {
         "통과한 시도를 leaf로 확정한다.",
         "선수: pf_report(verdict=pass).",
         "tool(마지막 실행과 동일), argSpecs(필수, 실행 인자 키 전체를 fixed/var/generated로 분류,",
-        "예: {\"month\":{\"kind\":\"var\",\"ref\":\"${params.month}\"}}).",
+        "예: {\"month\":{\"kind\":\"var\",\"ref\":\"${params.month}\"}}), ignore(선택, 비교 제외 JSON 경로).",
         "leaf 확정과 golden 기록 반환. 다음: pf_next.",
       ].join("\n"),
       inputSchema: {
         sessionId: SessionIdSchema,
         nodeId: NodeIdSchema,
         tool: ToolRefShape,
-        argSpecs: z.record(
-          z.discriminatedUnion("kind", [
-            z.object({ kind: z.literal("fixed"), value: z.unknown() }),
-            z.object({ kind: z.literal("var"), ref: z.string().min(1) }),
-            z.object({ kind: z.literal("generated"), instruction: z.string().min(1), inputs: z.array(z.string()).default([]), constraints: z.array(z.string()).default([]) }),
-          ]),
-        ),
+        argSpecs: z.record(ArgSpecShape),
         sideEffect: z.enum(["none", "local_write", "external"]).optional(),
+        ignore: z.array(z.string()).optional(),
       },
       outputSchema: OUTPUT_SCHEMAS["pf_confirm_leaf"],
       annotations: WRITE_ANN,
@@ -364,6 +361,7 @@ export function buildServer(deps: ServerDeps): McpServer {
           tool: a.tool as { server: string; name: string },
           argSpecs: a.argSpecs as never,
           sideEffect: a.sideEffect as "none" | "local_write" | "external" | undefined,
+          goldenIgnore: a.ignore as string[] | undefined,
         });
         deps.store.touch(sid);
         return ok({ node: nodeSummary(out.node, s.limits), instruction: out.instruction });
@@ -723,6 +721,7 @@ export function buildServer(deps: ServerDeps): McpServer {
           failed: report.summary.fail,
           unverified: report.summary.unverified,
           skipped: report.summary.skipped,
+          blocked: report.summary.blocked,
           reportPath,
         });
       } catch (e) {

@@ -13,7 +13,11 @@
     "./errors": "./dist/errors.js",
     "./errors.js": "./dist/errors.js",
     "./store": "./dist/store.js",
-    "./store.js": "./dist/store.js"
+    "./store.js": "./dist/store.js",
+    "./ids": "./dist/ids.js",
+    "./ids.js": "./dist/ids.js",
+    "./normalize": "./dist/normalize.js",
+    "./normalize.js": "./dist/normalize.js"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",

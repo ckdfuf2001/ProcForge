@@ -79,6 +79,37 @@
 - [M3-9] 산출물 — runs/<runId>/report.json + by-session latest 포인터. JUnit XML 옵션. --update-golden 없이는 golden/cassette 불변.
 - [M3-10] compareNodeIds를 runner에 복제 (local 자족, core import 금지 준수).
 
+## M3.1
+
+- [M3.1-1] 모드 역할 — replay: 인자 해석·참조·녹화 적중·constraints만 (golden 비교 없음).
+  passthrough: golden 정규화 비교로 drift 검출. record: 녹화만. --update-golden은
+  record/passthrough 전용, replay와 병용 시 bad_request(CLI exit 2).
+- [M3.1-2] 정규화 비교 shared/normalize — runFs 절대경로→{RUNFS}, ISO 시각→{TIME},
+  UUID→{UUID} 치환 후 비교. JSON이면 구조 비교(무시 경로 제거), 첫 불일치 JSON 경로 +
+  200자 excerpt. 텍스트면 첫 불일치 문자 위치 + 앞뒤 200자. golden.ignore는
+  confirm_leaf(ignore 인자)→goldenIgnore→golden.ignore로 기록.
+- [M3.1-3] 경로 역할 — ArgSpec.path 명시 우선. 추정 규칙: output/outfile/dest(/_path/_dir
+  접미·out_/output 접두 포함) → out. path/file/input/src/template/dir 계열(포함 매치) →
+  in. inputSchema properties format(uri/file/path/file-path/directory) → in. 그 외
+  재작성 안 함. in은 runFs 우선·projectRoot 읽기 폴백(둘 다 없으면 에러).
+  out은 존재 무관하게 runFs 매핑, fs 밖 절대경로 거부. 경계 검사는 isEscapeRel만
+  (prefix startsWith 금지). MCP 서버 spawn cwd=runFs. 녹화 키는 fsDir→RUNFS,
+  projectRoot→PROJECT 접두로 정규화(머신 간 결정성).
+- [M3.1-4] 실패 전파 — 범위 밖 의존 출력만 golden 선주입. 범위 내 의존이
+  fail/blocked이거나 출력이 없으면 blocked(detail=원인 id), 실행 안 함.
+  비-leaf는 skipped. JUnit·요약에 blocked 별도 집계.
+- [M3.1-5] golden.attemptId — confirm_leaf 시점 pass attempt id 기록. generated는
+  해당 attempt args에서만 취득. attemptId 부재(구 세션)는 마지막 pass attempt로
+  마이그레이션(폴백).
+- [M3.1-6] JUnit — unverified/skipped/blocked → skipped element. failures는 fail만.
+- [M3.1-7] compareNodeIds shared 이동 (M3-10 복제 철회). core/src/ids.ts는 재수출로 유지.
+
+## M3.5
+
+- [M3.5-1] 실사용 테스트는 사용자 환경에서 수행 (실제 OpenCode·모델 필요).
+  PPT MCP는 knorq-ai/pptx-mcp-server 권장 (PyPI·37종·검증 내장). 샘플·시나리오·측정표는
+  examples/dogfood + docs/M3.5-dogfood.md에 준비. 코드 수정은 instruction·description 한정.
+
 ## M1
 
 - [M1-1] checker 주입 — §6 pf_report의 verdict 계산은 local checker(§7)가 소유. core는 `EvaluateFn`을 생성자 주입받고 기본값은 constraints-empty→pass, 그 외→fail. 이유: core→local import 순환 방지 + 의존방향(local→core 금지) 유지. M2에서 local MCP 핸들러가 `checker.evaluateAll`을 주입한다.

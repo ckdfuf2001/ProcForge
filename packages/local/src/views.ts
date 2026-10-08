@@ -134,6 +134,7 @@ export const PfTestOutputSchema = z.object({
   failed: z.number(),
   unverified: z.number(),
   skipped: z.number(),
+  blocked: z.number(),
   reportPath: z.string(),
 });
 

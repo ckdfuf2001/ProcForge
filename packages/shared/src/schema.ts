@@ -30,16 +30,20 @@ export const AttemptIdSchema = z.string().uuid("Attempt id must be UUID");
 export const ArgSpecFixedSchema = z.object({
   kind: z.literal("fixed"),
   value: z.unknown(),
+  /** 경로 역할 힌트 (M3.1-3). 미지정 시 inputSchema에서 추정 */
+  path: z.enum(["in", "out"]).optional(),
 });
 export const ArgSpecVarSchema = z.object({
   kind: z.literal("var"),
   ref: z.string().min(1),
+  path: z.enum(["in", "out"]).optional(),
 });
 export const ArgSpecGeneratedSchema = z.object({
   kind: z.literal("generated"),
   instruction: z.string().min(1),
   inputs: z.array(z.string()).default([]),
   constraints: z.array(z.string()).default([]),
+  path: z.enum(["in", "out"]).optional(),
 });
 export const ArgSpecSchema = z.discriminatedUnion("kind", [
   ArgSpecFixedSchema,
@@ -187,7 +191,14 @@ export const NodeSchema = z.object({
     .default([]),
   attempts: z.array(AttemptSchema).default([]),
   golden: z
-    .object({ fixtures: z.array(z.string()), output: z.string() })
+    .object({
+      fixtures: z.array(z.string()),
+      output: z.string(),
+      /** 확정 시점 pass attempt id (M3.1-5, generated 인자 출처) */
+      attemptId: z.string().uuid().optional(),
+      /** 출력 비교 제외 JSON 경로 (M3.1-2) */
+      ignore: z.array(z.string()).default([]),
+    })
     .optional(),
   /** external dry-run 승인 기록 (M2.6-4) */
   approval: z.object({ at: z.string(), note: z.string().optional() }).optional(),

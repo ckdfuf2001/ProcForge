@@ -1,8 +1,9 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve, relative } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { connectMcpServer, loadMcpConfigs } from "../catalog.js";
+import { isEscapeRel } from "../artifacts.js";
 import type { ToolResponse } from "./types.js";
 
 // 실행 1회 동안 MCP 서버 연결 풀 유지 (M3). 내장 툴은 최소 구현.
@@ -26,8 +27,7 @@ export class ConnectionPool {
 
   private runPath(p: string): string {
     const abs = resolve(this.runFs, p);
-    const rel = relative(this.runFs, abs);
-    if (rel === "" || rel === ".." || rel.startsWith(`..${"/"}`) || rel.startsWith(`..\\`)) {
+    if (isEscapeRel(relative(this.runFs, abs).split("\\").join("/"), "/")) {
       throw new Error(`run fs escape: ${p}`);
     }
     return abs;
@@ -66,12 +66,12 @@ export class ConnectionPool {
 
   async call(server: string, tool: string, args: Record<string, unknown>): Promise<ToolResponse> {
     if (this.isBuiltin(server, tool)) return this.builtin(tool, args);
-    // MCP 서버 lazy 연결
+    // MCP 서버 lazy 연결 (cwd=run fs, M3.1-3)
     let client = this.mcp.get(server);
     if (!client) {
       const cfg = this.configs[server];
       if (!cfg) throw new Error(`unknown MCP server: ${server}`);
-      client = await connectMcpServer(server, cfg);
+      client = await connectMcpServer(server, cfg, { cwd: this.runFs });
       this.mcp.set(server, client);
     }
     const r = await client.callTool({ name: tool, arguments: args });

@@ -1,8 +1,11 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
+import { readFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
 
-// CI E2E용 가짜 ppt MCP 서버 (M2). stdio 전용. 의존성 없음(workspace SDK 사용).
+// CI E2E용 가짜 ppt MCP 서버 (M2). stdio 전용.
+// fill_template은 실제 파일을 쓴다 (상대경로 → cwd 기준. runner는 cwd=run fs로 spawn, M3.1-3).
 const server = new McpServer({ name: "fake-ppt-mcp", version: "0.0.0" });
 
 server.tool(
@@ -28,10 +31,13 @@ server.tool(
 server.tool(
   "fill_template",
   "Fill report template",
-  { template: z.string(), month: z.string() },
-  async ({ template, month }) => {
-    void template;
-    return { content: [{ type: "text", text: JSON.stringify({ output: `report-${month}.pptx` }) }] };
+  { template: z.string(), month: z.string(), output: z.string().optional() },
+  async ({ template, month, output }) => {
+    const tpl = existsSync(template) ? readFileSync(template, "utf8") : "no-template";
+    const out = output ?? `report-${month}.pptx`;
+    mkdirSync(dirname(out), { recursive: true });
+    writeFileSync(out, `filled:${month}:${tpl}`);
+    return { content: [{ type: "text", text: JSON.stringify({ output: out, month }) }] };
   },
 );
 

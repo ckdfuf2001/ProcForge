@@ -71,8 +71,12 @@ export function loadMcpConfigs(projectRoot: string): { servers: Record<string, M
   return { servers, sources };
 }
 
-/** MCP stdio 서버 연결 (runner 연결 풀이 재사용, M3) */
-export async function connectMcpServer(serverName: string, cfg: McpServerConfig): Promise<Client> {
+/** MCP stdio 서버 연결 (runner 연결 풀이 재사용, M3). cwd 지정 시 run fs로 spawn (M3.1-3) */
+export async function connectMcpServer(
+  serverName: string,
+  cfg: McpServerConfig,
+  opts: { cwd?: string } = {},
+): Promise<Client> {
   const rawCmd = cfg.command;
   const cmd = Array.isArray(rawCmd) ? rawCmd : typeof rawCmd === "string" ? rawCmd.split(" ") : [];
   if (cfg.type === "remote" || cmd.length === 0 || cfg.enabled === false) {
@@ -81,7 +85,7 @@ export async function connectMcpServer(serverName: string, cfg: McpServerConfig)
   const transport = new StdioClientTransport({
     command: cmd[0],
     args: cmd.slice(1),
-    cwd: cfg.cwd,
+    cwd: opts.cwd ?? cfg.cwd,
     env: { ...process.env, ...(cfg.environment ?? {}) } as Record<string, string>,
   });
   const client = new Client({ name: "procforge-runner", version: "0.3.0" });

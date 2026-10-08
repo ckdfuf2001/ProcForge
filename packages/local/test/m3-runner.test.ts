@@ -1,9 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, writeFileSync, existsSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, existsSync, readFileSync, rmSync, mkdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
+import { randomUUID } from "node:crypto";
+import { spawnSync } from "node:child_process";
 import { collectCatalog } from "../src/catalog.js";
 import { createLocalStack } from "../src/core-inprocess.js";
+import { ingestArtifacts } from "../src/artifacts.js";
 import { runSession, toJUnit } from "../src/runner/index.js";
 import { FileStore } from "../src/filestore.js";
 import type { CoreClient } from "@procforge/shared/core-client.js";
@@ -27,6 +30,7 @@ beforeEach(() => {
   process.env.HOME = home;
   process.env.USERPROFILE = home;
   writeFileSync(join(root, "data.pptx"), "x");
+  writeFileSync(join(root, "template.j2"), "template {{month}}");
   writeOpencodeConfig(["node", serverMjs]);
   client = createLocalStack(pfdir).client;
 });
@@ -55,33 +59,66 @@ async function scriptedSession(): Promise<string> {
     sessionId: sid, nodeId: "1", decision: "split",
     children: [{ goal: "목록" }, { goal: "읽기", dependsOn: ["1.1"] }, { goal: "채우기", dependsOn: ["1.1", "1.2"] }],
   });
-  const leaf = async (nodeId: string, tool: string, args: Record<string, unknown>, resultJson: unknown, argSpecs: Record<string, never>) => {
+  const leaf = async (
+    nodeId: string,
+    tool: string,
+    args: Record<string, unknown>,
+    resultJson: unknown,
+    argSpecs: Record<string, never>,
+    artifactPaths: string[] = [],
+    goldenIgnore: string[] = [],
+  ) => {
+    const summary = JSON.stringify(resultJson);
+    const attemptId = randomUUID();
+    let stored: string[] = [];
+    let contents: Record<string, string> = {};
+    if (artifactPaths.length > 0) {
+      const ing = ingestArtifacts({ procforgeDir: pfdir, sessionId: sid, nodeId, attemptId, baseDir: root, paths: artifactPaths });
+      stored = ing.stored;
+      contents = ing.contents;
+    }
     await client.pfReport({
       sessionId: sid, nodeId, tool: { server: "fake-ppt", name: tool }, args,
-      resultSummary: JSON.stringify(resultJson), resultJson,
-      selfVerdict: "pass", selfReason: "ok",
+      resultSummary: summary, resultJson,
+      artifacts: stored, artifactContents: contents,
+      selfVerdict: "pass", selfReason: "ok", attemptId,
     });
-    await client.pfResolve({ sessionId: sid, nodeId, decision: "leaf", tool: { server: "fake-ppt", name: tool }, argSpecs: argSpecs as never });
+    await client.pfResolve({
+      sessionId: sid, nodeId, decision: "leaf",
+      tool: { server: "fake-ppt", name: tool }, argSpecs: argSpecs as never, goldenIgnore,
+    });
   };
   await leaf("1.1", "list_slides", { file: "data.pptx" }, { slides: ["표지", "실적", "전망"] }, { file: { kind: "fixed", value: "data.pptx" } });
   await leaf("1.2", "read_slide", { file: "data.pptx", index: 1 }, { title: "슬라이드1", body: "본문" }, {
     file: { kind: "fixed", value: "data.pptx" },
     index: { kind: "fixed", value: 1 },
   });
-  await leaf("1.3", "fill_template", { template: "t.j2", month: "2026-09" }, { output: "report-2026-09.pptx" }, {
-    template: { kind: "fixed", value: "t.j2" },
-    month: { kind: "var", ref: "${params.month}" },
-  });
+  await leaf(
+    "1.3", "fill_template",
+    { template: "template.j2", month: "2026-09", output: "output/report.pptx" },
+    { output: "output/report.pptx", month: "2026-09" },
+    {
+      template: { kind: "fixed", value: "template.j2" },
+      month: { kind: "var", ref: "${params.month}" },
+      output: { kind: "fixed", value: "output/report.pptx", path: "out" },
+    },
+    ["template.j2"],
+    ["output"],
+  );
   return sid;
 }
 
 describe("M3 runner", () => {
   it("record → replay 왕복 (fake 서버 없이 replay 전부 pass)", async () => {
     const sid = await scriptedSession();
-    const rec = await runSession({ procforgeDir: pfdir, projectRoot: root, sessionId: sid, mode: "record" });
+    const rec = await runSession({ procforgeDir: pfdir, projectRoot: root, sessionId: sid, mode: "record", runId: "m3-out" });
     expect(rec.summary.fail).toBe(0);
     expect(rec.summary.pass).toBe(3);
     expect(existsSync(join(pfdir, "sessions", sid, "cassettes", "1.1.json"))).toBe(true);
+    // M3.1-3: 출력은 runFs에만, 원본 프로젝트에는 없음
+    expect(existsSync(join(pfdir, "runs", "m3-out", "fs", "output", "report.pptx"))).toBe(true);
+    expect(existsSync(join(root, "output", "report.pptx"))).toBe(false);
+    expect(readFileSync(join(pfdir, "runs", "m3-out", "fs", "template.j2"), "utf8")).toContain("template");
 
     // 서버 연결을 끊어도 replay는 통과 (녹화본만 사용)
     writeOpencodeConfig(BROKEN_CMD);
@@ -94,8 +131,10 @@ describe("M3 runner", () => {
   it("녹화 누락 시 replay 즉시 실패", async () => {
     const sid = await scriptedSession();
     const rep = await runSession({ procforgeDir: pfdir, projectRoot: root, sessionId: sid, mode: "replay" });
-    expect(rep.summary.fail).toBe(3);
+    expect(rep.summary.fail).toBe(1);
     expect(rep.results.find((r) => r.nodeId === "1.1")?.detail).toMatch(/녹화 없음/);
+    // 하류는 blocked (실행 안 함)
+    expect(rep.results.find((r) => r.nodeId === "1.2")?.status).toBe("blocked");
   }, 30000);
 
   it("서브트리 실행: 1.1만, 1.2 녹화 삭제해도 통과", async () => {
@@ -109,25 +148,57 @@ describe("M3 runner", () => {
     expect(rep.summary.fail).toBe(0);
   }, 30000);
 
-  it("golden 불일치 → fail+diff, --update-golden으로만 갱신", async () => {
+  it("passthrough drift: golden 변조 → fail+diff, record+update로만 갱신", async () => {
     const sid = await scriptedSession();
     await runSession({ procforgeDir: pfdir, projectRoot: root, sessionId: sid, mode: "record" });
-    writeOpencodeConfig(BROKEN_CMD);
     // golden 변조
     const store = new FileStore(pfdir);
     const n = store.getNode(sid, "1.1")!;
-    store.saveNode(sid, { ...n, golden: { fixtures: [], output: "tampered" } });
-    const bad = await runSession({ procforgeDir: pfdir, projectRoot: root, sessionId: sid, mode: "replay", nodeId: "1.1" });
-    expect(bad.summary.fail).toBe(1);
-    expect(bad.results[0].detail).toMatch(/golden 불일치/);
-    // 갱신 없음 확인 (여전히 변조 상태)
+    store.saveNode(sid, { ...n, golden: { fixtures: [], output: "tampered", attemptId: n.golden?.attemptId, ignore: [] } });
+    // passthrough는 실제 호출 → drift 검출 fail
+    const drift = await runSession({ procforgeDir: pfdir, projectRoot: root, sessionId: sid, mode: "passthrough", nodeId: "1.1" });
+    expect(drift.summary.fail).toBe(1);
+    expect(drift.results[0].detail).toMatch(/golden drift/);
+    // 갱신 없음 확인
     expect(store.getNode(sid, "1.1")!.golden?.output).toBe("tampered");
-    // --update-golden으로 갱신 → 다음 replay 통과
-    const upd = await runSession({ procforgeDir: pfdir, projectRoot: root, sessionId: sid, mode: "replay", nodeId: "1.1", updateGolden: true });
+    // record+update-golden으로 갱신 → replay 통과
+    const upd = await runSession({ procforgeDir: pfdir, projectRoot: root, sessionId: sid, mode: "record", nodeId: "1.1", updateGolden: true });
     expect(upd.summary.fail).toBe(0);
     expect(store.getNode(sid, "1.1")!.golden?.output).not.toBe("tampered");
-    const again = await runSession({ procforgeDir: pfdir, projectRoot: root, sessionId: sid, mode: "replay", nodeId: "1.1" });
+    writeOpencodeConfig(BROKEN_CMD);
+    const again = await runSession({ procforgeDir: pfdir, projectRoot: root, sessionId: sid, mode: "replay" });
     expect(again.summary.fail).toBe(0);
+  }, 30000);
+
+  it("실패 전파: 상류 실패 → 하류 blocked", async () => {
+    const collected = await collectCatalog(root);
+    const builtin = collected.entries.filter((e) => e.server === "opencode");
+    const started = await client.pfStart({
+      request: "blocked",
+      toolCatalog: [...builtin, ...collected.entries.filter((e) => e.server === "fake-ppt")],
+      limits: { maxDepth: 3, maxRetries: 2, maxNodes: 10 },
+    });
+    const sid = started.session.id;
+    await client.pfResolve({ sessionId: sid, nodeId: "1", decision: "split", children: [{ goal: "읽기" }, { goal: "후속", dependsOn: ["1.1"] }] });
+    for (const nid of ["1.1", "1.2"]) {
+      await client.pfReport({
+        sessionId: sid, nodeId: nid,
+        tool: { server: "opencode", name: "read" }, args: { path: nid === "1.1" ? "missing.txt" : "also-missing.txt" },
+        resultSummary: "{}", resultJson: {},
+        selfVerdict: "pass", selfReason: "ok",
+      });
+      await client.pfResolve({
+        sessionId: sid, nodeId: nid, decision: "leaf",
+        tool: { server: "opencode", name: "read" },
+        argSpecs: { path: { kind: "fixed", value: nid === "1.1" ? "missing.txt" : "also-missing.txt" } } as never,
+      });
+    }
+    const rep = await runSession({ procforgeDir: pfdir, projectRoot: root, sessionId: sid, mode: "passthrough" });
+    expect(rep.results.find((r) => r.nodeId === "1.1")?.status).toBe("fail");
+    const downstream = rep.results.find((r) => r.nodeId === "1.2")!;
+    expect(downstream.status).toBe("blocked");
+    expect(downstream.detail).toMatch(/1\.1/);
+    expect(rep.summary.pass).toBe(0);
   }, 30000);
 
   it("--changed: 조언받은 노드+하류만 실행", async () => {
@@ -135,24 +206,33 @@ describe("M3 runner", () => {
     await runSession({ procforgeDir: pfdir, projectRoot: root, sessionId: sid, mode: "record" });
     writeOpencodeConfig(BROKEN_CMD);
     await runSession({ procforgeDir: pfdir, projectRoot: root, sessionId: sid, mode: "replay" });
-    // 1.2에 조언 추가 (hash 변경, 1.3은 하류 stale로 open 복귀)
     await client.pfAdvise(sid, "1.2", "문체를 다듬어라");
-    // 1.3 재확정 (stale open → report → leaf)
+    // 1.3 재확정 (stale open → report → leaf). 기존 fixture 내용을 함께 제출해 file_exists 통과
+    const store13 = new FileStore(pfdir);
+    const n13 = store13.getNode(sid, "1.3")!;
+    const contents13: Record<string, string> = {};
+    for (const fx of n13.golden?.fixtures ?? []) {
+      contents13[fx] = readFileSync(join(pfdir, "sessions", sid, fx), "utf8");
+    }
     await client.pfReport({
       sessionId: sid, nodeId: "1.3",
       tool: { server: "fake-ppt", name: "fill_template" },
-      args: { template: "t.j2", month: "2026-09" },
-      resultSummary: JSON.stringify({ output: "report-2026-09.pptx" }),
-      resultJson: { output: "report-2026-09.pptx" },
+      args: { template: "template.j2", month: "2026-09", output: "output/report.pptx" },
+      resultSummary: JSON.stringify({ output: "output/report.pptx", month: "2026-09" }),
+      resultJson: { output: "output/report.pptx", month: "2026-09" },
+      artifacts: [...(n13.golden?.fixtures ?? [])],
+      artifactContents: contents13,
       selfVerdict: "pass", selfReason: "ok",
     });
     await client.pfResolve({
       sessionId: sid, nodeId: "1.3", decision: "leaf",
       tool: { server: "fake-ppt", name: "fill_template" },
       argSpecs: {
-        template: { kind: "fixed", value: "t.j2" },
+        template: { kind: "fixed", value: "template.j2" },
         month: { kind: "var", ref: "${params.month}" },
+        output: { kind: "fixed", value: "output/report.pptx", path: "out" },
       } as never,
+      goldenIgnore: ["output"],
     });
     const rep = await runSession({ procforgeDir: pfdir, projectRoot: root, sessionId: sid, mode: "replay", changed: true });
     const ids = rep.results.filter((r) => r.status !== "skipped").map((r) => r.nodeId).sort();
@@ -161,7 +241,7 @@ describe("M3 runner", () => {
     expect(rep.results.find((r) => r.nodeId === "1.3")?.status).toBe("pass");
   }, 30000);
 
-  it("JUnit XML 출력", async () => {
+  it("JUnit XML 출력 (skipped 매핑 포함)", async () => {
     const sid = await scriptedSession();
     await runSession({ procforgeDir: pfdir, projectRoot: root, sessionId: sid, mode: "record" });
     writeOpencodeConfig(BROKEN_CMD);
@@ -172,5 +252,18 @@ describe("M3 runner", () => {
     const out = join(root, "junit.xml");
     writeFileSync(out, xml);
     expect(readFileSync(out, "utf8")).toContain("testcase");
+  }, 30000);
+
+  it("replay+update-golden은 bad_request, CLI는 exit 2", async () => {
+    const sid = await scriptedSession();
+    await expect(
+      runSession({ procforgeDir: pfdir, projectRoot: root, sessionId: sid, mode: "replay", updateGolden: true }),
+    ).rejects.toThrow(/update-golden.*record\/passthrough/);
+    const cli = resolve(__dirname, "..", "dist", "cli.js");
+    const r = spawnSync(process.execPath, [cli, "test", "--session", sid, "--mode", "replay", "--update-golden"], {
+      env: { ...process.env, PROCFORGE_DIR: pfdir, PROCFORGE_PROJECT_ROOT: root },
+      encoding: "utf8",
+    });
+    expect(r.status).toBe(2);
   }, 30000);
 });

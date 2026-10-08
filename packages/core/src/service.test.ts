@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { CoreService, consumeRetry, isResolved, autoConstraints } from "../src/service.js";
-import { compareNodeIds } from "../src/ids.js";
+import { compareNodeIds } from "@procforge/shared/ids.js";
 import { createMemoryStore } from "../src/store.js";
 import type { Node, Session } from "@procforge/shared/schema.js";
 
