@@ -57,6 +57,10 @@ export type PfResolveInput = {
   argSpecs?: Record<string, ArgSpec>;
   sideEffect?: SideEffect;
   tool?: { server: string; name: string };
+  /** ask_human용 dry-run 계획 (M2.6-4). attempt로 저장되고 실행되지 않음 */
+  plan?: { tool: { server: string; name: string }; args: Record<string, unknown> };
+  /** retry/ask_human 사유 기록용 (M2.6-4) */
+  note?: string;
 };
 
 export type PfResolveOutput = {
@@ -73,7 +77,7 @@ export type PfAdviseOutput = {
 // local checker → core 주입 계약. core·local 모두 shared 타입만 사용.
 export type EvaluateFn = (
   constraints: Constraint[],
-  ctx: { resultSummary?: string; resultJson?: unknown; artifacts?: Record<string, string> },
+  ctx: { resultSummary?: string; resultJson?: unknown; artifacts?: Record<string, string>; fileExists?: (p: string) => boolean },
 ) => { verdict: "pass" | "fail"; failedConstraints: string[]; unverified?: string[] };
 
 export interface CoreClient {
@@ -85,4 +89,6 @@ export interface CoreClient {
   pfTree(sessionId: string): Promise<{ nodes: Node[]; session: Session }>;
   pfLock(sessionId: string, nodeId: string): Promise<Node>;
   pfReopen(sessionId: string, nodeId: string, reason: string): Promise<Node>;
+  /** external dry-run 계획 승인/거부 (M2.6-4) */
+  pfApprove(sessionId: string, nodeId: string, approved: boolean, note?: string): Promise<Node>;
 }

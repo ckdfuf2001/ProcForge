@@ -23,7 +23,7 @@ describe("schema zod", () => {
     expect(NodeSchema.safeParse(n).success).toBe(true);
     expect(NodeSchema.safeParse({ ...n, id: "bad" }).success).toBe(false);
     const s = {
-      id: "s1",
+      id: "123e4567-e89b-42d3-a456-426614174000",
       request: "r",
       params: {},
       toolCatalog: [],

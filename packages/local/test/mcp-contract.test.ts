@@ -52,6 +52,8 @@ const EXPECTED_ANNOTATIONS: Record<string, Record<string, boolean>> = {
   pf_confirm_leaf: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
   pf_retry: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
   pf_ask_human: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+  pf_approve: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+  pf_test: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
   pf_advise: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
   pf_tree: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
   pf_get_node: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
@@ -133,6 +135,12 @@ describe("도구 응답 계약 (outputSchema 통과)", () => {
       await call("pf_get_node", { sessionId: sid, nodeId: "1.1" });
       await call("pf_lock", { sessionId: sid, nodeId: "1.1" });
       await call("pf_reopen", { sessionId: sid, nodeId: "1.1", reason: "test" });
+      await call("pf_ask_human", {
+        sessionId: sid, nodeId: "1.2", question: "go?",
+        plan: { tool: { server: "opencode", name: "read" }, args: { path: "x" } },
+      });
+      await call("pf_approve", { sessionId: sid, nodeId: "1.2", approved: true, note: "ok" });
+      await call("pf_test", { sessionId: sid, mode: "replay" });
       await call("pf_refresh_catalog", {});
     } finally {
       await close();
@@ -142,7 +150,7 @@ describe("도구 응답 계약 (outputSchema 통과)", () => {
   it("에러 봉투: session_not_found", async () => {
     const { mcp, close } = await linked();
     try {
-      const r = await mcp.callTool({ name: "pf_next", arguments: { sessionId: "nope" } });
+      const r = await mcp.callTool({ name: "pf_next", arguments: { sessionId: "123e4567-e89b-42d3-a456-426614174000" } });
       expect(r.isError).toBe(true);
       const parsed = ErrorEnvelopeShape.safeParse(r.structuredContent);
       expect(parsed.success).toBe(true);

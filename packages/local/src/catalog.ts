@@ -71,6 +71,24 @@ export function loadMcpConfigs(projectRoot: string): { servers: Record<string, M
   return { servers, sources };
 }
 
+/** MCP stdio 서버 연결 (runner 연결 풀이 재사용, M3) */
+export async function connectMcpServer(serverName: string, cfg: McpServerConfig): Promise<Client> {
+  const rawCmd = cfg.command;
+  const cmd = Array.isArray(rawCmd) ? rawCmd : typeof rawCmd === "string" ? rawCmd.split(" ") : [];
+  if (cfg.type === "remote" || cmd.length === 0 || cfg.enabled === false) {
+    throw new Error(`${serverName}: unsupported transport or disabled`);
+  }
+  const transport = new StdioClientTransport({
+    command: cmd[0],
+    args: cmd.slice(1),
+    cwd: cfg.cwd,
+    env: { ...process.env, ...(cfg.environment ?? {}) } as Record<string, string>,
+  });
+  const client = new Client({ name: "procforge-runner", version: "0.3.0" });
+  await client.connect(transport);
+  return client;
+}
+
 async function listServerTools(
   serverName: string,
   cfg: McpServerConfig,
@@ -82,15 +100,16 @@ async function listServerTools(
   if (cfg.type === "remote" || cmd.length === 0) {
     return { entries: [], warning: `${serverName}: remote/unsupported transport skipped` };
   }
+  const client = new Client({ name: "procforge-catalog", version: "0.0.0" });
+  const timeout = new Promise<never>((_, reject) => {
+    setTimeout(() => reject(new Error("timeout")), timeoutMs);
+  });
+  // 연결은 connectMcpServer로 일원화하되 타임아웃 경쟁을 위해 transport 직접 구성
   const transport = new StdioClientTransport({
     command: cmd[0],
     args: cmd.slice(1),
     cwd: cfg.cwd,
     env: { ...process.env, ...(cfg.environment ?? {}) } as Record<string, string>,
-  });
-  const client = new Client({ name: "procforge-catalog", version: "0.0.0" });
-  const timeout = new Promise<never>((_, reject) => {
-    setTimeout(() => reject(new Error("timeout")), timeoutMs);
   });
   try {
     await Promise.race([client.connect(transport), timeout]);

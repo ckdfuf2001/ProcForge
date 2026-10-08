@@ -5,7 +5,8 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
-    "procforge-local": "./dist/main.js"
+    "procforge-local": "./dist/main.js",
+    "procforge": "./dist/cli.js"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",

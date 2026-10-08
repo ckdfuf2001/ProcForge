@@ -18,6 +18,13 @@ export const NodeIdSchema = z
   .regex(/^\d+(\.\d+)*$/, "Node id must be like '1', '2.1'");
 export type NodeId = z.infer<typeof NodeIdSchema>;
 
+/** 세션 id = UUID v4 (M2.6-2) */
+export const SessionIdSchema = z
+  .string()
+  .regex(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i, "Session id must be UUID v4");
+/** attempt id = UUID (M2.6-8) */
+export const AttemptIdSchema = z.string().uuid("Attempt id must be UUID");
+
 // ---------- ArgSpec ----------
 
 export const ArgSpecFixedSchema = z.object({
@@ -147,7 +154,7 @@ export const ToolWithSchemaSchema = ToolRefSchema.extend({
 export type ToolWithSchema = z.infer<typeof ToolWithSchemaSchema>;
 
 export const AttemptSchema = z.object({
-  id: z.string().min(1),
+  id: AttemptIdSchema,
   at: z.string().min(1),
   tool: ToolRefSchema,
   args: z.record(z.unknown()),
@@ -182,6 +189,8 @@ export const NodeSchema = z.object({
   golden: z
     .object({ fixtures: z.array(z.string()), output: z.string() })
     .optional(),
+  /** external dry-run 승인 기록 (M2.6-4) */
+  approval: z.object({ at: z.string(), note: z.string().optional() }).optional(),
   retries: z.number().int().min(0).default(0),
   hash: z.string().min(1),
   locked: z.boolean().default(false),
@@ -197,7 +206,7 @@ export const ToolCatalogEntrySchema = z.object({
 export type ToolCatalogEntry = z.infer<typeof ToolCatalogEntrySchema>;
 
 export const SessionSchema = z.object({
-  id: z.string().min(1),
+  id: SessionIdSchema,
   request: z.string().min(1),
   params: z.record(z.string()).default({}),
   toolCatalog: z.array(ToolCatalogEntrySchema),

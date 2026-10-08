@@ -129,7 +129,11 @@ describe("M2 E2E 월간보고서 (fake-ppt-mcp + scripted host, 신도구)", () 
         argSpecs: { file: { kind: "fixed", value: "data/slides.pptx" }, index: { kind: "fixed", value: 2 } },
       });
 
-      writeFileSync(join(root, "out", "report-2026-09.pptx"), "filled-report");
+      writeFileSync(join(root, "out", "report-2026-09.pptx"), "placeholder");
+      // strict sandbox: artifacts는 sandbox/<sid>/ 하위에서 제출
+      const sbOut = join(pfdir, "sandbox", sid, "out");
+      mkdirSync(sbOut, { recursive: true });
+      writeFileSync(join(sbOut, "report-2026-09.pptx"), "filled-report");
       await doLeaf(call, {
         sessionId: sid,
         nodeId: "1.3",
@@ -194,7 +198,10 @@ describe("M2 E2E 월간보고서 (fake-ppt-mcp + scripted host, 신도구)", () 
       const adv = await call("pf_advise", { sessionId: sid, nodeId: "1.1", text: "슬라이드는 1개" });
       expect((adv["constraints"] as unknown[]).length).toBeGreaterThan(0);
 
-      writeFileSync(join(root, "out", "report.md"), "# report");
+      writeFileSync(join(root, "out", "report.md"), "placeholder");
+      const sbOut2 = join(pfdir, "sandbox", sid, "out");
+      mkdirSync(sbOut2, { recursive: true });
+      writeFileSync(join(sbOut2, "report.md"), "# report");
       const r3 = await call("pf_report", {
         sessionId: sid,
         nodeId: "1.1",

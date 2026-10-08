@@ -120,11 +120,21 @@ export const PfTreeOutputSchema = z.object({
 export const PfGetNodeOutputSchema = z.object({ node: NodeSchema });
 export const PfLockOutputSchema = z.object({ node: NodeSummarySchema });
 export const PfReopenOutputSchema = z.object({ node: NodeSummarySchema });
+export const PfApproveOutputSchema = z.object({ node: NodeSummarySchema });
 export const CatalogEntrySummarySchema = z.object({ server: z.string(), name: z.string(), schemaHash: z.string() });
 export const PfRefreshCatalogOutputSchema = z.object({
   entries: z.array(CatalogEntrySummarySchema),
   warnings: z.array(z.string()),
   cached: z.boolean(),
+});
+export const PfTestOutputSchema = z.object({
+  runId: z.string(),
+  mode: z.string(),
+  passed: z.number(),
+  failed: z.number(),
+  unverified: z.number(),
+  skipped: z.number(),
+  reportPath: z.string(),
 });
 
 export const OUTPUT_SCHEMAS: Record<string, z.ZodTypeAny> = {
@@ -140,5 +150,7 @@ export const OUTPUT_SCHEMAS: Record<string, z.ZodTypeAny> = {
   pf_get_node: PfGetNodeOutputSchema,
   pf_lock: PfLockOutputSchema,
   pf_reopen: PfReopenOutputSchema,
+  pf_approve: PfApproveOutputSchema,
   pf_refresh_catalog: PfRefreshCatalogOutputSchema,
+  pf_test: PfTestOutputSchema,
 };

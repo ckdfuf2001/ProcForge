@@ -8,6 +8,8 @@ const procforgeDir = resolve(process.env.PROCFORGE_DIR ?? process.argv[3] ?? `${
 const readOnly = process.env.PROCFORGE_READ_ONLY === "1";
 const ttlDays = Number(process.env.PROCFORGE_SESSION_TTL_DAYS ?? "30");
 const sessionTtlMs = Number.isFinite(ttlDays) && ttlDays > 0 ? ttlDays * 86400000 : DEFAULT_SESSION_TTL_MS;
+const strictSandbox = process.env.PROCFORGE_STRICT_SANDBOX !== "0";
+const maxArtifactBytes = Number(process.env.PROCFORGE_MAX_ARTIFACT_BYTES ?? `${5 * 1024 * 1024}`);
 
 const { client, store } = createLocalStack(procforgeDir);
-await runStdio({ client, store, procforgeDir, projectRoot, sessionTtlMs, readOnly });
+await runStdio({ client, store, procforgeDir, projectRoot, sessionTtlMs, readOnly, strictSandbox, maxArtifactBytes });

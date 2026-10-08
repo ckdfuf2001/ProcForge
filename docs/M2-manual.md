@@ -2,10 +2,10 @@
 
 ## 0. 도구 구성 (M2.5)
 
-등록 도구 13개 (결정적 순서):
+등록 도구 15개 (결정적 순서):
 `pf_start`, `pf_next`, `pf_report`, `pf_split`, `pf_confirm_leaf`, `pf_retry`,
-`pf_ask_human`, `pf_advise`, `pf_tree`, `pf_get_node`, `pf_lock`, `pf_reopen`,
-`pf_refresh_catalog`.
+`pf_ask_human`, `pf_approve`, `pf_advise`, `pf_tree`, `pf_get_node`, `pf_lock`,
+`pf_reopen`, `pf_refresh_catalog`, `pf_test`.
 `pf_finalize`/`pf_test`는 M5/M3까지 미등록. 구 `pf_resolve`는 위 4개로 분리됨.
 프롬프트 `procforge_decompose` 1개 등록.
 
@@ -71,7 +71,24 @@ npx @modelcontextprotocol/inspector node packages/local/dist/main.js <projectRoo
 `pf_start` → `pf_next` → `pf_split` 순으로 호출해 structuredContent 응답 확인.
 Prompts 탭: `procforge_decompose` 조회. Errors 탭에 스택 노출이 없는지 확인.
 
-## 5. 문제 해결
+## 5. runner 사용 (M3)
+
+```powershell
+# 녹화 (실제 도구 호출)
+node packages/local/dist/cli.js test --session <sid> --mode record
+# 회귀 (LLM·외부 서버 없이 녹화본만)
+node packages/local/dist/cli.js test --session <sid> --mode replay --junit report.xml
+# 서브트리 / 변경분만
+node packages/local/dist/cli.js test --session <sid> --node 1.2 --mode replay
+node packages/local/dist/cli.js test --session <sid> --mode replay --changed
+# golden 갱신 (의도적 변경 후에만)
+node packages/local/dist/cli.js test --session <sid> --mode record --update-golden
+```
+
+`--update-golden` 없이는 golden/cassette를 절대 수정하지 않는다.
+MCP에서는 `pf_test` 도구로 동일 실행 (요약 + report 경로 반환).
+
+## 6. 문제 해결
 
 - MCP 연결 실패: `node packages/local/dist/main.js <projectRoot>`를 직접 실행해 stdio 응답 확인.
 - 카탈로그 수집 실패: `warnings` 필드에 서버별 사유 기록. `enabled: false` 서버는 건너뜀.

@@ -23,8 +23,8 @@ import { defaultEvaluate } from "./evaluate.js";
 import { adviceToConstraints } from "./advice.js";
 import { compareNodeIds } from "./ids.js";
 
-function rid(prefix: string): string {
-  return `${prefix}-${Math.random().toString(36).slice(2, 10)}`;
+function newAttemptId(): string {
+  return randomUUID();
 }
 
 function err(code: string, message: string): Error {
@@ -145,7 +145,7 @@ export class CoreService implements CoreClient {
       session,
       node: root,
       instruction:
-        `루트 노드다. 이 작업이 툴 1회 호출로 가능한지 판단하라. 가능하면 실행 후 pf_report(selfVerdict/selfReason 필수)로 보고하고, 너무 크면 pf_resolve(split)로 분해하라. ` +
+        `루트 노드다. 이 작업이 툴 1회 호출로 가능한지 판단하라. 가능하면 실행 후 pf_report(selfVerdict/selfReason 필수)로 보고하고, 너무 크면 pf_split으로 분해하라. ` +
         `탐색 실행(probing)은 .procforge/sandbox/${sid}/ 작업 사본에서만 하라.`,
     };
   }
@@ -183,7 +183,7 @@ export class CoreService implements CoreClient {
       return {
         done: false,
         node: n,
-        instruction: `노드 ${n.id}는 외부 부작용(external)이다. 실제 실행 금지. dry-run으로 수행할 계획을 pf_report 대신 pf_resolve(ask_human)로 보고하고 사람 승인을 받아라.`,
+        instruction: `노드 ${n.id}는 외부 부작용(external)이다. 실제 실행 금지. dry-run으로 수행할 계획을 pf_report 대신 pf_ask_human으로 보고하고 사람 승인을 받아라.`,
       };
     }
     return {
@@ -191,7 +191,7 @@ export class CoreService implements CoreClient {
       node: n,
       instruction:
         `노드 ${n.id}(${n.goal}): 툴 1회로 가능한지 판단하라. 가능하면 sandbox(.procforge/sandbox/${sessionId}/) 사본에서 실행 후 ` +
-        `pf_report(selfVerdict/selfReason 필수), 아니면 pf_resolve(split). pass여도 leaf 자동 확정 없음 — pf_resolve(leaf, tool, argSpecs) 제출이 필요하다.`,
+        `pf_report(selfVerdict/selfReason 필수), 아니면 pf_split. pass여도 leaf 자동 확정 없음 — pf_confirm_leaf(tool, argSpecs) 제출이 필요하다.`,
     };
   }
 
@@ -212,7 +212,7 @@ export class CoreService implements CoreClient {
         attempts: [
           ...n.attempts,
           {
-            id: input.attemptId ?? rid("a"),
+            id: input.attemptId ?? newAttemptId(),
             at: new Date().toISOString(),
             tool: input.tool,
             args: input.args,
@@ -227,7 +227,7 @@ export class CoreService implements CoreClient {
       return {
         verdict: "fail",
         failedConstraints: [],
-        instruction: `외부 부작용 노드는 실제 실행 금지. dry-run 계획을 세워 pf_resolve(ask_human)로 사람 승인을 요청하라.`,
+        instruction: `외부 부작용 노드는 실제 실행 금지. dry-run 계획을 세워 pf_ask_human으로 사람 승인을 요청하라.`,
       };
     }
 
@@ -239,7 +239,7 @@ export class CoreService implements CoreClient {
     const rubricIds = n.constraints.filter((c) => c.kind === "llm_rubric").map((c) => c.id);
     const missingReasons = rubricIds.filter((id) => !input.rubricReasons?.[id]);
     const attemptBase = {
-      id: input.attemptId ?? rid("a"),
+      id: input.attemptId ?? newAttemptId(),
       at: new Date().toISOString(),
       tool: input.tool,
       args: input.args,
@@ -259,7 +259,7 @@ export class CoreService implements CoreClient {
         verdict: "fail",
         failedConstraints: missingReasons,
         unverified: rubricIds,
-        instruction: `llm_rubric 판정 사유 누락(${missingReasons.join(",")}). needs_human. pf_advise로 조언을 보충하거나 pf_resolve(retry) 후 rubricReasons에 id별 판정 사유를 채워 다시 pf_report하라.`,
+        instruction: `llm_rubric 판정 사유 누락(${missingReasons.join(",")}). needs_human. pf_advise로 조언을 보충하거나 pf_retry 후 rubricReasons에 id별 판정 사유를 채워 다시 pf_report하라.`,
       };
     }
 
@@ -305,7 +305,7 @@ export class CoreService implements CoreClient {
         failedConstraints: [],
         unverified,
         instruction:
-          `통과. 그러나 leaf 자동 확정은 하지 않는다.${autoNote} pf_resolve(decision=leaf, tool, argSpecs)로 확정 신청하라. ` +
+          `통과. 그러나 leaf 자동 확정은 하지 않는다.${autoNote} pf_confirm_leaf(tool, argSpecs)로 확정 신청하라. ` +
           `argSpecs는 마지막 실행 인자 키를 모두 분류(fixed/var/generated)해야 하며 누락 시 bad_request.`,
       };
     }
@@ -324,7 +324,7 @@ export class CoreService implements CoreClient {
       unverified,
       instruction:
         status === "needs_human"
-          ? `실패(재시도 소진: 총 ${n.attempts.length + 1}회). needs_human. 사유: ${input.selfReason}. pf_advise로 조언을 받거나 pf_resolve(split)로 분해하라.`
+          ? `실패(재시도 소진: 총 ${n.attempts.length + 1}회). needs_human. 사유: ${input.selfReason}. pf_advise로 조언을 받거나 pf_split으로 분해하라.`
           : `실패(재시도 ${retries}/${s.limits.maxRetries}). 사유: ${input.selfReason}. 반영해 다시 실행 후 pf_report하라.`,
     };
   }
@@ -335,6 +335,28 @@ export class CoreService implements CoreClient {
 
     switch (input.decision) {
       case "ask_human": {
+        if (input.plan) {
+          // dry-run 계획 저장 (실행 아님, verdict 없음). 승인 대기.
+          const next: Node = {
+            ...n,
+            status: "needs_human",
+            approval: undefined,
+            attempts: [
+              ...n.attempts,
+              {
+                id: newAttemptId(),
+                at: new Date().toISOString(),
+                tool: input.plan.tool,
+                args: input.plan.args,
+                resultSummary: `[dry-run] ${input.note ?? ""}`.trim(),
+                artifacts: [],
+                failedConstraints: [],
+              },
+            ],
+          };
+          this.store.saveNode(s.id, next);
+          return { node: next, instruction: `dry-run 계획을 저장했다. pf_approve로 승인/거부를 받아라.` };
+        }
         const next = { ...n, status: "needs_human" as const };
         this.store.saveNode(s.id, next);
         return { node: next, instruction: `노드 ${n.id}를 needs_human으로 전환했다. pf_advise를 기다려라.` };
@@ -396,9 +418,14 @@ export class CoreService implements CoreClient {
         const cat = s.toolCatalog.find((t) => t.server === input.tool!.server && t.name === input.tool!.name);
         if (!cat) throw err("bad_request", "unknown tool");
         const last = n.attempts[n.attempts.length - 1];
-        if (!last || last.verdict !== "pass") throw err("conflict", "leaf requires passing attempt. report first.");
-        if (last.tool.server !== input.tool.server || last.tool.name !== input.tool.name)
-          throw err("bad_request", `leaf tool must match last attempt (${last.tool.server}/${last.tool.name})`);
+        // M2.6-4: external은 승인된 dry-run 계획으로만 확정 (실행 없음)
+        const isApprovedExternalPlan =
+          n.sideEffect === "external" && n.approval !== undefined && last !== undefined && last.verdict === undefined;
+        if (!isApprovedExternalPlan) {
+          if (!last || last.verdict !== "pass") throw err("conflict", "leaf requires passing attempt. report first.");
+        }
+        if (last!.tool.server !== input.tool.server || last!.tool.name !== input.tool.name)
+          throw err("bad_request", `leaf tool must match last attempt (${last!.tool.server}/${last!.tool.name})`);
         if (!input.argSpecs) throw err("bad_request", "leaf requires argSpecs");
         const missing = Object.keys(last.args).filter((k) => !(k in input.argSpecs!));
         if (missing.length > 0) throw err("bad_request", `argSpecs missing: ${missing.join(",")}`);
@@ -461,6 +488,29 @@ export class CoreService implements CoreClient {
   async pfTree(sessionId: string): Promise<{ nodes: Node[]; session: Session }> {
     const s = this.sess(sessionId);
     return { session: s, nodes: [...this.store.getNodes(sessionId).values()].sort((a, b) => compareNodeIds(a.id, b.id)) };
+  }
+
+  async pfApprove(sessionId: string, nodeId: string, approved: boolean, note?: string): Promise<Node> {
+    const s = this.sess(sessionId);
+    const n = this.node(sessionId, nodeId);
+    if (n.locked) throw err("conflict", `node ${n.id} is locked`);
+    if (n.status !== "needs_human") throw err("conflict", `node ${n.id} has no pending approval (${n.status})`);
+    if (approved) {
+      const last = n.attempts[n.attempts.length - 1];
+      if (!last || last.verdict !== undefined)
+        throw err("conflict", `node ${n.id} has no dry-run plan to approve. submit plan via ask_human first.`);
+      const next: Node = { ...n, status: "probing", approval: { at: new Date().toISOString(), note } };
+      this.store.saveNode(s.id, next);
+      return next;
+    }
+    const next: Node = {
+      ...n,
+      status: "open",
+      approval: undefined,
+      advice: [...n.advice, { at: new Date().toISOString(), text: note ?? "plan rejected" }],
+    };
+    this.store.saveNode(s.id, next);
+    return next;
   }
 
   async pfLock(sessionId: string, nodeId: string): Promise<Node> {

@@ -30,6 +30,80 @@ describe("M2.5-6 세션 핸들 UUID", () => {
   });
 });
 
+describe("M2.6-4 external 승인 흐름", () => {
+  const extCatalog: Session["toolCatalog"] = [
+    { server: "mail", name: "send", inputSchema: {}, schemaHash: "h9" },
+  ];
+  it("ask_human(plan) → approve → confirm_leaf, 거부 시 open+조언", async () => {
+    const svc = new CoreService(createMemoryStore(), passEval);
+    const { session } = await svc.pfStart({ request: "메일 발송", toolCatalog: extCatalog });
+    await svc.pfResolve({
+      sessionId: session.id,
+      nodeId: "1",
+      decision: "split",
+      children: [{ goal: "발송", sideEffect: "external" }],
+    });
+    const ask = await svc.pfResolve({
+      sessionId: session.id,
+      nodeId: "1.1",
+      decision: "ask_human",
+      plan: { tool: { server: "mail", name: "send" }, args: { to: "a@b.c" } },
+      note: "발송해도 될까요",
+    });
+    expect(ask.node.status).toBe("needs_human");
+    expect(ask.node.attempts).toHaveLength(1);
+    expect(ask.node.attempts[0].verdict).toBeUndefined();
+
+    // 계획 없이 승인 시도 → 불가(다른 노드)
+    await expect(svc.pfApprove(session.id, "1", true)).rejects.toThrow();
+
+    // 거부 → open + 조언 기록
+    const rej = await svc.pfApprove(session.id, "1.1", false, "내일 발송");
+    expect(rej.status).toBe("open");
+    expect(rej.advice.at(-1)?.text).toBe("내일 발송");
+
+    // 다시 계획 → 승인 → 확정
+    await svc.pfResolve({
+      sessionId: session.id,
+      nodeId: "1.1",
+      decision: "ask_human",
+      plan: { tool: { server: "mail", name: "send" }, args: { to: "a@b.c" } },
+    });
+    const ap = await svc.pfApprove(session.id, "1.1", true, "ok");
+    expect(ap.status).toBe("probing");
+    expect(ap.approval).toBeDefined();
+    const leaf = await svc.pfResolve({
+      sessionId: session.id,
+      nodeId: "1.1",
+      decision: "leaf",
+      tool: { server: "mail", name: "send" },
+      argSpecs: { to: { kind: "fixed", value: "a@b.c" } },
+    });
+    expect(leaf.node.status).toBe("leaf");
+  });
+
+  it("미승인 external은 leaf 불가", async () => {
+    const svc = new CoreService(createMemoryStore(), passEval);
+    const { session } = await svc.pfStart({ request: "r", toolCatalog: extCatalog });
+    await svc.pfResolve({
+      sessionId: session.id,
+      nodeId: "1",
+      decision: "split",
+      children: [{ goal: "발송", sideEffect: "external" }],
+    });
+    await svc.pfResolve({ sessionId: session.id, nodeId: "1.1", decision: "ask_human" });
+    await expect(
+      svc.pfResolve({
+        sessionId: session.id,
+        nodeId: "1.1",
+        decision: "leaf",
+        tool: { server: "mail", name: "send" },
+        argSpecs: {},
+      }),
+    ).rejects.toThrow();
+  });
+});
+
 describe("M1.5-4 node id 숫자 정렬", () => {
   it('"1.2" < "1.10"', () => {
     expect(compareNodeIds("1.2", "1.10")).toBeLessThan(0);
@@ -75,7 +149,7 @@ describe("M1.5-1 pass여도 leaf 자동 확정 없음", () => {
     const { session } = await svc.pfStart({ request: "r", toolCatalog: catalog });
     const r = await svc.pfReport({ ...rep(), sessionId: session.id });
     expect(r.verdict).toBe("pass");
-    expect(r.instruction).toMatch(/pf_resolve/);
+    expect(r.instruction).toMatch(/pf_confirm_leaf/);
     let tree = await svc.pfTree(session.id);
     expect(tree.nodes[0].status).toBe("probing");
     expect(tree.nodes[0].tool).toBeUndefined();

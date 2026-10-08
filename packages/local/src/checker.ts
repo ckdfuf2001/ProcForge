@@ -304,6 +304,7 @@ export const checkerEvaluate: EvaluateFn = (constraints, ctx) => {
     resultSummary: ctx.resultSummary,
     resultJson: ctx.resultJson,
     artifacts: ctx.artifacts,
+    fileExists: ctx.fileExists,
   });
   return { verdict: r.verdict === "fail" ? "fail" : "pass", failedConstraints: r.failedConstraints, unverified: r.unverified };
 };

@@ -55,6 +55,30 @@
 - [M2.5-7] prompt procforge_decompose — args는 문자열만(request?, params? JSON 문자열). MCP prompt 인자는 클라이언트가 문자열로 다루므로 record 대신 string. pf_start 응답에 동일 전문 포함(클라 미노출 대비).
 - [M2.5-8] 운영 — PROCFORGE_READ_ONLY=1이면 읽기 3종만 등록(prompt는 유지). 카탈로그 캐시 .procforge/cache/catalog.json(10분, 설정 fingerprint 무효), 서버별 타임아웃 5초. 세션 파일 1MB 초과 시 stderr 경고. local/src의 console.log 금지.
 
+## M2.6
+
+- [M2.6-1] instruction 도구명 — core 응답 instruction의 도구 언급은 tools/list에 존재해야 하며 pf_resolve 언급 금지. 계약 테스트: service.ts 정적 스캔 + instruction-following host E2E(첫 언급 도구만 호출해 완료).
+- [M2.6-2] ID 검증 — sessionId UUID v4, nodeId 기존 패턴, attemptId UUID. shared zod + 서버 입력스키마 + FileStore 진입부 이중 검증. Session.id/Attempt.id 스키마 강화.
+- [M2.6-3] isEscapeRel — 세그먼트 정규화 판정("..data.json" 허용, ".." 상위·절대경로 거부).
+- [M2.6-4] pf_approve — ask_human(plan)으로 dry-run attempt 저장(verdict 없음) → 승인 시 probing+approval → confirm_leaf 가능, 거부 시 open+조언 기록. 미승인 external leaf 불가. PfResolveInput에 plan/note 추가, Node.approval 추가.
+- [M2.6-5] artifacts sandbox 제한 — PROCFORGE_STRICT_SANDBOX 기본 on. strict면 제출 경로 기준이 sandbox/<sid>/.
+- [M2.6-6] artifact 상한 5MB 초과 bad_request. NUL 바이트 기준 바이너리 판별, 내용은 {sha256,size,mime} 메타 JSON으로 대체. fixtures-manifest(stored→원본 상대경로)를 ingest 시 기록.
+- [M2.6-7] 세션 lockfile — sessions/<sid>/.lock(pid+시각), fresh 락 충돌 시 conflict, staleMs 경과 시 정리. 쓰기 도구 + runner가 사용. 동일 프로세스 내 동시성은 JS 단일 스레드로 자명.
+- [M2.6-8] attempt id — bare randomUUID (접두사 폐지, AttemptIdSchema 통과용).
+
+## M3
+
+- [M3-1] runner 구조 — local/src/runner (types/connections/workdir/recordings/resolve/run). LLM 없음. 연결 풀은 실행 1회 유지, MCP lazy 연결이므로 replay는 서버 프로세스를 띄우지 않음.
+- [M3-2] 내장 툴 — read/write/edit/bash 최소 구현, bash 기본 비활성. glob/grep 등 그 외는 미지원 에러.
+- [M3-3] run fs — runs/<runId>/fs/에 manifest 기준 source 상대경로로 fixtures 전개. 원본 쓰기 금지, 쓰기는 run fs로 한정. 경로 재작성은 run fs에 존재하는 상대경로 문자열만.
+- [M3-4] generated — replay/cassette는 마지막 attempt 실제값, live는 미지원 에러.
+- [M3-5] 모드 — record(호출+녹화)/replay(녹화만, 기본)/passthrough(호출, 녹화 안 함). 키=server+tool+정규화 args 해시(runs 경로 상대화).
+- [M3-6] external — 전 모드 실제 호출 금지. 녹화 적중 시 사용, 없으면 결정적 mock + unverified 표시.
+- [M3-7] 판정 — checker 재사용. rubric 잔존(mock 포함) 시 unverified(실패 아님). golden 비교는 replay만(summary 문자열 비교), 불일치 시 fail+diff. --update-golden이면 비교 대신 golden.output 갱신(fixtures는 pf_report 소유이므로 output만).
+- [M3-8] 범위 — 전체/서브트리(범위 밖 의존 출력은 golden에서 공급, JSON 파싱 실패 시 원문)/--changed(최신 리포트 nodeHashes 비교 + 하류). 비-leaf는 skipped.
+- [M3-9] 산출물 — runs/<runId>/report.json + by-session latest 포인터. JUnit XML 옵션. --update-golden 없이는 golden/cassette 불변.
+- [M3-10] compareNodeIds를 runner에 복제 (local 자족, core import 금지 준수).
+
 ## M1
 
 - [M1-1] checker 주입 — §6 pf_report의 verdict 계산은 local checker(§7)가 소유. core는 `EvaluateFn`을 생성자 주입받고 기본값은 constraints-empty→pass, 그 외→fail. 이유: core→local import 순환 방지 + 의존방향(local→core 금지) 유지. M2에서 local MCP 핸들러가 `checker.evaluateAll`을 주입한다.

@@ -1,14 +1,16 @@
-import { randomBytes } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import type { CoreClient } from "@procforge/shared/core-client.js";
+import { NodeIdSchema, SessionIdSchema } from "@procforge/shared/schema.js";
 import { ingestArtifacts, setupSandbox } from "./artifacts.js";
 import { collectCatalog } from "./catalog.js";
 import { logger } from "./logger.js";
 import type { FileStore } from "./filestore.js";
 import { OUTPUT_SCHEMAS, nodeSummary } from "./views.js";
+import { runSession } from "./runner/index.js";
 
 export const DEFAULT_SESSION_TTL_MS = 30 * 24 * 3600 * 1000;
 
@@ -19,6 +21,10 @@ export type ServerDeps = {
   projectRoot: string;
   sessionTtlMs?: number;
   readOnly?: boolean;
+  /** artifacts를 sandbox/<sid>/로 제한 (M2.6-5, 기본 on) */
+  strictSandbox?: boolean;
+  /** artifact 읽기 상한 바이트 (M2.6-6, 기본 5MB) */
+  maxArtifactBytes?: number;
 };
 
 /** 도구 등록 순서 (결정적, 스냅샷 테스트 대상) */
@@ -30,12 +36,14 @@ export const TOOL_NAMES = [
   "pf_confirm_leaf",
   "pf_retry",
   "pf_ask_human",
+  "pf_approve",
   "pf_advise",
   "pf_tree",
   "pf_get_node",
   "pf_lock",
   "pf_reopen",
   "pf_refresh_catalog",
+  "pf_test",
 ] as const;
 
 export const READ_ONLY_TOOLS = ["pf_next", "pf_tree", "pf_get_node"] as const;
@@ -124,6 +132,21 @@ export function buildServer(deps: ServerDeps): McpServer {
   const R = (name: string, config: any, cb: any) => {
     if (enabled(name)) server.registerTool(name, config, cb);
   };
+  // 쓰기 도구는 세션 lockfile로 프로세스 간 보호 (M2.6-7)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const W = (name: string, config: any, cb: any) => {
+    if (!enabled(name)) return;
+    server.registerTool(name, config as never, (async (a: any, extra: any) => {
+      const release = deps.store.acquireLock(a.sessionId);
+      try {
+        return await cb(a, extra);
+      } finally {
+        release();
+      }
+    }) as never);
+  };
+  const strictSandbox = deps.strictSandbox ?? true;
+  const maxArtifactBytes = deps.maxArtifactBytes ?? 5 * 1024 * 1024;
 
   R(
     "pf_start",
@@ -185,7 +208,7 @@ export function buildServer(deps: ServerDeps): McpServer {
         "인자: sessionId.",
         "노드 요약과 지침 반환. done=true면 종료. 다음: 실행 후 pf_report, 크면 pf_split.",
       ].join("\n"),
-      inputSchema: { sessionId: z.string().min(1) },
+      inputSchema: { sessionId: SessionIdSchema },
       outputSchema: OUTPUT_SCHEMAS["pf_next"] as never,
       annotations: READ_ONLY_ANN,
     },
@@ -202,7 +225,7 @@ export function buildServer(deps: ServerDeps): McpServer {
     },
   );
 
-  R(
+  W(
     "pf_report",
     {
       title: "실행 결과 보고",
@@ -210,12 +233,12 @@ export function buildServer(deps: ServerDeps): McpServer {
         "leaf 후보 실행 결과를 보고한다.",
         "선수: pf_next. 실행은 호스트가 자기 도구로 수행.",
         "tool/args/resultSummary/selfVerdict(판정)/selfReason(사유, 필수),",
-        "artifacts(프로젝트 상대경로, 선택), rubricReasons(사람 판단 항목 사유, 선택).",
+        "artifacts(sandbox 상대경로, 선택, 5MB 상한), rubricReasons(사람 판단 항목 사유, 선택).",
         "통과해도 자동 확정 없음. 다음: pf_confirm_leaf 또는 pf_split.",
       ].join("\n"),
       inputSchema: {
-        sessionId: z.string().min(1),
-        nodeId: z.string().min(1),
+        sessionId: SessionIdSchema,
+        nodeId: NodeIdSchema,
         tool: ToolRefShape,
         args: z.record(z.unknown()),
         resultSummary: z.string(),
@@ -233,12 +256,13 @@ export function buildServer(deps: ServerDeps): McpServer {
         const sid = a.sessionId as string;
         requireFresh(deps, sid);
         const nid = a.nodeId as string;
-        const attemptId = `a-${randomBytes(4).toString("hex")}`;
+        const attemptId = randomUUID();
         let stored: string[] = [];
         let contents: Record<string, string> = {};
         const arts = a.artifacts as string[] | undefined;
         if (arts && arts.length > 0) {
-          const ing = ingestArtifacts({ procforgeDir: deps.procforgeDir, sessionId: sid, nodeId: nid, attemptId, projectRoot: deps.projectRoot, paths: arts });
+          const baseDir = strictSandbox ? join(deps.procforgeDir, "sandbox", sid) : deps.projectRoot;
+          const ing = ingestArtifacts({ procforgeDir: deps.procforgeDir, sessionId: sid, nodeId: nid, attemptId, baseDir, paths: arts, maxBytes: maxArtifactBytes });
           stored = ing.stored;
           contents = ing.contents;
         }
@@ -264,7 +288,7 @@ export function buildServer(deps: ServerDeps): McpServer {
     },
   );
 
-  R(
+  W(
     "pf_split",
     {
       title: "노드 분해",
@@ -275,8 +299,8 @@ export function buildServer(deps: ServerDeps): McpServer {
         "부모와 생성된 자식 반환. 다음: pf_next로 자식 처리.",
       ].join("\n"),
       inputSchema: {
-        sessionId: z.string().min(1),
-        nodeId: z.string().min(1),
+        sessionId: SessionIdSchema,
+        nodeId: NodeIdSchema,
         children: z.array(z.object({ goal: z.string().min(1), dependsOn: z.array(z.string()).optional(), sideEffect: z.enum(["none", "local_write", "external"]).optional() })).min(1),
       },
       outputSchema: OUTPUT_SCHEMAS["pf_split"] as never,
@@ -301,7 +325,7 @@ export function buildServer(deps: ServerDeps): McpServer {
     },
   );
 
-  R(
+  W(
     "pf_confirm_leaf",
     {
       title: "leaf 확정",
@@ -313,8 +337,8 @@ export function buildServer(deps: ServerDeps): McpServer {
         "leaf 확정과 golden 기록 반환. 다음: pf_next.",
       ].join("\n"),
       inputSchema: {
-        sessionId: z.string().min(1),
-        nodeId: z.string().min(1),
+        sessionId: SessionIdSchema,
+        nodeId: NodeIdSchema,
         tool: ToolRefShape,
         argSpecs: z.record(
           z.discriminatedUnion("kind", [
@@ -349,7 +373,7 @@ export function buildServer(deps: ServerDeps): McpServer {
     },
   );
 
-  R(
+  W(
     "pf_retry",
     {
       title: "재시도",
@@ -359,7 +383,7 @@ export function buildServer(deps: ServerDeps): McpServer {
         "reason(필수, 재시도 사유, 기록용).",
         "probing 복귀 또는 한도 초과 시 needs_human. 다음: 실행 후 pf_report.",
       ].join("\n"),
-      inputSchema: { sessionId: z.string().min(1), nodeId: z.string().min(1), reason: z.string().min(1) },
+      inputSchema: { sessionId: SessionIdSchema, nodeId: NodeIdSchema, reason: z.string().min(1) },
       outputSchema: OUTPUT_SCHEMAS["pf_retry"] as never,
       annotations: WRITE_ANN,
     },
@@ -377,17 +401,22 @@ export function buildServer(deps: ServerDeps): McpServer {
     },
   );
 
-  R(
+  W(
     "pf_ask_human",
     {
       title: "사람에게 질문",
       description: [
         "사람 판단이 필요해 질문을 남긴다.",
         "선수: pf_next(외부 영향 노드) 또는 막힌 노드.",
-        "question(필수, 사람에게 물을 내용).",
-        "needs_human 전환. 다음: pf_advise로 조언 등록 대기.",
+        "question(필수, 사람에게 물을 내용), plan(선택, {tool,args} dry-run 계획, 승인 대상).",
+        "needs_human 전환. 계획이 있으면 pf_approve 대기, 없으면 pf_advise 대기.",
       ].join("\n"),
-      inputSchema: { sessionId: z.string().min(1), nodeId: z.string().min(1), question: z.string().min(1) },
+      inputSchema: {
+        sessionId: SessionIdSchema,
+        nodeId: NodeIdSchema,
+        question: z.string().min(1),
+        plan: z.object({ tool: ToolRefShape, args: z.record(z.unknown()) }).optional(),
+      },
       outputSchema: OUTPUT_SCHEMAS["pf_ask_human"] as never,
       annotations: WRITE_ANN,
     },
@@ -396,7 +425,13 @@ export function buildServer(deps: ServerDeps): McpServer {
         const sid = a.sessionId as string;
         const s = requireFresh(deps, sid);
         logger.info("pf_ask_human", { sessionId: sid, nodeId: a.nodeId, question: a.question });
-        const out = await client.pfResolve({ sessionId: sid, nodeId: a.nodeId as string, decision: "ask_human" });
+        const out = await client.pfResolve({
+          sessionId: sid,
+          nodeId: a.nodeId as string,
+          decision: "ask_human",
+          plan: a.plan as { tool: { server: string; name: string }; args: Record<string, unknown> } | undefined,
+          note: a.question as string,
+        });
         deps.store.touch(sid);
         return ok({ node: nodeSummary(out.node, s.limits), instruction: out.instruction });
       } catch (e) {
@@ -405,7 +440,39 @@ export function buildServer(deps: ServerDeps): McpServer {
     },
   );
 
-  R(
+  W(
+    "pf_approve",
+    {
+      title: "계획 승인",
+      description: [
+        "dry-run 계획을 승인하거나 거부한다.",
+        "선수: pf_ask_human(계획 포함) 이후 needs_human.",
+        "approved(필수), note(선택, 거부 사유·승인 메모).",
+        "승인 시 확정 가능 상태(probing)로, 거부 시 open으로. 다음: 승인 후 pf_confirm_leaf.",
+      ].join("\n"),
+      inputSchema: {
+        sessionId: SessionIdSchema,
+        nodeId: NodeIdSchema,
+        approved: z.boolean(),
+        note: z.string().optional(),
+      },
+      outputSchema: OUTPUT_SCHEMAS["pf_approve"] as never,
+      annotations: WRITE_ANN,
+    },
+    async (a: any) => {
+      try {
+        const sid = a.sessionId as string;
+        const s = requireFresh(deps, sid);
+        const n = await client.pfApprove(sid, a.nodeId as string, a.approved as boolean, a.note as string | undefined);
+        deps.store.touch(sid);
+        return ok({ node: nodeSummary(n, s.limits) });
+      } catch (e) {
+        return errResult(e);
+      }
+    },
+  );
+
+  W(
     "pf_advise",
     {
       title: "조언 등록",
@@ -415,7 +482,7 @@ export function buildServer(deps: ServerDeps): McpServer {
         "text(필수, 예: \"매출은 세전 기준\").",
         "생성된 조건과 갱신 노드 반환. needs_human이면 open 복귀. 다음: pf_next.",
       ].join("\n"),
-      inputSchema: { sessionId: z.string().min(1), nodeId: z.string().min(1), text: z.string().min(1) },
+      inputSchema: { sessionId: SessionIdSchema, nodeId: NodeIdSchema, text: z.string().min(1) },
       outputSchema: OUTPUT_SCHEMAS["pf_advise"] as never,
       annotations: WRITE_ANN,
     },
@@ -446,9 +513,9 @@ export function buildServer(deps: ServerDeps): McpServer {
         "목록·상태별 개수·hasMore 반환. 상세가 필요하면 pf_get_node.",
       ].join("\n"),
       inputSchema: {
-        sessionId: z.string().min(1),
+        sessionId: SessionIdSchema,
         detail: z.enum(["summary", "full"]).optional(),
-        nodeId: z.string().optional(),
+        nodeId: NodeIdSchema.optional(),
         limit: z.number().int().min(1).max(500).optional(),
         cursor: z.number().int().min(0).optional(),
       },
@@ -510,7 +577,7 @@ export function buildServer(deps: ServerDeps): McpServer {
         "선수: pf_tree로 id 확인 후.",
         "nodeId 지정. 전체 attempts·조건 포함. 다음: 상태에 맞는 도구 호출.",
       ].join("\n"),
-      inputSchema: { sessionId: z.string().min(1), nodeId: z.string().min(1) },
+      inputSchema: { sessionId: SessionIdSchema, nodeId: NodeIdSchema },
       outputSchema: OUTPUT_SCHEMAS["pf_get_node"] as never,
       annotations: READ_ONLY_ANN,
     },
@@ -529,7 +596,7 @@ export function buildServer(deps: ServerDeps): McpServer {
     },
   );
 
-  R(
+  W(
     "pf_lock",
     {
       title: "노드 잠금",
@@ -538,7 +605,7 @@ export function buildServer(deps: ServerDeps): McpServer {
         "선수: leaf 확정 후.",
         "잠긴 노드와 그 조상은 재분해 금지. 다음: pf_next 계속 또는 pf_reopen.",
       ].join("\n"),
-      inputSchema: { sessionId: z.string().min(1), nodeId: z.string().min(1) },
+      inputSchema: { sessionId: SessionIdSchema, nodeId: NodeIdSchema },
       outputSchema: OUTPUT_SCHEMAS["pf_lock"] as never,
       annotations: WRITE_ANN,
     },
@@ -555,7 +622,7 @@ export function buildServer(deps: ServerDeps): McpServer {
     },
   );
 
-  R(
+  W(
     "pf_reopen",
     {
       title: "노드 재오픈",
@@ -564,7 +631,7 @@ export function buildServer(deps: ServerDeps): McpServer {
         "선수: pf_lock 이후, 사람 판단으로만.",
         "reason(필수). 다음: pf_next.",
       ].join("\n"),
-      inputSchema: { sessionId: z.string().min(1), nodeId: z.string().min(1), reason: z.string().min(1) },
+      inputSchema: { sessionId: SessionIdSchema, nodeId: NodeIdSchema, reason: z.string().min(1) },
       outputSchema: OUTPUT_SCHEMAS["pf_reopen"] as never,
       annotations: WRITE_ANN,
     },
@@ -602,6 +669,61 @@ export function buildServer(deps: ServerDeps): McpServer {
           entries: c.entries.map((e) => ({ server: e.server, name: e.name, schemaHash: e.schemaHash })),
           warnings: c.warnings,
           cached: c.cached,
+        });
+      } catch (e) {
+        return errResult(e);
+      }
+    },
+  );
+
+  R(
+    "pf_test",
+    {
+      title: "절차서 테스트",
+      description: [
+        "확정 트리를 LLM 없이 재실행한다.",
+        "선수: 전 노드 leaf 확정 후.",
+        "sessionId(필수), nodeId(서브트리, 선택), mode(record|replay|passthrough, 기본 replay),",
+        "updateGolden(선택), junitPath(선택).",
+        "요약과 report 경로 반환. 다음: 실패 노드는 pf_tree로 확인.",
+      ].join("\n"),
+      inputSchema: {
+        sessionId: SessionIdSchema,
+        nodeId: NodeIdSchema.optional(),
+        mode: z.enum(["record", "replay", "passthrough"]).optional(),
+        updateGolden: z.boolean().optional(),
+        junitPath: z.string().optional(),
+      },
+      outputSchema: OUTPUT_SCHEMAS["pf_test"] as never,
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+    },
+    async (a: any) => {
+      try {
+        const { writeFileSync } = await import("node:fs");
+        const sid = a.sessionId as string;
+        requireFresh(deps, sid);
+        const report = await runSession({
+          procforgeDir: deps.procforgeDir,
+          projectRoot: deps.projectRoot,
+          sessionId: sid,
+          nodeId: a.nodeId as string | undefined,
+          mode: (a.mode as "record" | "replay" | "passthrough" | undefined) ?? "replay",
+          updateGolden: (a.updateGolden as boolean | undefined) ?? false,
+        });
+        deps.store.touch(sid);
+        const reportPath = join(deps.procforgeDir, "runs", report.runId, "report.json");
+        if (a.junitPath) {
+          const { toJUnit } = await import("./runner/index.js");
+          writeFileSync(a.junitPath as string, toJUnit(report));
+        }
+        return ok({
+          runId: report.runId,
+          mode: report.mode,
+          passed: report.summary.pass,
+          failed: report.summary.fail,
+          unverified: report.summary.unverified,
+          skipped: report.summary.skipped,
+          reportPath,
         });
       } catch (e) {
         return errResult(e);
