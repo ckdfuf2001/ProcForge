@@ -44,6 +44,17 @@
 - [M2-6] pf_start toolCatalog 선택화 — 호출자 제공 시 덮어쓰기, 생략 시 collectCatalog 자동 수집. 수집 warnings는 응답에 포함.
 - [M2-7] golden 기록 시점 — pf_resolve(leaf)에서 마지막 attempt의 artifacts + resultSummary로 golden 확정.
 
+## M2.5
+
+- [M2.5-1] 에러 봉투 — 업무/검증 에러는 CallToolResult `{ isError: true, content:[text], structuredContent:{error:{code,message,hint}} }`. SDK는 isError 결과의 outputSchema 검증을 건너뛰므로 봉투가 그대로 전달된다. 내부는 code=internal로 치환하고 스택은 stderr에만 기록.
+- [M2.5-2] registerTool — SDK 1.32.1 내장(업그레이드 불필요). 전 도구에 title·outputSchema·structuredContent(+동일 JSON text). 계약 테스트는 InMemoryTransport 실연결 + OUTPUT_SCHEMAS 검증. tools/list 스냅샷은 이름·순서·annotations 엄격 일치 + 입출력 스키마 존재 확인(전체 덤프 대신 구조 검사로 brittleness 회피).
+- [M2.5-3] pf_resolve 분리 — pf_split/pf_confirm_leaf/pf_retry/pf_ask_human. core CoreClient(pfResolve decision)는 유지, local 서버층에서 매핑. pf_retry reason·pf_ask_human question은 core 계약에 없어 stderr 로그로 기록. pf_finalize/pf_test는 미등록(구현 마일스톤까지). description 금지어: 부가세, llm_rubric, numeric_match, json_path_exists, file_exists, auto constraint, 휴리스틱 (CI grep, server.ts 한정).
+- [M2.5-4] annotations — 읽기 3종만 readOnly/idempotent. 전 도구 openWorldHint=false(실행은 호스트 몫).
+- [M2.5-5] 응답 크기 — pf_next는 요약(NodeSummary)+retriesLeft(총 maxRetries+1−attempts). pf_tree 기본 요약 목록(goal 80자)+상태별 개수+limit(기본 50)/cursor/hasMore. full 상세요. 200노드 기본 응답 한도 32KB(실측 ~12KB).
+- [M2.5-6] 세션 핸들 — core rid 대신 crypto.randomUUID. TTL은 서버층 FileStore meta(lastUsedAt)로 집행, 기본 30일, PROCFORGE_SESSION_TTL_DAYS로 설정. 만료/부재는 session_not_found + pf_start 힌트.
+- [M2.5-7] prompt procforge_decompose — args는 문자열만(request?, params? JSON 문자열). MCP prompt 인자는 클라이언트가 문자열로 다루므로 record 대신 string. pf_start 응답에 동일 전문 포함(클라 미노출 대비).
+- [M2.5-8] 운영 — PROCFORGE_READ_ONLY=1이면 읽기 3종만 등록(prompt는 유지). 카탈로그 캐시 .procforge/cache/catalog.json(10분, 설정 fingerprint 무효), 서버별 타임아웃 5초. 세션 파일 1MB 초과 시 stderr 경고. local/src의 console.log 금지.
+
 ## M1
 
 - [M1-1] checker 주입 — §6 pf_report의 verdict 계산은 local checker(§7)가 소유. core는 `EvaluateFn`을 생성자 주입받고 기본값은 constraints-empty→pass, 그 외→fail. 이유: core→local import 순환 방지 + 의존방향(local→core 금지) 유지. M2에서 local MCP 핸들러가 `checker.evaluateAll`을 주입한다.

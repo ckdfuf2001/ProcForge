@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
   computeNodeHash,
   type Constraint,
@@ -110,7 +111,7 @@ export class CoreService implements CoreClient {
   }
 
   async pfStart(input: PfStartInput): Promise<PfStartOutput> {
-    const sid = rid("s");
+    const sid = randomUUID(); // M2.5-6: 세션 핸들은 UUID
     const limits = input.limits ?? { maxDepth: 5, maxRetries: 2, maxNodes: 50 };
     const session: Session = {
       id: sid,

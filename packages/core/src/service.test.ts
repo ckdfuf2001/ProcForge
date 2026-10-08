@@ -22,6 +22,14 @@ const rep = (over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
+describe("M2.5-6 세션 핸들 UUID", () => {
+  it("세션 id는 UUID", async () => {
+    const svc = new CoreService(createMemoryStore(), passEval);
+    const { session } = await svc.pfStart({ request: "r", toolCatalog: catalog });
+    expect(session.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+  });
+});
+
 describe("M1.5-4 node id 숫자 정렬", () => {
   it('"1.2" < "1.10"', () => {
     expect(compareNodeIds("1.2", "1.10")).toBeLessThan(0);

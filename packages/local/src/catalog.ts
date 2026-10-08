@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import type { ToolCatalogEntry } from "@procforge/shared/schema.js";
@@ -111,12 +111,30 @@ async function listServerTools(
   }
 }
 
-/** opencode.json mcp 항목 + 내장 툴 → toolCatalog 수집 */
+/** opencode.json mcp 항목 + 내장 툴 → toolCatalog 수집 (M2.5: 캐시+5초 타임아웃) */
 export async function collectCatalog(
   projectRoot: string,
-  opts: { timeoutMs?: number } = {},
-): Promise<{ entries: ToolCatalogEntry[]; warnings: string[] }> {
-  const timeoutMs = opts.timeoutMs ?? 10000;
+  opts: { timeoutMs?: number; cacheDir?: string; refresh?: boolean } = {},
+): Promise<{ entries: ToolCatalogEntry[]; warnings: string[]; cached: boolean }> {
+  const timeoutMs = opts.timeoutMs ?? 5000;
+  const CACHE_TTL_MS = 10 * 60 * 1000;
+  const cachePath = opts.cacheDir ? join(opts.cacheDir, "catalog.json") : undefined;
+  const fingerprint = configFingerprint(projectRoot);
+  if (!opts.refresh && cachePath && existsSync(cachePath)) {
+    try {
+      const cached = JSON.parse(readFileSync(cachePath, "utf8")) as {
+        at: number;
+        fingerprint: string;
+        entries: ToolCatalogEntry[];
+        warnings: string[];
+      };
+      if (cached.fingerprint === fingerprint && Date.now() - cached.at < CACHE_TTL_MS) {
+        return { entries: cached.entries, warnings: cached.warnings, cached: true };
+      }
+    } catch {
+      // 캐시 손상 시 재수집
+    }
+  }
   const { servers } = loadMcpConfigs(projectRoot);
   const entries: ToolCatalogEntry[] = [...BUILTIN_TOOLS];
   const warnings: string[] = [];
@@ -125,5 +143,31 @@ export async function collectCatalog(
     entries.push(...r.entries);
     if (r.warning) warnings.push(r.warning);
   }
-  return { entries, warnings };
+  if (cachePath) {
+    try {
+      mkdirSync(dirname(cachePath), { recursive: true });
+      writeFileSync(cachePath, JSON.stringify({ at: Date.now(), fingerprint, entries, warnings }));
+    } catch {
+      // 캐시 실패는 무시
+    }
+  }
+  return { entries, warnings, cached: false };
+}
+
+function configFingerprint(projectRoot: string): string {
+  const candidates = [
+    join(homedir(), ".config", "opencode", "opencode.json"),
+    join(projectRoot, "opencode.json"),
+    join(projectRoot, ".opencode", "opencode.json"),
+  ];
+  const parts = candidates.map((f) => {
+    if (!existsSync(f)) return `${f}:missing`;
+    try {
+      const st = statSync(f);
+      return `${f}:${st.mtimeMs}:${st.size}`;
+    } catch {
+      return `${f}:unreadable`;
+    }
+  });
+  return createHash("sha256").update(parts.join("|")).digest("hex").slice(0, 16);
 }

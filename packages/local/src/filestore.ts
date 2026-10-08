@@ -3,6 +3,9 @@ import { join, dirname } from "node:path";
 import type { Store } from "@procforge/shared/store.js";
 import type { Node, Session } from "@procforge/shared/schema.js";
 import { NodeSchema, SessionSchema } from "@procforge/shared/schema.js";
+import { logger } from "./logger.js";
+
+const WARN_BYTES = 1_000_000;
 
 // NOTE: local 전용. core 패키지는 이 파일을 모른다. 합성은 core-inprocess.ts에서만.
 export class FileStore implements Store {
@@ -13,6 +16,7 @@ export class FileStore implements Store {
   }
 
   private writeAtomic(path: string, data: string): void {
+    if (data.length > WARN_BYTES) logger.warn(`large session file: ${path} (${data.length} bytes)`);
     mkdirSync(dirname(path), { recursive: true });
     const tmp = `${path}.${process.pid}.tmp`;
     writeFileSync(tmp, data);
@@ -52,5 +56,26 @@ export class FileStore implements Store {
 
   saveNode(sessionId: string, n: Node): void {
     this.writeAtomic(join(this.sessionDir(sessionId), "nodes", `${n.id}.json`), JSON.stringify(n, null, 2));
+  }
+
+  // ---- 세션 TTL용 메타 (M2.5-6, Store 인터페이스 외 local 확장) ----
+
+  private metaPath(sid: string): string {
+    return join(this.sessionDir(sid), "meta.json");
+  }
+
+  touch(sid: string): void {
+    this.writeAtomic(this.metaPath(sid), JSON.stringify({ lastUsedAt: new Date().toISOString() }));
+  }
+
+  getLastUsed(sid: string): number | undefined {
+    const p = this.metaPath(sid);
+    if (!existsSync(p)) return undefined;
+    try {
+      const t = Date.parse((JSON.parse(readFileSync(p, "utf8")) as { lastUsedAt: string }).lastUsedAt);
+      return Number.isNaN(t) ? undefined : t;
+    } catch {
+      return undefined;
+    }
   }
 }

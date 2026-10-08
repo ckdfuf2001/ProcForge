@@ -1,25 +1,89 @@
 import { randomBytes } from "node:crypto";
+import { join } from "node:path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import type { CoreClient } from "@procforge/shared/core-client.js";
-import { toError } from "@procforge/shared/errors.js";
 import { ingestArtifacts, setupSandbox } from "./artifacts.js";
 import { collectCatalog } from "./catalog.js";
+import { logger } from "./logger.js";
+import type { FileStore } from "./filestore.js";
+import { OUTPUT_SCHEMAS, nodeSummary } from "./views.js";
+
+export const DEFAULT_SESSION_TTL_MS = 30 * 24 * 3600 * 1000;
 
 export type ServerDeps = {
   client: CoreClient;
+  store: FileStore;
   procforgeDir: string;
   projectRoot: string;
+  sessionTtlMs?: number;
+  readOnly?: boolean;
 };
 
-const text = (obj: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(obj, null, 2) }] });
+/** 도구 등록 순서 (결정적, 스냅샷 테스트 대상) */
+export const TOOL_NAMES = [
+  "pf_start",
+  "pf_next",
+  "pf_report",
+  "pf_split",
+  "pf_confirm_leaf",
+  "pf_retry",
+  "pf_ask_human",
+  "pf_advise",
+  "pf_tree",
+  "pf_get_node",
+  "pf_lock",
+  "pf_reopen",
+  "pf_refresh_catalog",
+] as const;
 
-function errOf(e: unknown) {
-  const code = (e as { code?: string } | null)?.code ?? "internal";
-  const message = e instanceof Error ? e.message : String(e);
-  return text(toError(code, message, "pf_tree로 상태를 확인하라"));
+export const READ_ONLY_TOOLS = ["pf_next", "pf_tree", "pf_get_node"] as const;
+
+/** 분해 루프 안내 (prompt + pf_start 첫 응답 공유, 정책 세부 없음) */
+export const PROMPT_TEXT = [
+  "ProcForge 분해 루프:",
+  "1. pf_next로 노드 1개를 받는다. done=true면 끝.",
+  "2. 노드가 도구 1회로 가능하면 sandbox 사본에서 실행 후 pf_report(selfVerdict/selfReason 필수).",
+  "3. 너무 크면 pf_split로 나눈다.",
+  "4. pass여도 자동 확정 없음. pf_confirm_leaf(tool, argSpecs)로 확정한다.",
+  "5. 외부에 영향을 주는 실행은 직접 하지 말고 pf_ask_human으로 승인 요청.",
+  "6. needs_human이면 사람 조언을 pf_advise로 등록한 뒤 계속한다.",
+].join("\n");
+
+function err(code: string, message: string, hint?: string): Error {
+  return Object.assign(new Error(message), { code, hint });
 }
+
+const HINTS: Record<string, string> = {
+  bad_request: "입력을 고쳐 재호출하라.",
+  conflict: "pf_tree로 현재 상태를 확인하고 상태에 맞는 도구를 호출하라.",
+  not_found: "pf_tree로 id를 확인하라.",
+  session_not_found: "pf_start로 새 세션을 시작하라.",
+  unimplemented: "해당 마일스톤 구현 후 사용하라.",
+  internal: "다시 시도하라. 계속되면 pf_tree로 상태를 확인하라.",
+};
+
+function errResult(e: unknown) {
+  const rawCode = (e as { code?: string } | null)?.code ?? "internal";
+  const code = rawCode === "not_found" && /session/i.test(e instanceof Error ? e.message : "") ? "session_not_found" : rawCode;
+  const hint = (e as { hint?: string } | null)?.hint ?? HINTS[code] ?? HINTS["internal"];
+  const message = code === "internal" ? "내부 오류가 발생했다." : e instanceof Error ? e.message : String(e);
+  if (code === "internal") logger.error("internal", e instanceof Error ? (e.stack ?? e.message) : String(e));
+  const body = { error: { code, message, hint: `${hint}`.trim() } };
+  return {
+    isError: true as const,
+    content: [{ type: "text" as const, text: `${code}: ${message} (힌트: ${body.error.hint})` }],
+    structuredContent: body,
+  };
+}
+
+function ok(payload: Record<string, unknown>) {
+  return { content: [{ type: "text" as const, text: JSON.stringify(payload) }], structuredContent: payload };
+}
+
+const READ_ONLY_ANN = { readOnlyHint: true, idempotentHint: true, openWorldHint: false };
+const WRITE_ANN = { readOnlyHint: false, destructiveHint: false, openWorldHint: false };
 
 const ToolRefShape = z.object({ server: z.string().min(1), name: z.string().min(1) });
 const CatalogEntryShape = z.object({
@@ -39,183 +103,526 @@ const ArgSpecShape = z.discriminatedUnion("kind", [
   }),
 ]);
 
+function requireFresh(deps: ServerDeps, sessionId: string) {
+  const s = deps.store.getSession(sessionId);
+  if (!s) throw err("session_not_found", `세션 없음: ${sessionId}`, HINTS["session_not_found"]);
+  const ttl = deps.sessionTtlMs ?? DEFAULT_SESSION_TTL_MS;
+  const last = deps.store.getLastUsed(sessionId);
+  if (last === undefined) {
+    deps.store.touch(sessionId);
+    return s;
+  }
+  if (Date.now() - last > ttl) throw err("session_not_found", `세션 만료: ${sessionId}`, "pf_start로 새 세션을 시작하라.");
+  return s;
+}
+
 export function buildServer(deps: ServerDeps): McpServer {
   const server = new McpServer({ name: "procforge-local", version: "0.2.0" });
   const { client } = deps;
+  const enabled = (name: string) => !deps.readOnly || (READ_ONLY_TOOLS as readonly string[]).includes(name);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const R = (name: string, config: any, cb: any) => {
+    if (enabled(name)) server.registerTool(name, config, cb);
+  };
 
-  server.tool(
+  R(
     "pf_start",
-    "ProcForge 세션 시작",
-    { request: z.string().min(1), params: z.record(z.string()).optional(), toolCatalog: z.array(CatalogEntryShape).optional(), seedFiles: z.array(z.string()).optional() },
-    async (a) => {
+    {
+      title: "세션 시작",
+      description: [
+        "새 분해 세션을 시작한다.",
+        "선수 호출: 없음. 요청 1건당 세션 1개.",
+        "request(필수, 예: \"9월 월간보고서\"), params(선택, 예: {\"month\":\"2026-09\"}),",
+        "toolCatalog(선택, 생략 시 자동 수집), seedFiles(선택, sandbox에 복사할 참조 파일),",
+        "limits(선택, 예: {\"maxDepth\":5,\"maxRetries\":2,\"maxNodes\":50}).",
+        "세션·루트 노드·수행 지침 반환. 세션은 30일 미사용 시 만료. 다음: pf_next.",
+      ].join("\n"),
+      inputSchema: {
+        request: z.string().min(1),
+        params: z.record(z.string()).optional(),
+        toolCatalog: z.array(CatalogEntryShape).optional(),
+        seedFiles: z.array(z.string()).optional(),
+        limits: z.object({ maxDepth: z.number().int().min(1), maxRetries: z.number().int().min(0), maxNodes: z.number().int().min(1) }).optional(),
+      },
+      outputSchema: OUTPUT_SCHEMAS["pf_start"] as never,
+      annotations: WRITE_ANN,
+    },
+    async (a: any) => {
       try {
-        const collected = a.toolCatalog ? undefined : await collectCatalog(deps.projectRoot);
+        const collected = a.toolCatalog
+          ? undefined
+          : await collectCatalog(deps.projectRoot, { cacheDir: join(deps.procforgeDir, "cache") });
         const catalog = a.toolCatalog ?? collected!.entries;
         const warnings = collected?.warnings ?? [];
-        const out = await client.pfStart({ request: a.request, params: a.params, toolCatalog: catalog });
+        const out = await client.pfStart({ request: a.request as string, params: a.params as Record<string, string> | undefined, toolCatalog: catalog as never, limits: a.limits as never });
+        deps.store.touch(out.session.id);
         let sandboxNote = "";
-        if (a.seedFiles && a.seedFiles.length > 0) {
-          const sb = setupSandbox({ procforgeDir: deps.procforgeDir, sessionId: out.session.id, projectRoot: deps.projectRoot, seedFiles: a.seedFiles });
-          sandboxNote = ` 참조 파일 ${sb.copied.length}개를 sandbox(${sb.sandboxDir})에 복사했다.`;
+        const seeds = a.seedFiles as string[] | undefined;
+        if (seeds && seeds.length > 0) {
+          const sb = setupSandbox({ procforgeDir: deps.procforgeDir, sessionId: out.session.id, projectRoot: deps.projectRoot, seedFiles: seeds });
+          sandboxNote = ` 참조 파일 ${sb.copied.length}개를 sandbox에 복사했다.`;
         }
-        return text({ sessionId: out.session.id, node: out.node, instruction: out.instruction + sandboxNote, warnings });
+        return ok({
+          sessionId: out.session.id,
+          node: nodeSummary(out.node, out.session.limits),
+          instruction: `${PROMPT_TEXT}\n\n${out.instruction}${sandboxNote}`,
+          warnings,
+          sessionExpiresInDays: Math.round((deps.sessionTtlMs ?? DEFAULT_SESSION_TTL_MS) / 86400000),
+        });
       } catch (e) {
-        return errOf(e);
+        return errResult(e);
       }
     },
   );
 
-  server.tool("pf_next", "다음 작업 노드 조회", { sessionId: z.string().min(1) }, async (a) => {
-    try {
-      return text(await client.pfNext(a.sessionId));
-    } catch (e) {
-      return errOf(e);
-    }
-  });
-
-  server.tool(
-    "pf_report",
-    "leaf 실행 결과 보고",
+  R(
+    "pf_next",
     {
-      sessionId: z.string().min(1),
-      nodeId: z.string().min(1),
-      tool: ToolRefShape,
-      args: z.record(z.unknown()),
-      resultSummary: z.string(),
-      resultJson: z.unknown().optional(),
-      artifacts: z.array(z.string()).optional(),
-      selfVerdict: z.enum(["pass", "fail"]),
-      selfReason: z.string().min(1),
-      rubricReasons: z.record(z.string()).optional(),
+      title: "다음 노드 조회",
+      description: [
+        "처리할 노드 1개를 의존성 순서로 받는다.",
+        "선수: pf_start. 매 단계마다 호출.",
+        "인자: sessionId.",
+        "노드 요약과 지침 반환. done=true면 종료. 다음: 실행 후 pf_report, 크면 pf_split.",
+      ].join("\n"),
+      inputSchema: { sessionId: z.string().min(1) },
+      outputSchema: OUTPUT_SCHEMAS["pf_next"] as never,
+      annotations: READ_ONLY_ANN,
     },
-    async (a) => {
+    async (a: any) => {
       try {
+        const s = requireFresh(deps, a.sessionId as string);
+        const out = await client.pfNext(a.sessionId as string);
+        deps.store.touch(a.sessionId as string);
+        if (out.done) return ok({ done: true });
+        return ok({ done: false, node: nodeSummary(out.node, s.limits), instruction: out.instruction });
+      } catch (e) {
+        return errResult(e);
+      }
+    },
+  );
+
+  R(
+    "pf_report",
+    {
+      title: "실행 결과 보고",
+      description: [
+        "leaf 후보 실행 결과를 보고한다.",
+        "선수: pf_next. 실행은 호스트가 자기 도구로 수행.",
+        "tool/args/resultSummary/selfVerdict(판정)/selfReason(사유, 필수),",
+        "artifacts(프로젝트 상대경로, 선택), rubricReasons(사람 판단 항목 사유, 선택).",
+        "통과해도 자동 확정 없음. 다음: pf_confirm_leaf 또는 pf_split.",
+      ].join("\n"),
+      inputSchema: {
+        sessionId: z.string().min(1),
+        nodeId: z.string().min(1),
+        tool: ToolRefShape,
+        args: z.record(z.unknown()),
+        resultSummary: z.string(),
+        resultJson: z.unknown().optional(),
+        artifacts: z.array(z.string()).optional(),
+        selfVerdict: z.enum(["pass", "fail"]),
+        selfReason: z.string().min(1),
+        rubricReasons: z.record(z.string()).optional(),
+      },
+      outputSchema: OUTPUT_SCHEMAS["pf_report"] as never,
+      annotations: WRITE_ANN,
+    },
+    async (a: any) => {
+      try {
+        const sid = a.sessionId as string;
+        requireFresh(deps, sid);
+        const nid = a.nodeId as string;
         const attemptId = `a-${randomBytes(4).toString("hex")}`;
         let stored: string[] = [];
         let contents: Record<string, string> = {};
-        if (a.artifacts && a.artifacts.length > 0) {
-          const ing = ingestArtifacts({
-            procforgeDir: deps.procforgeDir,
-            sessionId: a.sessionId,
-            nodeId: a.nodeId,
-            attemptId,
-            projectRoot: deps.projectRoot,
-            paths: a.artifacts,
-          });
+        const arts = a.artifacts as string[] | undefined;
+        if (arts && arts.length > 0) {
+          const ing = ingestArtifacts({ procforgeDir: deps.procforgeDir, sessionId: sid, nodeId: nid, attemptId, projectRoot: deps.projectRoot, paths: arts });
           stored = ing.stored;
           contents = ing.contents;
         }
         const out = await client.pfReport({
-          sessionId: a.sessionId,
-          nodeId: a.nodeId,
-          tool: a.tool,
+          sessionId: sid,
+          nodeId: nid,
+          tool: a.tool as { server: string; name: string },
           args: a.args as Record<string, unknown>,
-          resultSummary: a.resultSummary,
+          resultSummary: a.resultSummary as string,
           resultJson: a.resultJson,
           artifacts: stored,
           artifactContents: contents,
-          selfVerdict: a.selfVerdict,
-          selfReason: a.selfReason,
-          rubricReasons: a.rubricReasons,
+          selfVerdict: a.selfVerdict as "pass" | "fail",
+          selfReason: a.selfReason as string,
+          rubricReasons: a.rubricReasons as Record<string, string> | undefined,
           attemptId,
         });
-        return text(out);
+        deps.store.touch(sid);
+        return ok(out as unknown as Record<string, unknown>);
       } catch (e) {
-        return errOf(e);
+        return errResult(e);
       }
     },
   );
 
-  server.tool(
-    "pf_resolve",
-    "노드 판정(leaf/split/retry/ask_human)",
+  R(
+    "pf_split",
     {
-      sessionId: z.string().min(1),
-      nodeId: z.string().min(1),
-      decision: z.enum(["leaf", "split", "retry", "ask_human"]),
-      children: z.array(z.object({ goal: z.string().min(1), dependsOn: z.array(z.string()).optional(), sideEffect: z.enum(["none", "local_write", "external"]).optional() })).optional(),
-      argSpecs: z.record(ArgSpecShape).optional(),
-      sideEffect: z.enum(["none", "local_write", "external"]).optional(),
-      tool: ToolRefShape.optional(),
+      title: "노드 분해",
+      description: [
+        "노드를 하위 작업으로 나눈다.",
+        "선수: pf_next. 도구 1회로 안 될 때.",
+        "children(필수, 최소 1개, 예: [{\"goal\":\"슬라이드 목록 읽기\"}]).",
+        "부모와 생성된 자식 반환. 다음: pf_next로 자식 처리.",
+      ].join("\n"),
+      inputSchema: {
+        sessionId: z.string().min(1),
+        nodeId: z.string().min(1),
+        children: z.array(z.object({ goal: z.string().min(1), dependsOn: z.array(z.string()).optional(), sideEffect: z.enum(["none", "local_write", "external"]).optional() })).min(1),
+      },
+      outputSchema: OUTPUT_SCHEMAS["pf_split"] as never,
+      annotations: WRITE_ANN,
     },
-    async (a) => {
+    async (a: any) => {
       try {
-        return text(
-          await client.pfResolve({
-            sessionId: a.sessionId,
-            nodeId: a.nodeId,
-            decision: a.decision,
-            children: a.children as { goal: string; dependsOn?: string[]; sideEffect?: "none" | "local_write" | "external" }[] | undefined,
-            argSpecs: a.argSpecs as Record<string, { kind: "fixed"; value: unknown } | { kind: "var"; ref: string } | { kind: "generated"; instruction: string; inputs: string[]; constraints: string[] }> | undefined,
-            sideEffect: a.sideEffect,
-            tool: a.tool,
-          }),
-        );
+        const sid = a.sessionId as string;
+        const s = requireFresh(deps, sid);
+        const kids = a.children as { goal: string; dependsOn?: string[]; sideEffect?: "none" | "local_write" | "external" }[] | undefined;
+        if (!kids || kids.length === 0) throw err("bad_request", "children이 비었다.", "최소 1개의 {goal}을 넣어 pf_split 재호출.");
+        const out = await client.pfResolve({ sessionId: sid, nodeId: a.nodeId as string, decision: "split", children: kids });
+        deps.store.touch(sid);
+        return ok({
+          node: nodeSummary(out.node, s.limits),
+          created: (out.created ?? []).map((c) => nodeSummary(c, s.limits)),
+          instruction: out.instruction,
+        });
       } catch (e) {
-        return errOf(e);
+        return errResult(e);
       }
     },
   );
 
-  server.tool(
+  R(
+    "pf_confirm_leaf",
+    {
+      title: "leaf 확정",
+      description: [
+        "통과한 시도를 leaf로 확정한다.",
+        "선수: pf_report(verdict=pass).",
+        "tool(마지막 실행과 동일), argSpecs(필수, 실행 인자 키 전체를 fixed/var/generated로 분류,",
+        "예: {\"month\":{\"kind\":\"var\",\"ref\":\"${params.month}\"}}).",
+        "leaf 확정과 golden 기록 반환. 다음: pf_next.",
+      ].join("\n"),
+      inputSchema: {
+        sessionId: z.string().min(1),
+        nodeId: z.string().min(1),
+        tool: ToolRefShape,
+        argSpecs: z.record(
+          z.discriminatedUnion("kind", [
+            z.object({ kind: z.literal("fixed"), value: z.unknown() }),
+            z.object({ kind: z.literal("var"), ref: z.string().min(1) }),
+            z.object({ kind: z.literal("generated"), instruction: z.string().min(1), inputs: z.array(z.string()).default([]), constraints: z.array(z.string()).default([]) }),
+          ]),
+        ),
+        sideEffect: z.enum(["none", "local_write", "external"]).optional(),
+      },
+      outputSchema: OUTPUT_SCHEMAS["pf_confirm_leaf"],
+      annotations: WRITE_ANN,
+    },
+    async (a: any) => {
+      try {
+        const sid = a.sessionId as string;
+        const s = requireFresh(deps, sid);
+        if (!a.argSpecs) throw err("bad_request", "argSpecs가 없다.", "마지막 실행 인자 키를 모두 분류해 pf_confirm_leaf 재호출.");
+        const out = await client.pfResolve({
+          sessionId: sid,
+          nodeId: a.nodeId as string,
+          decision: "leaf",
+          tool: a.tool as { server: string; name: string },
+          argSpecs: a.argSpecs as never,
+          sideEffect: a.sideEffect as "none" | "local_write" | "external" | undefined,
+        });
+        deps.store.touch(sid);
+        return ok({ node: nodeSummary(out.node, s.limits), instruction: out.instruction });
+      } catch (e) {
+        return errResult(e);
+      }
+    },
+  );
+
+  R(
+    "pf_retry",
+    {
+      title: "재시도",
+      description: [
+        "실패한 노드를 다시 시도한다.",
+        "선수: pf_report(verdict=fail) 또는 needs_human.",
+        "reason(필수, 재시도 사유, 기록용).",
+        "probing 복귀 또는 한도 초과 시 needs_human. 다음: 실행 후 pf_report.",
+      ].join("\n"),
+      inputSchema: { sessionId: z.string().min(1), nodeId: z.string().min(1), reason: z.string().min(1) },
+      outputSchema: OUTPUT_SCHEMAS["pf_retry"] as never,
+      annotations: WRITE_ANN,
+    },
+    async (a: any) => {
+      try {
+        const sid = a.sessionId as string;
+        const s = requireFresh(deps, sid);
+        logger.info("pf_retry", { sessionId: sid, nodeId: a.nodeId, reason: a.reason });
+        const out = await client.pfResolve({ sessionId: sid, nodeId: a.nodeId as string, decision: "retry" });
+        deps.store.touch(sid);
+        return ok({ node: nodeSummary(out.node, s.limits), instruction: out.instruction });
+      } catch (e) {
+        return errResult(e);
+      }
+    },
+  );
+
+  R(
+    "pf_ask_human",
+    {
+      title: "사람에게 질문",
+      description: [
+        "사람 판단이 필요해 질문을 남긴다.",
+        "선수: pf_next(외부 영향 노드) 또는 막힌 노드.",
+        "question(필수, 사람에게 물을 내용).",
+        "needs_human 전환. 다음: pf_advise로 조언 등록 대기.",
+      ].join("\n"),
+      inputSchema: { sessionId: z.string().min(1), nodeId: z.string().min(1), question: z.string().min(1) },
+      outputSchema: OUTPUT_SCHEMAS["pf_ask_human"] as never,
+      annotations: WRITE_ANN,
+    },
+    async (a: any) => {
+      try {
+        const sid = a.sessionId as string;
+        const s = requireFresh(deps, sid);
+        logger.info("pf_ask_human", { sessionId: sid, nodeId: a.nodeId, question: a.question });
+        const out = await client.pfResolve({ sessionId: sid, nodeId: a.nodeId as string, decision: "ask_human" });
+        deps.store.touch(sid);
+        return ok({ node: nodeSummary(out.node, s.limits), instruction: out.instruction });
+      } catch (e) {
+        return errResult(e);
+      }
+    },
+  );
+
+  R(
     "pf_advise",
-    "사람 조언 등록(조건으로 변환)",
-    { sessionId: z.string().min(1), nodeId: z.string().min(1), text: z.string().min(1) },
-    async (a) => {
+    {
+      title: "조언 등록",
+      description: [
+        "사람 조언을 조건으로 등록한다.",
+        "선수: needs_human 노드.",
+        "text(필수, 예: \"매출은 세전 기준\").",
+        "생성된 조건과 갱신 노드 반환. needs_human이면 open 복귀. 다음: pf_next.",
+      ].join("\n"),
+      inputSchema: { sessionId: z.string().min(1), nodeId: z.string().min(1), text: z.string().min(1) },
+      outputSchema: OUTPUT_SCHEMAS["pf_advise"] as never,
+      annotations: WRITE_ANN,
+    },
+    async (a: any) => {
       try {
-        return text(await client.pfAdvise(a.sessionId, a.nodeId, a.text));
+        const sid = a.sessionId as string;
+        const s = requireFresh(deps, sid);
+        const out = await client.pfAdvise(sid, a.nodeId as string, a.text as string);
+        deps.store.touch(sid);
+        return ok({
+          constraints: out.constraints.map((c) => ({ id: c.id, kind: c.kind, summary: `${c.kind}` })),
+          node: nodeSummary(out.node, s.limits),
+        });
       } catch (e) {
-        return errOf(e);
+        return errResult(e);
       }
     },
   );
 
-  server.tool("pf_tree", "트리 요약 조회", { sessionId: z.string().min(1) }, async (a) => {
-    try {
-      return text(await client.pfTree(a.sessionId));
-    } catch (e) {
-      return errOf(e);
-    }
-  });
+  R(
+    "pf_tree",
+    {
+      title: "트리 조회",
+      description: [
+        "트리 요약을 조회한다.",
+        "선수: pf_start 이후 언제든.",
+        "detail(summary|full, 기본 summary), nodeId(서브트리, 선택), limit(기본 50), cursor(기본 0).",
+        "목록·상태별 개수·hasMore 반환. 상세가 필요하면 pf_get_node.",
+      ].join("\n"),
+      inputSchema: {
+        sessionId: z.string().min(1),
+        detail: z.enum(["summary", "full"]).optional(),
+        nodeId: z.string().optional(),
+        limit: z.number().int().min(1).max(500).optional(),
+        cursor: z.number().int().min(0).optional(),
+      },
+      outputSchema: OUTPUT_SCHEMAS["pf_tree"] as never,
+      annotations: READ_ONLY_ANN,
+    },
+    async (a: any) => {
+      try {
+        const sid = a.sessionId as string;
+        requireFresh(deps, sid);
+        const { nodes } = await client.pfTree(sid);
+        deps.store.touch(sid);
+        const detail = (a.detail as string | undefined) ?? "summary";
+        const limit = (a.limit as number | undefined) ?? 50;
+        const cursor = (a.cursor as number | undefined) ?? 0;
+        const root = a.nodeId as string | undefined;
+        let set = nodes;
+        if (root) {
+          const keep = new Set<string>([root]);
+          let grew = true;
+          while (grew) {
+            grew = false;
+            for (const n of nodes) {
+              if (n.parentId && keep.has(n.parentId) && !keep.has(n.id)) {
+                keep.add(n.id);
+                grew = true;
+              }
+            }
+          }
+          set = nodes.filter((n) => keep.has(n.id));
+        }
+        const counts: Record<string, number> = {};
+        for (const n of set) counts[n.status] = (counts[n.status] ?? 0) + 1;
+        const page = set.slice(cursor, cursor + limit);
+        return ok({
+          entries: page.map((n) => ({
+            id: n.id,
+            parentId: n.parentId,
+            goal: detail === "full" ? n.goal : n.goal.slice(0, 80),
+            status: n.status,
+            ...(detail === "full" ? { node: n } : {}),
+          })),
+          counts,
+          hasMore: cursor + limit < set.length,
+          nextCursor: cursor + limit < set.length ? cursor + limit : null,
+        });
+      } catch (e) {
+        return errResult(e);
+      }
+    },
+  );
 
-  server.tool("pf_lock", "노드 승인 잠금", { sessionId: z.string().min(1), nodeId: z.string().min(1) }, async (a) => {
-    try {
-      return text(await client.pfLock(a.sessionId, a.nodeId));
-    } catch (e) {
-      return errOf(e);
-    }
-  });
+  R(
+    "pf_get_node",
+    {
+      title: "노드 상세 조회",
+      description: [
+        "단일 노드 전체를 조회한다.",
+        "선수: pf_tree로 id 확인 후.",
+        "nodeId 지정. 전체 attempts·조건 포함. 다음: 상태에 맞는 도구 호출.",
+      ].join("\n"),
+      inputSchema: { sessionId: z.string().min(1), nodeId: z.string().min(1) },
+      outputSchema: OUTPUT_SCHEMAS["pf_get_node"] as never,
+      annotations: READ_ONLY_ANN,
+    },
+    async (a: any) => {
+      try {
+        const sid = a.sessionId as string;
+        requireFresh(deps, sid);
+        const { nodes } = await client.pfTree(sid);
+        deps.store.touch(sid);
+        const n = nodes.find((x) => x.id === (a.nodeId as string));
+        if (!n) throw err("not_found", `노드 없음: ${a.nodeId}`, "pf_tree로 id를 확인하라.");
+        return ok({ node: n });
+      } catch (e) {
+        return errResult(e);
+      }
+    },
+  );
 
-  server.tool(
+  R(
+    "pf_lock",
+    {
+      title: "노드 잠금",
+      description: [
+        "노드를 승인 잠금한다.",
+        "선수: leaf 확정 후.",
+        "잠긴 노드와 그 조상은 재분해 금지. 다음: pf_next 계속 또는 pf_reopen.",
+      ].join("\n"),
+      inputSchema: { sessionId: z.string().min(1), nodeId: z.string().min(1) },
+      outputSchema: OUTPUT_SCHEMAS["pf_lock"] as never,
+      annotations: WRITE_ANN,
+    },
+    async (a: any) => {
+      try {
+        const sid = a.sessionId as string;
+        const s = requireFresh(deps, sid);
+        const n = await client.pfLock(sid, a.nodeId as string);
+        deps.store.touch(sid);
+        return ok({ node: nodeSummary(n, s.limits) });
+      } catch (e) {
+        return errResult(e);
+      }
+    },
+  );
+
+  R(
     "pf_reopen",
-    "노드 재오픈",
-    { sessionId: z.string().min(1), nodeId: z.string().min(1), reason: z.string().min(1) },
-    async (a) => {
+    {
+      title: "노드 재오픈",
+      description: [
+        "잠금을 풀고 노드를 다시 연다.",
+        "선수: pf_lock 이후, 사람 판단으로만.",
+        "reason(필수). 다음: pf_next.",
+      ].join("\n"),
+      inputSchema: { sessionId: z.string().min(1), nodeId: z.string().min(1), reason: z.string().min(1) },
+      outputSchema: OUTPUT_SCHEMAS["pf_reopen"] as never,
+      annotations: WRITE_ANN,
+    },
+    async (a: any) => {
       try {
-        return text(await client.pfReopen(a.sessionId, a.nodeId, a.reason));
+        const sid = a.sessionId as string;
+        const s = requireFresh(deps, sid);
+        const n = await client.pfReopen(sid, a.nodeId as string, a.reason as string);
+        deps.store.touch(sid);
+        return ok({ node: nodeSummary(n, s.limits) });
       } catch (e) {
-        return errOf(e);
+        return errResult(e);
       }
     },
   );
 
-  server.tool(
-    "pf_finalize",
-    "절차서 export (M5 예정)",
-    { sessionId: z.string().min(1), format: z.string().optional() },
-    async (a) => {
-      void a;
-      return text(toError("unimplemented", "pf_finalize는 M5에서 구현", "절차서 export는 M5 마일스톤"));
+  R(
+    "pf_refresh_catalog",
+    {
+      title: "카탈로그 갱신",
+      description: [
+        "도구 목록을 다시 수집한다.",
+        "선수: mcp 서버 추가/변경 후.",
+        "인자 없음. 캐시 무시하고 수집.",
+        "서버·이름·해시 목록과 warnings 반환.",
+      ].join("\n"),
+      inputSchema: {},
+      outputSchema: OUTPUT_SCHEMAS["pf_refresh_catalog"] as never,
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+    },
+    async () => {
+      try {
+        const c = await collectCatalog(deps.projectRoot, { cacheDir: join(deps.procforgeDir, "cache"), refresh: true });
+        return ok({
+          entries: c.entries.map((e) => ({ server: e.server, name: e.name, schemaHash: e.schemaHash })),
+          warnings: c.warnings,
+          cached: c.cached,
+        });
+      } catch (e) {
+        return errResult(e);
+      }
     },
   );
 
-  server.tool(
-    "pf_test",
-    "테스트 러너 (M3 예정)",
-    { sessionId: z.string().optional(), procedurePath: z.string().optional(), nodeId: z.string().optional(), mode: z.string().optional() },
-    async (a) => {
-      void a;
-      return text(toError("unimplemented", "pf_test는 M3에서 구현", "runner는 M3 마일스톤"));
+  server.registerPrompt(
+    "procforge_decompose",
+    {
+      title: "분해 루프 안내",
+      description: "ProcForge 분해 루프 안내를 받는다. 세션 시작 전 1회.",
+      argsSchema: { request: z.string().optional(), params: z.string().optional() },
+    },
+    async (args) => {
+      const r = (args as { request?: string; params?: string } | undefined)?.request;
+      return {
+        messages: [
+          { role: "user", content: { type: "text", text: r ? `${PROMPT_TEXT}\n\n요청: ${r}` : PROMPT_TEXT } },
+        ],
+      };
     },
   );
 
@@ -225,4 +632,5 @@ export function buildServer(deps: ServerDeps): McpServer {
 export async function runStdio(deps: ServerDeps): Promise<void> {
   const server = buildServer(deps);
   await server.connect(new StdioServerTransport());
+  logger.info("procforge-local started", { projectRoot: deps.projectRoot, readOnly: deps.readOnly ?? false });
 }
