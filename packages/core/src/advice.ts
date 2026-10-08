@@ -18,14 +18,14 @@ export function adviceToConstraints(text: string): Constraint[] {
       },
     ];
   }
-  // "N개", "N장" 개수 언급
+  // "N개", "N장" 개수 언급 → 결과 JSON의 items 배열 길이로 검사 (M2 가정, DECISIONS 참조)
   const countMatch = /(\d+)\s*(개|장|슬라이드|페이지)/.exec(t);
   if (countMatch) {
     return [
       {
         id: id(),
         kind: "count",
-        spec: { path: "result.items", exact: Number(countMatch[1]) },
+        spec: { path: "items", exact: Number(countMatch[1]) },
         source: "human",
         note: text,
       },

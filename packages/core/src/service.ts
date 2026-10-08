@@ -1,11 +1,12 @@
 import {
   computeNodeHash,
-  type ArgSpec,
+  type Constraint,
   type Node,
   type Session,
 } from "@procforge/shared/schema.js";
 import type {
   CoreClient,
+  EvaluateFn,
   PfAdviseOutput,
   PfNextOutput,
   PfReportInput,
@@ -15,16 +16,79 @@ import type {
   PfStartInput,
   PfStartOutput,
 } from "@procforge/shared/core-client.js";
-import { createMemoryStore, type Store } from "./store.js";
-import { defaultEvaluate, type EvaluateFn } from "./evaluate.js";
+import { createMemoryStore } from "./store.js";
+import type { Store } from "@procforge/shared/store.js";
+import { defaultEvaluate } from "./evaluate.js";
 import { adviceToConstraints } from "./advice.js";
+import { compareNodeIds } from "./ids.js";
 
 function rid(prefix: string): string {
   return `${prefix}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
-function isTerminalLeafCandidate(n: Node): boolean {
-  return n.status === "leaf";
+function err(code: string, message: string): Error {
+  return Object.assign(new Error(message), { code });
+}
+
+/**
+ * 재시도 경계 통일 (M1.5-6): 총 시도 횟수 = maxRetries + 1.
+ * 실패 보고(pfReport)와 수동 재시도(pfResolve retry) 두 경로가 이 함수만 사용.
+ * retries는 누적 실패 횟수. retries > maxRetries 이면 needs_human.
+ */
+export function consumeRetry(
+  n: Node,
+  limits: Session["limits"],
+): { status: "probing" | "needs_human"; retries: number } {
+  const retries = n.retries + 1;
+  if (retries > limits.maxRetries) return { status: "needs_human", retries };
+  return { status: "probing", retries };
+}
+
+/**
+ * dependsOn 충족 조건 (M1.5-5): dep이 leaf이거나,
+ * split이면서 모든 하위(자손)가 leaf.
+ */
+export function isResolved(n: Node, byId: Map<string, Node>, seen = new Set<string>()): boolean {
+  if (n.status === "leaf") return true;
+  if (n.status !== "split") return false;
+  if (seen.has(n.id)) return false;
+  seen.add(n.id);
+  if (n.children.length === 0) return false;
+  return n.children.every((c) => {
+    const child = byId.get(c);
+    return child !== undefined && isResolved(child, byId, seen);
+  });
+}
+
+/**
+ * 첫 pass 결과 형태 기반 auto constraint 생성 (M1.5-2).
+ * file_exists(artifacts) + json_path_exists(result 최상위 키). 최대 10개.
+ */
+export function autoConstraints(
+  resultJson: unknown,
+  artifacts: string[],
+): Constraint[] {
+  const out: Constraint[] = [];
+  let i = 0;
+  const id = () => `auto-${i++}`;
+  for (const a of artifacts) {
+    if (out.length >= 10) break;
+    out.push({ id: id(), kind: "file_exists", spec: { path: a }, source: "auto", note: "auto: first-pass shape" });
+  }
+  if (out.length < 10 && resultJson !== null && typeof resultJson === "object" && !Array.isArray(resultJson)) {
+    for (const k of Object.keys(resultJson as Record<string, unknown>)) {
+      if (out.length >= 10) break;
+      if (!/^[A-Za-z0-9_.-]+$/.test(k)) continue;
+      out.push({
+        id: id(),
+        kind: "json_path_exists",
+        spec: { path: k },
+        source: "auto",
+        note: "auto: first-pass shape",
+      });
+    }
+  }
+  return out;
 }
 
 export class CoreService implements CoreClient {
@@ -35,13 +99,13 @@ export class CoreService implements CoreClient {
 
   private sess(sid: string): Session {
     const s = this.store.getSession(sid);
-    if (!s) throw Object.assign(new Error(`session ${sid} not found`), { code: "not_found" });
+    if (!s) throw err("not_found", `session ${sid} not found`);
     return s;
   }
 
   private node(sid: string, nid: string): Node {
     const n = this.store.getNode(sid, nid);
-    if (!n) throw Object.assign(new Error(`node ${nid} not found`), { code: "not_found" });
+    if (!n) throw err("not_found", `node ${nid} not found`);
     return n;
   }
 
@@ -80,24 +144,30 @@ export class CoreService implements CoreClient {
       session,
       node: root,
       instruction:
-        "루트 노드다. 이 작업이 툴 1회 호출로 가능한지 판단하라. 가능하면 실행 후 pf_report로 보고하고, 너무 크면 pf_resolve(split)로 분해하라.",
+        `루트 노드다. 이 작업이 툴 1회 호출로 가능한지 판단하라. 가능하면 실행 후 pf_report(selfVerdict/selfReason 필수)로 보고하고, 너무 크면 pf_resolve(split)로 분해하라. ` +
+        `탐색 실행(probing)은 .procforge/sandbox/${sid}/ 작업 사본에서만 하라.`,
     };
   }
 
   async pfNext(sessionId: string): Promise<PfNextOutput> {
-    const s = this.sess(sessionId);
+    this.sess(sessionId);
     const nodes = [...this.store.getNodes(sessionId).values()];
     if (nodes.length === 0) return { done: true };
     const byId = new Map(nodes.map((n) => [n.id, n]));
     const ready = nodes
-      .filter((n) => (n.status === "open" || n.status === "probing") && n.dependsOn.every((d) => byId.get(d) && isTerminalLeafCandidate(byId.get(d)!)))
-      .sort((a, b) => (a.id < b.id ? -1 : 1));
+      .filter(
+        (n) =>
+          (n.status === "open" || n.status === "probing") &&
+          n.dependsOn.every((d) => {
+            const dep = byId.get(d);
+            return dep !== undefined && isResolved(dep, byId);
+          }),
+      )
+      .sort((a, b) => compareNodeIds(a.id, b.id));
     if (ready.length === 0) {
       const pending = nodes.some((n) => n.status === "open" || n.status === "probing" || n.status === "needs_human");
       if (!pending) return { done: true };
-      // needs_human만 남았으면 done이 아니라 대기 — 첫 번째를 안내용으로 반환하지 않고 done:false 유지?
-      // M1 단순화: needs_human 노드가 있으면 해당 노드를 반환해 조언을 유도한다.
-      const h = nodes.filter((n) => n.status === "needs_human").sort((a, b) => (a.id < b.id ? -1 : 1))[0];
+      const h = nodes.filter((n) => n.status === "needs_human").sort((a, b) => compareNodeIds(a.id, b.id))[0];
       if (h) {
         return {
           done: false,
@@ -108,7 +178,6 @@ export class CoreService implements CoreClient {
       return { done: true };
     }
     const n = ready[0];
-    void s;
     if (n.sideEffect === "external") {
       return {
         done: false,
@@ -119,16 +188,20 @@ export class CoreService implements CoreClient {
     return {
       done: false,
       node: n,
-      instruction: `노드 ${n.id}(${n.goal}): 툴 1회로 가능한지 판단하라. 가능하면 실행 후 pf_report, 아니면 pf_resolve(split). 반복 작업이면 iterate를 함께 제출하라.`,
+      instruction:
+        `노드 ${n.id}(${n.goal}): 툴 1회로 가능한지 판단하라. 가능하면 sandbox(.procforge/sandbox/${sessionId}/) 사본에서 실행 후 ` +
+        `pf_report(selfVerdict/selfReason 필수), 아니면 pf_resolve(split). pass여도 leaf 자동 확정 없음 — pf_resolve(leaf, tool, argSpecs) 제출이 필요하다.`,
     };
   }
 
   async pfReport(input: PfReportInput): Promise<PfReportOutput> {
     const s = this.sess(input.sessionId);
     const n = this.node(input.sessionId, input.nodeId);
-    if (n.locked) throw Object.assign(new Error(`node ${n.id} is locked`), { code: "conflict" });
+    if (!input.selfVerdict || !input.selfReason)
+      throw err("bad_request", "selfVerdict and selfReason are required");
+    if (n.locked) throw err("conflict", `node ${n.id} is locked`);
     if (n.status !== "open" && n.status !== "probing")
-      throw Object.assign(new Error(`node ${n.id} is not reportable (${n.status})`), { code: "conflict" });
+      throw err("conflict", `node ${n.id} is not reportable (${n.status})`);
 
     // external 차단 (§5)
     if (n.sideEffect === "external") {
@@ -138,7 +211,7 @@ export class CoreService implements CoreClient {
         attempts: [
           ...n.attempts,
           {
-            id: rid("a"),
+            id: input.attemptId ?? rid("a"),
             at: new Date().toISOString(),
             tool: input.tool,
             args: input.args,
@@ -159,60 +232,99 @@ export class CoreService implements CoreClient {
 
     // catalog 확인
     const cat = s.toolCatalog.find((t) => t.server === input.tool.server && t.name === input.tool.name);
-    if (!cat) throw Object.assign(new Error(`unknown tool ${input.tool.server}/${input.tool.name}`), { code: "bad_request" });
+    if (!cat) throw err("bad_request", `unknown tool ${input.tool.server}/${input.tool.name}`);
 
-    const artifactsMap: Record<string, string> = { ...(input.artifactContents ?? {}) };
-    const { verdict, failedConstraints, unverified } = this.evaluate(n.constraints, {
-      resultSummary: input.resultSummary,
-      resultJson: input.resultJson,
-      artifacts: artifactsMap,
-    });
-
-    const attempt = {
-      id: rid("a"),
+    // llm_rubric 사유 확인 (M1.5-3)
+    const rubricIds = n.constraints.filter((c) => c.kind === "llm_rubric").map((c) => c.id);
+    const missingReasons = rubricIds.filter((id) => !input.rubricReasons?.[id]);
+    const attemptBase = {
+      id: input.attemptId ?? rid("a"),
       at: new Date().toISOString(),
       tool: input.tool,
       args: input.args,
       resultSummary: input.resultSummary,
       artifacts: input.artifacts ?? [],
-      verdict,
-      failedConstraints,
-    } as Node["attempts"][number];
-    void unverified;
-
-    let next: Node;
-    if (verdict === "pass") {
-      // tool/args 확정: 실제 실행값을 fixed ArgSpec으로 기록
-      const args: Record<string, ArgSpec> = {};
-      for (const [k, v] of Object.entries(input.args)) args[k] = { kind: "fixed", value: v };
-      next = {
+      ...(input.rubricReasons ? { rubricReasons: input.rubricReasons } : {}),
+    };
+    if (missingReasons.length > 0) {
+      // M1.5-3: 사유 없으면 needs_human (재시도 차감 없음 — 프로토콜 오류扱い)
+      const next: Node = {
         ...n,
-        status: "leaf",
-        tool: { server: input.tool.server, name: input.tool.name, schemaHash: cat.schemaHash },
-        args,
-        attempts: [...n.attempts, attempt],
+        status: "needs_human",
+        attempts: [...n.attempts, { ...attemptBase, verdict: "fail" as const, failedConstraints: missingReasons }],
+      };
+      this.store.saveNode(s.id, next);
+      return {
+        verdict: "fail",
+        failedConstraints: missingReasons,
+        unverified: rubricIds,
+        instruction: `llm_rubric 판정 사유 누락(${missingReasons.join(",")}). needs_human. pf_advise로 조언을 보충하거나 pf_resolve(retry) 후 rubricReasons에 id별 판정 사유를 채워 다시 pf_report하라.`,
+      };
+    }
+
+    // verdict 계산 (M1.5-2): constraints가 비었으면 selfVerdict 사용
+    const artifactsMap: Record<string, string> = { ...(input.artifactContents ?? {}) };
+    let verdict: "pass" | "fail";
+    let failedConstraints: string[];
+    let unverified: string[] | undefined;
+    if (n.constraints.length === 0) {
+      verdict = input.selfVerdict;
+      failedConstraints = verdict === "pass" ? [] : ["self"];
+    } else {
+      const r = this.evaluate(n.constraints, {
+        resultSummary: input.resultSummary,
+        resultJson: input.resultJson,
+        artifacts: artifactsMap,
+      });
+      unverified = r.unverified;
+      failedConstraints = [...r.failedConstraints];
+      if (input.selfVerdict === "fail" && !failedConstraints.includes("self")) failedConstraints.push("self");
+      verdict = r.verdict === "pass" && input.selfVerdict === "pass" ? "pass" : "fail";
+    }
+
+    if (verdict === "pass") {
+      // M1.5-1: pass여도 leaf 자동 확정 없음. probing 유지 + resolve 요구.
+      // 첫 pass + constraints 비어 있으면 결과 형태 기반 auto constraint 부착.
+      let constraints = n.constraints;
+      if (n.constraints.length === 0) {
+        const auto = autoConstraints(input.resultJson, input.artifacts ?? []);
+        if (auto.length > 0) constraints = [...n.constraints, ...auto];
+      }
+      const next: Node = {
+        ...n,
+        status: "probing",
+        constraints,
+        attempts: [...n.attempts, { ...attemptBase, verdict: "pass" as const, failedConstraints: [] }],
       };
       next.hash = computeNodeHash({ goal: next.goal, args: next.args, constraints: next.constraints, dependsOn: next.dependsOn });
       this.store.saveNode(s.id, next);
-      return { verdict, failedConstraints, instruction: `통과. 노드 ${n.id}가 leaf로 확정됐다. pf_next로 다음 노드를 받아라.` };
-    }
-    // fail
-    const retries = n.retries + 1;
-    if (retries >= s.limits.maxRetries) {
-      next = { ...n, status: "needs_human", retries, attempts: [...n.attempts, attempt] };
-      this.store.saveNode(s.id, next);
+      const autoNote = constraints.length > n.constraints.length ? ` 결과 형태 기반 auto constraint ${constraints.length - n.constraints.length}개 부착.` : "";
       return {
         verdict,
-        failedConstraints,
-        instruction: `실패(재시도 소진). 노드 ${n.id}가 needs_human이 됐다. 원인을 좁혀 pf_advise로 조언을 받거나 pf_resolve(split)로 분해하라.`,
+        failedConstraints: [],
+        unverified,
+        instruction:
+          `통과. 그러나 leaf 자동 확정은 하지 않는다.${autoNote} pf_resolve(decision=leaf, tool, argSpecs)로 확정 신청하라. ` +
+          `argSpecs는 마지막 실행 인자 키를 모두 분류(fixed/var/generated)해야 하며 누락 시 bad_request.`,
       };
     }
-    next = { ...n, status: "probing", retries, attempts: [...n.attempts, attempt] };
+    // fail → 재시도 경계 (M1.5-6)
+    const { status, retries } = consumeRetry(n, s.limits);
+    const next: Node = {
+      ...n,
+      status,
+      retries,
+      attempts: [...n.attempts, { ...attemptBase, verdict: "fail" as const, failedConstraints }],
+    };
     this.store.saveNode(s.id, next);
     return {
       verdict,
       failedConstraints,
-      instruction: `실패(재시도 ${retries}/${s.limits.maxRetries}). 조언을 반영해 다시 실행 후 pf_report하라. 한 번에 안 되면 pf_resolve(split).`,
+      unverified,
+      instruction:
+        status === "needs_human"
+          ? `실패(재시도 소진: 총 ${n.attempts.length + 1}회). needs_human. 사유: ${input.selfReason}. pf_advise로 조언을 받거나 pf_resolve(split)로 분해하라.`
+          : `실패(재시도 ${retries}/${s.limits.maxRetries}). 사유: ${input.selfReason}. 반영해 다시 실행 후 pf_report하라.`,
     };
   }
 
@@ -227,33 +339,27 @@ export class CoreService implements CoreClient {
         return { node: next, instruction: `노드 ${n.id}를 needs_human으로 전환했다. pf_advise를 기다려라.` };
       }
       case "retry": {
-        if (n.locked) throw Object.assign(new Error("locked"), { code: "conflict" });
-        const retries = n.retries + 1;
-        if (retries > s.limits.maxRetries) {
-          const next = { ...n, status: "needs_human" as const, retries };
-          this.store.saveNode(s.id, next);
-          return { node: next, instruction: "재시도 한도 초과로 needs_human." };
-        }
-        const next = { ...n, status: "probing" as const, retries };
+        if (n.locked) throw err("conflict", "locked");
+        const { status, retries } = consumeRetry(n, s.limits);
+        const next = { ...n, status, retries };
         this.store.saveNode(s.id, next);
-        return { node: next, instruction: `재시도 ${retries}/${s.limits.maxRetries}. 실행 후 pf_report.` };
+        return {
+          node: next,
+          instruction: status === "needs_human" ? "재시도 한도 초과로 needs_human." : `재시도 ${retries}/${s.limits.maxRetries}. 실행 후 pf_report.`,
+        };
       }
       case "split": {
-        if (n.locked) throw Object.assign(new Error(`locked node ${n.id} cannot be split`), { code: "conflict" });
-        // 조상이 아니라 "이 노드가 잠긴 노드의 조상"인 경우도 금지
+        if (n.locked) throw err("conflict", `locked node ${n.id} cannot be split`);
         const all = [...this.store.getNodes(s.id).values()];
-        const isAncestorOfLocked = all.some((x) => x.locked && (x.id === n.id || x.id.startsWith(n.id + ".")));
-        if (isAncestorOfLocked && all.some((x) => x.locked && x.id !== n.id && x.id.startsWith(n.id + ".")))
-          throw Object.assign(new Error("ancestor of locked node"), { code: "conflict" });
-        if (!input.children || input.children.length === 0)
-          throw Object.assign(new Error("split requires children"), { code: "bad_request" });
+        if (all.some((x) => x.locked && x.id !== n.id && x.id.startsWith(n.id + ".")))
+          throw err("conflict", "ancestor of locked node");
+        if (!input.children || input.children.length === 0) throw err("bad_request", "split requires children");
         if (n.depth + 1 > s.limits.maxDepth) {
           const next = { ...n, status: "needs_human" as const };
           this.store.saveNode(s.id, next);
           return { node: next, instruction: `분해 깊이가 maxDepth(${s.limits.maxDepth})를 초과해 needs_human으로 전환했다.` };
         }
-        if (all.length + input.children.length > s.limits.maxNodes)
-          throw Object.assign(new Error("maxNodes exceeded"), { code: "bad_request" });
+        if (all.length + input.children.length > s.limits.maxNodes) throw err("bad_request", "maxNodes exceeded");
         const created: Node[] = input.children.map((c, i) => {
           const id = `${n.id}.${i + 1}`;
           const child: Node = {
@@ -282,29 +388,35 @@ export class CoreService implements CoreClient {
         return { node: next, created, instruction: `분해 완료. 자식 ${created.length}개를 순서대로 pf_next로 처리하라.` };
       }
       case "leaf": {
-        if (!input.tool) throw Object.assign(new Error("leaf requires tool"), { code: "bad_request" });
+        // M1.5-1: leaf 확정은 여기서만. pass여도 report에서 자동 확정 없음.
+        if (n.locked) throw err("conflict", `node ${n.id} is locked`);
+        if (n.status !== "probing" && n.status !== "open") throw err("conflict", `node ${n.id} is not resolvable (${n.status})`);
+        if (!input.tool) throw err("bad_request", "leaf requires tool");
         const cat = s.toolCatalog.find((t) => t.server === input.tool!.server && t.name === input.tool!.name);
-        if (!cat) throw Object.assign(new Error("unknown tool"), { code: "bad_request" });
+        if (!cat) throw err("bad_request", "unknown tool");
         const last = n.attempts[n.attempts.length - 1];
-        if (!last || last.verdict !== "pass")
-          throw Object.assign(new Error("leaf requires passing attempt. report first."), { code: "conflict" });
-        const argSpecs = input.argSpecs ?? {};
-        // var 후보 경고: params 값과 동일한 fixed
+        if (!last || last.verdict !== "pass") throw err("conflict", "leaf requires passing attempt. report first.");
+        if (last.tool.server !== input.tool.server || last.tool.name !== input.tool.name)
+          throw err("bad_request", `leaf tool must match last attempt (${last.tool.server}/${last.tool.name})`);
+        if (!input.argSpecs) throw err("bad_request", "leaf requires argSpecs");
+        const missing = Object.keys(last.args).filter((k) => !(k in input.argSpecs!));
+        if (missing.length > 0) throw err("bad_request", `argSpecs missing: ${missing.join(",")}`);
         const warnings: string[] = [];
-        for (const [k, spec] of Object.entries(argSpecs)) {
+        for (const [k, spec] of Object.entries(input.argSpecs)) {
           if (spec.kind === "fixed") {
             const v = (spec as { value: unknown }).value;
             if (typeof v === "string" && Object.values(s.params).includes(v))
               warnings.push(`arg ${k} 값 "${v}"이 params와 동일 — var(${"${params.*"}) 후보`);
           }
         }
-        if (input.sideEffect) n.sideEffect = input.sideEffect;
         const next: Node = {
           ...n,
           status: "leaf",
           tool: { server: input.tool.server, name: input.tool.name, schemaHash: cat.schemaHash },
-          args: argSpecs,
+          args: input.argSpecs,
+          golden: { fixtures: [...last.artifacts], output: last.resultSummary },
         };
+        if (input.sideEffect) next.sideEffect = input.sideEffect;
         next.hash = computeNodeHash({ goal: next.goal, args: next.args, constraints: next.constraints, dependsOn: next.dependsOn });
         this.store.saveNode(s.id, next);
         return {
@@ -328,11 +440,9 @@ export class CoreService implements CoreClient {
     const oldHash = n.hash;
     next.hash = computeNodeHash({ goal: next.goal, args: next.args, constraints: next.constraints, dependsOn: next.dependsOn });
     this.store.saveNode(s.id, next);
-    // hash가 바뀌면 dependsOn 하위 노드만 stale 처리 (BFS 하류)
     if (oldHash !== next.hash) {
       const all = [...this.store.getNodes(s.id).values()];
-      const downstream = all.filter((x) => x.dependsOn.includes(nodeId));
-      const queue = [...downstream];
+      const queue = all.filter((x) => x.dependsOn.includes(nodeId));
       const seen = new Set<string>();
       while (queue.length > 0) {
         const cur = queue.shift()!;
@@ -349,7 +459,7 @@ export class CoreService implements CoreClient {
 
   async pfTree(sessionId: string): Promise<{ nodes: Node[]; session: Session }> {
     const s = this.sess(sessionId);
-    return { session: s, nodes: [...this.store.getNodes(sessionId).values()].sort((a, b) => (a.id < b.id ? -1 : 1)) };
+    return { session: s, nodes: [...this.store.getNodes(sessionId).values()].sort((a, b) => compareNodeIds(a.id, b.id)) };
   }
 
   async pfLock(sessionId: string, nodeId: string): Promise<Node> {

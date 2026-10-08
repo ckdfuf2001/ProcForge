@@ -4,8 +4,8 @@ import { join } from "node:path";
 // CI: local 패키지가 core 서버 전용 로직을 직접 import하지 못하도록 검사.
 // 허용: @procforge/shared, 상대경로, 외부 라이브러리.
 // 금지: "@procforge/core", "packages/core" 문자열 포함 import.
-// 예외: packages/local/src/core-inprocess.ts 1파일만 허용하지 않음 —
-// DECISIONS M0-6에 따라 in-process 어댑터는 core 측에 둔다. local에는 예외 없음.
+// 예외(M0-6 개정, M1.5): 합성 루트 packages/local/src/core-inprocess.ts 1파일만 허용.
+// M6에서 이 파일만 HTTP CoreClient로 교체한다.
 
 const LOCAL_SRC = new URL("../packages/local/src/", import.meta.url).pathname;
 
@@ -27,7 +27,9 @@ function listFiles(dir, out = []) {
 
 const files = listFiles(LOCAL_SRC);
 const violations = [];
+const EXCEPTION = "core-inprocess.ts";
 for (const f of files) {
+  if (f.endsWith(EXCEPTION)) continue;
   const content = readFileSync(f, "utf8");
   const lines = content.split("\n");
   lines.forEach((line, i) => {

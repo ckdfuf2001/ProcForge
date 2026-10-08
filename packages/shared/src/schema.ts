@@ -155,6 +155,8 @@ export const AttemptSchema = z.object({
   artifacts: z.array(z.string()).default([]),
   verdict: z.enum(["pass", "fail"]).optional(),
   failedConstraints: z.array(z.string()).default([]),
+  /** llm_rubric 판정 사유 기록 (M1.5-3) */
+  rubricReasons: z.record(z.string()).optional(),
 });
 export type Attempt = z.infer<typeof AttemptSchema>;
 

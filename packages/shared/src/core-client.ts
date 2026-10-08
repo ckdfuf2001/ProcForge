@@ -30,6 +30,14 @@ export type PfReportInput = {
   resultJson?: unknown;
   artifacts?: string[];
   artifactContents?: Record<string, string>;
+  /** 호스트 자기 판정 (필수, M1.5-2). constraints가 비었으면 이 값을 사용. */
+  selfVerdict: "pass" | "fail";
+  /** 자기 판정 사유 (필수) */
+  selfReason: string;
+  /** llm_rubric constraint id → 판정 사유. 남은 rubric은 전부 필요 (M1.5-3) */
+  rubricReasons?: Record<string, string>;
+  /** local이 미리 채번한 attempt id (fixture 경로 결정용, M2). 없으면 core가 채번 */
+  attemptId?: string;
 };
 
 export type PfReportOutput = {
@@ -61,6 +69,12 @@ export type PfAdviseOutput = {
   constraints: Constraint[];
   node: Node;
 };
+
+// local checker → core 주입 계약. core·local 모두 shared 타입만 사용.
+export type EvaluateFn = (
+  constraints: Constraint[],
+  ctx: { resultSummary?: string; resultJson?: unknown; artifacts?: Record<string, string> },
+) => { verdict: "pass" | "fail"; failedConstraints: string[]; unverified?: string[] };
 
 export interface CoreClient {
   pfStart(input: PfStartInput): Promise<PfStartOutput>;

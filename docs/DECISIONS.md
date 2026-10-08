@@ -19,7 +19,30 @@
 - [M0-4] Node id 형식 — `"2.1"` 형식을 정규식 `^\d+(\.\d+)*$`로 검증. root는 `"1"`.
 - [M0-5] validator의 "잘못된 트리 10종" 정의 — 아래 10종을 M0 완료 조건으로 고정:
   1. leaf의 tool이 catalog에 없음 2. args가 inputSchema에 부적합 3. var 참조가 존재하지 않는 노드 4. 참조 필드 경로 오류 5. 순환 의존 6. depth 초과 7. 노드 수 초과 8. schemaHash 불일치 9. leaf 확정 조건 미달(verdict!=pass인데 leaf) 10. id/parent/children 불일치.
-- [M0-6] local→core 직접 import 금지 범위 — `packages/local/src/**`에서 `from "@procforge/core"` 또는 `packages/core/src` 경로 import를 CI(`scripts/check-deps.mjs`)에서 실패 처리. 허용: `@procforge/shared`, `CoreClient` 인터페이스 경유만. M0~M5 in-process 어댑터는 `packages/core` 측의 `createInProcessClient()`가 `CoreClient`를 반환하고 local은 인스턴스 주입으로만 받는다.
+- [M0-6] local→core 직접 import 금지 범위 — `packages/local/src/**`에서 `from "@procforge/core"` 검사를 CI(`scripts/check-deps.mjs`)에서 실패 처리. 예외: 합성 루트 `core-inprocess.ts` 1파일만 허용 (M1.5 개정 — 당초 "예외 없음"에서 변경. 이유: in-process 합성점이 코드 어딘가에는 필요하고, 1파일로 한정 + M6에서 HTTP 구현으로 교체가 가장 깔끔한 마이그레이션 경로). local 패키지 의존성에는 `@procforge/core: workspace:*`가 존재하나 소스 import는 예외 파일만 허용.
+
+## M1.5
+
+- [M1.5-1] pass여도 leaf 자동 확정 금지 — pfReport pass 시 status=probing 유지, tool/args 확정 없음. 확정은 pf_resolve(leaf, tool, argSpecs)에서만. argSpecs는 마지막 attempt args 키 전체 포함 필수, 누락 시 bad_request. leaf tool은 마지막 attempt tool과 일치 필수.
+- [M1.5-2] selfVerdict/selfReason 필수 — constraints가 비었으면 selfVerdict 사용(호스트 정직성 가정). 첫 pass + constraints 비어 있으면 결과 형태 기반 auto constraint(file_exists/artifacts, json_path_exists/최상위 키, 최대 10개) 부착. 이유: 회귀 기반 확보(M3 replay의 검사 대상).
+- [M1.5-3] llm_rubric 사유 필수 — 남은 rubric id별 rubricReasons 없으면 needs_human(재시도 차감 없음). Attempt에 rubricReasons 기록 필드 추가(스키마 확장, optional).
+- [M1.5-4] 노드 id 정렬 — 세그먼트 숫자 비교 compareNodeIds ("1.2" < "1.10"). pfNext/pfTree 정렬에 사용.
+- [M1.5-5] dependsOn 충족 — leaf 또는 (split + 모든 자손 leaf). isResolved 헬퍼.
+- [M1.5-6] 재시도 경계 — 총 시도 = maxRetries+1. consumeRetry 단일 함수로 pfReport-fail/pfResolve-retry 통일 (retries > maxRetries → needs_human).
+- [M1.5-7] M1-3(부가세 regex) 한계 명시 — 현재 "부가세 제외" 조언 변환은 요약 문구(regex) 검사일 뿐 수치 검증이 아님. M4에서 numeric_match(세전/세후 금액 대조) 기반으로 대체 예정.
+- [M1.5-8] 개수 조언 경로 — "N개/장/슬라이드" 조언은 count { path: "items", exact: N } 생성. "items" 키 가정은 M2 휴리스틱이며 호스트가 결과 JSON 형태를 맞추거나 실패 후 조정한다.
+- [M1.5-9] Store 포트는 shared(`shared/store.ts`)로 이동 — core·local 모두 shared에만 의존. FileStore는 local 소유로 Store 구현.
+- [M1.5-10] PfReportOutput.verdict의 "unverifiable"은 현재 미사용 예약값. rubric 잔존 신호는 unverified[] 목록으로 전달하고 verdict는 pass/fail로 통일.
+
+## M2
+
+- [M2-1] opencode.json mcp 형식 — `{ mcp: { <name>: { type: "local"|"remote", command: string[]|string, cwd?, environment?, enabled?, url? } } }`로 가정. 설정 파일 탐색 순서: 전역(`~/.config/opencode/opencode.json`) → 프로젝트(`opencode.json`, `.opencode/opencode.json`), 프로젝트가 덮어씀. remote 타입은 수집 건너뜀(warnings 기록).
+- [M2-2] OpenCode 내장 툴 고정 목록 — read/write/edit/bash/glob/grep, server명 "opencode". 실제 OpenCode 내장 목록과 다르면 M7 이전에 동기화.
+- [M2-3] artifacts — 호스트는 프로젝트 상대경로만 제출. local이 읽어 fixtures/<nodeId>/<attemptId>/에 복사하고 Attempt.artifacts에는 fixture 상대경로 기록(세션 디렉터리 기준 자족). 루트 밖·심링크 탈출·부재 파일은 bad_request. 내용은 utf8 텍스트로 checker에 전달(바이너리는 바이트 복사만 보장).
+- [M2-4] sandbox — pf_start의 seedFiles(선택)를 sandbox/<sid>/에 상대경로 유지 복사. seedFiles 지정이 가이드에 없으므로 local MCP 도구 입력으로 추가한 확장 (core 계약 변경 없음).
+- [M2-5] FileStore 동기 I/O — Store 인터페이스를 sync로 구현(fs sync + 원자적 rename). 싱글 스레드이므로 세션 mutex는 자명. M6 멀티프로세스 시 파일락 필요.
+- [M2-6] pf_start toolCatalog 선택화 — 호출자 제공 시 덮어쓰기, 생략 시 collectCatalog 자동 수집. 수집 warnings는 응답에 포함.
+- [M2-7] golden 기록 시점 — pf_resolve(leaf)에서 마지막 attempt의 artifacts + resultSummary로 golden 확정.
 
 ## M1
 

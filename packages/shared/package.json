@@ -11,7 +11,9 @@
     "./core-client": "./dist/core-client.js",
     "./core-client.js": "./dist/core-client.js",
     "./errors": "./dist/errors.js",
-    "./errors.js": "./dist/errors.js"
+    "./errors.js": "./dist/errors.js",
+    "./store": "./dist/store.js",
+    "./store.js": "./dist/store.js"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",

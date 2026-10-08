@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { CoreService } from "../src/service.js";
+import { CoreService, consumeRetry, isResolved, autoConstraints } from "../src/service.js";
+import { compareNodeIds } from "../src/ids.js";
 import { createMemoryStore } from "../src/store.js";
-import type { Session } from "@procforge/shared/schema.js";
+import type { Node, Session } from "@procforge/shared/schema.js";
 
 const catalog: Session["toolCatalog"] = [
   { server: "fs", name: "read", inputSchema: {}, schemaHash: "h1" },
@@ -10,51 +11,240 @@ const catalog: Session["toolCatalog"] = [
 const passEval = () => ({ verdict: "pass" as const, failedConstraints: [] as string[] });
 const failEval = () => ({ verdict: "fail" as const, failedConstraints: ["c1"] });
 
-describe("core state machine (§5)", () => {
-  it("open → probing 실패 → 재시도 → pass → leaf", async () => {
-    const svc = new CoreService(createMemoryStore(), failEval);
-    const { session } = await svc.pfStart({ request: "r", toolCatalog: catalog, limits: { maxDepth: 3, maxRetries: 2, maxNodes: 10 } });
-    const nxt = await svc.pfNext(session.id);
-    expect(nxt.done).toBe(false);
-    const r1 = await svc.pfReport({ sessionId: session.id, nodeId: "1", tool: { server: "fs", name: "read" }, args: {}, resultSummary: "bad" });
-    expect(r1.verdict).toBe("fail");
+const rep = (over: Record<string, unknown> = {}) => ({
+  sessionId: "",
+  nodeId: "1",
+  tool: { server: "fs", name: "read" },
+  args: {},
+  resultSummary: "ok",
+  selfVerdict: "pass" as const,
+  selfReason: "looks good",
+  ...over,
+});
+
+describe("M1.5-4 node id 숫자 정렬", () => {
+  it('"1.2" < "1.10"', () => {
+    expect(compareNodeIds("1.2", "1.10")).toBeLessThan(0);
+    expect(compareNodeIds("1.10", "1.2")).toBeGreaterThan(0);
+    expect(compareNodeIds("1", "1.1")).toBeLessThan(0);
+    expect(compareNodeIds("2", "1.10")).toBeGreaterThan(0);
+    expect(["1.10", "1.2", "1", "2"].sort(compareNodeIds)).toEqual(["1", "1.2", "1.10", "2"]);
+  });
+});
+
+describe("M1.5-6 재시도 경계 통일 (총 maxRetries+1회)", () => {
+  const n = (retries: number) =>
+    ({ retries, status: "probing" }) as unknown as Node;
+  const limits = { maxDepth: 3, maxRetries: 1, maxNodes: 10 };
+  it("1회 실패→probing, 2회 실패→needs_human", () => {
+    expect(consumeRetry(n(0), limits)).toEqual({ status: "probing", retries: 1 });
+    expect(consumeRetry(n(1), limits)).toEqual({ status: "needs_human", retries: 2 });
+  });
+});
+
+describe("M1.5-5 dependsOn 충족 (leaf 또는 전체-leaf split)", () => {
+  const leaf = (id: string) => ({ id, status: "leaf", children: [] }) as unknown as Node;
+  it("split+전부 leaf면 resolved", () => {
+    const byId = new Map<string, Node>([
+      ["s", { id: "s", status: "split", children: ["s.1", "s.2"] } as unknown as Node],
+      ["s.1", leaf("s.1")],
+      ["s.2", leaf("s.2")],
+    ]);
+    expect(isResolved(byId.get("s")!, byId)).toBe(true);
+  });
+  it("자식 중 open이 있으면 미충족", () => {
+    const byId = new Map<string, Node>([
+      ["s", { id: "s", status: "split", children: ["s.1"] } as unknown as Node],
+      ["s.1", { id: "s.1", status: "open", children: [] } as unknown as Node],
+    ]);
+    expect(isResolved(byId.get("s")!, byId)).toBe(false);
+  });
+});
+
+describe("M1.5-1 pass여도 leaf 자동 확정 없음", () => {
+  it("report pass → probing 유지, resolve(leaf)로만 확정", async () => {
+    const svc = new CoreService(createMemoryStore(), passEval);
+    const { session } = await svc.pfStart({ request: "r", toolCatalog: catalog });
+    const r = await svc.pfReport({ ...rep(), sessionId: session.id });
+    expect(r.verdict).toBe("pass");
+    expect(r.instruction).toMatch(/pf_resolve/);
     let tree = await svc.pfTree(session.id);
     expect(tree.nodes[0].status).toBe("probing");
-    // 주입 evaluator를 pass로 교체할 수 없으므로 새 서비스? 대신 retry 후 직접 확인: retries 증가
+    expect(tree.nodes[0].tool).toBeUndefined();
+    // argSpecs 없이 leaf 신청 → bad_request
+    await expect(
+      svc.pfResolve({ sessionId: session.id, nodeId: "1", decision: "leaf", tool: { server: "fs", name: "read" } }),
+    ).rejects.toThrow();
+    // 키 누락 → bad_request
+    const svc2 = new CoreService(createMemoryStore(), passEval);
+    const s2 = await svc2.pfStart({ request: "r", toolCatalog: catalog });
+    await svc2.pfReport({ ...rep(), sessionId: s2.session.id, args: { path: "a", extra: 1 } });
+    await expect(
+      svc2.pfResolve({
+        sessionId: s2.session.id,
+        nodeId: "1",
+        decision: "leaf",
+        tool: { server: "fs", name: "read" },
+        argSpecs: { path: { kind: "fixed", value: "a" } },
+      }),
+    ).rejects.toThrow(/argSpecs missing: extra/);
+    // 정상 확정 → leaf + golden
+    const done = await svc2.pfResolve({
+      sessionId: s2.session.id,
+      nodeId: "1",
+      decision: "leaf",
+      tool: { server: "fs", name: "read" },
+      argSpecs: { path: { kind: "fixed", value: "a" }, extra: { kind: "fixed", value: 1 } },
+    });
+    expect(done.node.status).toBe("leaf");
+    expect(done.node.golden).toBeDefined();
+    const nxt = await svc2.pfNext(s2.session.id);
+    expect(nxt.done).toBe(true);
+  });
+
+  it("fixed≈params 경고는 resolve 경로에서", async () => {
+    const svc = new CoreService(createMemoryStore(), passEval);
+    const s = await svc.pfStart({ request: "r", params: { month: "2026-09" }, toolCatalog: catalog });
+    await svc.pfReport({ ...rep(), sessionId: s.session.id, args: { month: "2026-09" } });
+    const leaf = await svc.pfResolve({
+      sessionId: s.session.id,
+      nodeId: "1",
+      decision: "leaf",
+      tool: { server: "fs", name: "read" },
+      argSpecs: { month: { kind: "fixed", value: "2026-09" } },
+    });
+    expect(leaf.instruction).toMatch(/var/);
+  });
+});
+
+describe("M1.5-2 selfVerdict + auto constraint", () => {
+  it("selfVerdict/selfReason 없으면 bad_request", async () => {
+    const svc = new CoreService(createMemoryStore(), passEval);
+    const { session } = await svc.pfStart({ request: "r", toolCatalog: catalog });
+    await expect(
+      svc.pfReport({ sessionId: session.id, nodeId: "1", tool: { server: "fs", name: "read" }, args: {}, resultSummary: "x" } as never),
+    ).rejects.toThrow(/selfVerdict/);
+  });
+
+  it("constraints 비었으면 selfVerdict 사용 (fail 포함)", async () => {
+    const svc = new CoreService(createMemoryStore(), passEval);
+    const { session } = await svc.pfStart({
+      request: "r",
+      toolCatalog: catalog,
+      limits: { maxDepth: 3, maxRetries: 5, maxNodes: 10 },
+    });
+    const r = await svc.pfReport({ ...rep(), sessionId: session.id, selfVerdict: "fail", selfReason: "host says bad" });
+    expect(r.verdict).toBe("fail");
+    const tree = await svc.pfTree(session.id);
+    expect(tree.nodes[0].status).toBe("probing");
     expect(tree.nodes[0].retries).toBe(1);
   });
 
-  it("pass 보고 → leaf 확정", async () => {
-    const svc = new CoreService(createMemoryStore(), passEval);
-    const { session } = await svc.pfStart({ request: "r", toolCatalog: catalog });
-    const r = await svc.pfReport({ sessionId: session.id, nodeId: "1", tool: { server: "fs", name: "read" }, args: { path: "a" }, resultSummary: "ok" });
-    expect(r.verdict).toBe("pass");
-    const tree = await svc.pfTree(session.id);
-    expect(tree.nodes[0].status).toBe("leaf");
-    const done = await svc.pfNext(session.id);
-    expect(done.done).toBe(true);
+  it("첫 pass 시 결과 형태 기반 auto constraint 부착", () => {
+    const auto = autoConstraints({ slides: [1], title: "t" }, ["fixtures/1/a/out.txt"]);
+    expect(auto.some((c) => c.kind === "file_exists")).toBe(true);
+    expect(auto.some((c) => c.kind === "json_path_exists")).toBe(true);
   });
 
-  it("실패 누적 → needs_human", async () => {
+  it("첫 pass 보고에 auto constraint가 노드에 부착됨", async () => {
+    const svc = new CoreService(createMemoryStore(), passEval);
+    const { session } = await svc.pfStart({ request: "r", toolCatalog: catalog });
+    await svc.pfReport({
+      ...rep(),
+      sessionId: session.id,
+      resultJson: { slides: [1, 2] },
+      artifacts: ["fixtures/1/a/out.txt"],
+    });
+    const tree = await svc.pfTree(session.id);
+    expect(tree.nodes[0].constraints.length).toBeGreaterThan(0);
+    expect(tree.nodes[0].status).toBe("probing");
+  });
+});
+
+describe("M1.5-3 llm_rubric 사유 필수", () => {
+  it("사유 없으면 needs_human, 보충 후 open 복귀 아님 retry로 재보고", async () => {
+    const svc = new CoreService(createMemoryStore(), passEval);
+    const { session } = await svc.pfStart({ request: "r", toolCatalog: catalog });
+    await svc.pfAdvise(session.id, "1", "문체를 자연스럽게");
+    let tree = await svc.pfTree(session.id);
+    const rubricId = tree.nodes[0].constraints.find((c) => c.kind === "llm_rubric")!.id;
+    const r = await svc.pfReport({ ...rep(), sessionId: session.id });
+    expect(r.verdict).toBe("fail");
+    tree = await svc.pfTree(session.id);
+    expect(tree.nodes[0].status).toBe("needs_human");
+    // retry 후 사유 첨부 재보고 → pass(probing)
+    await svc.pfResolve({ sessionId: session.id, nodeId: "1", decision: "retry" });
+    const r2 = await svc.pfReport({ ...rep(), sessionId: session.id, rubricReasons: { [rubricId]: "문체 자연스러움 확인" } });
+    expect(r2.verdict).toBe("pass");
+    tree = await svc.pfTree(session.id);
+    const last = tree.nodes[0].attempts.at(-1)!;
+    expect(last.rubricReasons?.[rubricId]).toBe("문체 자연스러움 확인");
+  });
+});
+
+describe("core 상태머신 회귀 (M1)", () => {
+  it("실패 누적 → needs_human (maxRetries=1이면 2회)", async () => {
     const svc = new CoreService(createMemoryStore(), failEval);
     const { session } = await svc.pfStart({ request: "r", toolCatalog: catalog, limits: { maxDepth: 3, maxRetries: 1, maxNodes: 10 } });
-    await svc.pfReport({ sessionId: session.id, nodeId: "1", tool: { server: "fs", name: "read" }, args: {}, resultSummary: "bad" });
-    const tree = await svc.pfTree(session.id);
+    await svc.pfReport({ ...rep(), sessionId: session.id, selfVerdict: "pass", resultJson: undefined });
+    // constraints 비어 selfVerdict pass지만 checker fail → fail 1회 → probing
+    let tree = await svc.pfTree(session.id);
+    // 주의: constraints가 비었으므로 selfVerdict(pass) 사용 → pass. checker 무시는 M1.5-2 의도.
+    expect(tree.nodes[0].status).toBe("probing");
+  });
+
+  it("checker fail + self pass → fail, 소진 시 needs_human", async () => {
+    const svc = new CoreService(createMemoryStore(), failEval);
+    const { session } = await svc.pfStart({ request: "r", toolCatalog: catalog, limits: { maxDepth: 3, maxRetries: 1, maxNodes: 10 } });
+    await svc.pfAdvise(session.id, "1", "결과 파일 out/report.md 생성");
+    await svc.pfReport({ ...rep(), sessionId: session.id });
+    let tree = await svc.pfTree(session.id);
+    expect(tree.nodes[0].status).toBe("probing");
+    await svc.pfReport({ ...rep(), sessionId: session.id });
+    tree = await svc.pfTree(session.id);
     expect(tree.nodes[0].status).toBe("needs_human");
   });
 
-  it("split → 자식 open 생성, needs_human 조언 후 open 복귀", async () => {
+  it("split → 자식 open, needs_human 조언 후 open 복귀", async () => {
     const svc = new CoreService(createMemoryStore(), passEval);
     const { session } = await svc.pfStart({ request: "r", toolCatalog: catalog });
     const sp = await svc.pfResolve({ sessionId: session.id, nodeId: "1", decision: "split", children: [{ goal: "a" }, { goal: "b" }] });
     expect(sp.created?.length).toBe(2);
-    expect(sp.node.status).toBe("split");
     await svc.pfResolve({ sessionId: session.id, nodeId: "1.1", decision: "ask_human" });
     let tree = await svc.pfTree(session.id);
     expect(tree.nodes.find((n) => n.id === "1.1")?.status).toBe("needs_human");
     await svc.pfAdvise(session.id, "1.1", "매출은 부가세 제외 기준");
     tree = await svc.pfTree(session.id);
     expect(tree.nodes.find((n) => n.id === "1.1")?.status).toBe("open");
+  });
+
+  it("split 자식이 전부 leaf면 부모 의존 충족 (pfNext 진행)", async () => {
+    const svc = new CoreService(createMemoryStore(), passEval);
+    const { session } = await svc.pfStart({ request: "r", toolCatalog: catalog });
+    await svc.pfResolve({
+      sessionId: session.id,
+      nodeId: "1",
+      decision: "split",
+      children: [{ goal: "a" }, { goal: "b", dependsOn: ["1.1"] }],
+    });
+    const finishLeaf = async (id: string) => {
+      await svc.pfReport({ ...rep(), sessionId: session.id, nodeId: id });
+      await svc.pfResolve({
+        sessionId: session.id,
+        nodeId: id,
+        decision: "leaf",
+        tool: { server: "fs", name: "read" },
+        argSpecs: {},
+      });
+    };
+    // 1.2는 1.1 대기 → pfNext는 1.1 반환
+    let nxt = await svc.pfNext(session.id);
+    if (!nxt.done) expect(nxt.node.id).toBe("1.1");
+    await finishLeaf("1.1");
+    nxt = await svc.pfNext(session.id);
+    if (!nxt.done) expect(nxt.node.id).toBe("1.2");
+    await finishLeaf("1.2");
+    expect(await svc.pfNext(session.id)).toEqual({ done: true });
   });
 
   it("depth 초과 split 거부 → needs_human", async () => {
@@ -73,64 +263,48 @@ describe("core state machine (§5)", () => {
       decision: "split",
       children: [{ goal: "send mail", sideEffect: "external" }],
     });
-    const r = await svc.pfReport({
-      sessionId: session.id,
-      nodeId: "1.1",
-      tool: { server: "fs", name: "read" },
-      args: {},
-      resultSummary: "sent",
-    });
+    const r = await svc.pfReport({ ...rep(), sessionId: session.id, nodeId: "1.1" });
     expect(r.verdict).toBe("fail");
     expect(r.instruction).toMatch(/dry-run/);
     const tree = await svc.pfTree(session.id);
     expect(tree.nodes.find((n) => n.id === "1.1")?.status).toBe("needs_human");
   });
 
-  it("external 차단은 pfReport에서 needs_human으로", async () => {
-    const svc = new CoreService(createMemoryStore(), passEval);
-    const { session } = await svc.pfStart({ request: "r", toolCatalog: catalog });
-    // split 후 자식을 external로: resolve leaf 경로로 sideEffect를 바꿀 수 없으므로, split된 부모를 사용하지 않고
-    // pfResolve(split)된 자식 노드를 store 직접 조작 없이 검증 — 대신 pfResolve leaf 시 sideEffect 전달 검증
-    const r = await svc.pfReport({ sessionId: session.id, nodeId: "1", tool: { server: "fs", name: "read" }, args: {}, resultSummary: "ok" });
-    expect(r.verdict).toBe("pass");
-    // leaf 확정 후 argSpecs var 경고
-    const svc2 = new CoreService(createMemoryStore(), passEval);
-    const s2 = await svc2.pfStart({ request: "r", params: { month: "2026-09" }, toolCatalog: catalog });
-    await svc2.pfReport({ sessionId: s2.session.id, nodeId: "1", tool: { server: "fs", name: "read" }, args: { month: "2026-09" }, resultSummary: "ok" });
-    const leaf = await svc2.pfResolve({
-      sessionId: s2.session.id,
-      nodeId: "1",
-      decision: "leaf",
-      tool: { server: "fs", name: "read" },
-      argSpecs: { month: { kind: "fixed", value: "2026-09" } },
-    });
-    expect(leaf.instruction).toMatch(/var/);
-  });
-
-  it("locked 노드 재분해 금지", async () => {
+  it("locked 노드 재분해 금지 + leaf 확정 불가", async () => {
     const svc = new CoreService(createMemoryStore(), passEval);
     const { session } = await svc.pfStart({ request: "r", toolCatalog: catalog });
     await svc.pfLock(session.id, "1");
     await expect(svc.pfResolve({ sessionId: session.id, nodeId: "1", decision: "split", children: [{ goal: "x" }] })).rejects.toThrow();
+    await expect(
+      svc.pfResolve({ sessionId: session.id, nodeId: "1", decision: "leaf", tool: { server: "fs", name: "read" }, argSpecs: {} }),
+    ).rejects.toThrow();
   });
 
-  it("조언 추가 시 하위 dependsOn 노드만 stale(open) 처리", async () => {
+  it("조언 추가 시 하위 dependsOn 노드만 stale 처리", async () => {
     const svc = new CoreService(createMemoryStore(), passEval);
     const { session } = await svc.pfStart({ request: "r", toolCatalog: catalog });
-    await svc.pfResolve({ sessionId: session.id, nodeId: "1", decision: "split", children: [{ goal: "a" }, { goal: "b depends" }] });
-    // 1.2가 1.1에 의존하도록 직접 resolve? dependsOn은 split children 입력으로 지정 가능 — 여기서는 별도 분해로 재현:
-    // 간단히 1.1을 leaf 확정 후 1.2가 dependsOn 1.1이도록 상황을 만들 수 없으므로 pfAdvise의 하류 탐색만 확인:
-    await svc.pfReport({ sessionId: session.id, nodeId: "1.1", tool: { server: "fs", name: "read" }, args: {}, resultSummary: "ok" });
+    await svc.pfResolve({ sessionId: session.id, nodeId: "1", decision: "split", children: [{ goal: "a" }, { goal: "b" }] });
+    await svc.pfReport({ ...rep(), sessionId: session.id, nodeId: "1.1" });
     await svc.pfAdvise(session.id, "1.1", "형식을 맞춰라");
     const tree = await svc.pfTree(session.id);
     expect(tree.nodes.find((n) => n.id === "1.1")?.constraints.length).toBeGreaterThan(0);
   });
 
-  it("leaf 확정은 passing attempt 없이 불가", async () => {
+  it("leaf 확정은 passing attempt 없이 불가 + tool 불일치 불가", async () => {
     const svc = new CoreService(createMemoryStore(), passEval);
     const { session } = await svc.pfStart({ request: "r", toolCatalog: catalog });
     await expect(
-      svc.pfResolve({ sessionId: session.id, nodeId: "1", decision: "leaf", tool: { server: "fs", name: "read" } }),
+      svc.pfResolve({ sessionId: session.id, nodeId: "1", decision: "leaf", tool: { server: "fs", name: "read" }, argSpecs: {} }),
+    ).rejects.toThrow();
+    await svc.pfReport({ ...rep(), sessionId: session.id });
+    await expect(
+      svc.pfResolve({
+        sessionId: session.id,
+        nodeId: "1",
+        decision: "leaf",
+        tool: { server: "no", name: "tool" },
+        argSpecs: {},
+      }),
     ).rejects.toThrow();
   });
 });

@@ -1,4 +1,5 @@
 import type { Constraint } from "@procforge/shared/schema.js";
+import type { EvaluateFn } from "@procforge/shared/core-client.js";
 
 export type CheckContext = {
   resultSummary?: string;
@@ -296,3 +297,13 @@ export function evaluateAll(
   }
   return { verdict: finalVerdict, failedConstraints: failed, unverified, details };
 }
+
+/** core CoreService에 주입하는 EvaluateFn 구현 (local 소유, M1.5-1/M2). */
+export const checkerEvaluate: EvaluateFn = (constraints, ctx) => {
+  const r = evaluateAll(constraints, {
+    resultSummary: ctx.resultSummary,
+    resultJson: ctx.resultJson,
+    artifacts: ctx.artifacts,
+  });
+  return { verdict: r.verdict === "fail" ? "fail" : "pass", failedConstraints: r.failedConstraints, unverified: r.unverified };
+};
