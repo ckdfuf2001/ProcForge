@@ -17,7 +17,9 @@
     "./ids": "./dist/ids.js",
     "./ids.js": "./dist/ids.js",
     "./normalize": "./dist/normalize.js",
-    "./normalize.js": "./dist/normalize.js"
+    "./normalize.js": "./dist/normalize.js",
+    "./deps": "./dist/deps.js",
+    "./deps.js": "./dist/deps.js"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",

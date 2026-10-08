@@ -41,4 +41,24 @@ server.tool(
   },
 );
 
+server.tool(
+  "save",
+  "Save text to a file (M3.3 weakIn test)",
+  { file_path: z.string(), content: z.string().optional() },
+  async ({ file_path, content }) => {
+    mkdirSync(dirname(file_path), { recursive: true });
+    writeFileSync(file_path, content ?? "");
+    return { content: [{ type: "text", text: JSON.stringify({ saved: file_path }) }] };
+  },
+);
+
+server.tool(
+  "echo",
+  "Echo args back as JSON (M3.3 split-dep test)",
+  { snapshot: z.unknown().optional(), url: z.string().optional(), title: z.string().optional(), note: z.string().optional() },
+  async (args) => {
+    return { content: [{ type: "text", text: JSON.stringify(args) }] };
+  },
+);
+
 await server.connect(new StdioServerTransport());

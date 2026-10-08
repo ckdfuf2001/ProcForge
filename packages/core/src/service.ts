@@ -46,20 +46,10 @@ export function consumeRetry(
 }
 
 /**
- * dependsOn 충족 조건 (M1.5-5): dep이 leaf이거나,
- * split이면서 모든 하위(자손)가 leaf.
+ * dependsOn 충족 조건 (M1.5-5, M3.3-6 shared 공용).
  */
-export function isResolved(n: Node, byId: Map<string, Node>, seen = new Set<string>()): boolean {
-  if (n.status === "leaf") return true;
-  if (n.status !== "split") return false;
-  if (seen.has(n.id)) return false;
-  seen.add(n.id);
-  if (n.children.length === 0) return false;
-  return n.children.every((c) => {
-    const child = byId.get(c);
-    return child !== undefined && isResolved(child, byId, seen);
-  });
-}
+import { isResolved } from "@procforge/shared/deps.js";
+export { isResolved };
 
 /**
  * 첫 pass 결과 형태 기반 auto constraint 생성 (M1.5-2).

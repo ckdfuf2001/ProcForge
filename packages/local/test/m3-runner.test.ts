@@ -370,3 +370,147 @@ describe("M3.2 runner", () => {
     expect(rep.results.find((r) => r.nodeId === "1.1")?.detail).toMatch(/fixture 없음/);
   }, 30000);
 });
+
+describe("M3.3 runner", () => {
+  async function leafDirect(
+    sid: string,
+    nodeId: string,
+    tool: string,
+    args: Record<string, unknown>,
+    resultJson: unknown,
+    argSpecs: Record<string, never>,
+  ) {
+    const summary = JSON.stringify(resultJson);
+    await client.pfReport({
+      sessionId: sid, nodeId, tool: { server: "fake-ppt", name: tool }, args,
+      resultSummary: summary, resultJson,
+      selfVerdict: "pass", selfReason: "ok",
+    });
+    await client.pfResolve({ sessionId: sid, nodeId, decision: "leaf", tool: { server: "fake-ppt", name: tool }, argSpecs: argSpecs as never });
+  }
+
+  it("weakIn save: runFs에만 생성되고 replay 통과", async () => {
+    await collectCatalog(root);
+    const started = await client.pfStart({
+      request: "저장", toolCatalog: (await collectCatalog(root)).entries,
+      limits: { maxDepth: 3, maxRetries: 2, maxNodes: 10 },
+    });
+    const sid = started.session.id;
+    await client.pfResolve({ sessionId: sid, nodeId: "1", decision: "split", children: [{ goal: "저장" }] });
+    await leafDirect(sid, "1.1", "save", { file_path: "output/new.pptx", content: "hi" }, { saved: "output/new.pptx" }, {
+      file_path: { kind: "fixed", value: "output/new.pptx" },
+      content: { kind: "fixed", value: "hi" },
+    });
+    const rec = await runSession({
+      procforgeDir: pfdir, projectRoot: root, sessionId: sid, mode: "record", runId: "m33-save",
+    });
+    expect(rec.summary.fail).toBe(0);
+    expect(existsSync(join(pfdir, "runs", "m33-save", "fs", "output", "new.pptx"))).toBe(true);
+    expect(existsSync(join(root, "output", "new.pptx"))).toBe(false);
+    writeOpencodeConfig(BROKEN_CMD);
+    const rep = await runSession({ procforgeDir: pfdir, projectRoot: root, sessionId: sid, mode: "replay" });
+    expect(rep.summary.fail).toBe(0);
+  }, 30000);
+
+  it("미확정 인자(url/title/note)는 그대로 유지", async () => {
+    const started = await client.pfStart({
+      request: "echo", toolCatalog: (await collectCatalog(root)).entries,
+      limits: { maxDepth: 3, maxRetries: 2, maxNodes: 10 },
+    });
+    const sid = started.session.id;
+    await client.pfResolve({ sessionId: sid, nodeId: "1", decision: "split", children: [{ goal: "echo" }] });
+    const args = { url: "https://a.b/c", title: "1/2분기", note: "보고서.v2" };
+    await leafDirect(sid, "1.1", "echo", args, args, {
+      url: { kind: "fixed", value: args.url },
+      title: { kind: "fixed", value: args.title },
+      note: { kind: "fixed", value: args.note },
+    });
+    const rec = await runSession({
+      procforgeDir: pfdir, projectRoot: root, sessionId: sid, mode: "record",
+    });
+    expect(rec.summary.fail).toBe(0);
+    const cas = JSON.parse(readFileSync(join(pfdir, "sessions", sid, "cassettes", "1.1.json"), "utf8")) as {
+      entries: { args: Record<string, unknown> }[];
+    };
+    expect(cas.entries[0].args).toEqual(args);
+  }, 30000);
+
+  it("inout 미존재 → fixture 에러", async () => {
+    const { BUILTIN_TOOLS } = await import("../src/catalog.js");
+    const started = await client.pfStart({
+      request: "편집", toolCatalog: BUILTIN_TOOLS,
+      limits: { maxDepth: 3, maxRetries: 2, maxNodes: 10 },
+    });
+    const sid = started.session.id;
+    await client.pfResolve({ sessionId: sid, nodeId: "1", decision: "split", children: [{ goal: "편집" }] });
+    await client.pfReport({
+      sessionId: sid, nodeId: "1.1",
+      tool: { server: "opencode", name: "edit" },
+      args: { path: "missing.txt", oldString: "a", newString: "b" },
+      resultSummary: "{}", resultJson: {},
+      selfVerdict: "pass", selfReason: "ok",
+    });
+    await client.pfResolve({
+      sessionId: sid, nodeId: "1.1", decision: "leaf",
+      tool: { server: "opencode", name: "edit" },
+      argSpecs: {
+        path: { kind: "fixed", value: "missing.txt" },
+        oldString: { kind: "fixed", value: "a" },
+        newString: { kind: "fixed", value: "b" },
+      } as never,
+    });
+    const rep = await runSession({ procforgeDir: pfdir, projectRoot: root, sessionId: sid, mode: "record" });
+    expect(rep.summary.fail).toBe(1);
+    expect(rep.results.find((r) => r.nodeId === "1.1")?.detail).toMatch(/fixture 없음/);
+  }, 30000);
+
+  it("lastPassHash: (a) 실패 노드 재실행 (b) 서브트리 범위 밖 보존", async () => {
+    const sid = await scriptedSession();
+    await runSession({ procforgeDir: pfdir, projectRoot: root, allowProjectRead: true, sessionId: sid, mode: "record" });
+    writeOpencodeConfig(BROKEN_CMD);
+    const readLastPass = () =>
+      (JSON.parse(readFileSync(join(pfdir, "runs", "by-session", sid, "latest.json"), "utf8")) as { lastPassHash: Record<string, string> }).lastPassHash;
+    // (b) 서브트리 실행은 범위 밖 기록을 덮지 않음
+    await runSession({ procforgeDir: pfdir, projectRoot: root, allowProjectRead: true, sessionId: sid, mode: "replay", nodeId: "1.1" });
+    expect(Object.keys(readLastPass()).sort()).toEqual(["1.1", "1.2", "1.3"]);
+    // 1.2 녹화 삭제 → replay에서 1.2 실패
+    rmSync(join(pfdir, "sessions", sid, "cassettes", "1.2.json"));
+    const bad = await runSession({ procforgeDir: pfdir, projectRoot: root, allowProjectRead: true, sessionId: sid, mode: "replay" });
+    expect(bad.results.find((r) => r.nodeId === "1.2")?.status).toBe("fail");
+    // (a) 다음 --changed에서 1.2 재실행, 1.1은 제외
+    const ch = await runSession({ procforgeDir: pfdir, projectRoot: root, allowProjectRead: true, sessionId: sid, mode: "replay", changed: true });
+    const execIds = ch.results.filter((r) => r.status !== "skipped").map((r) => r.nodeId);
+    expect(execIds).toContain("1.2");
+    expect(execIds).not.toContain("1.1");
+  }, 60000);
+
+  it("split 의존 펼침: dependsOn ['1.2'] 노드가 실행됨", async () => {
+    const started = await client.pfStart({
+      request: "펼침", toolCatalog: (await collectCatalog(root)).entries,
+      limits: { maxDepth: 4, maxRetries: 2, maxNodes: 20 },
+    });
+    const sid = started.session.id;
+    await client.pfResolve({
+      sessionId: sid, nodeId: "1", decision: "split",
+      children: [{ goal: "단일" }, { goal: "묶음" }, { goal: "합치기", dependsOn: ["1.2"] }],
+    });
+    await client.pfResolve({ sessionId: sid, nodeId: "1.2", decision: "split", children: [{ goal: "b1" }, { goal: "b2" }] });
+    await leafDirect(sid, "1.1", "echo", { title: "a" }, { title: "a" }, { title: { kind: "fixed", value: "a" } });
+    await leafDirect(sid, "1.2.1", "echo", { title: "b1" }, { title: "b1" }, { title: { kind: "fixed", value: "b1" } });
+    await leafDirect(sid, "1.2.2", "echo", { title: "b2" }, { title: "b2" }, { title: { kind: "fixed", value: "b2" } });
+    await leafDirect(sid, "1.3", "echo", { snapshot: "placeholder" }, { snapshot: {} }, {
+      snapshot: { kind: "var", ref: "$1.2" },
+    });
+    const rec = await runSession({ procforgeDir: pfdir, projectRoot: root, sessionId: sid, mode: "record" });
+    expect(rec.summary.fail).toBe(0);
+    expect(rec.results.find((r) => r.nodeId === "1.3")?.status).toBe("pass");
+    const cas = JSON.parse(readFileSync(join(pfdir, "sessions", sid, "cassettes", "1.3.json"), "utf8")) as {
+      entries: { args: Record<string, unknown> }[];
+    };
+    const snap = (cas.entries[0].args["snapshot"] ?? {}) as Record<string, unknown>;
+    expect(Object.keys(snap).sort()).toEqual(["1.2.1", "1.2.2"]);
+    writeOpencodeConfig(BROKEN_CMD);
+    const rep = await runSession({ procforgeDir: pfdir, projectRoot: root, sessionId: sid, mode: "replay" });
+    expect(rep.summary.fail).toBe(0);
+  }, 60000);
+});

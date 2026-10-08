@@ -1,9 +1,13 @@
 import { existsSync } from "node:fs";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { isEscapeRel } from "../artifacts.js";
+import { logger } from "../logger.js";
 import type { PathRole } from "@procforge/shared/schema.js";
 
 export type { PathRole };
+
+/** 이름 규칙 추론 결과. weakIn은 존재 여부로 in/out 확정 (M3.3-1) */
+export type InferredRole = "in" | "out" | "weakIn" | undefined;
 
 // 경로 역할 판정 + run fs 재작성 (M3.1-3, M3.2-3). path 인자만 재작성.
 
@@ -14,13 +18,13 @@ const IN_EXACT = new Set([
 ]);
 
 /**
- * 인자명 규칙 (추정 순서 3단계, DECISIONS M3.1-3/M3.2-3).
- * output/outfile/dest 계열 → out. path/file/input/src/template/dir 계열 → in.
+ * 인자명 규칙 (추정 순서 3단계, DECISIONS M3.1-3/M3.2-3/M3.3-1).
+ * output 계열 → out. 이름 규칙의 in은 약한 추정(weakIn).
  */
 export function inferPathRole(
   argName: string,
   inputSchema?: Record<string, unknown>,
-): "in" | "out" | undefined {
+): "in" | "out" | "weakIn" | undefined {
   const lower = argName.toLowerCase();
   if (
     OUT_EXACT.has(lower) ||
@@ -40,7 +44,7 @@ export function inferPathRole(
     lower.startsWith("in_") ||
     lower.startsWith("src_")
   ) {
-    return "in";
+    return "weakIn";
   }
   const props = (inputSchema?.["properties"] as Record<string, Record<string, unknown>> | undefined) ?? {};
   const fmt = props[argName]?.["format"];
@@ -66,16 +70,22 @@ export type RewriteOpts = {
   toolReadOnly?: boolean;
 };
 
+const URL_RE = /^[a-z][a-z0-9+.-]*:\/\//i;
+
 /**
- * path 역할 인자만 run fs 기준으로 재작성.
- * 역할 확정 순서: 명시 roles → readOnly면 in → 인자명 규칙 → 파일 미존재 & 비-readOnly면 out.
+ * 확정된 역할의 인자만 run fs 기준으로 재작성 (M3.3-2).
+ * 역할 확정 순서: 명시 roles → readOnly면 in → 인자명 규칙 → weakIn 존재 판정.
+ * looksLikePath만으로는 재작성 금지(경고 로그만). URL 형태는 항상 제외.
  * - in: run fs 우선, allowProjectRead 시 projectRoot 폴백. 없으면 에러.
- * - out/inout: 존재 무관, run fs 아래로 매핑. fs 밖 절대경로는 거부.
+ *   in + fs 밖 절대경로 + 폴백 off → bad_request (M3.3-3).
+ * - out: 존재 무관, run fs 아래로 매핑. fs 밖 절대경로는 거부.
+ * - inout: run fs 안에 존재해야 함. 미존재 → bad_request (M3.3-4).
+ * - weakIn: 존재 → in. 미존재 + 비-readOnly → out. 미존재 + readOnly → in(실패).
  * - 경계 검사는 isEscapeRel (prefix startsWith 금지).
  */
 export function rewritePaths(
   args: Record<string, unknown>,
-  roles: Record<string, PathRole | undefined>,
+  roles: Record<string, PathRole | InferredRole | undefined>,
   opts: RewriteOpts,
 ): Record<string, unknown> {
   const base = resolve(opts.fsDir);
@@ -87,23 +97,33 @@ export function rewritePaths(
     if (existsSync(resolve(base, rel))) return true;
     return proot ? existsSync(resolve(proot, rel)) : false;
   };
-  const mapOne = (v: string, role: PathRole | undefined, argName: string): string => {
-    let r: PathRole | undefined = role;
-    if (!r && opts.toolReadOnly) r = "in";
-    if (!r && !opts.toolReadOnly && looksLikePath(v) && !existsInScope(v)) r = "out";
-    if (!r && existsInScope(v)) r = "in";
+  const fixtureError = (argName: string, v: string): Error =>
+    Object.assign(new Error(`fixture 없음: ${argName}=${v}, record 모드로 재녹화`), { code: "bad_request" });
+  const mapOne = (v: string, role: PathRole | InferredRole | undefined, argName: string): string => {
+    let r: PathRole | undefined;
+    if (role === "weakIn") {
+      if (existsInScope(v)) r = "in";
+      else if (!opts.toolReadOnly) r = "out";
+      else r = "in";
+    } else {
+      r = role as PathRole | undefined;
+      if (!r && opts.toolReadOnly) r = "in";
+    }
     if (!r) return v;
     if (isAbsolute(v)) {
       if (!isEscapeRel(posixRel(base, resolve(v)), "/")) return resolve(v);
-      if (r === "out" || r === "inout") throw new Error(`출력 경로가 run fs 밖: ${argName}=${v}`);
+      if (r === "in" && proot && !opts.allowProjectRead) throw fixtureError(argName, v);
+      if (r === "out") throw new Error(`출력 경로가 run fs 밖: ${argName}=${v}`);
+      if (r === "inout") throw fixtureError(argName, v);
       return v;
     }
     const rel = v.split("\\").join("/");
     if (isEscapeRel(rel, "/")) throw new Error(`경로 탈출: ${argName}=${v}`);
-    if (r === "out" || r === "inout") {
+    if (r === "out") return resolve(base, rel);
+    if (r === "inout") {
       const abs = resolve(base, rel);
-      if (r === "out" || existsSync(abs)) return abs;
-      return abs; // inout 미존재: 생성 대상으로 매핑
+      if (existsSync(abs)) return abs;
+      throw fixtureError(argName, v);
     }
     const fsAbs = resolve(base, rel);
     if (existsSync(fsAbs)) return fsAbs;
@@ -111,20 +131,20 @@ export function rewritePaths(
       const pAbs = resolve(proot, rel);
       if (existsSync(pAbs)) return pAbs;
     }
-    if (proot && !opts.allowProjectRead) {
-      throw Object.assign(new Error(`fixture 없음: ${argName}=${v}, record 모드로 재녹화`), { code: "bad_request" });
-    }
+    if (proot && !opts.allowProjectRead) throw fixtureError(argName, v);
     throw new Error(`입력 없음: ${argName}=${v}`);
   };
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(args)) {
-    const role = roles[k];
-    if (typeof v !== "string") {
-      out[k] = v;
+    if (typeof v !== "string" || URL_RE.test(v)) {
+      out[k] = v; // URL 형태는 항상 제외 (M3.3-2)
       continue;
     }
-    if (role === undefined && !looksLikePath(v)) {
-      out[k] = v; // 경로처럼 보이지 않으면 손대지 않음
+    let role = roles[k];
+    if (role === undefined && opts.toolReadOnly) role = "in";
+    if (role === undefined) {
+      if (looksLikePath(v)) logger.warn("unconfirmed path kept", { arg: k, value: v });
+      out[k] = v;
       continue;
     }
     out[k] = mapOne(v, role, k);

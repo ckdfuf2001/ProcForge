@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { compareNormalized } from "@procforge/shared/normalize.js";
 import { compareNodeIds } from "@procforge/shared/ids.js";
+import { expandDepLeafs } from "@procforge/shared/deps.js";
 import type { Node } from "@procforge/shared/schema.js";
 import { FileStore } from "../filestore.js";
 import { evaluateAll } from "../checker.js";
@@ -11,18 +12,22 @@ import { normalizeArgSpecs } from "../artifacts.js";
 import { ConnectionPool } from "./connections.js";
 import { findRecording, loadCassette, recordKey, saveRecording, toToolResponse } from "./recordings.js";
 import { resolveArgs } from "./resolve.js";
-import { inferPathRole, rewritePaths, type PathRole } from "./paths.js";
+import { inferPathRole, rewritePaths, type InferredRole, type PathRole } from "./paths.js";
 import { setupRunFs } from "./workdir.js";
 import type { NodeResult, RunMode, RunOptions, RunReport, ToolResponse } from "./types.js";
 
 function orderNodes(nodes: Node[]): Node[] {
+  const byId = new Map(nodes.map((n) => [n.id, n]));
   const inScope = new Set(nodes.map((n) => n.id));
+  // dependsOn의 split id는 자손 leaf로 펼침 (M3.3-6)
+  const edges = (n: Node): string[] =>
+    n.dependsOn.flatMap((d) => expandDepLeafs(d, byId)).filter((d) => inScope.has(d));
   const done = new Set<string>();
   const out: Node[] = [];
   const pending = [...nodes].sort((a, b) => compareNodeIds(a.id, b.id));
   let guard = pending.length * pending.length + 1;
   while (pending.length > 0 && guard-- > 0) {
-    const i = pending.findIndex((n) => n.dependsOn.filter((d) => inScope.has(d)).every((d) => done.has(d)));
+    const i = pending.findIndex((n) => edges(n).every((d) => done.has(d)));
     if (i === -1) throw new Error(`의존 해소 불가(순환?): ${pending.map((n) => n.id).join(",")}`);
     const [n] = pending.splice(i, 1);
     done.add(n.id);
@@ -51,13 +56,14 @@ function latestReportPath(procforgeDir: string, sessionId: string): string {
   return join(procforgeDir, "runs", "by-session", sessionId, "latest.json");
 }
 
-function readLatestHashes(procforgeDir: string, sessionId: string): Record<string, string> | undefined {
+function readLastPass(procforgeDir: string, sessionId: string): { exists: boolean; hashes: Record<string, string> } {
   const p = latestReportPath(procforgeDir, sessionId);
-  if (!existsSync(p)) return undefined;
+  if (!existsSync(p)) return { exists: false, hashes: {} };
   try {
-    return (JSON.parse(readFileSync(p, "utf8")) as { nodeHashes: Record<string, string> }).nodeHashes;
+    const parsed = JSON.parse(readFileSync(p, "utf8")) as { lastPassHash?: Record<string, string> };
+    return { exists: true, hashes: parsed.lastPassHash ?? {} };
   } catch {
-    return undefined;
+    return { exists: true, hashes: {} };
   }
 }
 
@@ -100,12 +106,14 @@ export async function runSession(opts: RunOptions): Promise<RunReport> {
       if (!all.some((n) => n.id === opts.nodeId)) throw Object.assign(new Error(`노드 없음: ${opts.nodeId}`), { code: "not_found" });
       all = subtree(all, opts.nodeId);
     }
-    // --changed: hash 변경 + 하류만
+    // --changed: lastPassHash 불일치 또는 없음 + 하류만 (M3.3-5)
     let targets = new Set(all.map((n) => n.id));
     if (opts.changed) {
-      const prev = readLatestHashes(opts.procforgeDir, opts.sessionId);
-      if (prev) {
-        const changedIds = new Set(all.filter((n) => prev[n.id] !== n.hash).map((n) => n.id));
+      const prev = readLastPass(opts.procforgeDir, opts.sessionId);
+      if (prev.exists) {
+        const changedIds = new Set(
+          all.filter((n) => prev.hashes[n.id] === undefined || prev.hashes[n.id] !== n.hash).map((n) => n.id),
+        );
         const queue = [...changedIds];
         while (queue.length > 0) {
           const cur = queue.shift()!;
@@ -120,6 +128,7 @@ export async function runSession(opts: RunOptions): Promise<RunReport> {
       }
     }
     const ordered = orderNodes(all);
+    const byIdAll = new Map(all.map((x) => [x.id, x]));
     const outputs = new Map<string, unknown>();
     // 범위 밖 의존 출력만 golden에서 공급 (M3.1-4: 범위 내 선주입 금지)
     for (const n of all) {
@@ -148,13 +157,16 @@ export async function runSession(opts: RunOptions): Promise<RunReport> {
         resultOf.set(n.id, r);
         continue;
       }
-      // 실패 전파 (M3.1-4): 범위 내 의존이 fail/blocked이거나 출력이 없으면 blocked
-      const badDep = n.dependsOn.find((d) => {
-        if (!targets.has(d)) return false; // 범위 밖은 golden 선주입됨
-        const dr = resultOf.get(d);
-        if (!dr) return true;
-        return dr.status === "fail" || dr.status === "blocked" || !outputs.has(d);
-      });
+      // 실패 전파 (M3.1-4/M3.3-6): split 의존은 자손 leaf로 펼침.
+      // 범위 내 의존이 fail/blocked이거나 출력이 없으면 blocked
+      const badDep = n.dependsOn
+        .flatMap((d) => expandDepLeafs(d, byIdAll))
+        .find((d) => {
+          if (!targets.has(d)) return false; // 범위 밖은 golden 선주입됨
+          const dr = resultOf.get(d);
+          if (!dr) return true;
+          return dr.status === "fail" || dr.status === "blocked" || !outputs.has(d);
+        });
       if (badDep) {
         const r: NodeResult = { nodeId: n.id, status: "blocked", failedConstraints: [], detail: `blocked by ${badDep}`, durationMs: Date.now() - start };
         results.push(r);
@@ -162,7 +174,7 @@ export async function runSession(opts: RunOptions): Promise<RunReport> {
         continue;
       }
       try {
-        const r = await execNode(opts, session.params, outputs, pool, fsDir, n, mode);
+        const r = await execNode(opts, session.params, outputs, pool, fsDir, n, mode, new Map(all.map((x) => [x.id, x])));
         results.push(r);
         resultOf.set(n.id, r);
       } catch (e) {
@@ -196,9 +208,17 @@ export async function runSession(opts: RunOptions): Promise<RunReport> {
     };
     mkdirSync(runDir, { recursive: true });
     writeFileSync(join(runDir, "report.json"), JSON.stringify(report, null, 2));
+    // lastPassHash 병합 저장 (M3.3-5): pass만 갱신, 미실행 유지, fail/blocked 삭제
+    const prevPass = readLastPass(opts.procforgeDir, opts.sessionId).hashes;
+    const merged: Record<string, string> = { ...prevPass };
+    const hashOf = new Map([...store.getNodes(opts.sessionId).values()].map((n) => [n.id, n.hash]));
+    for (const r of results) {
+      if (r.status === "pass") merged[r.nodeId] = hashOf.get(r.nodeId) ?? "";
+      else if (r.status === "fail" || r.status === "blocked") delete merged[r.nodeId];
+    }
     const latestPath = latestReportPath(opts.procforgeDir, opts.sessionId);
     mkdirSync(dirname(latestPath), { recursive: true });
-    writeFileSync(latestPath, JSON.stringify({ runId, at: report.at, nodeHashes: report.nodeHashes }));
+    writeFileSync(latestPath, JSON.stringify({ runId, at: report.at, nodeHashes: report.nodeHashes, lastPassHash: merged }));
     logger.info("run complete", { runId, ...summary, durationMs: Date.now() - t0 });
     return report;
   } finally {
@@ -215,6 +235,7 @@ async function execNode(
   fsDir: string,
   n: Node,
   mode: RunMode,
+  byId: Map<string, Node>,
 ): Promise<NodeResult> {
   const start = Date.now();
   // 구 세션 마이그레이션: 절대경로 fixed → 상대경로 (M3.2-2)
@@ -226,7 +247,7 @@ async function execNode(
   const specs = normSpecs.specs;
   const inputSchema = catalogInputSchema(opts, n);
   const readOnly = catalogReadOnly(opts, n);
-  const roles: Record<string, PathRole | undefined> = {};
+  const roles: Record<string, PathRole | InferredRole | undefined> = {};
   for (const [k, spec] of Object.entries(specs)) {
     const explicit = (spec as { path?: PathRole }).path;
     if (explicit) {
@@ -246,7 +267,7 @@ async function execNode(
       roles[k] = "in";
       continue;
     }
-    roles[k] = inferPathRole(k, inputSchema) as PathRole | undefined;
+    roles[k] = inferPathRole(k, inputSchema);
   }
   const args = rewritePaths(
     resolveArgs({
@@ -256,6 +277,10 @@ async function execNode(
       attempts: n.attempts,
       goldenAttemptId: n.golden?.attemptId,
       live: mode === "live",
+      topo: {
+        isSplit: (id) => byId.get(id)?.status === "split",
+        childrenOf: (id) => byId.get(id)?.children ?? [],
+      },
     }),
     roles,
     { fsDir, projectRoot: opts.projectRoot, allowProjectRead: opts.allowProjectRead ?? false, toolReadOnly: readOnly },

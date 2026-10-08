@@ -126,6 +126,23 @@
 - [M3.2-6] 내장 도구 응답에 resultJson 추가 (판정 대상). 경로 후보 판정은
   슬래시/확장자 패턴(무분별 매핑 방지). 녹화 키는 fsDir→RUNFS, projectRoot→PROJECT.
 
+## M3.3
+
+- [M3.3-1] 이름 규칙 in은 weakIn(약한 추정). 존재→in, 미존재+비-readOnly→out,
+  미존재+readOnly→in(실패). schema format 판정은 강한 in 유지.
+- [M3.3-2] 재작성은 확정 역할(명시/내장/어노테이션/이름·스키마 규칙)만.
+  역할 미확정은 경고 로그 후 원문 유지. URL(스킴://)은 항상 제외.
+  부수 발견: MCP 서버 입력 검증이 스키마 외 키를 strip하므로 녹화는 실제 수신값 기준.
+- [M3.3-3] in + fs 밖 절대경로 + 폴백 off → bad_request(fixture 없음).
+- [M3.3-4] inout은 run fs 내 존재 필수. 미존재 → bad_request(fixture 없음).
+  inout의 projectRoot 폴백 없음(편집 쓰기가 원본에 닿는 것을 방지). 죽은 생성-매핑 분기 제거.
+- [M3.3-5] latest.json에 lastPassHash 병합 저장. pass만 갱신, 미실행 유지,
+  fail/blocked 삭제. --changed는 불일치·부재를 변경으로 처리. 서브트리 실행은
+  범위 밖 기록을 보존.
+- [M3.3-6] split 의존은 자손 leaf로 펼침(shared/deps: isResolved·expandDepLeafs·
+  descendantLeafs, core·runner 공용). split 출력={childId:output}. $2.2 같은
+  자식 직접 참조는 기존 규칙 그대로.
+
 ## M1
 
 - [M1-1] checker 주입 — §6 pf_report의 verdict 계산은 local checker(§7)가 소유. core는 `EvaluateFn`을 생성자 주입받고 기본값은 constraints-empty→pass, 그 외→fail. 이유: core→local import 순환 방지 + 의존방향(local→core 금지) 유지. M2에서 local MCP 핸들러가 `checker.evaluateAll`을 주입한다.

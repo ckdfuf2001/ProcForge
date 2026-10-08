@@ -3,6 +3,11 @@ import type { ArgSpec, Attempt } from "@procforge/shared/schema.js";
 
 // 인자 해석 (M3): fixed 그대로, var는 params+이전 출력, generated는 replay 기록값/live 에러.
 
+export type OutputTopo = {
+  isSplit: (id: string) => boolean;
+  childrenOf: (id: string) => string[];
+};
+
 export function resolveArgs(input: {
   specs: Record<string, ArgSpec>;
   params: Record<string, string>;
@@ -12,13 +17,15 @@ export function resolveArgs(input: {
   /** golden.attemptId (없으면 마지막 pass attempt로 마이그레이션) */
   goldenAttemptId?: string;
   live: boolean;
+  /** split 출력 조립용 토폴로지 (M3.3-6) */
+  topo?: OutputTopo;
 }): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [k, spec] of Object.entries(input.specs)) {
     if (spec.kind === "fixed") {
       out[k] = (spec as { value: unknown }).value;
     } else if (spec.kind === "var") {
-      out[k] = resolveVar((spec as { ref: string }).ref, input.params, input.outputs);
+      out[k] = resolveVar((spec as { ref: string }).ref, input.params, input.outputs, input.topo);
     } else {
       if (input.live) throw new Error(`generated 인자 '${k}'는 live 모드 미지원 (M5 이후)`);
       out[k] = resolveGenerated(k, input.attempts, input.goldenAttemptId);
@@ -59,7 +66,12 @@ function getByDot(root: unknown, path: string): unknown {
   return cur;
 }
 
-export function resolveVar(ref: string, params: Record<string, string>, outputs: Map<string, unknown>): unknown {
+export function resolveVar(
+  ref: string,
+  params: Record<string, string>,
+  outputs: Map<string, unknown>,
+  topo?: OutputTopo,
+): unknown {
   const pm = /^\$\{params\.([A-Za-z0-9_.-]+)\}$/.exec(ref);
   if (pm) {
     if (!(pm[1] in params)) throw new Error(`params 참조 없음: ${pm[1]}`);
@@ -68,6 +80,17 @@ export function resolveVar(ref: string, params: Record<string, string>, outputs:
   const m = /^\$(\d+(?:\.\d+)*)(.*)$/.exec(ref);
   if (!m) throw new Error(`지원하지 않는 참조: ${ref}`);
   const [, nid, rest] = m;
+  // split 노드 출력 = { [childId]: output } 객체 (M3.3-6)
+  if (topo?.isSplit(nid)) {
+    const obj: Record<string, unknown> = {};
+    for (const c of topo.childrenOf(nid)) {
+      if (!outputs.has(c)) throw new Error(`split 자식 출력 없음: ${c}`);
+      obj[c] = outputs.get(c);
+    }
+    if (rest === "" || rest === ".output") return obj;
+    if (rest.startsWith(".output.")) return getByDot(obj, rest.slice(".output.".length));
+    throw new Error(`지원하지 않는 참조: ${ref}`);
+  }
   if (!outputs.has(nid)) throw new Error(`노드 출력 없음: ${nid}`);
   const base = outputs.get(nid);
   if (rest === "" || rest === ".output") return base;
