@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { mkdtempSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { assertSafePath, ingestArtifacts, setupSandbox, isEscapeRel } from "../src/artifacts.js";
+import { assertSafePath, ingestArtifacts, setupSandbox, isEscapeRel, normalizeArgSpecs } from "../src/artifacts.js";
 
 let root: string;
 let pfdir: string;
@@ -72,5 +72,23 @@ describe("artifacts", () => {
     const sb = setupSandbox({ procforgeDir: pfdir, sessionId: "s1", projectRoot: root, seedFiles: ["data/in.txt"] });
     expect(sb.copied).toEqual([join("data", "in.txt")]);
     expect(existsSync(join(pfdir, "sandbox", "s1", "data", "in.txt"))).toBe(true);
+  });
+
+  it("normalizeArgSpecs: sandbox·프로젝트 절대경로 → 상대경로", () => {
+    const sb = join(pfdir, "sandbox", "s1");
+    const { specs, warnings } = normalizeArgSpecs(
+      {
+        a: { kind: "fixed", value: join(sb, "out", "x.txt") },
+        b: { kind: "fixed", value: join(root, "data.pptx") },
+        c: { kind: "fixed", value: process.platform === "win32" ? "C:\\Windows\\x.txt" : "/etc/x.txt" },
+        d: { kind: "fixed", value: "rel.txt" },
+      },
+      { sandboxDir: sb, projectRoot: root },
+    );
+    expect(specs["a"]).toEqual({ kind: "fixed", value: join("out", "x.txt").replace(/\\/g, "/") });
+    expect(specs["b"]).toEqual({ kind: "fixed", value: "data.pptx" });
+    expect(specs["d"]).toEqual({ kind: "fixed", value: "rel.txt" });
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toMatch(/절대경로 유지/);
   });
 });

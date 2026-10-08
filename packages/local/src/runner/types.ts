@@ -1,4 +1,4 @@
-export type RunMode = "record" | "replay" | "passthrough";
+export type RunMode = "record" | "replay" | "passthrough" | "live";
 
 export type RunOptions = {
   procforgeDir: string;
@@ -11,6 +11,8 @@ export type RunOptions = {
   updateGolden?: boolean;
   /** bash 내장 실행 허용 (기본 false) */
   allowBash?: boolean;
+  /** projectRoot 읽기 폴백 허용 (기본 false, M3.2-4) */
+  allowProjectRead?: boolean;
   /** hash 변경 노드+하류만 실행 */
   changed?: boolean;
   runId?: string;

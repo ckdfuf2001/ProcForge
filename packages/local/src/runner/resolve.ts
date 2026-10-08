@@ -1,5 +1,4 @@
 import { existsSync } from "node:fs";
-import { resolve } from "node:path";
 import type { ArgSpec, Attempt } from "@procforge/shared/schema.js";
 
 // 인자 해석 (M3): fixed 그대로, var는 params+이전 출력, generated는 replay 기록값/live 에러.
@@ -74,28 +73,4 @@ export function resolveVar(ref: string, params: Record<string, string>, outputs:
   if (rest === "" || rest === ".output") return base;
   if (rest.startsWith(".output.")) return getByDot(base, rest.slice(".output.".length));
   throw new Error(`지원하지 않는 참조: ${ref}`);
-}
-
-/**
- * 실행 인자의 프로젝트 상대경로 문자열을 run fs 절대경로로 재작성.
- * run fs에 해당 파일이 있을 때만 재작성 (없으면 원문 유지 → 도구가 실패).
- */
-export function rewritePaths(args: Record<string, unknown>, fsDir: string): Record<string, unknown> {
-  const rw = (v: unknown): unknown => {
-    if (typeof v === "string" && v.length > 0 && v.length < 512 && !v.includes("\n") && !v.startsWith("RUNFS/")) {
-      const cand = resolve(fsDir, v);
-      if (existsSync(cand) && cand.startsWith(resolve(fsDir))) return cand;
-      return v;
-    }
-    if (Array.isArray(v)) return v.map(rw);
-    if (v !== null && typeof v === "object") {
-      const out: Record<string, unknown> = {};
-      for (const [k, val] of Object.entries(v as Record<string, unknown>)) out[k] = rw(val);
-      return out;
-    }
-    return v;
-  };
-  const out: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(args)) out[k] = rw(v);
-  return out;
 }

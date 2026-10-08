@@ -27,23 +27,26 @@ export const AttemptIdSchema = z.string().uuid("Attempt id must be UUID");
 
 // ---------- ArgSpec ----------
 
+export const PathRoleSchema = z.enum(["in", "out", "inout"]);
+export type PathRole = z.infer<typeof PathRoleSchema>;
+
 export const ArgSpecFixedSchema = z.object({
   kind: z.literal("fixed"),
   value: z.unknown(),
-  /** 경로 역할 힌트 (M3.1-3). 미지정 시 inputSchema에서 추정 */
-  path: z.enum(["in", "out"]).optional(),
+  /** 경로 역할 힌트 (M3.1-3, M3.2-3 inout). 미지정 시 inputSchema에서 추정 */
+  path: PathRoleSchema.optional(),
 });
 export const ArgSpecVarSchema = z.object({
   kind: z.literal("var"),
   ref: z.string().min(1),
-  path: z.enum(["in", "out"]).optional(),
+  path: PathRoleSchema.optional(),
 });
 export const ArgSpecGeneratedSchema = z.object({
   kind: z.literal("generated"),
   instruction: z.string().min(1),
   inputs: z.array(z.string()).default([]),
   constraints: z.array(z.string()).default([]),
-  path: z.enum(["in", "out"]).optional(),
+  path: PathRoleSchema.optional(),
 });
 export const ArgSpecSchema = z.discriminatedUnion("kind", [
   ArgSpecFixedSchema,
@@ -208,11 +211,21 @@ export const NodeSchema = z.object({
 });
 export type Node = z.infer<typeof NodeSchema>;
 
+export const ToolAnnotationsSchema = z.object({
+  readOnlyHint: z.boolean().optional(),
+  destructiveHint: z.boolean().optional(),
+  idempotentHint: z.boolean().optional(),
+  openWorldHint: z.boolean().optional(),
+});
+export type ToolAnnotations = z.infer<typeof ToolAnnotationsSchema>;
+
 export const ToolCatalogEntrySchema = z.object({
   server: z.string().min(1),
   name: z.string().min(1),
   inputSchema: z.record(z.unknown()),
   schemaHash: z.string().min(1),
+  /** tools/list annotations (M3.2-3 경로 추정용) */
+  annotations: ToolAnnotationsSchema.optional(),
 });
 export type ToolCatalogEntry = z.infer<typeof ToolCatalogEntrySchema>;
 

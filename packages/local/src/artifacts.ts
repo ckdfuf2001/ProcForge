@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { join, resolve, relative, basename, dirname, sep, isAbsolute, extname } from "node:path";
+import type { ArgSpec } from "@procforge/shared/schema.js";
 
 // 호스트는 경로만 제출, 실제 읽기·복사는 local이 수행 (M2).
 // - 프로젝트 루트 밖 경로 거부, 심볼릭 링크 탈출 거부
@@ -133,6 +134,41 @@ export function ingestArtifacts(input: {
   });
   appendManifest(input.procforgeDir, input.sessionId, manifestEntries);
   return { stored, contents };
+}
+
+/**
+ * confirm_leaf fixed 인자 정규화 (M3.2-2): sandbox/<sid>/·프로젝트 루트 아래 절대경로 → 상대경로.
+ * 그 외 절대경로는 유지 + warnings. 기존 세션 마이그레이션에도 재사용 (runner).
+ */
+export function normalizeArgSpecs(
+  specs: Record<string, ArgSpec>,
+  opts: { sandboxDir: string; projectRoot: string },
+): { specs: Record<string, ArgSpec>; warnings: string[] } {
+  const sb = resolve(opts.sandboxDir);
+  const proot = resolve(opts.projectRoot);
+  const warnings: string[] = [];
+  const out: Record<string, ArgSpec> = {};
+  for (const [k, spec] of Object.entries(specs)) {
+    if (spec.kind !== "fixed" || typeof (spec as { value: unknown }).value !== "string") {
+      out[k] = spec;
+      continue;
+    }
+    const v = (spec as { value: string }).value;
+    if (!isAbsolute(v)) {
+      out[k] = spec;
+      continue;
+    }
+    const norm = (s: string) => s.replace(/\\/g, "/");
+    if (!isEscapeRel(relative(sb, v).split(sep).join("/"), "/")) {
+      out[k] = { ...spec, value: norm(relative(sb, v)) };
+    } else if (!isEscapeRel(relative(proot, v).split(sep).join("/"), "/")) {
+      out[k] = { ...spec, value: norm(relative(proot, v)) };
+    } else {
+      warnings.push(`절대경로 유지: ${k}=${v} (sandbox·프로젝트 밖)`);
+      out[k] = spec;
+    }
+  }
+  return { specs: out, warnings };
 }
 
 export function setupSandbox(input: {

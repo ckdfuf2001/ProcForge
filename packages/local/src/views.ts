@@ -97,7 +97,11 @@ export const PfSplitOutputSchema = z.object({
   created: z.array(NodeSummarySchema),
   instruction: z.string(),
 });
-export const PfConfirmLeafOutputSchema = z.object({ node: NodeSummarySchema, instruction: z.string() });
+export const PfConfirmLeafOutputSchema = z.object({
+  node: NodeSummarySchema,
+  instruction: z.string(),
+  warnings: z.array(z.string()),
+});
 export const PfRetryOutputSchema = z.object({ node: NodeSummarySchema, instruction: z.string() });
 export const PfAskHumanOutputSchema = z.object({ node: NodeSummarySchema, instruction: z.string() });
 export const PfAdviseOutputSchema = z.object({

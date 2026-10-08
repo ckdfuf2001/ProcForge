@@ -5,7 +5,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import type { CoreClient } from "@procforge/shared/core-client.js";
 import { NodeIdSchema, SessionIdSchema } from "@procforge/shared/schema.js";
-import { ingestArtifacts, setupSandbox } from "./artifacts.js";
+import { ingestArtifacts, normalizeArgSpecs, setupSandbox } from "./artifacts.js";
 import { collectCatalog } from "./catalog.js";
 import { logger } from "./logger.js";
 import type { FileStore } from "./filestore.js";
@@ -354,17 +354,21 @@ export function buildServer(deps: ServerDeps): McpServer {
         const sid = a.sessionId as string;
         const s = requireFresh(deps, sid);
         if (!a.argSpecs) throw err("bad_request", "argSpecs가 없다.", "마지막 실행 인자 키를 모두 분류해 pf_confirm_leaf 재호출.");
+        const norm = normalizeArgSpecs(a.argSpecs as Record<string, import("@procforge/shared/schema.js").ArgSpec>, {
+          sandboxDir: join(deps.procforgeDir, "sandbox", sid),
+          projectRoot: deps.projectRoot,
+        });
         const out = await client.pfResolve({
           sessionId: sid,
           nodeId: a.nodeId as string,
           decision: "leaf",
           tool: a.tool as { server: string; name: string },
-          argSpecs: a.argSpecs as never,
+          argSpecs: norm.specs as never,
           sideEffect: a.sideEffect as "none" | "local_write" | "external" | undefined,
           goldenIgnore: a.ignore as string[] | undefined,
         });
         deps.store.touch(sid);
-        return ok({ node: nodeSummary(out.node, s.limits), instruction: out.instruction });
+        return ok({ node: nodeSummary(out.node, s.limits), instruction: out.instruction, warnings: norm.warnings });
       } catch (e) {
         return errResult(e);
       }
@@ -681,15 +685,16 @@ export function buildServer(deps: ServerDeps): McpServer {
       description: [
         "확정 트리를 LLM 없이 재실행한다.",
         "선수: 전 노드 leaf 확정 후.",
-        "sessionId(필수), nodeId(서브트리, 선택), mode(record|replay|passthrough, 기본 replay),",
-        "updateGolden(선택), junitPath(선택).",
+        "sessionId(필수), nodeId(서브트리, 선택), mode(record|replay|passthrough|live, 기본 replay),",
+        "updateGolden(선택), allowProjectRead(선택), junitPath(선택).",
         "요약과 report 경로 반환. 다음: 실패 노드는 pf_tree로 확인.",
       ].join("\n"),
       inputSchema: {
         sessionId: SessionIdSchema,
         nodeId: NodeIdSchema.optional(),
-        mode: z.enum(["record", "replay", "passthrough"]).optional(),
+        mode: z.enum(["record", "replay", "passthrough", "live"]).optional(),
         updateGolden: z.boolean().optional(),
+        allowProjectRead: z.boolean().optional(),
         junitPath: z.string().optional(),
       },
       outputSchema: OUTPUT_SCHEMAS["pf_test"] as never,
@@ -705,8 +710,9 @@ export function buildServer(deps: ServerDeps): McpServer {
           projectRoot: deps.projectRoot,
           sessionId: sid,
           nodeId: a.nodeId as string | undefined,
-          mode: (a.mode as "record" | "replay" | "passthrough" | undefined) ?? "replay",
+          mode: (a.mode as "record" | "replay" | "passthrough" | "live" | undefined) ?? "replay",
           updateGolden: (a.updateGolden as boolean | undefined) ?? false,
+          allowProjectRead: (a.allowProjectRead as boolean | undefined) ?? false,
         });
         deps.store.touch(sid);
         const reportPath = join(deps.procforgeDir, "runs", report.runId, "report.json");

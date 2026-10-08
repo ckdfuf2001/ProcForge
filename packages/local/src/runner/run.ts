@@ -7,6 +7,7 @@ import type { Node } from "@procforge/shared/schema.js";
 import { FileStore } from "../filestore.js";
 import { evaluateAll } from "../checker.js";
 import { logger } from "../logger.js";
+import { normalizeArgSpecs } from "../artifacts.js";
 import { ConnectionPool } from "./connections.js";
 import { findRecording, loadCassette, recordKey, saveRecording, toToolResponse } from "./recordings.js";
 import { resolveArgs } from "./resolve.js";
@@ -79,6 +80,9 @@ export function toJUnit(report: RunReport): string {
 
 export async function runSession(opts: RunOptions): Promise<RunReport> {
   const mode: RunMode = opts.mode ?? "replay";
+  if (mode === "live") {
+    throw Object.assign(new Error("live 모드(generated 재생성)는 M5에서 구현"), { code: "unimplemented" });
+  }
   if (mode === "replay" && opts.updateGolden) {
     throw Object.assign(new Error("--update-golden은 record/passthrough에서만 허용 (replay 불가)"), { code: "bad_request" });
   }
@@ -213,23 +217,48 @@ async function execNode(
   mode: RunMode,
 ): Promise<NodeResult> {
   const start = Date.now();
+  // 구 세션 마이그레이션: 절대경로 fixed → 상대경로 (M3.2-2)
+  const normSpecs = normalizeArgSpecs(n.args ?? {}, {
+    sandboxDir: join(opts.procforgeDir, "sandbox", opts.sessionId),
+    projectRoot: opts.projectRoot,
+  });
+  if (normSpecs.warnings.length > 0) logger.warn("absolute path kept", { nodeId: n.id, warnings: normSpecs.warnings });
+  const specs = normSpecs.specs;
   const inputSchema = catalogInputSchema(opts, n);
+  const readOnly = catalogReadOnly(opts, n);
   const roles: Record<string, PathRole | undefined> = {};
-  for (const [k, spec] of Object.entries(n.args ?? {})) {
-    roles[k] = (spec as { path?: PathRole }).path ?? inferPathRole(k, inputSchema);
+  for (const [k, spec] of Object.entries(specs)) {
+    const explicit = (spec as { path?: PathRole }).path;
+    if (explicit) {
+      roles[k] = explicit;
+      continue;
+    }
+    // 내장 고정 매핑 (M3.2-3): write.path=out, edit.path=inout
+    if (n.tool?.server === "opencode" && n.tool?.name === "write" && k === "path") {
+      roles[k] = "out";
+      continue;
+    }
+    if (n.tool?.server === "opencode" && n.tool?.name === "edit" && k === "path") {
+      roles[k] = "inout";
+      continue;
+    }
+    if (readOnly) {
+      roles[k] = "in";
+      continue;
+    }
+    roles[k] = inferPathRole(k, inputSchema) as PathRole | undefined;
   }
   const args = rewritePaths(
     resolveArgs({
-      specs: n.args ?? {},
+      specs,
       params,
       outputs,
       attempts: n.attempts,
       goldenAttemptId: n.golden?.attemptId,
-      live: mode === "passthrough",
+      live: mode === "live",
     }),
     roles,
-    fsDir,
-    opts.projectRoot,
+    { fsDir, projectRoot: opts.projectRoot, allowProjectRead: opts.allowProjectRead ?? false, toolReadOnly: readOnly },
   );
   const server = n.tool!.server;
   const tool = n.tool!.name;
@@ -308,12 +337,19 @@ async function execNode(
 }
 
 function catalogInputSchema(_opts: RunOptions, _n: Node): Record<string, unknown> | undefined {
-  // 세션 카탈로그에서 해당 tool inputSchema 조회 (추론 보조)
+  return catalogEntry(_opts, _n)?.inputSchema as Record<string, unknown> | undefined;
+}
+
+function catalogReadOnly(_opts: RunOptions, _n: Node): boolean {
+  return catalogEntry(_opts, _n)?.annotations?.readOnlyHint === true;
+}
+
+function catalogEntry(_opts: RunOptions, _n: Node) {
+  // 세션 카탈로그에서 해당 tool 항목 조회 (추론 보조)
   try {
     const store = new FileStore(_opts.procforgeDir);
     const s = store.getSession(_opts.sessionId);
-    const e = s?.toolCatalog.find((t) => t.server === _n.tool?.server && t.name === _n.tool?.name);
-    return e?.inputSchema as Record<string, unknown> | undefined;
+    return s?.toolCatalog.find((t) => t.server === _n.tool?.server && t.name === _n.tool?.name);
   } catch {
     return undefined;
   }

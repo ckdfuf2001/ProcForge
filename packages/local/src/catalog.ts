@@ -33,19 +33,30 @@ function inputSchemaOf(props: Record<string, unknown>, required: string[]): Reco
   return { type: "object", properties: props, required };
 }
 
-function builtin(name: string, props: Record<string, unknown>, required: string[]): ToolCatalogEntry {
+function builtin(
+  name: string,
+  props: Record<string, unknown>,
+  required: string[],
+  readOnly: boolean,
+): ToolCatalogEntry {
   const inputSchema = inputSchemaOf(props, required);
-  return { server: "opencode", name, inputSchema, schemaHash: schemaHash(inputSchema) };
+  return {
+    server: "opencode",
+    name,
+    inputSchema,
+    schemaHash: schemaHash(inputSchema),
+    annotations: { readOnlyHint: readOnly, openWorldHint: false },
+  };
 }
 
 /** OpenCode 내장 툴 고정 목록 (M2 가정 — DECISIONS 참조) */
 export const BUILTIN_TOOLS: ToolCatalogEntry[] = [
-  builtin("read", { path: { type: "string" } }, ["path"]),
-  builtin("write", { path: { type: "string" }, content: { type: "string" } }, ["path", "content"]),
-  builtin("edit", { path: { type: "string" }, oldString: { type: "string" }, newString: { type: "string" } }, ["path", "oldString", "newString"]),
-  builtin("bash", { command: { type: "string" } }, ["command"]),
-  builtin("glob", { pattern: { type: "string" } }, ["pattern"]),
-  builtin("grep", { pattern: { type: "string" } }, ["pattern"]),
+  builtin("read", { path: { type: "string" } }, ["path"], true),
+  builtin("write", { path: { type: "string" }, content: { type: "string" } }, ["path", "content"], false),
+  builtin("edit", { path: { type: "string" }, oldString: { type: "string" }, newString: { type: "string" } }, ["path", "oldString", "newString"], false),
+  builtin("bash", { command: { type: "string" } }, ["command"], false),
+  builtin("glob", { pattern: { type: "string" } }, ["pattern"], true),
+  builtin("grep", { pattern: { type: "string" } }, ["pattern"], true),
 ];
 
 export function loadMcpConfigs(projectRoot: string): { servers: Record<string, McpServerConfig>; sources: string[] } {
@@ -120,7 +131,19 @@ async function listServerTools(
     const { tools } = await client.listTools();
     const entries = tools.map((t) => {
       const inputSchema = (t.inputSchema ?? { type: "object" }) as Record<string, unknown>;
-      return { server: serverName, name: t.name, inputSchema, schemaHash: schemaHash(inputSchema) };
+      const a = (t.annotations ?? {}) as Record<string, boolean>;
+      return {
+        server: serverName,
+        name: t.name,
+        inputSchema,
+        schemaHash: schemaHash(inputSchema),
+        annotations: {
+          readOnlyHint: a["readOnlyHint"],
+          destructiveHint: a["destructiveHint"],
+          idempotentHint: a["idempotentHint"],
+          openWorldHint: a["openWorldHint"],
+        },
+      };
     });
     return { entries };
   } catch (e) {

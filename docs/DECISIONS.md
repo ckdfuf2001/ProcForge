@@ -110,6 +110,22 @@
   PPT MCP는 knorq-ai/pptx-mcp-server 권장 (PyPI·37종·검증 내장). 샘플·시나리오·측정표는
   examples/dogfood + docs/M3.5-dogfood.md에 준비. 코드 수정은 instruction·description 한정.
 
+## M3.2
+
+- [M3.2-1] passthrough도 generated는 golden attempt 기록값. live 모드 추가(생성 재생성,
+  M5까지 unimplemented). CLI·pf_test mode enum에 live 포함(실행 시 거부).
+- [M3.2-2] confirm_leaf fixed 정규화 — sandbox/<sid>/·프로젝트 절대경로 → 상대경로,
+  그 외 절대경로는 유지+warnings(응답 포함). runner도 동일 함수로 마이그레이션 적용.
+- [M3.2-3] PathRole inout 추가. 추정 순서: ArgSpec.path → 내장 고정(write.path=out,
+  edit.path=inout) → 카탈로그 readOnlyHint=true면 in → 인자명 규칙 →
+  파일 미존재 & 비-readOnly면 out. annotations 미상은 비-readOnly 취급.
+  ToolCatalogEntry.annotations 추가(수집 시 기록). 내장 read/glob/grep은 readOnly.
+- [M3.2-4] projectRoot 폴백 기본 off (--allow-project-read로만 on). off + fixture
+  누락 시 "fixture 없음: <경로>, record 모드로 재녹화" 에러.
+- [M3.2-5] resolve.ts 구 rewritePaths 삭제 (paths.ts로 일원화).
+- [M3.2-6] 내장 도구 응답에 resultJson 추가 (판정 대상). 경로 후보 판정은
+  슬래시/확장자 패턴(무분별 매핑 방지). 녹화 키는 fsDir→RUNFS, projectRoot→PROJECT.
+
 ## M1
 
 - [M1-1] checker 주입 — §6 pf_report의 verdict 계산은 local checker(§7)가 소유. core는 `EvaluateFn`을 생성자 주입받고 기본값은 constraints-empty→pass, 그 외→fail. 이유: core→local import 순환 방지 + 의존방향(local→core 금지) 유지. M2에서 local MCP 핸들러가 `checker.evaluateAll`을 주입한다.

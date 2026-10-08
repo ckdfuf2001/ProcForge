@@ -59,10 +59,10 @@ for (const [nid, tool, args, rj] of [
   await client.pfResolve({ sessionId: sid, nodeId: nid, decision: "leaf", tool: { server: "fake-ppt", name: tool }, argSpecs: specs });
 }
 
-runCli(["test", "--session", sid, "--mode", "record"]);
+runCli(["test", "--session", sid, "--mode", "record", "--allow-project-read"]);
 writeCfg(["nonexistent-procforge-tool-xyz"]); // 서버 차단: replay는 녹화본만 사용
 const junit = join(root, "junit.xml");
-runCli(["test", "--session", sid, "--mode", "replay", "--junit", junit]);
+runCli(["test", "--session", sid, "--mode", "replay", "--allow-project-read", "--junit", junit]);
 if (!existsSync(junit)) {
   console.error("junit.xml missing");
   process.exit(1);

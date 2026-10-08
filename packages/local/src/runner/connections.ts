@@ -37,13 +37,20 @@ export class ConnectionPool {
     switch (name) {
       case "read": {
         const p = this.runPath(args["path"] as string);
-        return { resultText: readFileSync(p, "utf8") };
+        const text = readFileSync(p, "utf8");
+        let json: unknown;
+        try {
+          json = JSON.parse(text);
+        } catch {
+          json = { text };
+        }
+        return { resultText: text, resultJson: json };
       }
       case "write": {
         const p = this.runPath(args["path"] as string);
         mkdirSync(dirname(p), { recursive: true });
         writeFileSync(p, args["content"] as string);
-        return { resultText: `wrote ${args["path"]}` };
+        return { resultText: `wrote ${args["path"]}`, resultJson: { wrote: args["path"] } };
       }
       case "edit": {
         const p = this.runPath(args["path"] as string);
@@ -51,13 +58,13 @@ export class ConnectionPool {
         const oldS = args["oldString"] as string;
         if (!cur.includes(oldS)) throw new Error(`oldString not found in ${args["path"]}`);
         writeFileSync(p, cur.replace(oldS, args["newString"] as string));
-        return { resultText: `edited ${args["path"]}` };
+        return { resultText: `edited ${args["path"]}`, resultJson: { edited: args["path"] } };
       }
       case "bash": {
         if (!this.allowBash) throw new Error("bash is disabled in runner (allowBash 필요)");
         const r = spawnSync(args["command"] as string, { shell: true, cwd: this.runFs, encoding: "utf8", timeout: 30000 });
         if (r.status !== 0) throw new Error(`bash exit ${r.status}: ${(r.stderr || r.stdout || "").slice(0, 500)}`);
-        return { resultText: r.stdout };
+        return { resultText: r.stdout, resultJson: { stdout: r.stdout, exit: r.status } };
       }
       default:
         throw new Error(`runner 미지원 내장 툴: ${name}`);

@@ -14,6 +14,7 @@ const { values, positionals } = parseArgs({
     junit: { type: "string" },
     "update-golden": { type: "boolean", default: false },
     "allow-bash": { type: "boolean", default: false },
+    "allow-project-read": { type: "boolean", default: false },
     changed: { type: "boolean", default: false },
     "procforge-dir": { type: "string" },
     "project-root": { type: "string" },
@@ -24,7 +25,7 @@ const { values, positionals } = parseArgs({
 async function main(): Promise<number> {
   const [cmd] = positionals;
   if (cmd !== "test") {
-    console.error("usage: procforge test --session <id> [--node <id>] [--mode record|replay|passthrough] [--update-golden] [--allow-bash] [--changed] [--junit out.xml]");
+    console.error("usage: procforge test --session <id> [--node <id>] [--mode record|replay|passthrough|live] [--update-golden] [--allow-bash] [--allow-project-read] [--changed] [--junit out.xml]");
     return 2;
   }
   if (values.procedure && !values.session) {
@@ -36,7 +37,7 @@ async function main(): Promise<number> {
     return 2;
   }
   const mode = values.mode as string;
-  if (!["record", "replay", "passthrough"].includes(mode)) {
+  if (!["record", "replay", "passthrough", "live"].includes(mode)) {
     console.error(`bad --mode: ${mode}`);
     return 2;
   }
@@ -52,9 +53,10 @@ async function main(): Promise<number> {
       projectRoot,
       sessionId: values.session,
       nodeId: values.node,
-      mode: mode as "record" | "replay" | "passthrough",
+      mode: mode as "record" | "replay" | "passthrough" | "live",
       updateGolden: values["update-golden"] ?? false,
       allowBash: values["allow-bash"] ?? false,
+      allowProjectRead: values["allow-project-read"] ?? false,
       changed: values.changed ?? false,
     });
     if (values.junit) writeFileSync(resolve(values.junit), toJUnit(report));
