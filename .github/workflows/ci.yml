@@ -1,0 +1,23 @@
+name: ci
+on:
+  push:
+  pull_request:
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm test
+      - run: pnpm check:deps
+      - name: no policy strings in local bundle
+        run: |
+          ! grep -ri "분해 정책\|멈춤 판단\|argSpec 분류 휴리스틱" packages/local/src || (echo "policy leak in local" && exit 1)

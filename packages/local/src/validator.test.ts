@@ -1,0 +1,162 @@
+import { describe, it, expect } from "vitest";
+import { validateTree } from "../src/validator.js";
+import type { Node, Session } from "@procforge/shared/schema.js";
+
+function baseSession(over: Partial<Session> = {}): Session {
+  return {
+    id: "s1",
+    request: "월간보고서",
+    params: { month: "2026-09" },
+    toolCatalog: [
+      {
+        server: "fs",
+        name: "read",
+        inputSchema: {
+          type: "object",
+          properties: { path: { type: "string" } },
+          required: ["path"],
+        } as unknown as Record<string, unknown>,
+        schemaHash: "abc",
+      },
+    ],
+    rootId: "1",
+    limits: { maxDepth: 3, maxRetries: 2, maxNodes: 10 },
+    createdAt: new Date().toISOString(),
+    ...over,
+  };
+}
+
+function leaf(id: string, over: Partial<Node> = {}): Node {
+  return {
+    id,
+    parentId: null,
+    goal: `goal ${id}`,
+    status: "leaf",
+    depth: 0,
+    dependsOn: [],
+    children: [],
+    tool: { server: "fs", name: "read", schemaHash: "abc" },
+    args: { path: { kind: "fixed", value: "a.txt" } },
+    sideEffect: "none",
+    constraints: [],
+    advice: [],
+    attempts: [
+      {
+        id: "a1",
+        at: new Date().toISOString(),
+        tool: { server: "fs", name: "read" },
+        args: { path: "a.txt" },
+        resultSummary: "ok",
+        artifacts: [],
+        verdict: "pass",
+        failedConstraints: [],
+      },
+    ],
+    retries: 0,
+    hash: "h",
+    locked: false,
+    ...over,
+  };
+}
+
+describe("validator 10종", () => {
+  it("1. leaf tool이 catalog에 없음", () => {
+    const s = baseSession();
+    const n = leaf("1", { tool: { server: "no", name: "tool", schemaHash: "x" } });
+    const errs = validateTree(s, [n]);
+    expect(errs.some((e) => e.code === "unknown_tool")).toBe(true);
+  });
+
+  it("2. args가 inputSchema에 부적합", () => {
+    const s = baseSession();
+    const n = leaf("1", { args: { path: { kind: "fixed", value: 123 } } });
+    const errs = validateTree(s, [n]);
+    expect(errs.some((e) => e.code === "bad_args")).toBe(true);
+  });
+
+  it("3. var 참조가 존재하지 않는 노드", () => {
+    const s = baseSession();
+    const n = leaf("1", { args: { path: { kind: "var", ref: "$9.output.path" } } });
+    const errs = validateTree(s, [n]);
+    expect(errs.some((e) => e.code === "bad_ref")).toBe(true);
+  });
+
+  it("4. 참조 필드 경로 오류", () => {
+    const s = baseSession();
+    const n1 = leaf("1");
+    const n2 = leaf("2", {
+      parentId: null,
+      args: { path: { kind: "var", ref: "$1.output.nonexistent.deep" } },
+    });
+    const errs = validateTree(s, [n1, n2], { outputs: { "1": { path: "a.txt" } } });
+    expect(errs.some((e) => e.code === "bad_ref_field")).toBe(true);
+  });
+
+  it("5. 순환 의존", () => {
+    const s = baseSession();
+    const a = leaf("1", { dependsOn: ["2"] });
+    const b = leaf("2", { dependsOn: ["1"] });
+    const errs = validateTree(s, [a, b]);
+    expect(errs.some((e) => e.code === "cycle")).toBe(true);
+  });
+
+  it("6. depth 초과", () => {
+    const s = baseSession();
+    const n = leaf("1", { depth: 99 });
+    const errs = validateTree(s, [n]);
+    expect(errs.some((e) => e.code === "depth_exceeded")).toBe(true);
+  });
+
+  it("7. 노드 수 초과", () => {
+    const s = baseSession({ limits: { maxDepth: 3, maxRetries: 2, maxNodes: 1 } });
+    const errs = validateTree(s, [leaf("1"), leaf("2")]);
+    expect(errs.some((e) => e.code === "too_many_nodes")).toBe(true);
+  });
+
+  it("8. schemaHash 불일치", () => {
+    const s = baseSession();
+    const n = leaf("1", { tool: { server: "fs", name: "read", schemaHash: "DIFFERENT" } });
+    const errs = validateTree(s, [n]);
+    expect(errs.some((e) => e.code === "schema_hash_mismatch")).toBe(true);
+  });
+
+  it("9. leaf 확정 조건 미달 (verdict!=pass)", () => {
+    const s = baseSession();
+    const n = leaf("1", {
+      attempts: [
+        {
+          id: "a1",
+          at: new Date().toISOString(),
+          tool: { server: "fs", name: "read" },
+          args: {},
+          resultSummary: "fail",
+          artifacts: [],
+          verdict: "fail",
+          failedConstraints: ["c1"],
+        },
+      ],
+    });
+    const errs = validateTree(s, [n]);
+    expect(errs.some((e) => e.code === "leaf_not_confirmed")).toBe(true);
+  });
+
+  it("10. id/parent/children 불일치", () => {
+    const s = baseSession();
+    const parent: Node = {
+      ...leaf("1"),
+      status: "split",
+      tool: undefined,
+      args: undefined,
+      attempts: [],
+      children: ["1.1"],
+    };
+    const child = leaf("1.1", { parentId: "WRONG" });
+    const errs = validateTree(s, [parent, child]);
+    expect(errs.some((e) => e.code === "parent_link" || e.code === "children_link")).toBe(true);
+  });
+
+  it("정상 트리는 에러 없음", () => {
+    const s = baseSession();
+    expect(validateTree(s, [leaf("1")])).toEqual([]);
+  });
+});

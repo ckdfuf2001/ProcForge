@@ -1,0 +1,5 @@
+node_modules/
+packages/*/dist/
+.procforge/
+*.log
+.DS_Store
