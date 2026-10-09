@@ -27,8 +27,9 @@ import { runSession } from "./runner/index.js";
 import { runProcedureTest } from "./runner/procedure-run.js";
 import { finalizeSession } from "./procedure.js";
 import { logEvent } from "./trace.js";
+import { ProcForgeApp, PROMPT_TEXT, DEFAULT_SESSION_TTL_MS } from "./app/app.js";
 
-export const DEFAULT_SESSION_TTL_MS = 30 * 24 * 3600 * 1000;
+export { PROMPT_TEXT, DEFAULT_SESSION_TTL_MS };
 
 export type ServerDeps = {
   client: CoreClient;
@@ -64,17 +65,6 @@ export const TOOL_NAMES = [
 ] as const;
 
 export const READ_ONLY_TOOLS = ["pf_next", "pf_tree", "pf_get_node"] as const;
-
-/** 분해 루프 안내 (prompt + pf_start 첫 응답 공유, 정책 세부 없음) */
-export const PROMPT_TEXT = [
-  "ProcForge 분해 루프:",
-  "1. pf_next로 노드 1개를 받는다. done=true면 끝.",
-  "2. 노드가 도구 1회로 가능하면 sandbox 사본에서 실행 후 pf_report(selfVerdict/selfReason 필수).",
-  "3. 너무 크면 pf_split로 나눈다.",
-  "4. pass여도 자동 확정 없음. pf_confirm_leaf(tool, argSpecs)로 확정한다.",
-  "5. 외부에 영향을 주는 실행은 직접 하지 말고 pf_ask_human으로 승인 요청.",
-  "6. needs_human이면 사람 조언을 pf_advise로 등록한 뒤 계속한다.",
-].join("\n");
 
 function err(code: ErrorCode, message: string, hint?: string): ProcForgeError {
   return pfError(code, message, hint);
@@ -147,6 +137,15 @@ function requireFresh(deps: ServerDeps, sessionId: string) {
 export function buildServer(deps: ServerDeps): McpServer {
   const server = new McpServer({ name: "procforge-local", version: "0.2.0" });
   const { client } = deps;
+  const app = new ProcForgeApp({
+    core: deps.client,
+    store: deps.store,
+    procforgeDir: deps.procforgeDir,
+    projectRoot: deps.projectRoot,
+    sessionTtlMs: deps.sessionTtlMs,
+    strictSandbox: deps.strictSandbox,
+    maxArtifactBytes: deps.maxArtifactBytes,
+  });
   const enabled = (name: string) => !deps.readOnly || (READ_ONLY_TOOLS as readonly string[]).includes(name);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const R = (name: string, config: any, cb: any) => {
@@ -212,27 +211,7 @@ export function buildServer(deps: ServerDeps): McpServer {
     },
     async (a: any) => {
       try {
-        const collected = a.toolCatalog
-          ? undefined
-          : await collectCatalog(deps.projectRoot, { cacheDir: join(deps.procforgeDir, "cache") });
-        const catalog = a.toolCatalog ?? collected!.entries;
-        const warnings = collected?.warnings ?? [];
-        const out = await client.pfStart({ request: a.request as string, params: a.params as Record<string, string> | undefined, toolCatalog: catalog as never, limits: a.limits as never, opencodeVersion: collected?.opencodeVersion });
-        deps.store.touch(out.session.id);
-        let sandboxNote = "";
-        const seeds = a.seedFiles as string[] | undefined;
-        if (seeds && seeds.length > 0) {
-          const sb = setupSandbox({ procforgeDir: deps.procforgeDir, sessionId: out.session.id, projectRoot: deps.projectRoot, seedFiles: seeds });
-          sandboxNote = ` 참조 파일 ${sb.copied.length}개를 sandbox에 복사했다.`;
-        }
-        return ok({
-          sessionId: out.session.id,
-          node: nodeSummary(out.node, out.session.limits),
-          instruction: `${PROMPT_TEXT}\n\n${out.instruction}${sandboxNote}`,
-          warnings,
-          sessionExpiresInDays: Math.round((deps.sessionTtlMs ?? DEFAULT_SESSION_TTL_MS) / 86400000),
-          opencodeVersion: out.session.opencodeVersion ?? "unknown",
-        });
+        return ok(await app.start(a));
       } catch (e) {
         return errResult(e);
       }

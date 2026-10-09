@@ -1,0 +1,102 @@
+import { join } from "node:path";
+import type { CoreClient } from "@procforge/shared/core-client.js";
+import type { Session } from "@procforge/shared/schema.js";
+import { pfError } from "@procforge/shared/errors.js";
+import type { FileStore } from "../filestore.js";
+import { collectCatalog } from "../catalog.js";
+import { nodeSummary } from "../views.js";
+import { seedSandbox } from "../services/workspace.js";
+
+// ProcForge 유스케이스층 (M4.2-1). 사용자 행동 1개 = 메서드 1개.
+// 어댑터(server/cli/ui)는 입력 검증·호출·응답 포맷만 하고 정책·파일 작업은 여기에 위임한다.
+
+export const DEFAULT_SESSION_TTL_MS = 30 * 24 * 3600 * 1000;
+
+/** 분해 루프 안내 (prompt + pf_start 첫 응답 공유, 정책 세부 없음) */
+export const PROMPT_TEXT = [
+  "ProcForge 분해 루프:",
+  "1. pf_next로 노드 1개를 받는다. done=true면 끝.",
+  "2. 노드가 도구 1회로 가능하면 sandbox 사본에서 실행 후 pf_report(selfVerdict/selfReason 필수).",
+  "3. 너무 크면 pf_split로 나눈다.",
+  "4. pass여도 자동 확정 없음. pf_confirm_leaf(tool, argSpecs)로 확정한다.",
+  "5. 외부에 영향을 주는 실행은 직접 하지 말고 pf_ask_human으로 승인 요청.",
+  "6. needs_human이면 사람 조언을 pf_advise로 등록한 뒤 계속한다.",
+].join("\n");
+
+export type AppDeps = {
+  core: CoreClient;
+  store: FileStore;
+  procforgeDir: string;
+  projectRoot: string;
+  sessionTtlMs?: number;
+  strictSandbox?: boolean;
+  maxArtifactBytes?: number;
+};
+
+export class ProcForgeApp {
+  private core: CoreClient;
+  private store: FileStore;
+  private procforgeDir: string;
+  private projectRoot: string;
+  private sessionTtlMs: number | undefined;
+  private strictSandbox: boolean;
+  private maxArtifactBytes: number;
+
+  constructor(deps: AppDeps) {
+    this.core = deps.core;
+    this.store = deps.store;
+    this.procforgeDir = deps.procforgeDir;
+    this.projectRoot = deps.projectRoot;
+    this.sessionTtlMs = deps.sessionTtlMs;
+    this.strictSandbox = deps.strictSandbox ?? true;
+    this.maxArtifactBytes = deps.maxArtifactBytes ?? 5 * 1024 * 1024;
+  }
+
+  /** 세션 신선도 확인 (server requireFresh 이동). 없으면 touch 후 반환 */
+  private fresh(sessionId: string): Session {
+    const s = this.store.getSession(sessionId);
+    if (!s) throw pfError("session_not_found", `세션 없음: ${sessionId}`);
+    const ttl = this.sessionTtlMs ?? DEFAULT_SESSION_TTL_MS;
+    const last = this.store.getLastUsed(sessionId);
+    if (last === undefined) {
+      this.store.touch(sessionId);
+      return s;
+    }
+    if (Date.now() - last > ttl) throw pfError("session_not_found", `세션 만료: ${sessionId}`);
+    return s;
+  }
+
+  /** 변경계 유스케이스용 세션 락 (server W() 이동) */
+  private async locked<T>(sessionId: string, fn: () => Promise<T> | T): Promise<T> {
+    const release = this.store.acquireLock(sessionId);
+    try {
+      return await fn();
+    } finally {
+      release();
+    }
+  }
+
+  async start(a: any): Promise<Record<string, unknown>> {
+    const collected = a.toolCatalog
+      ? undefined
+      : await collectCatalog(this.projectRoot, { cacheDir: join(this.procforgeDir, "cache") });
+    const catalog = a.toolCatalog ?? collected!.entries;
+    const warnings = collected?.warnings ?? [];
+    const out = await this.core.pfStart({ request: a.request as string, params: a.params as Record<string, string> | undefined, toolCatalog: catalog as never, limits: a.limits as never, opencodeVersion: collected?.opencodeVersion });
+    this.store.touch(out.session.id);
+    const sandboxNote = seedSandbox({
+      procforgeDir: this.procforgeDir,
+      sessionId: out.session.id,
+      projectRoot: this.projectRoot,
+      seedFiles: a.seedFiles as string[] | undefined,
+    });
+    return {
+      sessionId: out.session.id,
+      node: nodeSummary(out.node, out.session.limits),
+      instruction: `${PROMPT_TEXT}\n\n${out.instruction}${sandboxNote}`,
+      warnings,
+      sessionExpiresInDays: Math.round((this.sessionTtlMs ?? DEFAULT_SESSION_TTL_MS) / 86400000),
+      opencodeVersion: out.session.opencodeVersion ?? "unknown",
+    };
+  }
+}
