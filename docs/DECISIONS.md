@@ -182,6 +182,20 @@
 - [M3.4.1-7] CI 매트릭스에 windows-latest 추가. Windows 실패는 skip 없이 수정
   (자식 프로세스 경로 fileURL·구분자·대소문자 이슈 해결).
 
+## M3.4.3 (그래프 교착)
+
+- [M3.4.3-1] pfNext 교착 응답 — ready 0 + pending + needs_human 없음이면
+  done:false + blocked[{nodeId, waitingOn, reason}] + 첫 stuck 노드.
+  reason: dep_missing(부재)/dep_empty_split(빈 펼침)/dep_failed(마지막 실패)/
+  dep_pending(그 외·순환 포함). 존재하는 원인은 needs_human 승격.
+  instruction은 pf_advise/pf_reopen 지시. computeDeadlock 순수 함수로 분리·단위 테스트.
+- [M3.4.3-2] 순환 검사는 펼친 그래프 기준 (shared hasCycle, validator·core 공용).
+  pf_split 저장 전 검사, 순환 생성 시 bad_request. validator 기존 cycle 테스트 유지.
+- [M3.4.3-3] propagateStale: 하류 split은 상태 유지 + 해시만 갱신. 펼친 의존
+  검사가 자손 leaf에 직접 도달하므로 하강 불필요. 재-split 불필요 테스트.
+- [M3.4.3-4] argSpecs 검사는 shared/args-schema 공용 (core bad_args·validator
+  bad_args). type 배열(["string","null"] 등) 지원. similarKey 이동.
+
 ## M3.4.2 (CI green)
 
 - [M3.4.2-1] pnpm/action-setup의 version 핀 제거 (packageManager 필드 사용).
