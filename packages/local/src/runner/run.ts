@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { compareNormalized } from "@procforge/shared/normalize.js";
 import { compareNodeIds } from "@procforge/shared/ids.js";
-import { expandDepLeafs } from "@procforge/shared/deps.js";
+import { effectiveDeps, expandDepLeafs, rawDepSources } from "@procforge/shared/deps.js";
 import type { Node } from "@procforge/shared/schema.js";
 import { FileStore } from "../filestore.js";
 import { evaluateAll } from "../checker.js";
@@ -20,9 +20,8 @@ import type { NodeResult, RunMode, RunOptions, RunReport, ToolResponse } from ".
 function orderNodes(nodes: Node[]): Node[] {
   const byId = new Map(nodes.map((n) => [n.id, n]));
   const inScope = new Set(nodes.map((n) => n.id));
-  // dependsOn의 split id는 자손 leaf로 펼침 (M3.3-6)
-  const edges = (n: Node): string[] =>
-    n.dependsOn.flatMap((d) => expandDepLeafs(d, byId)).filter((d) => inScope.has(d));
+  // 의존 간선 = 실효 의존 (M3.4.4-1). split id는 자손 leaf로 펼침.
+  const edges = (n: Node): string[] => effectiveDeps(n, byId).filter((d) => inScope.has(d));
   const done = new Set<string>();
   const out: Node[] = [];
   const pending = [...nodes].sort((a, b) => compareNodeIds(a.id, b.id));
@@ -107,11 +106,12 @@ export async function runSession(opts: RunOptions): Promise<RunReport> {
       if (!all.some((n) => n.id === opts.nodeId)) throw Object.assign(new Error(`노드 없음: ${opts.nodeId}`), { code: "not_found" });
       all = subtree(all, opts.nodeId);
     }
-    // --changed: lastPassHash 불일치 또는 없음 + 하류만 (M3.3-5)
+    // --changed: lastPassHash 불일치 또는 없음 + 하류만 (M3.3-5, M3.4.4-1 실효 하류)
     let targets = new Set(all.map((n) => n.id));
     if (opts.changed) {
       const prev = readLastPass(opts.procforgeDir, opts.sessionId);
       if (prev.exists) {
+        const allById = new Map(all.map((x) => [x.id, x]));
         const changedIds = new Set(
           all.filter((n) => prev.hashes[n.id] === undefined || prev.hashes[n.id] !== n.hash).map((n) => n.id),
         );
@@ -119,7 +119,7 @@ export async function runSession(opts: RunOptions): Promise<RunReport> {
         while (queue.length > 0) {
           const cur = queue.shift()!;
           for (const n of all) {
-            if (n.dependsOn.includes(cur) && !changedIds.has(n.id)) {
+            if (!changedIds.has(n.id) && effectiveDeps(n, allById).includes(cur)) {
               changedIds.add(n.id);
               queue.push(n.id);
             }
@@ -158,11 +158,11 @@ export async function runSession(opts: RunOptions): Promise<RunReport> {
         resultOf.set(n.id, r);
         continue;
       }
-      // 실패 전파 (M3.1-4/M3.3-6/M3.4.1-5): split 의존은 자손 leaf로 펼침.
-      // 펼침이 비면(자손 leaf 0개·자식 id 부재) blocked. 범위 내 의존이
+      // 실패 전파 (M3.1-4/M3.3-6/M3.4.1-5/M3.4.4-1): 원시 의존별 펼침 검사.
+      // 펼침 빈손(자손 leaf 0개·자식 id 부재) → blocked. 범위 내 leaf가
       // fail/blocked이거나 출력이 없으면 blocked
       let blockedBy: string | undefined;
-      for (const dep of n.dependsOn) {
+      for (const dep of rawDepSources(n, byIdAll)) {
         const leaves = expandDepLeafs(dep, byIdAll);
         if (leaves.length === 0) {
           blockedBy = dep;

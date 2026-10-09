@@ -713,3 +713,40 @@ describe("M3.4.1 runner", () => {
     expect(waiting.detail).toMatch(/1\.1/);
   }, 30000);
 });
+
+describe("M3.4.4 runner", () => {
+  it("(c) var 전용 의존도 순서 보장: 1.1 이후 1.2 실행", async () => {
+    const started = await client.pfStart({
+      request: "varorder", toolCatalog: (await collectCatalog(root)).entries,
+      limits: { maxDepth: 3, maxRetries: 2, maxNodes: 10 },
+    });
+    const sid = started.session.id;
+    await client.pfResolve({ sessionId: sid, nodeId: "1", decision: "split", children: [{ goal: "a" }, { goal: "b" }] });
+    await client.pfReport({
+      sessionId: sid, nodeId: "1.1",
+      tool: { server: "fake-ppt", name: "echo" }, args: { title: "a" },
+      resultSummary: JSON.stringify({ title: "a" }), resultJson: { title: "a" },
+      selfVerdict: "pass", selfReason: "ok",
+    });
+    await client.pfResolve({
+      sessionId: sid, nodeId: "1.1", decision: "leaf",
+      tool: { server: "fake-ppt", name: "echo" },
+      argSpecs: { title: { kind: "fixed", value: "a" } } as never,
+    });
+    await client.pfReport({
+      sessionId: sid, nodeId: "1.2",
+      tool: { server: "fake-ppt", name: "echo" }, args: { title: "b" },
+      resultSummary: JSON.stringify({ title: "b" }), resultJson: { title: "b" },
+      selfVerdict: "pass", selfReason: "ok",
+    });
+    await client.pfResolve({
+      sessionId: sid, nodeId: "1.2", decision: "leaf",
+      tool: { server: "fake-ppt", name: "echo" },
+      argSpecs: { title: { kind: "var", ref: "$1.1.output.title" } } as never,
+    });
+    const rec = await runSession({ procforgeDir: pfdir, projectRoot: root, sessionId: sid, mode: "record" });
+    expect(rec.summary.fail).toBe(0);
+    const order = rec.results.map((r) => r.nodeId);
+    expect(order.indexOf("1.1")).toBeLessThan(order.indexOf("1.2"));
+  }, 30000);
+});
