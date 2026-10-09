@@ -21,7 +21,11 @@
     "./deps": "./dist/deps.js",
     "./deps.js": "./dist/deps.js",
     "./args-schema": "./dist/args-schema.js",
-    "./args-schema.js": "./dist/args-schema.js"
+    "./args-schema.js": "./dist/args-schema.js",
+    "./validator": "./dist/validator.js",
+    "./validator.js": "./dist/validator.js",
+    "./dto": "./dist/dto.js",
+    "./dto.js": "./dist/dto.js"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",

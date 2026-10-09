@@ -8,7 +8,7 @@ import { isResolved } from "@procforge/shared/deps.js";
 import { compareNodeIds } from "@procforge/shared/ids.js";
 import { restoreParamsPlaceholders } from "@procforge/shared/normalize.js";
 import { FileStore } from "./filestore.js";
-import { validateTree } from "./validator.js";
+import { validateTree } from "@procforge/shared/validator.js";
 import { constraintSummary } from "./views.js";
 
 // 확정 트리 → 절차서 export/import (M4). procedure.json이 재실행 입력의 단일 원천.

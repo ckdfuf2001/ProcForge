@@ -1,7 +1,7 @@
-import type { Node, Session } from "@procforge/shared/schema.js";
-import { NodeIdSchema } from "@procforge/shared/schema.js";
-import { checkUnknownKeys, matchesType, readSchemaProps } from "@procforge/shared/args-schema.js";
-import { hasCycle } from "@procforge/shared/deps.js";
+import type { Node, Session } from "./schema.js";
+import { NodeIdSchema } from "./schema.js";
+import { checkUnknownKeys, matchesType, readSchemaProps } from "./args-schema.js";
+import { hasCycle } from "./deps.js";
 
 export type ValidationError = {
   code: string;

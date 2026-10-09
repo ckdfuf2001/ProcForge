@@ -6,7 +6,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { buildServer } from "../src/server.js";
 import { createLocalStack } from "../src/core-inprocess.js";
-import { validateTree } from "../src/validator.js";
+import { validateTree } from "@procforge/shared/validator.js";
 import { FileStore } from "../src/filestore.js";
 
 let root: string;
