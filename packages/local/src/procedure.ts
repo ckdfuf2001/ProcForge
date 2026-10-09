@@ -6,6 +6,7 @@ import type { ArgSpec, Constraint, Node, Session } from "@procforge/shared/schem
 import { computeNodeHash } from "@procforge/shared/schema.js";
 import { isResolved } from "@procforge/shared/deps.js";
 import { compareNodeIds } from "@procforge/shared/ids.js";
+import { restoreParamsPlaceholders } from "@procforge/shared/normalize.js";
 import { FileStore } from "./filestore.js";
 import { constraintSummary } from "./views.js";
 
@@ -86,15 +87,26 @@ export function finalizeSession(
   if (unresolved.length > 0) {
     throw Object.assign(new Error(`미해결 노드: ${unresolved.join(", ")}`), { code: "bad_request" });
   }
-  // fixed == params 경고 (재사용 깨짐)
+  // fixed == params 경고 (재사용 깨짐). M4.1-3: 부분 문자열 포함까지 확대
+  // (짧은 값 오경보 방지: 길이 3 이상만). golden은 자리표시자 복원 후 검사.
   const warnings: string[] = [];
-  const paramValues = new Set(Object.values(session.params));
+  const paramEntries = Object.entries(session.params).filter(([, v]) => v.length >= 3);
   for (const n of nodes) {
-    if (!n.args) continue;
-    for (const [k, spec] of Object.entries(n.args)) {
-      const s = spec as ArgSpec;
-      if (s.kind === "fixed" && typeof (s as { value: unknown }).value === "string" && paramValues.has((s as { value: string }).value)) {
-        warnings.push(`${n.id}.${k}="${(s as { value: string }).value}": params 값과 동일한 fixed (var 후보)`);
+    if (n.args) {
+      for (const [k, spec] of Object.entries(n.args)) {
+        const s = spec as ArgSpec;
+        if (s.kind !== "fixed" || typeof (s as { value: unknown }).value !== "string") continue;
+        const v = (s as { value: string }).value;
+        for (const [pk, pv] of paramEntries) {
+          if (v === pv) warnings.push(`${n.id}.${k}="${v}": params 값과 동일한 fixed (var 후보)`);
+          else if (v.includes(pv)) warnings.push(`${n.id}.${k}="${v}": params "${pk}" 값을 부분 포함 (var 후보)`);
+        }
+      }
+    }
+    if (n.golden) {
+      const restored = restoreParamsPlaceholders(n.golden.output, session.params);
+      for (const [pk, pv] of paramEntries) {
+        if (restored.includes(pv)) warnings.push(`${n.id}.golden.output: params "${pk}" 값을 포함 (재바인딩 확인)`);
       }
     }
   }

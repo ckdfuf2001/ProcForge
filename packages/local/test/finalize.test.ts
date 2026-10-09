@@ -158,4 +158,31 @@ describe("pf_finalize", () => {
     expect(md.indexOf("`1.2`")).toBeLessThan(md.indexOf("`1.10`"));
     expect(md.indexOf("`1.9`")).toBeLessThan(md.indexOf("`1.10`"));
   }, 30000);
+
+  it("M4.1-3 params 부분 포함 경고", async () => {
+    const collected = await collectCatalog(root);
+    const started = await client.pfStart({
+      request: "부분 포함",
+      params: { month: "2026-09" },
+      toolCatalog: collected.entries,
+      limits: { maxDepth: 3, maxRetries: 2, maxNodes: 20 },
+    });
+    const sid = started.session.id;
+    await client.pfResolve({ sessionId: sid, nodeId: "1", decision: "split", children: [{ goal: "a" }] });
+    const summary = JSON.stringify({ f: "report-2026-09.pptx" });
+    await client.pfReport({
+      sessionId: sid, nodeId: "1.1",
+      tool: { server: "fake-ppt", name: "list_slides" }, args: { file: "report-2026-09.pptx" },
+      resultSummary: summary, resultJson: JSON.parse(summary),
+      selfVerdict: "pass", selfReason: "ok",
+    });
+    await client.pfResolve({
+      sessionId: sid, nodeId: "1.1", decision: "leaf",
+      tool: { server: "fake-ppt", name: "list_slides" },
+      argSpecs: { file: { kind: "fixed", value: "report-2026-09.pptx" } } as never,
+    });
+    const out = finalizeSession(pfdir, sid, "substr-test", { projectRoot: root });
+    expect(out.warnings.some((w) => w.includes("부분 포함"))).toBe(true);
+    expect(out.warnings.some((w) => w.includes("golden.output"))).toBe(true);
+  }, 30000);
 });
