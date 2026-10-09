@@ -35,12 +35,19 @@ function dirs(): { projectRoot: string; procforgeDir: string } {
   return { projectRoot, procforgeDir };
 }
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 async function cmdTest(): Promise<number> {
   if (values.procedure && !values.session && !positionals[1]) {
     console.error("procedure 실행: procforge test procedures/<name> [--param k=v]");
     return 2;
   }
-  const procRef = positionals[1] ?? values.procedure;
+  // positional이 UUID면 세션 id로 해석 (M3.5 지시 호환)
+  const positional = positionals[1];
+  if (!values.session && positional && UUID_RE.test(positional)) {
+    values.session = positional;
+  }
+  const procRef = (!values.session ? positional : undefined) ?? values.procedure;
   const params: Record<string, string> = {};
   for (const p of (values.param as string[] | undefined) ?? []) {
     const i = p.indexOf("=");

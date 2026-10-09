@@ -62,6 +62,9 @@ node packages/local/dist/cli.js test --session <sid> --mode replay --junit repor
 node packages/local/dist/cli.js trace <sid>
 ```
 
+`test`의 첫 인자가 UUID면 `--session` 생략 가능 (`test <sid> --mode replay`).
+절차서는 `test procedures/<name> [--param k=v]`.
+
 ## 3. 확인 절차
 
 1. OpenCode 대화창에서 MCP 목록에 `procforge`와 위 13개 도구가 보이는지 확인.

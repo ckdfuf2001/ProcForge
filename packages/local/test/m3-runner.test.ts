@@ -266,6 +266,22 @@ describe("M3 runner", () => {
     });
     expect(r.status).toBe(2);
   }, 30000);
+
+  it("CLI positional UUID는 세션으로 해석", async () => {
+    const sid = await scriptedSession();
+    const cli = resolve(__dirname, "..", "dist", "cli.js");
+    const env = { ...process.env, PROCFORGE_DIR: pfdir, PROCFORGE_PROJECT_ROOT: root };
+    // 존재하지 않는 UUID → 세션 경로로 실행되어 session_not_found (절차서 경로 아님)
+    const r = spawnSync(process.execPath, [cli, "test", "123e4567-e89b-42d3-a456-426614174000", "--mode", "replay"], {
+      env, encoding: "utf8",
+    });
+    expect(r.status).toBe(1);
+    expect(r.stderr).toMatch(/세션 없음/);
+    // 존재하는 세션 → replay 실행 (녹화 없어 1.1 fail + 하류 blocked, 세션 경로로 동작)
+    const r2 = spawnSync(process.execPath, [cli, "test", sid, "--mode", "replay"], { env, encoding: "utf8" });
+    expect(r2.status).toBe(1);
+    expect(r2.stdout).toMatch(/run .*fail=1/);
+  }, 60000);
 });
 
 describe("M3.2 runner", () => {
