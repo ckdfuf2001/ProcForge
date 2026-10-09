@@ -69,6 +69,37 @@ describe("trace/export", () => {
     const names = listZip(buf).map((e) => e.name);
     expect(names.some((n) => n.endsWith(".redacted.json"))).toBe(true);
     expect(names.some((n) => n.endsWith("session.json") && !n.endsWith(".redacted.json"))).toBe(true);
+    // M3.6-1: with-content 조건 = 원본 + 기술자 병행 (원본마다 기술자 쌍 존재)
+    const originals = names.filter((n) => !n.endsWith(".redacted.json"));
+    expect(originals.length).toBeGreaterThan(0);
+    for (const o of originals) {
+      expect(names).toContain(`${o}.redacted.json`);
+      const meta = JSON.parse(readZipEntry(buf, `${o}.redacted.json`).toString("utf8")) as { redacted: boolean };
+      expect(meta.redacted).toBe(true);
+    }
+  });
+
+  it("export redact: 고유 문자열이 기술자 zip 어디에도 없음", async () => {
+    const marker = "UNIQMASK-7f3a-9zqx";
+    const started = await client.pfStart({
+      request: `마스킹 확인 ${marker}`,
+      toolCatalog: [{ server: "opencode", name: "read", inputSchema: {}, schemaHash: "h" }],
+    });
+    const sid = started.session.id;
+    await client.pfResolve({ sessionId: sid, nodeId: "1", decision: "split", children: [{ goal: `목표 ${marker}` }] });
+    await client.pfReport({
+      sessionId: sid, nodeId: "1.1",
+      tool: { server: "opencode", name: "read" }, args: { path: `x-${marker}` },
+      resultSummary: `요약 ${marker}`, resultJson: { ok: marker },
+      selfVerdict: "pass", selfReason: "ok",
+    });
+    const out = join(pfdir, "out-mask.zip");
+    exportSession({ procforgeDir: pfdir, sessionId: sid, outPath: out, redact: true });
+    const buf = readFileSync(out);
+    for (const e of listZip(buf)) {
+      expect(e.name).not.toContain(marker);
+      expect(readZipEntry(buf, e.name).toString("utf8")).not.toContain(marker);
+    }
   });
 
   it("zip UTF-8 플래그는 비ASCII 이름에만 (탐색기 해제 회귀)", () => {

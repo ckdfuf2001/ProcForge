@@ -110,6 +110,14 @@
   PPT MCP는 knorq-ai/pptx-mcp-server 권장 (PyPI·37종·검증 내장). 샘플·시나리오·측정표는
   examples/dogfood + docs/M3.5-dogfood.md에 준비. 코드 수정은 instruction·description 한정.
 
+## M3.6 (산출물 캡처 + 마스킹)
+
+- [M3.6-1] export 모드 — with-content(`--redact --include-originals`)는 원본 +
+  기술자(`<원본명>.redacted.json`) 병행이 정상 (원본마다 기술자 쌍 존재, 무결성
+  검증용). redact-only zip은 기술자만 포함하므로 request/goal/args/
+  resultSummary/golden/녹화본/fixture 내부 문자열이 원천 차단된다 (회귀 테스트로
+  고유 문자열 부재 확인). 텍스트 파일에도 기술자가 생기는 것은 버그가 아님.
+
 ## M3.2
 
 - [M3.2-1] passthrough도 generated는 golden attempt 기록값. live 모드 추가(생성 재생성,

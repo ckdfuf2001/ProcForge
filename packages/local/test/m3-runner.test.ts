@@ -7,6 +7,7 @@ import { spawnSync } from "node:child_process";
 import { collectCatalog } from "../src/catalog.js";
 import { createLocalStack } from "../src/core-inprocess.js";
 import { ingestArtifacts } from "../src/artifacts.js";
+import { exportSession, listZip, readZipEntry } from "../src/export.js";
 import { runSession, toJUnit } from "../src/runner/index.js";
 import { FileStore } from "../src/filestore.js";
 import type { CoreClient } from "@procforge/shared/core-client.js";
@@ -168,6 +169,55 @@ describe("M3 runner", () => {
     writeOpencodeConfig(BROKEN_CMD);
     const again = await runSession({ procforgeDir: pfdir, projectRoot: root, allowProjectRead: true, sessionId: sid, mode: "replay" });
     expect(again.summary.fail).toBe(0);
+  }, 30000);
+
+  it("export redact: 녹화본·fixture의 고유 문자열도 유출 없음", async () => {
+    const marker = "UNIQMASK-full-4b2c";
+    const collected = await collectCatalog(root);
+    const started = await client.pfStart({
+      request: `마스킹 ${marker}`,
+      params: { month: "2026-09" },
+      toolCatalog: collected.entries,
+      limits: { maxDepth: 3, maxRetries: 2, maxNodes: 20 },
+    });
+    const sid = started.session.id;
+    await client.pfResolve({
+      sessionId: sid, nodeId: "1", decision: "split",
+      children: [{ goal: `목표 ${marker}` }],
+    });
+    // 마커 포함 fixture를 1.1에 첨부
+    writeFileSync(join(root, "secret.txt"), `비밀 ${marker}`);
+    const attemptId = randomUUID();
+    const ing = ingestArtifacts({ procforgeDir: pfdir, sessionId: sid, nodeId: "1.1", attemptId, baseDir: root, paths: ["secret.txt"] });
+    await client.pfReport({
+      sessionId: sid, nodeId: "1.1",
+      tool: { server: "fake-ppt", name: "list_slides" }, args: { file: `data-${marker}.pptx` },
+      resultSummary: `요약 ${marker}`, resultJson: { slides: [marker] },
+      artifacts: ing.stored, artifactContents: ing.contents,
+      selfVerdict: "pass", selfReason: "ok", attemptId,
+    });
+    await client.pfResolve({
+      sessionId: sid, nodeId: "1.1", decision: "leaf",
+      tool: { server: "fake-ppt", name: "list_slides" },
+      argSpecs: { file: { kind: "fixed", value: `data-${marker}.pptx` } } as never,
+    });
+    writeFileSync(join(root, `data-${marker}.pptx`), "x");
+    const rec = await runSession({ procforgeDir: pfdir, projectRoot: root, allowProjectRead: true, sessionId: sid, mode: "record" });
+    expect(rec.summary.fail).toBe(0);
+    // with-content에는 마커가 있고 (검사가 vacuous하지 않음), redact에는 없음
+    const full = join(pfdir, "full.zip");
+    exportSession({ procforgeDir: pfdir, sessionId: sid, outPath: full, redact: true, includeOriginals: true });
+    const fullBuf = readFileSync(full);
+    const fullTexts = listZip(fullBuf).map((e) => readZipEntry(fullBuf, e.name).toString("utf8")).join("\n");
+    expect(fullTexts).toContain(marker);
+    const out = join(pfdir, "mask.zip");
+    const r = exportSession({ procforgeDir: pfdir, sessionId: sid, outPath: out, redact: true });
+    expect(r.redacted).toBe(true);
+    const buf = readFileSync(out);
+    for (const e of listZip(buf)) {
+      expect(e.name).not.toContain(marker);
+      expect(readZipEntry(buf, e.name).toString("utf8")).not.toContain(marker);
+    }
   }, 30000);
 
   it("실패 전파: 상류 실패 → 하류 blocked", async () => {
