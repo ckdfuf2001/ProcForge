@@ -148,14 +148,11 @@ export function classifyReportPaths(input: {
 export function readFixtureContents(input: {
   procforgeDir: string;
   sessionId: string;
-  nodeId: string;
-  getNode: (sessionId: string, nodeId: string) => { attempts: { artifacts: string[] }[] } | undefined;
+  artifacts: string[];
 }): Record<string, string> | undefined {
-  const cur = input.getNode(input.sessionId, input.nodeId);
-  const lastFx = cur?.attempts[cur.attempts.length - 1]?.artifacts ?? [];
-  if (lastFx.length === 0) return undefined;
+  if (input.artifacts.length === 0) return undefined;
   const contents: Record<string, string> = {};
-  for (const fx of lastFx) {
+  for (const fx of input.artifacts) {
     try {
       contents[fx] = readFileSync(join(input.procforgeDir, "sessions", input.sessionId, fx), "utf8").slice(0, 200000);
     } catch {

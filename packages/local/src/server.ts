@@ -1,28 +1,20 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import type { CoreClient } from "@procforge/shared/core-client.js";
 import { NodeIdSchema, SessionIdSchema, ConstraintSchema } from "@procforge/shared/schema.js";
 import { errorCodeOf } from "@procforge/shared/errors.js";
 import { logger } from "./logger.js";
-import type { FileStore } from "./filestore.js";
 import { OUTPUT_SCHEMAS } from "./views.js";
 import { logEvent } from "./trace.js";
-import { ProcForgeApp, PROMPT_TEXT, DEFAULT_SESSION_TTL_MS } from "./app/app.js";
+import type { ProcForgeApp } from "./app/app.js";
+import { PROMPT_TEXT, DEFAULT_SESSION_TTL_MS } from "./app/app.js";
 
 export { PROMPT_TEXT, DEFAULT_SESSION_TTL_MS };
 
 export type ServerDeps = {
-  client: CoreClient;
-  store: FileStore;
+  app: ProcForgeApp;
   procforgeDir: string;
-  projectRoot: string;
-  sessionTtlMs?: number;
   readOnly?: boolean;
-  /** artifacts를 sandbox/<sid>/로 제한 (M2.6-5, 기본 on) */
-  strictSandbox?: boolean;
-  /** artifact 읽기 상한 바이트 (M2.6-6, 기본 5MB) */
-  maxArtifactBytes?: number;
 };
 
 /** 도구 등록 순서 (결정적, 스냅샷 테스트 대상) */
@@ -101,15 +93,7 @@ const ArgSpecShape = z.discriminatedUnion("kind", [
 
 export function buildServer(deps: ServerDeps): McpServer {
   const server = new McpServer({ name: "procforge-local", version: "0.2.0" });
-  const app = new ProcForgeApp({
-    core: deps.client,
-    store: deps.store,
-    procforgeDir: deps.procforgeDir,
-    projectRoot: deps.projectRoot,
-    sessionTtlMs: deps.sessionTtlMs,
-    strictSandbox: deps.strictSandbox,
-    maxArtifactBytes: deps.maxArtifactBytes,
-  });
+  const { app } = deps;
   const enabled = (name: string) => !deps.readOnly || (READ_ONLY_TOOLS as readonly string[]).includes(name);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const R = (name: string, config: any, cb: any) => {
@@ -647,5 +631,5 @@ export function buildServer(deps: ServerDeps): McpServer {
 export async function runStdio(deps: ServerDeps): Promise<void> {
   const server = buildServer(deps);
   await server.connect(new StdioServerTransport());
-  logger.info("procforge-local started", { projectRoot: deps.projectRoot, readOnly: deps.readOnly ?? false });
+  logger.info("procforge-local started", { readOnly: deps.readOnly ?? false });
 }

@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { buildServer } from "../src/server.js";
+import { ProcForgeApp } from "../src/app/app.js";
 import { createLocalStack } from "../src/core-inprocess.js";
 import { FileStore } from "../src/filestore.js";
 import { fixtureFileExists } from "../src/artifacts.js";
@@ -40,7 +41,8 @@ afterEach(() => {
 
 async function linked() {
   const { client, store } = createLocalStack(pfdir);
-  const server = buildServer({ client, store, procforgeDir: pfdir, projectRoot: root });
+  const app = new ProcForgeApp({ core: client, store, procforgeDir: pfdir, projectRoot: root });
+  const server = buildServer({ app, procforgeDir: pfdir });
   const [ct, st] = InMemoryTransport.createLinkedPair();
   const mcp = new Client({ name: "m36-host", version: "0.0.0" });
   await server.connect(st);
@@ -214,3 +216,5 @@ describe("M3.6-3 출력 자동 캡처", () => {
     expect(fixtureFileExists(join(dir, "missing.pptx"))).toBe(false);
   });
 });
+
+

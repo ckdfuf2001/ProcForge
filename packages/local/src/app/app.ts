@@ -1,7 +1,6 @@
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { CoreClient } from "@procforge/shared/core-client.js";
-import type { Session } from "@procforge/shared/schema.js";
 import { pfError } from "@procforge/shared/errors.js";
 import type { FileStore } from "../filestore.js";
 import { collectCatalog } from "../catalog.js";
@@ -34,9 +33,11 @@ export const PROMPT_TEXT = [
 
 export type AppDeps = {
   core: CoreClient;
+  /** 세션 잠금용 (2.5-2에서 core로 이동 예정, 그 외 용도 없음) */
   store: FileStore;
   procforgeDir: string;
   projectRoot: string;
+  /** 표시용 세션 TTL (판정은 core 소유) */
   sessionTtlMs?: number;
   strictSandbox?: boolean;
   maxArtifactBytes?: number;
@@ -61,20 +62,6 @@ export class ProcForgeApp {
     this.maxArtifactBytes = deps.maxArtifactBytes ?? 5 * 1024 * 1024;
   }
 
-  /** 세션 신선도 확인 (server requireFresh 이동). 없으면 touch 후 반환 */
-  private fresh(sessionId: string): Session {
-    const s = this.store.getSession(sessionId);
-    if (!s) throw pfError("session_not_found", `세션 없음: ${sessionId}`);
-    const ttl = this.sessionTtlMs ?? DEFAULT_SESSION_TTL_MS;
-    const last = this.store.getLastUsed(sessionId);
-    if (last === undefined) {
-      this.store.touch(sessionId);
-      return s;
-    }
-    if (Date.now() - last > ttl) throw pfError("session_not_found", `세션 만료: ${sessionId}`);
-    return s;
-  }
-
   /** 변경계 유스케이스용 세션 락 (server W() 이동) */
   private async locked<T>(sessionId: string, fn: () => Promise<T> | T): Promise<T> {
     const release = this.store.acquireLock(sessionId);
@@ -91,7 +78,6 @@ export class ProcForgeApp {
     const catalog = a.toolCatalog ?? collected!.entries;
     const warnings = collected?.warnings ?? [];
     const out = await this.core.pfStart({ request: a.request as string, params: a.params as Record<string, string> | undefined, toolCatalog: catalog as never, limits: a.limits as never, opencodeVersion: collected?.opencodeVersion });
-    this.store.touch(out.session.id);
     const sandboxNote = seedSandbox({
       procforgeDir: this.procforgeDir,
       sessionId: out.session.id,
@@ -110,9 +96,9 @@ export class ProcForgeApp {
 
   async next(a: any): Promise<Record<string, unknown>> {
     const sid = a.sessionId as string;
-    const s = this.fresh(sid);
+    const s = await this.core.getSession(sid);
     const out = await this.core.pfNext(sid);
-    this.store.touch(sid);
+    
     if (out.done) return { done: true };
     // M4.1-7: 노드 분기 직전 sandbox 스냅샷 (pf_report 입출력 판정용)
     try {
@@ -134,7 +120,7 @@ export class ProcForgeApp {
   async report(a: any): Promise<Record<string, unknown>> {
     const sid = a.sessionId as string;
     return this.locked(sid, async () => {
-      const sess = this.fresh(sid);
+      const sess = await this.core.getSession(sid);
       const nid = a.nodeId as string;
       const attemptId = randomUUID();
       const toolRef = a.tool as { server: string; name: string };
@@ -176,7 +162,7 @@ export class ProcForgeApp {
         rubricReasons: a.rubricReasons as Record<string, string> | undefined,
         attemptId,
       });
-      this.store.touch(sid);
+      
       return { ...(out as unknown as Record<string, unknown>), warnings: reportWarnings };
     });
   }
@@ -184,7 +170,7 @@ export class ProcForgeApp {
   async confirmLeaf(a: any): Promise<Record<string, unknown>> {
     const sid = a.sessionId as string;
     return this.locked(sid, async () => {
-      const s = this.fresh(sid);
+      const s = await this.core.getSession(sid);
       if (!a.argSpecs) throw pfError("bad_request", "argSpecs가 없다.", "마지막 실행 인자 키를 모두 분류해 pf_confirm_leaf 재호출.");
       const norm = normalizeArgSpecs(a.argSpecs as Record<string, import("@procforge/shared/schema.js").ArgSpec>, {
         sandboxDir: join(this.procforgeDir, "sandbox", sid),
@@ -192,7 +178,7 @@ export class ProcForgeApp {
       });
       // M3.6-2 확정 시 추캡처: 명시 in/inout fixed 경로 중 미수집분
       const nodeId = a.nodeId as string;
-      const cur = this.store.getNode(sid, nodeId);
+      const cur = await this.core.getNode(sid, nodeId);
       const last = cur?.attempts[cur.attempts.length - 1];
       if (cur && last) {
         // M4.1-7: 보고 시 out 판정분은 attempt에서 제외 (golden 입력 순수 유지, 증거 파일은 보존)
@@ -235,7 +221,7 @@ export class ProcForgeApp {
         sideEffect: a.sideEffect as "none" | "local_write" | "external" | undefined,
         goldenIgnore: a.ignore as string[] | undefined,
       });
-      this.store.touch(sid);
+      
       return { node: nodeSummary(out.node, s.limits), instruction: out.instruction, warnings: norm.warnings };
     });
   }
@@ -243,10 +229,10 @@ export class ProcForgeApp {
   async retry(a: any): Promise<Record<string, unknown>> {
     const sid = a.sessionId as string;
     return this.locked(sid, async () => {
-      const s = this.fresh(sid);
+      const s = await this.core.getSession(sid);
       logger.info("pf_retry", { sessionId: sid, nodeId: a.nodeId, reason: a.reason });
       const out = await this.core.pfResolve({ sessionId: sid, nodeId: a.nodeId as string, decision: "retry" });
-      this.store.touch(sid);
+      
       return { node: nodeSummary(out.node, s.limits), instruction: out.instruction };
     });
   }
@@ -254,11 +240,11 @@ export class ProcForgeApp {
   async split(a: any): Promise<Record<string, unknown>> {
     const sid = a.sessionId as string;
     return this.locked(sid, async () => {
-      const s = this.fresh(sid);
+      const s = await this.core.getSession(sid);
       const kids = a.children as { goal: string; dependsOn?: string[]; sideEffect?: "none" | "local_write" | "external" }[] | undefined;
       if (!kids || kids.length === 0) throw pfError("bad_request", "children이 비었다.", "최소 1개의 {goal}을 넣어 pf_split 재호출.");
       const out = await this.core.pfResolve({ sessionId: sid, nodeId: a.nodeId as string, decision: "split", children: kids });
-      this.store.touch(sid);
+      
       return {
         node: nodeSummary(out.node, s.limits),
         created: (out.created ?? []).map((c) => nodeSummary(c, s.limits)),
@@ -270,7 +256,7 @@ export class ProcForgeApp {
   async askHuman(a: any): Promise<Record<string, unknown>> {
     const sid = a.sessionId as string;
     return this.locked(sid, async () => {
-      const s = this.fresh(sid);
+      const s = await this.core.getSession(sid);
       logger.info("pf_ask_human", { sessionId: sid, nodeId: a.nodeId, question: a.question });
       const out = await this.core.pfResolve({
         sessionId: sid,
@@ -279,7 +265,7 @@ export class ProcForgeApp {
         plan: a.plan as { tool: { server: string; name: string }; args: Record<string, unknown> } | undefined,
         note: a.question as string,
       });
-      this.store.touch(sid);
+      
       return { node: nodeSummary(out.node, s.limits), instruction: out.instruction };
     });
   }
@@ -287,9 +273,9 @@ export class ProcForgeApp {
   async approve(a: any): Promise<Record<string, unknown>> {
     const sid = a.sessionId as string;
     return this.locked(sid, async () => {
-      const s = this.fresh(sid);
+      const s = await this.core.getSession(sid);
       const n = await this.core.pfApprove(sid, a.nodeId as string, a.approved as boolean, a.note as string | undefined);
-      this.store.touch(sid);
+      
       return { node: nodeSummary(n, s.limits) };
     });
   }
@@ -297,18 +283,19 @@ export class ProcForgeApp {
   async advise(a: any): Promise<Record<string, unknown>> {
     const sid = a.sessionId as string;
     return this.locked(sid, async () => {
-      const s = this.fresh(sid);
+      const s = await this.core.getSession(sid);
       const nid = a.nodeId as string;
       // 최신 attempt의 fixture 내용을 읽어 core 평가에 전달 (M4)
+      const cur = await this.core.getNode(sid, nid);
       const fixtureContents = readFixtureContents({
-        procforgeDir: this.procforgeDir, sessionId: sid, nodeId: nid,
-        getNode: (ss, nn) => this.store.getNode(ss, nn),
+        procforgeDir: this.procforgeDir, sessionId: sid,
+        artifacts: cur.attempts[cur.attempts.length - 1]?.artifacts ?? [],
       });
       const out = await this.core.pfAdvise(sid, nid, a.text as string, {
         proposedConstraints: a.proposedConstraints as unknown[] | undefined,
         fixtureContents,
       });
-      this.store.touch(sid);
+      
       return {
         constraints: out.constraints.map((c) => ({ id: c.id, kind: c.kind, summary: `${c.kind}` })),
         rejected: out.rejected,
@@ -320,9 +307,9 @@ export class ProcForgeApp {
 
   async tree(a: any): Promise<Record<string, unknown>> {
     const sid = a.sessionId as string;
-    const s = this.fresh(sid);
+    const s = await this.core.getSession(sid);
     const { nodes } = await this.core.pfTree(sid);
-    this.store.touch(sid);
+    
     const detail = (a.detail as string | undefined) ?? "summary";
     const limit = (a.limit as number | undefined) ?? 50;
     const cursor = (a.cursor as number | undefined) ?? 0;
@@ -361,9 +348,9 @@ export class ProcForgeApp {
 
   async getNode(a: any): Promise<Record<string, unknown>> {
     const sid = a.sessionId as string;
-    this.fresh(sid);
+    await this.core.getSession(sid);
     const { nodes } = await this.core.pfTree(sid);
-    this.store.touch(sid);
+    
     const n = nodes.find((x) => x.id === (a.nodeId as string));
     if (!n) throw pfError("not_found", `노드 없음: ${a.nodeId}`, "pf_tree로 id를 확인하라.");
     return { node: n };
@@ -372,9 +359,9 @@ export class ProcForgeApp {
   async lock(a: any): Promise<Record<string, unknown>> {
     const sid = a.sessionId as string;
     return this.locked(sid, async () => {
-      const s = this.fresh(sid);
+      const s = await this.core.getSession(sid);
       const n = await this.core.pfLock(sid, a.nodeId as string);
-      this.store.touch(sid);
+      
       return { node: nodeSummary(n, s.limits) };
     });
   }
@@ -382,9 +369,9 @@ export class ProcForgeApp {
   async reopen(a: any): Promise<Record<string, unknown>> {
     const sid = a.sessionId as string;
     return this.locked(sid, async () => {
-      const s = this.fresh(sid);
+      const s = await this.core.getSession(sid);
       const n = await this.core.pfReopen(sid, a.nodeId as string, a.reason as string);
-      this.store.touch(sid);
+      
       return { node: nodeSummary(n, s.limits) };
     });
   }
@@ -392,7 +379,7 @@ export class ProcForgeApp {
   async editArgs(a: any): Promise<Record<string, unknown>> {
     const sid = a.sessionId as string;
     return this.locked(sid, async () => {
-      const s = this.fresh(sid);
+      const s = await this.core.getSession(sid);
       const out = await this.core.pfEditArgs({
         sessionId: sid,
         nodeId: a.nodeId as string,
@@ -401,7 +388,7 @@ export class ProcForgeApp {
           remove: a.patch?.remove as string[] | undefined,
         },
       });
-      this.store.touch(sid);
+      
       return { node: nodeSummary(out.node, s.limits), instruction: out.instruction };
     });
   }
@@ -409,7 +396,7 @@ export class ProcForgeApp {
   async editNode(a: any): Promise<Record<string, unknown>> {
     const sid = a.sessionId as string;
     return this.locked(sid, async () => {
-      const s = this.fresh(sid);
+      const s = await this.core.getSession(sid);
       const out = await this.core.pfEditNode({
         sessionId: sid,
         nodeId: a.nodeId as string,
@@ -417,7 +404,7 @@ export class ProcForgeApp {
         addConstraints: a.addConstraints as import("@procforge/shared/schema.js").Constraint[] | undefined,
         removeConstraintIds: a.removeConstraintIds as string[] | undefined,
       });
-      this.store.touch(sid);
+      
       return { node: nodeSummary(out.node, s.limits), instruction: out.instruction };
     });
   }
@@ -456,7 +443,7 @@ export class ProcForgeApp {
     }
     if (!a.sessionId) throw pfError("bad_request", "sessionId 또는 procedure 중 하나가 필요하다.");
     const sid = a.sessionId as string;
-    this.fresh(sid);
+    await this.core.getSession(sid);
     const report = await runSession({
       procforgeDir: this.procforgeDir,
       projectRoot: this.projectRoot,
@@ -466,7 +453,7 @@ export class ProcForgeApp {
       updateGolden: (a.updateGolden as boolean | undefined) ?? false,
       allowProjectRead: (a.allowProjectRead as boolean | undefined) ?? false,
     });
-    this.store.touch(sid);
+    
     const reportPath = join(this.procforgeDir, "runs", report.runId, "report.json");
     if (a.junitPath) writeJUnitFile(a.junitPath as string, report);
     return {
@@ -483,7 +470,7 @@ export class ProcForgeApp {
 
   async finalize(a: any): Promise<Record<string, unknown>> {
     const sid = a.sessionId as string;
-    this.fresh(sid);
+    await this.core.getSession(sid);
     const { doc, warnings } = await this.core.pfBuildProcedure(sid, a.name as string);
     const written = writeProcedure({
       procforgeDir: this.procforgeDir,
@@ -492,7 +479,7 @@ export class ProcForgeApp {
       doc,
       force: (a.force as boolean | undefined) ?? false,
     });
-    this.store.touch(sid);
+    
     return { name: doc.name, dir: written.dir, warnings, files: written.files, commandFile: written.commandFile };
   }
 }

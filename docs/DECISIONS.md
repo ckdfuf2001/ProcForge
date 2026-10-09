@@ -216,6 +216,12 @@
 - 2.5-1a: core.getSession/getNode + TTL/touch core 이관. Store에
   touchSession/getLastUsed 추가. errResult 정규식 분기 제거 (core가 직접
   session_not_found).
+- 2.5-1b: App은 core 조회로 전환, 조립은 진입점(main·테스트)으로 이동하고
+  server는 완성된 App만 받음. store 필드는 잠금용으로만 잔존 (2.5-2에서 제거).
+
+- 2.5-1a: core.getSession/getNode + TTL/touch core 이관. Store에
+  touchSession/getLastUsed 추가. errResult 정규식 분기 제거 (core가 직접
+  session_not_found).
 
 ## M3.2
 

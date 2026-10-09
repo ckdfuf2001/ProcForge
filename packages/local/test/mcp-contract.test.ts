@@ -5,9 +5,9 @@ import { tmpdir } from "node:os";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { buildServer, TOOL_NAMES, READ_ONLY_TOOLS, PROMPT_TEXT } from "../src/server.js";
+import { ProcForgeApp } from "../src/app/app.js";
 import { OUTPUT_SCHEMAS, ErrorEnvelopeShape } from "../src/views.js";
 import { createLocalStack } from "../src/core-inprocess.js";
-import { FileStore } from "../src/filestore.js";
 
 let root: string;
 let pfdir: string;
@@ -34,7 +34,8 @@ afterEach(() => {
 
 async function linked() {
   const { client, store } = createLocalStack(pfdir);
-  const server = buildServer({ client, store, procforgeDir: pfdir, projectRoot: root });
+  const app = new ProcForgeApp({ core: client, store, procforgeDir: pfdir, projectRoot: root });
+  const server = buildServer({ app, procforgeDir: pfdir });
   const [ct, st] = InMemoryTransport.createLinkedPair();
   const mcp = new Client({ name: "test", version: "0.0.0" });
   await server.connect(st);
@@ -84,7 +85,8 @@ describe("tools/list 스냅샷 (결정적 순서·annotations)", () => {
 
   it("READ_ONLY 모드: 읽기 3종만", async () => {
     const { client, store } = createLocalStack(pfdir);
-    const server = buildServer({ client, store, procforgeDir: pfdir, projectRoot: root, readOnly: true });
+    const app = new ProcForgeApp({ core: client, store, procforgeDir: pfdir, projectRoot: root });
+    const server = buildServer({ app, procforgeDir: pfdir, readOnly: true });
     const [ct, st] = InMemoryTransport.createLinkedPair();
     const mcp = new Client({ name: "test", version: "0.0.0" });
     await server.connect(st);
@@ -237,8 +239,9 @@ describe("도구 응답 계약 (outputSchema 통과)", () => {
 
 describe("M2.5-6 세션 TTL", () => {
   it("만료 세션은 session_not_found", async () => {
-    const { client, store } = createLocalStack(pfdir);
-    const server = buildServer({ client, store, procforgeDir: pfdir, projectRoot: root, sessionTtlMs: -1 });
+    const { client, store } = createLocalStack(pfdir, { sessionTtlMs: -1 });
+    const app = new ProcForgeApp({ core: client, store, procforgeDir: pfdir, projectRoot: root });
+    const server = buildServer({ app, procforgeDir: pfdir });
     const [ct, st] = InMemoryTransport.createLinkedPair();
     const mcp = new Client({ name: "test", version: "0.0.0" });
     await server.connect(st);
@@ -258,7 +261,6 @@ describe("M2.5-6 세션 TTL", () => {
 describe("M2.5-5 응답 크기", () => {
   it("200노드 트리 기본 응답 바이트 한도", async () => {
     const { client, store } = createLocalStack(pfdir);
-    void store;
     const started = await client.pfStart({
       request: "big",
       toolCatalog: [],
@@ -267,7 +269,8 @@ describe("M2.5-5 응답 크기", () => {
     const kids = Array.from({ length: 200 }, (_, i) => ({ goal: `작업 ${i}번 항목에 대한 설명 텍스트` }));
     await client.pfResolve({ sessionId: started.session.id, nodeId: "1", decision: "split", children: kids });
 
-    const server = buildServer({ client, store: new FileStore(pfdir), procforgeDir: pfdir, projectRoot: root });
+    const app = new ProcForgeApp({ core: client, store, procforgeDir: pfdir, projectRoot: root });
+    const server = buildServer({ app, procforgeDir: pfdir });
     const [ct, st] = InMemoryTransport.createLinkedPair();
     const mcp = new Client({ name: "test", version: "0.0.0" });
     await server.connect(st);
@@ -302,3 +305,5 @@ describe("M2.5-7 prompt", () => {
     }
   });
 });
+
+

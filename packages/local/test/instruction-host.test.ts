@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { buildServer, TOOL_NAMES } from "../src/server.js";
+import { ProcForgeApp } from "../src/app/app.js";
 import { createLocalStack } from "../src/core-inprocess.js";
 
 const MENTIONS = /pf_[a-z_]+/g;
@@ -56,7 +57,8 @@ describe("M2.6-1 instruction 도구명 일치", () => {
 describe("instruction-following host E2E", () => {
   it("instruction 첫 언급 도구만 호출해 단일 세션 완료", async () => {
     const { client, store } = createLocalStack(pfdir);
-    const server = buildServer({ client, store, procforgeDir: pfdir, projectRoot: root });
+    const app = new ProcForgeApp({ core: client, store, procforgeDir: pfdir, projectRoot: root });
+    const server = buildServer({ app, procforgeDir: pfdir });
     const [ct, st] = InMemoryTransport.createLinkedPair();
     const mcp = new Client({ name: "follow-host", version: "0.0.0" });
     await server.connect(st);
@@ -138,3 +140,5 @@ describe("instruction-following host E2E", () => {
     }
   }, 30000);
 });
+
+

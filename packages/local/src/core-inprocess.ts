@@ -5,9 +5,9 @@ import { FileStore } from "./filestore.js";
 
 // M0-6 예외 합성 루트: local에서 core를 직접 import하는 유일 허용 파일.
 // M6에서 이 파일만 HTTP CoreClient 구현으로 교체하면 local 나머지 코드는 그대로 동작한다.
-export function createLocalStack(procforgeDir: string): { client: CoreClient; store: FileStore } {
+export function createLocalStack(procforgeDir: string, opts: { sessionTtlMs?: number } = {}): { client: CoreClient; store: FileStore } {
   const store = new FileStore(procforgeDir);
-  const client: CoreClient = new CoreService(store, checkerEvaluate);
+  const client: CoreClient = new CoreService(store, checkerEvaluate, { sessionTtlMs: opts.sessionTtlMs });
   return { client, store };
 }
 
