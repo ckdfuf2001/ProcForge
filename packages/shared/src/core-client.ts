@@ -166,6 +166,8 @@ export interface CoreClient {
   pfReopen(sessionId: string, nodeId: string, reason: string, opts?: ChangeOpts): Promise<Node>;
   /** attempt artifacts 교체 (server 직접 저장 대체) */
   amendAttemptArtifacts(input: AmendAttemptArtifactsInput): Promise<{ node: Node; revision: number }>;
+  /** 카탈로그 저장 (M4.2-2, 수집은 local). 세션 toolCatalog 교체 */
+  pfUpdateCatalog(input: { sessionId: string; entries: unknown[]; expectedRevision?: number; actor?: Actor }): Promise<{ revision: number }>;
   /** 확정 인자 수정 (M4.2-2) */
   pfEditArgs(input: PfEditArgsInput): Promise<{ node: Node; instruction: string }>;
   /** 목표·검사 조건 직접 수정 (M4.2-2) */

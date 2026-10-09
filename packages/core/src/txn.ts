@@ -58,6 +58,10 @@ export class TxStore implements Store {
     return [...(this.touchedNodes.get(sessionId) ?? [])];
   }
 
+  sessionWritten(sessionId: string): boolean {
+    return this.touchedSessions.has(sessionId);
+  }
+
   hasWrites(): boolean {
     return this.touchedSessions.size > 0 || this.touchedNodes.size > 0 || this.bufferedEvents.length > 0;
   }

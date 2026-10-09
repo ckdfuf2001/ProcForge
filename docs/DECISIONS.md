@@ -203,6 +203,9 @@
 - pfEditArgs/pfEditNode — 확정 인자·목표/조건 직접 수정. leaf+goal 변경은
   open으로, 수정 인자는 suggestedArgs에 저장 (다음 보고 시 소진). pfNext는
   suggestedArgs 보유 노드에 수정 고지. 하류 propagateStale 적용.
+- pfUpdateCatalog(sessionId, entries) — 수집은 local, 저장만 core. 세션
+  toolCatalog 전체 교체 (가이드 표의 sessionId 생략은 표기 간소화로 보고
+  세션 기준으로 구현).
 
 ## M3.2
 

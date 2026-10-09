@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import {
   computeNodeHash,
   ConstraintSchema,
+  ToolCatalogEntrySchema,
   type ArgSpec,
   type Constraint,
   type Node,
@@ -195,7 +196,7 @@ export class CoreService implements CoreClient {
     try {
       const { result, summary } = body();
       const changed = tx.writtenNodeIds(sessionId);
-      if (changed.length === 0) return result;
+      if (changed.length === 0 && !tx.sessionWritten(sessionId)) return result;
       const cur = tx.getSession(sessionId);
       if (!cur) throw err("not_found", `session ${sessionId} not found`);
       const bumped: Session = { ...cur, revision: cur.revision + 1 };
@@ -868,6 +869,23 @@ export class CoreService implements CoreClient {
       this.propagateStale(s.id, n.id);
       return { result: { node: next, instruction: `노드 수정됨. pf_next로 계속하라.` }, summary: `editNode ${n.id}` };
     });
+  }
+
+  /** 카탈로그 저장 (M4.2-2, 수집은 local이 하고 core는 저장만) */
+  async pfUpdateCatalog(input: { sessionId: string; entries: unknown[]; expectedRevision?: number; actor?: Actor }): Promise<{ revision: number }> {
+    this.change(input.sessionId, { method: "pfUpdateCatalog", expectedRevision: input.expectedRevision, actor: input.actor }, () => {
+      const s = this.sess(input.sessionId);
+      if (!Array.isArray(input.entries)) throw err("bad_request", "entries 배열 필요.");
+      const parsed: Session["toolCatalog"] = [];
+      for (const e of input.entries) {
+        const r = ToolCatalogEntrySchema.safeParse(e);
+        if (!r.success) throw err("bad_request", `bad catalog entry: ${r.error.issues[0]?.message ?? "invalid"}`);
+        parsed.push(r.data);
+      }
+      this.store.saveSession({ ...s, toolCatalog: parsed });
+      return { result: undefined as void, summary: `updateCatalog ${parsed.length}` };
+    });
+    return { revision: this.base.getSession(input.sessionId)?.revision ?? 0 };
   }
 
   /** attempt artifacts 교체 (M4.2-1, server 직접 저장 대체) */

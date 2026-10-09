@@ -1114,6 +1114,24 @@ describe("M4.2-2 pfEditArgs/pfEditNode", () => {
   });
 });
 
+describe("M4.2-2 pfUpdateCatalog", () => {
+  it("교체 + revision, 형식 오류 거부", async () => {
+    const svc = new CoreService(createMemoryStore(), passEval);
+    const s = await svc.pfStart({ request: "r", toolCatalog: catalog });
+    const next = [
+      { server: "fs", name: "read", inputSchema: {}, schemaHash: "h2" },
+      { server: "fs", name: "write", inputSchema: {}, schemaHash: "h3" },
+    ];
+    const r = await svc.pfUpdateCatalog({ sessionId: s.session.id, entries: next });
+    expect(r.revision).toBe(1);
+    expect((await svc.pfTree(s.session.id)).session.toolCatalog.map((t) => t.name)).toEqual(["read", "write"]);
+    await expect(
+      svc.pfUpdateCatalog({ sessionId: s.session.id, entries: [{ server: "fs" }] }),
+    ).rejects.toThrow(/bad catalog entry/);
+    expect((await svc.pfTree(s.session.id)).session.revision).toBe(1);
+  });
+});
+
 describe("M4.2-1 pfBuildProcedure", () => {
   it("검증·경고·문서 조립", async () => {
     const svc = new CoreService(createMemoryStore(), passEval);
