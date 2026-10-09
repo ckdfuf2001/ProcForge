@@ -19,7 +19,9 @@
     "./normalize": "./dist/normalize.js",
     "./normalize.js": "./dist/normalize.js",
     "./deps": "./dist/deps.js",
-    "./deps.js": "./dist/deps.js"
+    "./deps.js": "./dist/deps.js",
+    "./args-schema": "./dist/args-schema.js",
+    "./args-schema.js": "./dist/args-schema.js"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",

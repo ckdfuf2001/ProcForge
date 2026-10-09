@@ -37,3 +37,32 @@ export function expandDepLeafs(depId: string, byId: Map<string, Node>): string[]
   if (n && n.status === "split") return descendantLeafs(depId, byId, []);
   return [depId];
 }
+
+/** 펼친 그래프 기준 순환 검출 (M3.4.3-2). 각 노드의 deps = dependsOn.flatMap(expand) */
+export function hasCycle(nodes: Node[]): boolean {
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  const WHITE = 0, GRAY = 1, BLACK = 2;
+  const color = new Map<string, number>();
+  let found = false;
+  const visit = (id: string): void => {
+    if (found) return;
+    color.set(id, GRAY);
+    const n = byId.get(id);
+    if (n) {
+      for (const d of n.dependsOn.flatMap((x) => expandDepLeafs(x, byId))) {
+        if (!byId.has(d)) continue;
+        const c = color.get(d) ?? WHITE;
+        if (c === GRAY) {
+          found = true;
+          return;
+        }
+        if (c === WHITE) visit(d);
+      }
+    }
+    color.set(id, BLACK);
+  };
+  for (const n of nodes) {
+    if ((color.get(n.id) ?? WHITE) === WHITE) visit(n.id);
+  }
+  return found;
+}

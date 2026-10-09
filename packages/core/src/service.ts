@@ -6,6 +6,8 @@ import {
   type Session,
 } from "@procforge/shared/schema.js";
 import type {
+  BlockedEntry,
+  BlockedReason,
   CoreClient,
   EvaluateFn,
   PfAdviseOutput,
@@ -31,22 +33,8 @@ function err(code: string, message: string): Error {
   return Object.assign(new Error(message), { code });
 }
 
-/** 유사 키 제안용 편집 거리 (M3.4-7, 상한 3) */
-export function similarKey(a: string, b: string): boolean {
-  if (a === b) return true;
-  const la = a.length;
-  const lb = b.length;
-  if (Math.abs(la - lb) > 3) return false;
-  let prev = Array.from({ length: lb + 1 }, (_, i) => i);
-  for (let i = 1; i <= la; i++) {
-    const cur = [i];
-    for (let j = 1; j <= lb; j++) {
-      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
-    }
-    prev = cur;
-  }
-  return prev[lb] <= 2;
-}
+import { checkUnknownKeys, similarKey } from "@procforge/shared/args-schema.js";
+export { similarKey };
 
 /**
  * 재시도 경계 통일 (M1.5-6): 총 시도 횟수 = maxRetries + 1.
@@ -67,7 +55,7 @@ export function consumeRetry(
  */
 import { isResolved } from "@procforge/shared/deps.js";
 export { isResolved };
-import { expandDepLeafs } from "@procforge/shared/deps.js";
+import { expandDepLeafs, hasCycle } from "@procforge/shared/deps.js";
 
 /**
  * 첫 pass 결과 형태 기반 auto constraint 생성 (M1.5-2).
@@ -100,6 +88,46 @@ export function autoConstraints(
   return out;
 }
 
+/**
+ * 교착 판정 순수 함수 (M3.4.3-1, 테스트용 export).
+ * ready 0 + pending(open/probing) 노드들에 대해 waitingOn·원인을 계산.
+ */
+export function computeDeadlock(
+  stuck: Node[],
+  byId: Map<string, Node>,
+): { blocked: BlockedEntry[]; causes: string[] } {
+  const blocked: BlockedEntry[] = [];
+  const causes = new Map<string, BlockedReason>();
+  for (const n of stuck) {
+    const waitingOn: string[] = [];
+    let reason: BlockedReason = "dep_pending";
+    for (const d of n.dependsOn) {
+      const dep = byId.get(d);
+      if (!dep) {
+        waitingOn.push(d);
+        reason = "dep_missing";
+        continue;
+      }
+      if (dep.status === "split" && expandDepLeafs(d, byId).length === 0) {
+        waitingOn.push(d);
+        reason = "dep_empty_split";
+        causes.set(d, reason);
+        continue;
+      }
+      const last = dep.attempts[dep.attempts.length - 1];
+      if (!isResolved(dep, byId)) {
+        waitingOn.push(d);
+        if (last?.verdict === "fail") {
+          reason = "dep_failed";
+          causes.set(d, reason);
+        }
+      }
+    }
+    if (waitingOn.length > 0) blocked.push({ nodeId: n.id, waitingOn, reason });
+  }
+  return { blocked, causes: [...causes.keys()] };
+}
+
 export class CoreService implements CoreClient {
   constructor(
     private store: Store = createMemoryStore(),
@@ -130,8 +158,9 @@ export class CoreService implements CoreClient {
   }
 
   /**
-   * stale 전파 일반화 (M3.4-6, 구 §5 규칙): origin 변경 후, 펼친 의존에 origin을
-   * 포함하는 하류 노드의 hash를 재계산·저장하고, 바뀌었으면 leaf/split을 open으로.
+   * stale 전파 일반화 (M3.4-6, M3.4.3-3, 구 §5 규칙): origin 변경 후, 펼친 의존에
+   * origin을 포함하는 하류 노드의 hash를 재계산·저장. leaf는 open으로 되돌리고,
+   * split은 상태를 유지한 채 자손으로 계속 (재-split 불필요).
    */
   private propagateStale(sid: string, originId: string): void {
     const queue = [originId];
@@ -145,11 +174,16 @@ export class CoreService implements CoreClient {
         if (!deps.includes(cur)) continue;
         seen.add(n.id);
         const nh = this.hashFor(sid, n);
-        if (nh !== n.hash) {
-          const reopened = n.status === "leaf" || n.status === "split" ? "open" as const : n.status;
-          this.store.saveNode(sid, { ...n, hash: nh, status: reopened });
-          queue.push(n.id);
+        if (nh === n.hash) continue;
+        // M3.4.3-3: split은 상태 유지(해시만 갱신). 펼친 의존 검사가 자손 leaf에
+        // 직접 도달하므로 별도 하강 불필요. 재-split 불필요.
+        if (n.status === "split") {
+          this.store.saveNode(sid, { ...n, hash: nh });
+          continue;
         }
+        const reopened = n.status === "leaf" ? ("open" as const) : n.status;
+        this.store.saveNode(sid, { ...n, hash: nh, status: reopened });
+        queue.push(n.id);
       }
     }
   }
@@ -220,7 +254,28 @@ export class CoreService implements CoreClient {
           instruction: `노드 ${h.id}는 사람의 조언이 필요하다. pf_advise로 조언을 등록하라.`,
         };
       }
-      return { done: true };
+      // M3.4.3-1 교착: ready 0 + pending + needs_human 없음
+      const stuck = nodes
+        .filter((n) => n.status === "open" || n.status === "probing")
+        .sort((a, b) => compareNodeIds(a.id, b.id));
+      const { blocked, causes } = computeDeadlock(stuck, byId);
+      // 원인 노드 needs_human 승격
+      for (const cid of causes) {
+        const c = this.node(sessionId, cid);
+        if (c.status === "open" || c.status === "probing") {
+          this.store.saveNode(sessionId, { ...c, status: "needs_human" });
+        }
+      }
+      const first = stuck[0];
+      const causeIds = causes.join(",");
+      return {
+        done: false,
+        node: first,
+        blocked,
+        instruction:
+          `교착: ${blocked.map((b) => `${b.nodeId}(${b.reason})`).join(", ")}. ` +
+          `원인 노드(${causeIds || "없음"})에 pf_advise 또는 pf_reopen 하라.`,
+      };
     }
     const n = ready[0];
     if (n.sideEffect === "external") {
@@ -428,6 +483,17 @@ export class CoreService implements CoreClient {
           return { node: next, instruction: `분해 깊이가 maxDepth(${s.limits.maxDepth})를 초과해 needs_human으로 전환했다.` };
         }
         if (all.length + input.children.length > s.limits.maxNodes) throw err("bad_request", "maxNodes exceeded");
+        // M3.4.3-2: 펼친 그래프 기준 순환이면 분해 거부 (저장 전)
+        {
+          const tentative = new Map(all.map((x) => [x.id, { ...x } as Node]));
+          input.children.forEach((c, i) => {
+            const id = `${n.id}.${i + 1}`;
+            tentative.set(id, { id, dependsOn: c.dependsOn ?? [], children: [], status: "open" } as unknown as Node);
+          });
+          const parentAsSplit = { ...n, status: "split" as const, children: input.children.map((_, i) => `${n.id}.${i + 1}`) };
+          tentative.set(n.id, parentAsSplit);
+          if (hasCycle([...tentative.values()])) throw err("bad_request", "split creates dependency cycle");
+        }
         const created: Node[] = input.children.map((c, i) => {
           const id = `${n.id}.${i + 1}`;
           const child: Node = {
@@ -479,18 +545,13 @@ export class CoreService implements CoreClient {
         if (!input.argSpecs) throw err("bad_request", "leaf requires argSpecs");
         const missing = Object.keys(last.args).filter((k) => !(k in input.argSpecs!));
         if (missing.length > 0) throw err("bad_request", `argSpecs missing: ${missing.join(",")}`);
-        // M3.4-7: additionalProperties:false 스키마는 등록 외 키 거부 (유사 키 제안)
-        const schemaProps = (cat.inputSchema as { properties?: Record<string, unknown>; additionalProperties?: boolean } | undefined);
-        if (schemaProps && schemaProps.additionalProperties === false && schemaProps.properties) {
-          const allowed = Object.keys(schemaProps.properties);
-          const unknownKeys = Object.keys(input.argSpecs).filter((k) => !allowed.includes(k));
-          if (unknownKeys.length > 0) {
-            const hints = unknownKeys.map((k) => {
-              const sim = allowed.filter((a) => similarKey(a, k));
-              return sim.length > 0 ? `${k} (유사: ${sim.join(", ")})` : k;
-            });
-            throw err("bad_args", `argSpecs unknown: ${hints.join("; ")}. 등록된 인자만 사용하라.`);
-          }
+        // M3.4.3-4: additionalProperties:false 스키마는 등록 외 키 거부 (공용 검사)
+        const { unknownKeys, suggestions } = checkUnknownKeys(Object.keys(input.argSpecs), cat.inputSchema);
+        if (unknownKeys.length > 0) {
+          const hints = unknownKeys.map((k) =>
+            suggestions[k]?.length ? `${k} (유사: ${suggestions[k].join(", ")})` : k,
+          );
+          throw err("bad_args", `argSpecs unknown: ${hints.join("; ")}. 등록된 인자만 사용하라.`);
         }
         const warnings: string[] = [];
         for (const [k, spec] of Object.entries(input.argSpecs)) {

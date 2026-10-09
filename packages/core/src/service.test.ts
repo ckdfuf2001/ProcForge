@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { CoreService, consumeRetry, isResolved, autoConstraints } from "../src/service.js";
+import { CoreService, consumeRetry, isResolved, autoConstraints, computeDeadlock } from "../src/service.js";
 import { compareNodeIds } from "@procforge/shared/ids.js";
 import { createMemoryStore } from "../src/store.js";
 import type { Node, Session } from "@procforge/shared/schema.js";
@@ -70,6 +70,111 @@ describe("M3.4-7 additionalProperties:false 낯선 키 거부", () => {
       argSpecs: { anything: { kind: "fixed", value: 1 } },
     });
     expect(done.node.status).toBe("leaf");
+  });
+});
+
+describe("M3.4.3-1 pfNext 교착", () => {
+  it("dep_failed + dep_missing → done:false + blocked + 원인 승격", async () => {
+    const svc = new CoreService(createMemoryStore(), failEval);
+    const { session } = await svc.pfStart({
+      request: "r",
+      toolCatalog: catalog,
+      limits: { maxDepth: 3, maxRetries: 5, maxNodes: 10 },
+    });
+    await svc.pfResolve({
+      sessionId: session.id,
+      nodeId: "1",
+      decision: "split",
+      children: [{ goal: "a", dependsOn: ["9.9"] }, { goal: "b", dependsOn: ["1.1"] }],
+    });
+    await svc.pfReport({ ...rep(), sessionId: session.id, nodeId: "1.1", selfVerdict: "fail", selfReason: "bad" });
+    const nxt = await svc.pfNext(session.id);
+    expect(nxt.done).toBe(false);
+    if (nxt.done) throw new Error("unreachable");
+    expect(nxt.blocked).toBeDefined();
+    const byNode = new Map(nxt.blocked!.map((b) => [b.nodeId, b]));
+    expect(byNode.get("1.1")).toMatchObject({ waitingOn: ["9.9"], reason: "dep_missing" });
+    expect(byNode.get("1.2")).toMatchObject({ waitingOn: ["1.1"], reason: "dep_failed" });
+    expect(nxt.instruction).toMatch(/pf_advise/);
+    // 원인(1.1) needs_human 승격 → 다음 pfNext는 조언 유도
+    const tree = await svc.pfTree(session.id);
+    expect(tree.nodes.find((n) => n.id === "1.1")?.status).toBe("needs_human");
+    const nxt2 = await svc.pfNext(session.id);
+    expect(nxt2.done).toBe(false);
+    if (!nxt2.done) expect(nxt2.node.id).toBe("1.1");
+  });
+
+  it("dep_empty_split 단위 판정", () => {
+    const mk = (id: string, status: "open" | "split", extra: Record<string, unknown> = {}) =>
+      ({ id, status, dependsOn: [], children: [], attempts: [], ...extra }) as unknown as Node;
+    const S = mk("S", "split", { children: [] });
+    const W = mk("W", "open", { dependsOn: ["S"] });
+    const byId = new Map([["S", S], ["W", W]]);
+    const { blocked, causes } = computeDeadlock([W], byId);
+    expect(blocked).toEqual([{ nodeId: "W", waitingOn: ["S"], reason: "dep_empty_split" }]);
+    expect(causes).toEqual(["S"]);
+  });
+});
+
+describe("M3.4.3-2 펼친 순환 split 거부", () => {
+  it("자기 조상 의존 분해는 bad_request", async () => {
+    const svc = new CoreService(createMemoryStore(), passEval);
+    const { session } = await svc.pfStart({ request: "r", toolCatalog: catalog });
+    await svc.pfResolve({ sessionId: session.id, nodeId: "1", decision: "split", children: [{ goal: "a" }] });
+    await expect(
+      svc.pfResolve({
+        sessionId: session.id,
+        nodeId: "1.1",
+        decision: "split",
+        children: [{ goal: "self", dependsOn: ["1.1"] }],
+      }),
+    ).rejects.toThrow(/cycle/);
+    // 저장 안 됐음 확인
+    const tree = await svc.pfTree(session.id);
+    expect(tree.nodes.some((n) => n.id === "1.1.1")).toBe(false);
+  });
+});
+
+describe("M3.4.3-3 stale: split 유지 + 자손 leaf만 open", () => {
+  it("2.1 변경 → 1.3 split 유지, 1.3.1 open, 1.3.2 유지", async () => {
+    const svc = new CoreService(createMemoryStore(), passEval);
+    const { session } = await svc.pfStart({ request: "r", toolCatalog: catalog });
+    const sid = session.id;
+    await svc.pfResolve({
+      sessionId: sid, nodeId: "1", decision: "split",
+      children: [{ goal: "a" }, { goal: "b" }, { goal: "c", dependsOn: ["1.2"] }],
+    });
+    await svc.pfResolve({ sessionId: sid, nodeId: "1.2", decision: "split", children: [{ goal: "b1" }, { goal: "b2" }] });
+    // 1.3.1만 1.2.1에 직접 의존
+    await svc.pfResolve({
+      sessionId: sid, nodeId: "1.3", decision: "split",
+      children: [{ goal: "c1", dependsOn: ["1.2.1"] }, { goal: "c2" }],
+    });
+    const leaf = async (id: string, v: string) => {
+      await svc.pfReport({ ...rep(), sessionId: sid, nodeId: id, args: { v } });
+      await svc.pfResolve({
+        sessionId: sid, nodeId: id, decision: "leaf",
+        tool: { server: "fs", name: "read" }, argSpecs: { v: { kind: "fixed", value: v } },
+      });
+    };
+    await leaf("1.1", "a");
+    await leaf("1.2.1", "b1");
+    await leaf("1.2.2", "b2");
+    await leaf("1.3.1", "c1");
+    await leaf("1.3.2", "c2");
+    // 1.2.1 argSpec 변경
+    await svc.pfReopen(sid, "1.2.1", "change");
+    await svc.pfReport({ ...rep(), sessionId: sid, nodeId: "1.2.1", args: { v: "new" } });
+    await svc.pfResolve({
+      sessionId: sid, nodeId: "1.2.1", decision: "leaf",
+      tool: { server: "fs", name: "read" }, argSpecs: { v: { kind: "fixed", value: "new" } },
+    });
+    const tree = await svc.pfTree(sid);
+    const byId = new Map(tree.nodes.map((n) => [n.id, n]));
+    expect(byId.get("1.3")?.status).toBe("split");
+    expect(byId.get("1.3.1")?.status).toBe("open");
+    expect(byId.get("1.3.2")?.status).toBe("leaf");
+    expect(byId.get("1.1")?.status).toBe("leaf");
   });
 });
 
