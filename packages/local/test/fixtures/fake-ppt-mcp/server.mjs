@@ -31,13 +31,13 @@ server.tool(
 server.tool(
   "fill_template",
   "Fill report template",
-  { template: z.string(), month: z.string(), output: z.string().optional() },
-  async ({ template, month, output }) => {
+  { template: z.string(), month: z.string(), output: z.string().optional(), content: z.string().optional() },
+  async ({ template, month, output, content }) => {
     const tpl = existsSync(template) ? readFileSync(template, "utf8") : "no-template";
     const out = output ?? `report-${month}.pptx`;
     mkdirSync(dirname(out), { recursive: true });
-    writeFileSync(out, `filled:${month}:${tpl}`);
-    return { content: [{ type: "text", text: JSON.stringify({ output: out, month }) }] };
+    writeFileSync(out, `filled:${month}:${tpl}:${content ?? ""}`);
+    return { content: [{ type: "text", text: JSON.stringify({ output: out, month, ...(content !== undefined ? { content } : {}) }) }] };
   },
 );
 

@@ -125,6 +125,9 @@
   치환 금지. 비JSON은 길이 4 이상 값만 치환). passthrough 비교·--update-golden
   갱신 시 현재 params로 복원/재치환. 모르는 키 자리표시자는 그대로 두어
   drift로 검출.
+- [M3.6-6] generated E2E — fake-ppt fill_template에 content(선택) 인자 추가
+  (파일·응답에 반영). 1.3 content=generated(inputs 1.2)로 record→replay→
+  passthrough 통과.
 
 ## M3.2
 

@@ -234,6 +234,75 @@ describe("M3 runner", () => {
     expect(pass.summary.pass).toBe(3);
   }, 30000);
 
+  it("M3.6-6 generated 인자: record→replay→passthrough 통과", async () => {
+    const collected = await collectCatalog(root);
+    const started = await client.pfStart({
+      request: "생성 보고서",
+      params: { month: "2026-09" },
+      toolCatalog: collected.entries,
+      limits: { maxDepth: 3, maxRetries: 2, maxNodes: 20 },
+    });
+    const sid = started.session.id;
+    await client.pfResolve({
+      sessionId: sid, nodeId: "1", decision: "split",
+      children: [{ goal: "목록" }, { goal: "읽기", dependsOn: ["1.1"] }, { goal: "채우기", dependsOn: ["1.1", "1.2"] }],
+    });
+    const leaf = async (
+      nodeId: string, tool: string,
+      args: Record<string, unknown>, resultJson: unknown,
+      argSpecs: Record<string, never>,
+      artifactPaths: string[] = [], goldenIgnore: string[] = [],
+    ) => {
+      const attemptId = randomUUID();
+      let stored: string[] = [];
+      let contents: Record<string, string> = {};
+      if (artifactPaths.length > 0) {
+        const ing = ingestArtifacts({ procforgeDir: pfdir, sessionId: sid, nodeId, attemptId, baseDir: root, paths: artifactPaths });
+        stored = ing.stored;
+        contents = ing.contents;
+      }
+      await client.pfReport({
+        sessionId: sid, nodeId, tool: { server: "fake-ppt", name: tool }, args,
+        resultSummary: JSON.stringify(resultJson), resultJson,
+        artifacts: stored, artifactContents: contents,
+        selfVerdict: "pass", selfReason: "ok", attemptId,
+      });
+      await client.pfResolve({
+        sessionId: sid, nodeId, decision: "leaf",
+        tool: { server: "fake-ppt", name: tool }, argSpecs: argSpecs as never, goldenIgnore,
+      });
+    };
+    await leaf("1.1", "list_slides", { file: "data.pptx" }, { slides: ["표지", "실적", "전망"] }, { file: { kind: "fixed", value: "data.pptx" } });
+    await leaf("1.2", "read_slide", { file: "data.pptx", index: 1 }, { title: "슬라이드1", body: "본문" }, {
+      file: { kind: "fixed", value: "data.pptx" },
+      index: { kind: "fixed", value: 1 },
+    });
+    // content는 1.2 출력 기반 generated (호스트가 실제 사용값을 기록)
+    await leaf(
+      "1.3", "fill_template",
+      { template: "template.j2", month: "2026-09", output: "output/report.pptx", content: "슬라이드1: 본문" },
+      { output: "output/report.pptx", month: "2026-09", content: "슬라이드1: 본문" },
+      {
+        template: { kind: "fixed", value: "template.j2" },
+        month: { kind: "var", ref: "${params.month}" },
+        output: { kind: "fixed", value: "output/report.pptx", path: "out" },
+        content: { kind: "generated", instruction: "1.2 제목·본문 인용", inputs: ["1.2"], constraints: [] },
+      },
+      ["template.j2"],
+      ["output"],
+    );
+    const base = { procforgeDir: pfdir, projectRoot: root, allowProjectRead: true, sessionId: sid } as const;
+    const rec = await runSession({ ...base, mode: "record" });
+    expect(rec.summary.fail).toBe(0);
+    expect(rec.summary.pass).toBe(3);
+    const rep = await runSession({ ...base, mode: "replay" });
+    expect(rep.summary.fail).toBe(0);
+    expect(rep.summary.pass).toBe(3);
+    const pass = await runSession({ ...base, mode: "passthrough" });
+    expect(pass.summary.fail).toBe(0);
+    expect(pass.summary.pass).toBe(3);
+  }, 60000);
+
   it("실패 전파: 상류 실패 → 하류 blocked", async () => {
     const collected = await collectCatalog(root);
     const builtin = collected.entries.filter((e) => e.server === "opencode");
