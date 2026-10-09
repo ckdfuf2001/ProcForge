@@ -198,6 +198,12 @@
 - R1 예외 유지: procedure import·runner updateGolden 직접 저장 (core 경로 결정은
   추후). PROMPT_TEXT·DEFAULT_SESSION_TTL_MS는 app 소유, server 재수출.
 
+## M4.2-2 (신규 CoreClient 메서드)
+
+- pfEditArgs/pfEditNode — 확정 인자·목표/조건 직접 수정. leaf+goal 변경은
+  open으로, 수정 인자는 suggestedArgs에 저장 (다음 보고 시 소진). pfNext는
+  suggestedArgs 보유 노드에 수정 고지. 하류 propagateStale 적용.
+
 ## M3.2
 
 - [M3.2-1] passthrough도 generated는 golden attempt 기록값. live 모드 추가(생성 재생성,

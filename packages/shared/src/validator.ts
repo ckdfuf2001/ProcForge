@@ -58,7 +58,7 @@ function getByDotPath(root: unknown, path: string): boolean {
   return true;
 }
 
-function checkFixedAgainstInputSchema(
+export function checkFixedAgainstInputSchema(
   args: Node["args"],
   inputSchema: Record<string, unknown>,
 ): string | null {

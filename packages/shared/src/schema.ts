@@ -207,6 +207,8 @@ export const NodeSchema = z.object({
     .optional(),
   /** external dry-run 승인 기록 (M2.6-4) */
   approval: z.object({ at: z.string(), note: z.string().optional() }).optional(),
+  /** 사람이 수정한 인자 제안 (M4.2-2 pfEditArgs). 다음 보고 시 소진 */
+  suggestedArgs: z.record(ArgSpecSchema).optional(),
   retries: z.number().int().min(0).default(0),
   hash: z.string().min(1),
   locked: z.boolean().default(false),

@@ -19,6 +19,8 @@ import type {
   PfReportOutput,
   PfResolveInput,
   PfResolveOutput,
+  PfEditArgsInput,
+  PfEditNodeInput,
   AmendAttemptArtifactsInput,
   PfStartInput,
   PfStartOutput,
@@ -39,6 +41,7 @@ function err(code: ErrorCode, message: string): ProcForgeError {
 }
 
 import { checkUnknownKeys, selfAndAncestors, similarKey, varRefNodeId } from "@procforge/shared/args-schema.js";
+import { checkFixedAgainstInputSchema } from "@procforge/shared/validator.js";
 import { maskParamsValues, restoreParamsPlaceholders } from "@procforge/shared/normalize.js";
 import { PROCEDURE_NAME_RE, type ProcedureDoc } from "@procforge/shared/procedure.js";
 import { validateTree } from "@procforge/shared/validator.js";
@@ -382,9 +385,10 @@ export class CoreService implements CoreClient {
     return { result: {
       done: false,
       node: n,
-      instruction:
-        `노드 ${n.id}(${n.goal}): 툴 1회로 가능한지 판단하라. 가능하면 sandbox(.procforge/sandbox/${sessionId}/) 사본에서 실행 후 ` +
-        `pf_report(selfVerdict/selfReason 필수), 아니면 pf_split. pass여도 leaf 자동 확정 없음 — pf_confirm_leaf(tool, argSpecs) 제출이 필요하다.`,
+      instruction: n.suggestedArgs
+        ? `사람이 인자를 수정함(node.suggestedArgs 참조). 이 인자로 실행 후 pf_report.`
+        : `노드 ${n.id}(${n.goal}): 툴 1회로 가능한지 판단하라. 가능하면 sandbox(.procforge/sandbox/${sessionId}/) 사본에서 실행 후 ` +
+          `pf_report(selfVerdict/selfReason 필수), 아니면 pf_split. pass여도 leaf 자동 확정 없음 — pf_confirm_leaf(tool, argSpecs) 제출이 필요하다.`,
     }, summary: `next ${n.id}` };
   });
   }
@@ -490,6 +494,7 @@ export class CoreService implements CoreClient {
         ...n,
         status: "probing",
         constraints,
+        suggestedArgs: undefined,
         attempts: [...n.attempts, { ...attemptBase, verdict: "pass" as const, failedConstraints: [] }],
       };
       next.hash = this.hashFor(s.id, next);
@@ -511,6 +516,7 @@ export class CoreService implements CoreClient {
       ...n,
       status,
       retries,
+      suggestedArgs: undefined,
       attempts: [...n.attempts, { ...attemptBase, verdict: "fail" as const, failedConstraints }],
     };
     this.store.saveNode(s.id, next);
@@ -790,6 +796,78 @@ export class CoreService implements CoreClient {
     const node = this.node(sessionId, nodeId);
     return { result: { constraints, rejected, node, ...(suggestNote ? { note: suggestNote } : {}) }, summary: `advise ${nodeId} +${constraints.length}` };
   });
+  }
+
+  /** 확정 인자 수정 (M4.2-2). leaf는 open으로, 수정분을 suggestedArgs에 저장 */
+  async pfEditArgs(input: PfEditArgsInput): Promise<{ node: Node; instruction: string }> {
+    return this.change(input.sessionId, { method: "pfEditArgs", expectedRevision: input.expectedRevision, actor: input.actor }, () => {
+      const s = this.sess(input.sessionId);
+      const n = this.node(input.sessionId, input.nodeId);
+      if (n.locked) throw err("conflict", `node ${n.id} is locked`);
+      if (!n.args) throw err("bad_request", `node ${n.id}에 확정된 인자가 없어 수정 불가. pf_confirm_leaf 먼저.`);
+      const set = input.patch.set ?? {};
+      for (const [k, spec] of Object.entries(set)) {
+        if (!spec || (spec.kind !== "fixed" && spec.kind !== "var" && spec.kind !== "generated")) {
+          throw err("bad_request", `bad patch spec: ${k}`);
+        }
+      }
+      const remove = new Set(input.patch.remove ?? []);
+      const merged: Record<string, ArgSpec> = {};
+      for (const [k, spec] of Object.entries(n.args)) {
+        if (!remove.has(k)) merged[k] = spec;
+      }
+      Object.assign(merged, set);
+      const cat = s.toolCatalog.find((t) => t.server === n.tool?.server && t.name === n.tool?.name);
+      if (!n.tool || !cat) throw err("bad_request", `node ${n.id}의 도구를 카탈로그에서 찾을 수 없어 검증 불가.`);
+      const problem = checkFixedAgainstInputSchema(merged, cat.inputSchema);
+      if (problem) throw err("bad_request", problem);
+      const reopened = n.status === "leaf" ? ("open" as const) : n.status;
+      const next: Node = { ...n, status: reopened, args: merged, suggestedArgs: merged };
+      next.hash = this.hashFor(s.id, next);
+      this.store.saveNode(s.id, next);
+      this.propagateStale(s.id, n.id);
+      return { result: { node: next, instruction: `인자 수정됨. pf_next로 계속하라.` }, summary: `editArgs ${n.id}` };
+    });
+  }
+
+  /** 목표·검사 조건 직접 수정 (M4.2-2) */
+  async pfEditNode(input: PfEditNodeInput): Promise<{ node: Node; instruction: string }> {
+    return this.change(input.sessionId, { method: "pfEditNode", expectedRevision: input.expectedRevision, actor: input.actor }, () => {
+      const s = this.sess(input.sessionId);
+      const n = this.node(input.sessionId, input.nodeId);
+      if (n.locked) throw err("conflict", `node ${n.id} is locked`);
+      const adds = input.addConstraints ?? [];
+      const removes = input.removeConstraintIds ?? [];
+      if (input.goal === undefined && adds.length === 0 && removes.length === 0) {
+        throw err("bad_request", "변경 없음 (goal/addConstraints/removeConstraintIds 중 하나 필요).");
+      }
+      if (input.goal !== undefined && input.goal.length === 0) throw err("bad_request", "goal이 비었다.");
+      let constraints = n.constraints;
+      if (removes.length > 0) {
+        const missing = removes.filter((id) => !constraints.some((c) => c.id === id));
+        if (missing.length > 0) throw err("bad_request", `unknown constraint: ${missing.join(",")}`);
+        constraints = constraints.filter((c) => !removes.includes(c.id));
+      }
+      if (adds.length > 0) {
+        const parsed: Constraint[] = [];
+        for (const p of adds) {
+          const r = ConstraintSchema.safeParse(p);
+          if (!r.success) throw err("bad_request", `bad constraint: ${r.error.issues[0]?.message ?? "invalid"}`);
+          parsed.push(r.data);
+        }
+        const dup = parsed.filter((a) => constraints.some((c) => c.id === a.id));
+        if (dup.length > 0) throw err("bad_request", `duplicate constraint: ${dup.map((d) => d.id).join(",")}`);
+        constraints = [...constraints, ...parsed];
+      }
+      const goalChanged = input.goal !== undefined && input.goal !== n.goal;
+      const reopened = goalChanged && n.status === "leaf" ? ("open" as const) : n.status;
+      const status = n.status === "needs_human" ? "open" : reopened;
+      const next: Node = { ...n, goal: input.goal ?? n.goal, constraints, status };
+      next.hash = this.hashFor(s.id, next);
+      this.store.saveNode(s.id, next);
+      this.propagateStale(s.id, n.id);
+      return { result: { node: next, instruction: `노드 수정됨. pf_next로 계속하라.` }, summary: `editNode ${n.id}` };
+    });
   }
 
   /** attempt artifacts 교체 (M4.2-1, server 직접 저장 대체) */

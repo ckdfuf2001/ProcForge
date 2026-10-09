@@ -111,6 +111,30 @@ export type AmendAttemptArtifactsInput = {
   actor?: Actor;
 };
 
+/** 인자 패치 (M4.2-2): fixed 값 수정·fixed↔var 전환 + 키 삭제 */
+export type PfEditArgsPatch = {
+  set?: Record<string, ArgSpec>;
+  remove?: string[];
+};
+
+export type PfEditArgsInput = {
+  sessionId: string;
+  nodeId: string;
+  patch: PfEditArgsPatch;
+  expectedRevision?: number;
+  actor?: Actor;
+};
+
+export type PfEditNodeInput = {
+  sessionId: string;
+  nodeId: string;
+  goal?: string;
+  addConstraints?: Constraint[];
+  removeConstraintIds?: string[];
+  expectedRevision?: number;
+  actor?: Actor;
+};
+
 export type PfAdviseInput = {
   sessionId: string;
   nodeId: string;
@@ -142,6 +166,10 @@ export interface CoreClient {
   pfReopen(sessionId: string, nodeId: string, reason: string, opts?: ChangeOpts): Promise<Node>;
   /** attempt artifacts 교체 (server 직접 저장 대체) */
   amendAttemptArtifacts(input: AmendAttemptArtifactsInput): Promise<{ node: Node; revision: number }>;
+  /** 확정 인자 수정 (M4.2-2) */
+  pfEditArgs(input: PfEditArgsInput): Promise<{ node: Node; instruction: string }>;
+  /** 목표·검사 조건 직접 수정 (M4.2-2) */
+  pfEditNode(input: PfEditNodeInput): Promise<{ node: Node; instruction: string }>;
   /** 절차서 문서 조립 (M4.2-1, 검증·params 경고 포함. 파일 쓰기는 local) */
   pfBuildProcedure(sessionId: string, name: string): Promise<{ doc: ProcedureDoc; warnings: string[] }>;
   /** external dry-run 계획 승인/거부 (M2.6-4) */

@@ -1014,6 +1014,106 @@ describe("core 상태머신 회귀 (M1)", () => {
   });
 });
 
+describe("M4.2-2 pfEditArgs/pfEditNode", () => {
+  const editCat: Session["toolCatalog"] = [
+    {
+      server: "fs",
+      name: "read",
+      inputSchema: {
+        type: "object",
+        properties: { file_path: { type: "string" }, index: { type: "integer" } },
+        required: ["file_path"],
+        additionalProperties: false,
+      } as unknown as Record<string, unknown>,
+      schemaHash: "h1",
+    },
+  ];
+
+  async function leafed() {
+    const svc = new CoreService(createMemoryStore(), passEval);
+    const s = await svc.pfStart({ request: "r", toolCatalog: editCat });
+    await svc.pfReport({ ...rep(), sessionId: s.session.id, args: { file_path: "a" } });
+    await svc.pfResolve({
+      sessionId: s.session.id, nodeId: "1", decision: "leaf",
+      tool: { server: "fs", name: "read" },
+      argSpecs: { file_path: { kind: "fixed", value: "a" } },
+    });
+    return { svc, sid: s.session.id };
+  }
+
+  it("fixed 값 수정: leaf→open + suggestedArgs + golden 보존", async () => {
+    const { svc, sid } = await leafed();
+    const goldenBefore = (await svc.pfTree(sid)).nodes[0].golden!;
+    const r = await svc.pfEditArgs({
+      sessionId: sid, nodeId: "1", patch: { set: { file_path: { kind: "fixed", value: "b" } } },
+    });
+    expect(r.node.status).toBe("open");
+    expect(r.node.args).toEqual({ file_path: { kind: "fixed", value: "b" } });
+    expect(r.node.suggestedArgs).toEqual({ file_path: { kind: "fixed", value: "b" } });
+    expect(r.node.golden).toEqual(goldenBefore);
+    expect(r.instruction).toMatch(/pf_next/);
+    // pfNext 안내에 수정 고지
+    const nxt = await svc.pfNext(sid);
+    expect(nxt.done).toBe(false);
+    if (!nxt.done) expect(nxt.instruction).toMatch(/사람이 인자를 수정함/);
+    // 보고하면 suggestedArgs 소진
+    await svc.pfReport({ ...rep(), sessionId: sid, nodeId: "1", args: { file_path: "b" } });
+    expect((await svc.pfTree(sid)).nodes[0].suggestedArgs).toBeUndefined();
+  });
+
+  it("fixed↔var 전환 + 스키마 위반 거부", async () => {
+    const { svc, sid } = await leafed();
+    // var 전환 통과
+    const v = await svc.pfEditArgs({
+      sessionId: sid, nodeId: "1", patch: { set: { file_path: { kind: "var", ref: "${params.p}" } } },
+    });
+    expect(v.node.status).toBe("open");
+    // 타입 위반
+    await expect(
+      svc.pfEditArgs({ sessionId: sid, nodeId: "1", patch: { set: { file_path: { kind: "fixed", value: 123 } } } }),
+    ).rejects.toThrow(/expected/);
+    // 필수키 삭제
+    await expect(
+      svc.pfEditArgs({ sessionId: sid, nodeId: "1", patch: { remove: ["file_path"] } }),
+    ).rejects.toThrow(/missing required/);
+    // 미등록 키
+    await expect(
+      svc.pfEditArgs({ sessionId: sid, nodeId: "1", patch: { set: { bogus: { kind: "fixed", value: 1 } } } }),
+    ).rejects.toThrow(/unknown/);
+    // 잠금
+    await svc.pfLock(sid, "1");
+    await expect(
+      svc.pfEditArgs({ sessionId: sid, nodeId: "1", patch: { set: { file_path: { kind: "fixed", value: "c" } } } }),
+    ).rejects.toThrow(/locked/);
+  });
+
+  it("pfEditNode: 목표·조건 직접 수정", async () => {
+    const { svc, sid } = await leafed();
+    // 목표 변경: leaf→open
+    const g = await svc.pfEditNode({ sessionId: sid, nodeId: "1", goal: "새 목표" });
+    expect(g.node.status).toBe("open");
+    expect(g.node.goal).toBe("새 목표");
+    // 조건 추가 (형식 오류 거부)
+    await expect(
+      svc.pfEditNode({ sessionId: sid, nodeId: "1", addConstraints: [{ kind: "nope" }] }),
+    ).rejects.toThrow(/bad constraint/);
+    const c1 = { id: "c1", kind: "count", spec: { path: "items", exact: 3 }, source: "human" };
+    const added = await svc.pfEditNode({ sessionId: sid, nodeId: "1", addConstraints: [c1] });
+    expect(added.node.constraints.map((c) => c.id)).toContain("c1");
+    await expect(
+      svc.pfEditNode({ sessionId: sid, nodeId: "1", addConstraints: [c1] }),
+    ).rejects.toThrow(/duplicate constraint/);
+    // 조건 삭제 (미존재 거부)
+    await expect(
+      svc.pfEditNode({ sessionId: sid, nodeId: "1", removeConstraintIds: ["nope"] }),
+    ).rejects.toThrow(/unknown constraint/);
+    const removed = await svc.pfEditNode({ sessionId: sid, nodeId: "1", removeConstraintIds: ["c1"] });
+    expect(removed.node.constraints.map((c) => c.id)).not.toContain("c1");
+    // 빈 변경 거부
+    await expect(svc.pfEditNode({ sessionId: sid, nodeId: "1" })).rejects.toThrow(/변경 없음/);
+  });
+});
+
 describe("M4.2-1 pfBuildProcedure", () => {
   it("검증·경고·문서 조립", async () => {
     const svc = new CoreService(createMemoryStore(), passEval);
