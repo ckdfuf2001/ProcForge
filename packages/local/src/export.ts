@@ -22,6 +22,11 @@ function crc32(buf: Buffer): number {
 
 export type ZipEntry = { name: string; data: Buffer };
 
+/** 탐색기 호환: UTF-8 플래그(0x0800)는 비ASCII 이름에만 설정 (탐색기가 플래그 있으면 해제 실패) */
+function utf8Flag(name: string): number {
+  return /[^\x00-\x7f]/.test(name) ? 0x0800 : 0;
+}
+
 export function writeZip(entries: ZipEntry[]): Buffer {
   const parts: Buffer[] = [];
   const central: Buffer[] = [];
@@ -30,10 +35,11 @@ export function writeZip(entries: ZipEntry[]): Buffer {
   for (const e of entries) {
     const nameBuf = Buffer.from(e.name, "utf8");
     const crc = crc32(e.data);
+    const flags = utf8Flag(e.name);
     const local = Buffer.alloc(30);
     local.writeUInt32LE(0x04034b50, 0);
     local.writeUInt16LE(20, 4);
-    local.writeUInt16LE(0x0800, 8); // UTF-8
+    local.writeUInt16LE(flags, 8);
     local.writeUInt16LE(0, 10);
     fixedDate.copy(local, 12);
     local.writeUInt32LE(crc, 14);
@@ -46,7 +52,7 @@ export function writeZip(entries: ZipEntry[]): Buffer {
     cen.writeUInt32LE(0x02014b50, 0);
     cen.writeUInt16LE(20, 4);
     cen.writeUInt16LE(20, 6);
-    cen.writeUInt16LE(0x0800, 8);
+    cen.writeUInt16LE(flags, 8);
     cen.writeUInt16LE(0, 10);
     fixedDate.copy(cen, 12);
     cen.writeUInt32LE(crc, 16);

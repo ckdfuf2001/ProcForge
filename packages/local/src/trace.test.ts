@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createLocalStack } from "../src/core-inprocess.js";
 import { buildTrace, formatTraceMarkdown, logEvent, readEvents } from "../src/trace.js";
-import { exportSession, listZip, readZipEntry } from "../src/export.js";
+import { exportSession, listZip, readZipEntry, writeZip } from "../src/export.js";
 import type { CoreClient } from "@procforge/shared/core-client.js";
 
 let pfdir: string;
@@ -69,5 +69,15 @@ describe("trace/export", () => {
     const names = listZip(buf).map((e) => e.name);
     expect(names.some((n) => n.endsWith(".redacted.json"))).toBe(true);
     expect(names.some((n) => n.endsWith("session.json") && !n.endsWith(".redacted.json"))).toBe(true);
+  });
+
+  it("zip UTF-8 플래그는 비ASCII 이름에만 (탐색기 해제 회귀)", () => {
+    const ascii = writeZip([{ name: "nodes/1.json", data: Buffer.from("{}") }]);
+    expect(ascii.readUInt16LE(8)).toBe(0); // local header flags
+    let p = 0;
+    while (ascii.readUInt32LE(p) !== 0x02014b50) p++;
+    expect(ascii.readUInt16LE(p + 8)).toBe(0); // central flags
+    const nonAscii = writeZip([{ name: "작업.json", data: Buffer.from("{}") }]);
+    expect(nonAscii.readUInt16LE(8)).toBe(0x0800);
   });
 });
