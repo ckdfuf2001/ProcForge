@@ -206,7 +206,7 @@ export function buildServer(deps: ServerDeps): McpServer {
           : await collectCatalog(deps.projectRoot, { cacheDir: join(deps.procforgeDir, "cache") });
         const catalog = a.toolCatalog ?? collected!.entries;
         const warnings = collected?.warnings ?? [];
-        const out = await client.pfStart({ request: a.request as string, params: a.params as Record<string, string> | undefined, toolCatalog: catalog as never, limits: a.limits as never });
+        const out = await client.pfStart({ request: a.request as string, params: a.params as Record<string, string> | undefined, toolCatalog: catalog as never, limits: a.limits as never, opencodeVersion: collected?.opencodeVersion });
         deps.store.touch(out.session.id);
         let sandboxNote = "";
         const seeds = a.seedFiles as string[] | undefined;
@@ -220,6 +220,7 @@ export function buildServer(deps: ServerDeps): McpServer {
           instruction: `${PROMPT_TEXT}\n\n${out.instruction}${sandboxNote}`,
           warnings,
           sessionExpiresInDays: Math.round((deps.sessionTtlMs ?? DEFAULT_SESSION_TTL_MS) / 86400000),
+          opencodeVersion: out.session.opencodeVersion ?? "unknown",
         });
       } catch (e) {
         return errResult(e);

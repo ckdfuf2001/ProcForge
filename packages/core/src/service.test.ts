@@ -667,6 +667,14 @@ describe("M1.5-1 pass여도 leaf 자동 확정 없음", () => {
     expect(leaf.instruction).toMatch(/var/);
   });
 
+  it("M3.6-7 세션에 opencode 버전 기록", async () => {
+    const svc = new CoreService(createMemoryStore(), passEval);
+    const s = await svc.pfStart({ request: "r", toolCatalog: catalog, opencodeVersion: "1.2.3" });
+    expect(s.session.opencodeVersion).toBe("1.2.3");
+    const s2 = await svc.pfStart({ request: "r", toolCatalog: catalog });
+    expect(s2.session.opencodeVersion).toBe("unknown");
+  });
+
   it("M3.6-5 미참조 dependsOn은 경고만 (dep_without_dataflow)", async () => {
     const svc = new CoreService(createMemoryStore(), passEval);
     const s = await svc.pfStart({ request: "r", toolCatalog: catalog });

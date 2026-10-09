@@ -125,6 +125,8 @@ node packages/local/dist/cli.js test procedures/<name> --param month=2026-10
 - `trace`: 호출 순서·시도/판정/조언·소요시간 + M3.5 측정행.
 - `export --redact`: 공유용 zip. 원본 대신 `<원본명>.redacted.json` 기술자
   (`{sha256,size}`)만 포함 — 실제 내용을 보려면 `--include-originals` 추가.
+- 내장 `read`는 `offset`(0-based 시작 줄)/`limit`(줄 수) 지원.
+  세션에는 수집 시점 opencode 버전 기록 (모르면 `unknown` + 경고).
 - 절차서 형식 명세: `docs/PROCEDURE-FORMAT.md`.
 - dogfood 측정 기록: `docs/M3.5-dogfood.md`.
 

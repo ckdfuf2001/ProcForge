@@ -8,6 +8,12 @@ import type { ToolResponse } from "./types.js";
 
 // 실행 1회 동안 MCP 서버 연결 풀 유지 (M3). 내장 툴은 최소 구현.
 
+function toLineIndex(v: unknown, what: string): number {
+  const n = typeof v === "string" && v.trim() !== "" ? Number(v) : (v as number);
+  if (!Number.isInteger(n) || (n as number) < 0) throw new Error(`read ${what} must be a non-negative integer`);
+  return n as number;
+}
+
 export class ConnectionPool {
   private mcp = new Map<string, Client>();
   private configs: Record<string, Parameters<typeof connectMcpServer>[1]> = {};
@@ -38,13 +44,18 @@ export class ConnectionPool {
       case "read": {
         const p = this.runPath(args["path"] as string);
         const text = readFileSync(p, "utf8");
+        // M3.6-7: offset(0-based 시작 줄)/limit(줄 수). 생략 시 전체.
+        const lines = text.split("\n");
+        const offset = args["offset"] === undefined ? 0 : toLineIndex(args["offset"], "offset");
+        const limit = args["limit"] === undefined ? lines.length : toLineIndex(args["limit"], "limit");
+        const slice = lines.slice(offset, offset + limit).join("\n");
         let json: unknown;
         try {
-          json = JSON.parse(text);
+          json = JSON.parse(slice);
         } catch {
-          json = { text };
+          json = { text: slice };
         }
-        return { resultText: text, resultJson: json };
+        return { resultText: slice, resultJson: json };
       }
       case "write": {
         const p = this.runPath(args["path"] as string);

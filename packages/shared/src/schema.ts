@@ -243,6 +243,8 @@ export const SessionSchema = z.object({
     maxNodes: z.number().int().min(1),
   }),
   createdAt: z.string().min(1),
+  /** 수집 시점 opencode 버전 (M3.6-7, 미상은 "unknown") */
+  opencodeVersion: z.string().optional(),
 });
 export type Session = z.infer<typeof SessionSchema>;
 

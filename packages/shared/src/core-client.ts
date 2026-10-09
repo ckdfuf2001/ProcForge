@@ -9,6 +9,8 @@ export type PfStartInput = {
   params?: Record<string, string>;
   toolCatalog: Session["toolCatalog"];
   limits?: Session["limits"];
+  /** 수집 시점 opencode 버전 (M3.6-7, 생략 시 "unknown") */
+  opencodeVersion?: string;
 };
 
 export type PfStartOutput = {

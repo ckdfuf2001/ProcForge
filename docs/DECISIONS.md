@@ -137,6 +137,12 @@
   실제 존재하는 파일을 artifacts로 ingest (최대 10개, URL 제외). 첫 pass의
   auto file_exists가 그대로 부착된다. 바이너리(pptx 등)는 sha256 비교 없이
   존재+크기>0만 검사 (fixtureFileExists, 확장자 기준).
+- [M3.6-7] 내장 툴 버전 대응 — 세션에 opencodeVersion 기록
+  (`opencode --version` best-effort, 실패 시 "unknown"). 버전별 스키마 표는
+  BUILTIN_BY_MAJOR (major 기준, 현행 "1" 가정·read offset/limit 포함).
+  표에 없는 major·unknown은 현행 스키마 + additionalProperties 허용 +
+  경고 (엄격화는 실측 스키마 확인 후). 버전은 카탈로그 fingerprint에 포함.
+  runner read는 offset(0-based 시작 줄)/limit(줄 수) 지원.
 
 ## M3.2
 

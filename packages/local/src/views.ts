@@ -80,6 +80,7 @@ export const PfStartOutputSchema = z.object({
   instruction: z.string(),
   warnings: z.array(z.string()),
   sessionExpiresInDays: z.number(),
+  opencodeVersion: z.string().optional(),
 });
 export const PfNextOutputSchema = z.object({
   done: z.boolean(),

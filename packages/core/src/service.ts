@@ -217,6 +217,7 @@ export class CoreService implements CoreClient {
       rootId: "1",
       limits,
       createdAt: new Date().toISOString(),
+      opencodeVersion: input.opencodeVersion ?? "unknown",
     };
     this.store.saveSession(session);
     const root: Node = {

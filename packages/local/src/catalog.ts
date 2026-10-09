@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, statSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { writeAtomicFile } from "./fsutil.js";
@@ -30,35 +31,109 @@ export type McpServerConfig = {
   url?: string;
 };
 
-function inputSchemaOf(props: Record<string, unknown>, required: string[]): Record<string, unknown> {
-  return { type: "object", properties: props, required };
-}
-
-function builtin(
-  name: string,
+function inputSchemaOf(
   props: Record<string, unknown>,
   required: string[],
-  readOnly: boolean,
-): ToolCatalogEntry {
-  const inputSchema = inputSchemaOf(props, required);
+  allowAdditional?: boolean,
+): Record<string, unknown> {
   return {
-    server: "opencode",
-    name,
-    inputSchema,
-    schemaHash: schemaHash(inputSchema),
-    annotations: { readOnlyHint: readOnly, openWorldHint: false },
+    type: "object",
+    properties: props,
+    required,
+    ...(allowAdditional === undefined ? {} : { additionalProperties: allowAdditional }),
   };
 }
 
-/** OpenCode 내장 툴 고정 목록 (M2 가정 — DECISIONS 참조) */
-export const BUILTIN_TOOLS: ToolCatalogEntry[] = [
-  builtin("read", { path: { type: "string" } }, ["path"], true),
-  builtin("write", { path: { type: "string" }, content: { type: "string" } }, ["path", "content"], false),
-  builtin("edit", { path: { type: "string" }, oldString: { type: "string" }, newString: { type: "string" } }, ["path", "oldString", "newString"], false),
-  builtin("bash", { command: { type: "string" } }, ["command"], false),
-  builtin("glob", { pattern: { type: "string" } }, ["pattern"], true),
-  builtin("grep", { pattern: { type: "string" } }, ["pattern"], true),
-];
+export type BuiltinDef = {
+  props: Record<string, unknown>;
+  required: string[];
+  readOnly: boolean;
+};
+
+/**
+ * 버전별 내장 툴 스키마 표 (M3.6-7, major 기준).
+ * "1" = 현행 가정 (read에 offset/limit 포함). 실측 버전과 다르면 DECISIONS 갱신.
+ * 표에 없는 major는 현행 스키마 + additionalProperties 허용 + 경고.
+ */
+export const BUILTIN_BY_MAJOR: Record<string, Record<string, BuiltinDef>> = {
+  "1": {
+    read: {
+      props: {
+        path: { type: "string" },
+        offset: { type: "integer", minimum: 0 },
+        limit: { type: "integer", minimum: 0 },
+      },
+      required: ["path"],
+      readOnly: true,
+    },
+    write: {
+      props: { path: { type: "string" }, content: { type: "string" } },
+      required: ["path", "content"],
+      readOnly: false,
+    },
+    edit: {
+      props: { path: { type: "string" }, oldString: { type: "string" }, newString: { type: "string" } },
+      required: ["path", "oldString", "newString"],
+      readOnly: false,
+    },
+    bash: { props: { command: { type: "string" } }, required: ["command"], readOnly: false },
+    glob: { props: { pattern: { type: "string" } }, required: ["pattern"], readOnly: true },
+    grep: { props: { pattern: { type: "string" } }, required: ["pattern"], readOnly: true },
+  },
+};
+
+function builtinEntries(
+  defs: Record<string, BuiltinDef>,
+  allowAdditional?: boolean,
+): ToolCatalogEntry[] {
+  return Object.entries(defs).map(([name, d]) => {
+    const inputSchema = inputSchemaOf(d.props, d.required, allowAdditional);
+    return {
+      server: "opencode",
+      name,
+      inputSchema,
+      schemaHash: schemaHash(inputSchema),
+      annotations: { readOnlyHint: d.readOnly, openWorldHint: false },
+    };
+  });
+}
+
+/** "1.2.3" → "1". 파싱 불가면 undefined */
+export function builtinMajor(version: string): string | undefined {
+  const m = /^(\d+)\./.exec(version.trim());
+  return m ? m[1] : undefined;
+}
+
+/** 버전 대응 내장 툴 목록. 모르는 버전은 허용 모드 + 경고 */
+export function builtinToolsFor(version?: string): { entries: ToolCatalogEntry[]; warnings: string[] } {
+  const v = version ?? "unknown";
+  const major = builtinMajor(v);
+  const defs = (major ? BUILTIN_BY_MAJOR[major] : undefined) ?? BUILTIN_BY_MAJOR["1"];
+  const known = !!major && major in BUILTIN_BY_MAJOR;
+  return {
+    entries: builtinEntries(defs, known ? undefined : true),
+    warnings: known ? [] : [`모르는 opencode 버전(${v}): 내장 툴 additionalProperties 허용`],
+  };
+}
+
+/** OpenCode 내장 툴 고정 목록 (M2 가정 — DECISIONS 참조). 현행 버전 기준 */
+export const BUILTIN_TOOLS: ToolCatalogEntry[] = builtinToolsFor("1.0.0").entries;
+
+export type VersionRunner = (cmd: string, args: string[]) => { stdout: string };
+
+/** `opencode --version` best-effort 감지. 실패·파싱 불가면 "unknown" */
+export function detectOpencodeVersion(run?: VersionRunner): string {
+  try {
+    const out = run
+      ? run("opencode", ["--version"]).stdout
+      : (spawnSync("opencode", ["--version"], { encoding: "utf8", timeout: 5000 }).stdout as string | null) ?? "";
+    const m = /(\d+)\.(\d+)\.(\d+)/.exec(out);
+    if (m) return `${m[1]}.${m[2]}.${m[3]}`;
+  } catch {
+    // 무시 → unknown
+  }
+  return "unknown";
+}
 
 export function loadMcpConfigs(projectRoot: string): { servers: Record<string, McpServerConfig>; sources: string[] } {
   const candidates = [
@@ -161,12 +236,14 @@ async function listServerTools(
 /** opencode.json mcp 항목 + 내장 툴 → toolCatalog 수집 (M2.5: 캐시+5초 타임아웃) */
 export async function collectCatalog(
   projectRoot: string,
-  opts: { timeoutMs?: number; cacheDir?: string; refresh?: boolean } = {},
-): Promise<{ entries: ToolCatalogEntry[]; warnings: string[]; cached: boolean }> {
+  opts: { timeoutMs?: number; cacheDir?: string; refresh?: boolean; opencodeVersion?: string; runOpencode?: VersionRunner } = {},
+): Promise<{ entries: ToolCatalogEntry[]; warnings: string[]; cached: boolean; opencodeVersion: string }> {
   const timeoutMs = opts.timeoutMs ?? 5000;
   const CACHE_TTL_MS = 10 * 60 * 1000;
   const cachePath = opts.cacheDir ? join(opts.cacheDir, "catalog.json") : undefined;
-  const fingerprint = configFingerprint(projectRoot);
+  // M3.6-7: 버전이 다르면 스키마가 다를 수 있어 fingerprint에 포함
+  const opencodeVersion = opts.opencodeVersion ?? detectOpencodeVersion(opts.runOpencode);
+  const fingerprint = `${configFingerprint(projectRoot)}|opencode:${opencodeVersion}`;
   if (!opts.refresh && cachePath && existsSync(cachePath)) {
     try {
       const cached = JSON.parse(readFileSync(cachePath, "utf8")) as {
@@ -174,17 +251,19 @@ export async function collectCatalog(
         fingerprint: string;
         entries: ToolCatalogEntry[];
         warnings: string[];
+        opencodeVersion?: string;
       };
       if (cached.fingerprint === fingerprint && Date.now() - cached.at < CACHE_TTL_MS) {
-        return { entries: cached.entries, warnings: cached.warnings, cached: true };
+        return { entries: cached.entries, warnings: cached.warnings, cached: true, opencodeVersion: cached.opencodeVersion ?? opencodeVersion };
       }
     } catch {
       // 캐시 손상 시 재수집
     }
   }
   const { servers } = loadMcpConfigs(projectRoot);
-  const entries: ToolCatalogEntry[] = [...BUILTIN_TOOLS];
-  const warnings: string[] = [];
+  const versioned = builtinToolsFor(opencodeVersion);
+  const entries: ToolCatalogEntry[] = [...versioned.entries];
+  const warnings: string[] = [...versioned.warnings];
   for (const [name, cfg] of Object.entries(servers)) {
     const r = await listServerTools(name, cfg, timeoutMs);
     entries.push(...r.entries);
@@ -192,12 +271,12 @@ export async function collectCatalog(
   }
   if (cachePath) {
     try {
-      writeAtomicFile(cachePath, JSON.stringify({ at: Date.now(), fingerprint, entries, warnings }));
+      writeAtomicFile(cachePath, JSON.stringify({ at: Date.now(), fingerprint, entries, warnings, opencodeVersion }));
     } catch {
       // 캐시 실패는 무시
     }
   }
-  return { entries, warnings, cached: false };
+  return { entries, warnings, cached: false, opencodeVersion };
 }
 
 function configFingerprint(projectRoot: string): string {
