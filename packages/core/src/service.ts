@@ -31,12 +31,13 @@ function newAttemptId(): string {
   return randomUUID();
 }
 
-function err(code: string, message: string): Error {
-  return Object.assign(new Error(message), { code });
+function err(code: ErrorCode, message: string): ProcForgeError {
+  return pfError(code, message);
 }
 
 import { checkUnknownKeys, selfAndAncestors, similarKey, varRefNodeId } from "@procforge/shared/args-schema.js";
 import { maskParamsValues } from "@procforge/shared/normalize.js";
+import { pfError, type ErrorCode, type ProcForgeError } from "@procforge/shared/errors.js";
 export { similarKey };
 
 /**

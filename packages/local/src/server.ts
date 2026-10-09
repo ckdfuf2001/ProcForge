@@ -6,6 +6,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import type { CoreClient } from "@procforge/shared/core-client.js";
 import { NodeIdSchema, SessionIdSchema, ConstraintSchema } from "@procforge/shared/schema.js";
+import { errorCodeOf, pfError, type ErrorCode, type ProcForgeError } from "@procforge/shared/errors.js";
 import { ingestArtifacts, normalizeArgSpecs, readManifest, setupSandbox } from "./artifacts.js";
 import {
   collectExistingPaths,
@@ -75,8 +76,8 @@ export const PROMPT_TEXT = [
   "6. needs_human이면 사람 조언을 pf_advise로 등록한 뒤 계속한다.",
 ].join("\n");
 
-function err(code: string, message: string, hint?: string): Error {
-  return Object.assign(new Error(message), { code, hint });
+function err(code: ErrorCode, message: string, hint?: string): ProcForgeError {
+  return pfError(code, message, hint);
 }
 
 const HINTS: Record<string, string> = {
@@ -90,7 +91,7 @@ const HINTS: Record<string, string> = {
 };
 
 function errResult(e: unknown) {
-  const rawCode = (e as { code?: string } | null)?.code ?? "internal";
+  const rawCode = errorCodeOf(e);
   const code = rawCode === "not_found" && /session/i.test(e instanceof Error ? e.message : "") ? "session_not_found" : rawCode;
   const hint = (e as { hint?: string } | null)?.hint ?? HINTS[code] ?? HINTS["internal"];
   const message = code === "internal" ? "내부 오류가 발생했다." : e instanceof Error ? e.message : String(e);
