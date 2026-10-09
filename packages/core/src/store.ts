@@ -1,5 +1,6 @@
 import type { Store } from "@procforge/shared/store.js";
 import type { Node, Session } from "@procforge/shared/schema.js";
+import type { CommitChange } from "@procforge/shared/store.js";
 import type { EventEntry } from "@procforge/shared/dto.js";
 
 export type { Store };
@@ -9,6 +10,17 @@ export function createMemoryStore(): Store {
   const nodes = new Map<string, Map<string, Node>>();
   const events = new Map<string, EventEntry[]>();
   const lastUsed = new Map<string, number>();
+  const apply = (sid: string, c: CommitChange) => {
+    for (const n of c.nodes ?? []) {
+      if (!nodes.has(sid)) nodes.set(sid, new Map());
+      nodes.get(sid)!.set(n.id, { ...n });
+    }
+    if (c.session) {
+      sessions.set(c.session.id, c.session);
+      if (!nodes.has(c.session.id)) nodes.set(c.session.id, new Map());
+    }
+    if (c.events?.length) events.set(sid, [...(events.get(sid) ?? []), ...c.events]);
+  };
   return {
     getSession: (id) => sessions.get(id),
     saveSession: (s) => {
@@ -30,5 +42,6 @@ export function createMemoryStore(): Store {
       lastUsed.set(sid, Date.now());
     },
     withLock: (_sid, fn) => fn(),
+    commitChange: (sid, c) => apply(sid, c),
   };
 }

@@ -1,4 +1,5 @@
 import type { Store } from "@procforge/shared/store.js";
+import type { CommitChange } from "@procforge/shared/store.js";
 import type { EventEntry } from "@procforge/shared/dto.js";
 import type { Node, Session } from "@procforge/shared/schema.js";
 
@@ -71,6 +72,13 @@ export class TxStore implements Store {
     return this.base.withLock(sessionId, fn);
   }
 
+  /** 버퍼에 일괄 기록 (commit 시 drain) */
+  commitChange(sessionId: string, c: CommitChange): void {
+    if (c.session) this.saveSession(c.session);
+    for (const n of c.nodes ?? []) this.saveNode(sessionId, n);
+    if (c.events?.length) this.appendEvents(sessionId, c.events);
+  }
+
   writtenNodeIds(sessionId: string): string[] {
     return [...(this.touchedNodes.get(sessionId) ?? [])];
   }
@@ -85,8 +93,17 @@ export class TxStore implements Store {
 
   /** R6 순서: 이벤트 기록 → 저장. append 실패 시 저장 생략 (부분 저장 금지) */
   commit(): void {
-    for (const { sessionId, events } of this.bufferedEvents) this.base.appendEvents(sessionId, events);
-    for (const [, s] of this.sessions) this.base.saveSession(s);
-    for (const [sid, m] of this.nodes) for (const [, n] of m) this.base.saveNode(sid, n);
+    const sids = new Set<string>([
+      ...this.sessions.keys(),
+      ...this.nodes.keys(),
+      ...this.bufferedEvents.map((e) => e.sessionId),
+    ]);
+    for (const sid of sids) {
+      this.base.commitChange(sid, {
+        ...(this.sessions.has(sid) ? { session: this.sessions.get(sid)! } : {}),
+        nodes: [...(this.nodes.get(sid)?.values() ?? [])],
+        events: this.bufferedEvents.filter((e) => e.sessionId === sid).flatMap((e) => e.events),
+      });
+    }
   }
 }

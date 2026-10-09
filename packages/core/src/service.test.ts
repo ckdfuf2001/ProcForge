@@ -684,7 +684,7 @@ describe("M1.5-1 pass여도 leaf 자동 확정 없음", () => {
   });
 });
 
-function recordingStore(inner = createMemoryStore(), opts: { failAppend?: boolean } = {}) {
+function recordingStore(inner = createMemoryStore(), opts: { failCommit?: boolean } = {}) {
   const calls: string[] = [];
   const appended: { sid: string; evts: EventEntry[] }[] = [];
   const store: Store = {
@@ -701,7 +701,6 @@ function recordingStore(inner = createMemoryStore(), opts: { failAppend?: boolea
     },
     appendEvents: (sid, evts) => {
       calls.push(`appendEvents:${evts.map((e) => `${e.method}#${e.seq}`).join(",")}`);
-      if (opts.failAppend) throw new Error("injected append failure");
       appended.push({ sid, evts });
       inner.appendEvents(sid, evts);
     },
@@ -711,6 +710,11 @@ function recordingStore(inner = createMemoryStore(), opts: { failAppend?: boolea
     withLock: (sid, fn) => {
       calls.push("withLock");
       return inner.withLock(sid, fn);
+    },
+    commitChange: (sid, c) => {
+      calls.push(`commitChange:${c.nodes?.length ?? 0}n`);
+      if (opts.failCommit) throw new Error("injected commit failure");
+      inner.commitChange(sid, c);
     },
   };
   return { store, calls, appended };
@@ -730,33 +734,32 @@ describe("M4.2-0.5 revision·이벤트 트랜잭션", () => {
     expect(calls.filter((c) => c.startsWith("saveNode")).length).toBe(savesBefore);
   });
 
-  it("변경 1회당 revision +1·이벤트 1건, 이벤트가 저장보다 먼저", async () => {
-    const { store, calls, appended } = recordingStore();
+  it("변경 1회당 revision +1·이벤트 1건, 원자 커밋 1회", async () => {
+    const { store, calls } = recordingStore();
     const svc = new CoreService(store, passEval);
     const s = await svc.pfStart({ request: "r", toolCatalog: catalog });
     const r = await svc.pfReport({ ...rep(), sessionId: s.session.id, resultJson: { ok: true }, expectedRevision: 0, actor: "human" });
     expect(r.verdict).toBe("pass");
     expect((await svc.pfTree(s.session.id)).session.revision).toBe(1);
-    expect(appended.length).toBe(1);
-    const [ev] = appended[0].evts;
+    // 원자 커밋 1회 (노드 1개)
+    expect(calls.filter((c) => c.startsWith("commitChange"))).toEqual(["commitChange:1n"]);
+    const all = await svc.getEvents(s.session.id);
+    expect(all.length).toBe(1);
+    const [ev] = all;
     expect(ev.method).toBe("pfReport");
     expect(ev.nodeIds).toEqual(["1"]);
     expect(ev.actor).toBe("human");
     expect(ev.seq).toBe(1);
     expect(ev.revision).toBe(1);
     expect(ev.beforeHash).not.toBe(ev.afterHash);
-    const appendIdx = calls.findIndex((c) => c.startsWith("appendEvents"));
-    expect(appendIdx).toBeGreaterThanOrEqual(0);
-    // R6 순서: 이벤트 기록 → 저장
-    expect(calls.slice(appendIdx)).toEqual([calls[appendIdx], "saveSession", "saveNode:1"]);
   });
 
-  it("이벤트 쓰기 실패 주입 시 상태 미변경", async () => {
-    const { store, calls } = recordingStore(createMemoryStore(), { failAppend: true });
+  it("커밋 실패 주입 시 상태 미변경", async () => {
+    const { store, calls } = recordingStore(createMemoryStore(), { failCommit: true });
     const svc = new CoreService(store, passEval);
     const s = await svc.pfStart({ request: "r", toolCatalog: catalog });
     const savesBefore = calls.filter((c) => c.startsWith("saveNode")).length;
-    await expect(svc.pfReport({ ...rep(), sessionId: s.session.id })).rejects.toThrow(/injected append failure/);
+    await expect(svc.pfReport({ ...rep(), sessionId: s.session.id })).rejects.toThrow(/injected commit failure/);
     expect((await svc.pfTree(s.session.id)).session.revision).toBe(0);
     expect(calls.filter((c) => c.startsWith("saveNode")).length).toBe(savesBefore);
     expect(store.getNode(s.session.id, "1")!.attempts.length).toBe(0);

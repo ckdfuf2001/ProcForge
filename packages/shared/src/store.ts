@@ -3,6 +3,14 @@ import type { EventEntry } from "./dto.js";
 
 // 영속성 포트. core·local 모두 shared의 이 인터페이스에만 의존한다.
 // (local→core 직접 import 금지 회피용. M0-6/DECISIONS 참조)
+
+/** 원자 커밋 단위 (M4.2-2.5-3): 세션+노드+이벤트 일괄 */
+export type CommitChange = {
+  session?: Session;
+  nodes?: Node[];
+  events?: EventEntry[];
+};
+
 export type Store = {
   getSession(id: string): Session | undefined;
   saveSession(s: Session): void;
@@ -19,4 +27,6 @@ export type Store = {
   touchSession(sessionId: string): void;
   /** 세션 잠금 안에서 실행 (M4.2-2.5, core change 트랜잭션용) */
   withLock<T>(sessionId: string, fn: () => T): T;
+  /** 원자 커밋 (M4.2-2.5-3): pending 기록 후 일괄 반영 */
+  commitChange(sessionId: string, change: CommitChange): void;
 };

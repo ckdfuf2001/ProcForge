@@ -220,6 +220,9 @@
   server는 완성된 App만 받음.
 - 2.5-2: 세션 잠금을 core change() 안으로 이동. Store.withLock
   (FileStore lockfile, Memory no-op). App.locked()/store 필드 제거.
+- 2.5-3: pending-<rev>.json 원자 커밋 (기록 → 노드 → 세션 → 이벤트 →
+  삭제). getSession·commitChange 진입 시 재반영 (이벤트 seq 중복 방지).
+  getNodes/getNode는 미적용 (세션 열기가 선행되는 흐름 전제).
 
 ## M3.2
 

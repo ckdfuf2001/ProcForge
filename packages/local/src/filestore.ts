@@ -1,6 +1,7 @@
 import { mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync, unlinkSync, statSync, appendFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import type { Store } from "@procforge/shared/store.js";
+import type { CommitChange } from "@procforge/shared/store.js";
 import type { Node, Session } from "@procforge/shared/schema.js";
 import type { EventEntry } from "@procforge/shared/dto.js";
 import { EventEntrySchema } from "@procforge/shared/dto.js";
@@ -36,6 +37,11 @@ export class FileStore implements Store {
     assertSessionId(id);
     const p = join(this.sessionDir(id), "session.json");
     if (!existsSync(p)) return undefined;
+    try {
+      this.recoverSession(id);
+    } catch {
+      // 복구 best-effort (읽기는 이어감)
+    }
     // M4.2-0.5-2: 읽기는 순수 조회 (구 세션 revision 기본값은 파서가 적용)
     const raw = JSON.parse(readFileSync(p, "utf8")) as Record<string, unknown>;
     return SessionSchema.parse(raw);
@@ -98,6 +104,84 @@ export class FileStore implements Store {
       }
     }
     return out;
+  }
+
+  private pendingFiles(sid: string): string[] {
+    const dir = this.sessionDir(sid);
+    if (!existsSync(dir)) return [];
+    return readdirSync(dir)
+      .filter((f) => f.startsWith("pending-") && f.endsWith(".json"))
+      .sort()
+      .map((f) => join(dir, f));
+  }
+
+  /**
+   * 남은 pending 재반영 (M4.2-2.5-3). true면 복구 수행.
+   * 이벤트는 seq 중복 방지 후 append.
+   */
+  recoverSession(sid: string): boolean {
+    const files = this.pendingFiles(sid);
+    if (files.length === 0) return false;
+    for (const f of files) {
+      let change: CommitChange | undefined;
+      try {
+        const parsed = JSON.parse(readFileSync(f, "utf8")) as CommitChange | null;
+        if (parsed && typeof parsed === "object") change = parsed;
+      } catch {
+        // 손상 pending은 삭제하고 계속
+      }
+      if (change) {
+        try {
+          this.applyPending(sid, change);
+        } catch {
+          continue;
+        }
+      }
+      try {
+        unlinkSync(f);
+      } catch {
+        // 무시
+      }
+    }
+    return true;
+  }
+
+  private applyPending(sid: string, c: CommitChange): void {
+    for (const n of c.nodes ?? []) this.saveNode(sid, n);
+    if (c.session) this.saveSession(c.session);
+    const fresh = (c.events ?? []).filter((e) => !this.readEvents(sid).some((x) => x.seq === e.seq));
+    if (fresh.length > 0) this.appendEvents(sid, fresh);
+  }
+
+  /**
+   * 원자 커밋 (M4.2-2.5-3): pending 원자 저장 → 노드 → 세션 → 이벤트 반영 →
+   * pending 삭제. 시작 시 남은 pending부터 재반영.
+   */
+  commitChange(sid: string, c: CommitChange): void {
+    assertSessionId(sid);
+    try {
+      this.recoverSession(sid);
+    } catch {
+      // best-effort 후 계속
+    }
+    const rev = c.session?.revision ?? this.readSessionRaw(sid)?.revision ?? 0;
+    mkdirSync(this.sessionDir(sid), { recursive: true });
+    this.writeAtomic(
+      join(this.sessionDir(sid), `pending-${rev}.json`),
+      JSON.stringify({ revision: rev, session: c.session ?? null, nodes: c.nodes ?? [], events: c.events ?? [] }),
+    );
+    this.applyPending(sid, c);
+    try {
+      unlinkSync(join(this.sessionDir(sid), `pending-${rev}.json`));
+    } catch {
+      // 삭제 실패 무시 (다음 진입 시 재반영, 멱등)
+    }
+  }
+
+  private readSessionRaw(sid: string): Session | undefined {
+    const p = join(this.sessionDir(sid), "session.json");
+    if (!existsSync(p)) return undefined;
+    return SessionSchema.parse(JSON.parse(readFileSync(p, "utf8")));
   }
 
   // ---- 세션 lockfile (M2.6-7, 프로세스 간 advisory lock) ----
