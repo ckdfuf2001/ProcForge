@@ -11,15 +11,21 @@ beforeEach(() => {
 });
 
 describe("inferPathRole", () => {
-  it("규칙 테이블 (이름 규칙 in은 weakIn)", () => {
+  it("규칙 테이블 (이름 규칙 in은 weakIn, 토큰화)", () => {
     expect(inferPathRole("output")).toBe("out");
     expect(inferPathRole("outputPath")).toBe("out");
     expect(inferPathRole("dest")).toBe("out");
     expect(inferPathRole("path")).toBe("weakIn");
     expect(inferPathRole("file")).toBe("weakIn");
     expect(inferPathRole("file_path")).toBe("weakIn");
+    expect(inferPathRole("filePath")).toBe("weakIn");
     expect(inferPathRole("template")).toBe("weakIn");
     expect(inferPathRole("configFile")).toBe("weakIn");
+    expect(inferPathRole("xpath")).toBeUndefined();
+    expect(inferPathRole("filename")).toBeUndefined();
+    expect(inferPathRole("file_type")).toBeUndefined();
+    expect(inferPathRole("input_language")).toBeUndefined();
+    expect(inferPathRole("profile")).toBeUndefined();
     expect(inferPathRole("month")).toBeUndefined();
     expect(inferPathRole("index")).toBeUndefined();
     expect(inferPathRole("data", { type: "object", properties: { data: { format: "file" } } })).toBe("in");
@@ -35,10 +41,16 @@ describe("rewritePaths", () => {
     expect(r["m"]).toBe("2026-09");
   });
 
-  it("weakIn: 존재→in, 미존재+비readOnly→out", () => {
+  it("weakIn: 존재→in, 미존재+비readOnly→out, 비경로값 유지", () => {
     const r = rewritePaths({ a: "in.txt", b: "new/out.txt" }, { a: "weakIn", b: "weakIn" }, o());
     expect(r["a"]).toBe(join(fsDir, "in.txt"));
     expect(r["b"]).toBe(join(fsDir, "new", "out.txt"));
+    const r2 = rewritePaths(
+      { p: "admin", x: "hello" },
+      { p: "weakIn", x: "weakIn" },
+      o(),
+    );
+    expect(r2).toEqual({ p: "admin", x: "hello" });
   });
 
   it("미확정 역할은 경고만, 값 유지 (URL 항상 제외)", () => {

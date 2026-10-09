@@ -17,9 +17,22 @@ const IN_EXACT = new Set([
   "src", "source", "template", "dir", "directory", "folder", "cwd",
 ]);
 
+const WEAK_LAST_TOKENS = new Set([
+  "path", "file", "filepath", "dir", "directory", "folder", "src", "source", "template",
+]);
+
+function tokenize(name: string): string[] {
+  return name
+    .split(/[_-]+/)
+    .flatMap((p) => p.split(/(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])/))
+    .map((t) => t.toLowerCase())
+    .filter((t) => t.length > 0);
+}
+
 /**
- * 인자명 규칙 (추정 순서 3단계, DECISIONS M3.1-3/M3.2-3/M3.3-1).
- * output 계열 → out. 이름 규칙의 in은 약한 추정(weakIn).
+ * 인자명 규칙 (추정 순서 3단계, DECISIONS M3.1-3/M3.2-3/M3.3-1/M3.4.1-3).
+ * output 계열 → out. 이름 규칙의 in은 약한 추정(weakIn):
+ * 마지막 토큰이 경로 토큰이거나 이름 전체가 IN_EXACT일 때만 (filename 제외).
  */
 export function inferPathRole(
   argName: string,
@@ -37,13 +50,9 @@ export function inferPathRole(
   }
   if (
     IN_EXACT.has(lower) ||
-    lower.includes("template") ||
-    lower.includes("file") ||
-    lower.includes("path") ||
-    lower.includes("input") ||
-    lower.startsWith("in_") ||
-    lower.startsWith("src_")
+    WEAK_LAST_TOKENS.has(tokenize(argName).at(-1) ?? "")
   ) {
+    if (lower === "filename") return undefined;
     return "weakIn";
   }
   const props = (inputSchema?.["properties"] as Record<string, Record<string, unknown>> | undefined) ?? {};
@@ -102,6 +111,11 @@ export function rewritePaths(
   const fixtureError = (argName: string, v: string): Error =>
     Object.assign(new Error(`fixture 없음: ${argName}=${v}, record 모드로 재녹화`), { code: "bad_request" });
   const mapOne = (v: string, role: PathRole | InferredRole | undefined, argName: string): string => {
+    // M3.4.1-3: weakIn이어도 값이 경로처럼 보이지 않으면 원문 유지 + 경고
+    if (role === "weakIn" && !looksLikePath(v)) {
+      logger.warn("weakIn non-path kept", { arg: argName, value: v });
+      return v;
+    }
     let r: PathRole | undefined;
     if (role === "weakIn") {
       if (existsInScope(v)) r = "in";
@@ -128,11 +142,11 @@ export function rewritePaths(
       ) {
         return abs;
       }
-      if (r === "out") throw new Error(`출력 경로가 run fs 밖: ${argName}=${v}`);
+      if (r === "out") throw Object.assign(new Error(`출력 경로가 run fs 밖: ${argName}=${v}`), { code: "bad_request" });
       throw fixtureError(argName, v);
     }
     const rel = v.split("\\").join("/");
-    if (isEscapeRel(rel, "/")) throw new Error(`경로 탈출: ${argName}=${v}`);
+    if (isEscapeRel(rel, "/")) throw Object.assign(new Error(`경로 탈출: ${argName}=${v}`), { code: "bad_request" });
     return mapRel(rel, r, argName);
   };
   const mapRel = (rel: string, r: PathRole, argName: string): string => {
@@ -149,7 +163,7 @@ export function rewritePaths(
       if (existsSync(pAbs)) return pAbs;
     }
     if (proot && !opts.allowProjectRead) throw fixtureError(argName, rel);
-    throw new Error(`입력 없음: ${argName}=${rel}`);
+    throw Object.assign(new Error(`입력 없음: ${argName}=${rel}`), { code: "bad_request" });
   };
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(args)) {
