@@ -352,13 +352,16 @@ async function execNode(
     updateNodeGolden(opts, n, resp);
   }
 
-  // 판정 (checker 재사용, llm_rubric은 별도 집계)
+  // 판정 (checker 재사용, llm_rubric·deferred는 별도 집계)
   const fileExists = (p: string) => existsSync(join(opts.procforgeDir, "sessions", opts.sessionId, p));
+  const nodeOutputs: Record<string, unknown> = {};
+  for (const [k, v] of outputs) nodeOutputs[k] = v;
   const r = evaluateAll(n.constraints, {
     resultSummary: resp.resultText,
     resultJson: resp.resultJson,
     artifacts: {},
     fileExists,
+    nodeOutputs,
   });
   const durationMs = Date.now() - start;
   if (r.failedConstraints.length > 0) {
