@@ -5,6 +5,7 @@ import { z } from "zod";
 import type { ArgSpec, Constraint, Node, Session } from "@procforge/shared/schema.js";
 import { computeNodeHash } from "@procforge/shared/schema.js";
 import { isResolved } from "@procforge/shared/deps.js";
+import { compareNodeIds } from "@procforge/shared/ids.js";
 import { FileStore } from "./filestore.js";
 import { constraintSummary } from "./views.js";
 
@@ -183,7 +184,8 @@ export function finalizeSession(
 
 function renderProcedureMd(doc: ProcedureDoc): string {
   const byId = new Map(doc.nodes.map((n) => [n.id, n]));
-  const order = [...doc.nodes].sort((a, b) => (a.id < b.id ? -1 : 1));
+  // M4.1-2: 노드 id 숫자 정렬 (1.2 < 1.10)
+  const order = [...doc.nodes].sort((a, b) => compareNodeIds(a.id, b.id));
   const roots = doc.nodes.filter((n) => n.parentId === null || !byId.has(n.parentId as string));
   const L: string[] = [];
   L.push(`# ${doc.name}`, ``, `원본 세션: ${doc.sourceSession} / 생성: ${doc.createdAt}`, ``);

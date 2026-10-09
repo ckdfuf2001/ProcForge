@@ -126,4 +126,36 @@ describe("pf_finalize", () => {
     const store = new FileStore(pfdir);
     expect(store.getSession(sessionId)!.params["month"]).toBe("2026-10");
   }, 30000);
+
+  it("M4.1-2 PROCEDURE.md는 노드 숫자 정렬 (1.2 < 1.10)", async () => {
+    const collected = await collectCatalog(root);
+    const started = await client.pfStart({
+      request: "정렬",
+      toolCatalog: collected.entries,
+      limits: { maxDepth: 3, maxRetries: 2, maxNodes: 20 },
+    });
+    const sid = started.session.id;
+    await client.pfResolve({
+      sessionId: sid, nodeId: "1", decision: "split",
+      children: Array.from({ length: 11 }, (_, i) => ({ goal: `작업${i + 1}` })),
+    });
+    for (let i = 1; i <= 11; i++) {
+      const id = `1.${i}`;
+      await client.pfReport({
+        sessionId: sid, nodeId: id,
+        tool: { server: "fake-ppt", name: "list_slides" }, args: { file: "data.pptx" },
+        resultSummary: JSON.stringify({ n: i }), resultJson: { n: i },
+        selfVerdict: "pass", selfReason: "ok",
+      });
+      await client.pfResolve({
+        sessionId: sid, nodeId: id, decision: "leaf",
+        tool: { server: "fake-ppt", name: "list_slides" },
+        argSpecs: { file: { kind: "fixed", value: "data.pptx" } } as never,
+      });
+    }
+    const out = finalizeSession(pfdir, sid, "order-test", { projectRoot: root });
+    const md = readFileSync(join(out.dir, "PROCEDURE.md"), "utf8");
+    expect(md.indexOf("`1.2`")).toBeLessThan(md.indexOf("`1.10`"));
+    expect(md.indexOf("`1.9`")).toBeLessThan(md.indexOf("`1.10`"));
+  }, 30000);
 });

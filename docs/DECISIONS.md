@@ -148,7 +148,9 @@
 
 - [M4.1-1] 명령 파일은 `<projectRoot>/.opencode/command/<name>.md`에 출력
   (projectRoot 생략 시 procforgeDir 부모). 기존 파일 + force 없음 → 쓰기 전
-  거부. procedures/<name>/ 안에는 `command.md` 사본만.
+  거부.   procedures/<name>/ 안에는 `command.md` 사본만.
+- [M4.1-2] PROCEDURE.md 단계·목차는 compareNodeIds 정렬 (문자열 정렬의
+  1.10 < 1.2 전도 방지).
 
 ## M3.2
 
