@@ -74,39 +74,27 @@ describe("M3.4-7 additionalProperties:false 낯선 키 거부", () => {
 });
 
 describe("M3.4.3-1 pfNext 교착", () => {
-  it("dep_failed + dep_missing → done:false + blocked + 원인 승격", async () => {
-    const svc = new CoreService(createMemoryStore(), failEval);
-    const { session } = await svc.pfStart({
-      request: "r",
-      toolCatalog: catalog,
-      limits: { maxDepth: 3, maxRetries: 5, maxNodes: 10 },
-    });
-    await svc.pfResolve({
-      sessionId: session.id,
-      nodeId: "1",
-      decision: "split",
-      children: [{ goal: "a", dependsOn: ["9.9"] }, { goal: "b", dependsOn: ["1.1"] }],
-    });
-    await svc.pfReport({ ...rep(), sessionId: session.id, nodeId: "1.1", selfVerdict: "fail", selfReason: "bad" });
-    const nxt = await svc.pfNext(session.id);
-    expect(nxt.done).toBe(false);
-    if (nxt.done) throw new Error("unreachable");
-    expect(nxt.blocked).toBeDefined();
-    const byNode = new Map(nxt.blocked!.map((b) => [b.nodeId, b]));
-    expect(byNode.get("1.1")).toMatchObject({ waitingOn: ["9.9"], reason: "dep_missing" });
-    expect(byNode.get("1.2")).toMatchObject({ waitingOn: ["1.1"], reason: "dep_failed" });
-    expect(nxt.instruction).toMatch(/pf_advise/);
-    // 원인(1.1) needs_human 승격 → 다음 pfNext는 조언 유도
-    const tree = await svc.pfTree(session.id);
-    expect(tree.nodes.find((n) => n.id === "1.1")?.status).toBe("needs_human");
-    const nxt2 = await svc.pfNext(session.id);
-    expect(nxt2.done).toBe(false);
-    if (!nxt2.done) expect(nxt2.node.id).toBe("1.1");
+  const mk = (id: string, status: "open" | "probing" | "split" | "needs_human" | "leaf", extra: Record<string, unknown> = {}) =>
+    ({ id, status, dependsOn: [], children: [], attempts: [], ...extra }) as unknown as Node;
+
+  it("dep_failed + dep_missing → blocked + 원인 승격", () => {
+    // A: 실패 시도 보유 + 미해소 의존 → dep_failed 원인
+    // B: A 의존 → 대기. C: 부재 의존 → dep_missing
+    const A = mk("A", "probing", { dependsOn: ["ZZ"], attempts: [{ verdict: "fail" }] });
+    const B = mk("B", "open", { dependsOn: ["A"] });
+    const C = mk("C", "open", { dependsOn: ["9.9"] });
+    const byId = new Map([["A", A], ["B", B], ["C", C]]);
+    const { blocked, causes } = computeDeadlock([A, B, C], byId);
+    const byNode = new Map(blocked.map((b) => [b.nodeId, b]));
+    expect(byNode.get("A")).toMatchObject({ waitingOn: ["ZZ"], reason: "dep_missing" });
+    expect(byNode.get("B")).toMatchObject({ waitingOn: ["A"], reason: "dep_failed" });
+    expect(byNode.get("C")).toMatchObject({ waitingOn: ["9.9"], reason: "dep_missing" });
+    expect(causes).toContain("A");
+    // C는 원인 없음 → 자신 승격
+    expect(causes).toContain("C");
   });
 
   it("dep_empty_split 단위 판정", () => {
-    const mk = (id: string, status: "open" | "split", extra: Record<string, unknown> = {}) =>
-      ({ id, status, dependsOn: [], children: [], attempts: [], ...extra }) as unknown as Node;
     const S = mk("S", "split", { children: [] });
     const W = mk("W", "open", { dependsOn: ["S"] });
     const byId = new Map([["S", S], ["W", W]]);
@@ -114,6 +102,220 @@ describe("M3.4.3-1 pfNext 교착", () => {
     expect(blocked).toEqual([{ nodeId: "W", waitingOn: ["S"], reason: "dep_empty_split" }]);
     expect(causes).toEqual(["S"]);
   });
+
+  it("API 유효 트리에서는 교착 오탐 없음", async () => {
+    const svc = new CoreService(createMemoryStore(), passEval);
+    const { session } = await svc.pfStart({ request: "r", toolCatalog: catalog });
+    await svc.pfResolve({ sessionId: session.id, nodeId: "1", decision: "split", children: [{ goal: "a" }, { goal: "b", dependsOn: ["1.1"] }] });
+    await svc.pfReport({ ...rep(), sessionId: session.id, nodeId: "1.1", args: { v: 1 } });
+    await svc.pfResolve({
+      sessionId: session.id, nodeId: "1.1", decision: "leaf",
+      tool: { server: "fs", name: "read" }, argSpecs: { v: { kind: "fixed", value: 1 } },
+    });
+    const nxt = await svc.pfNext(session.id);
+    expect(nxt.done).toBe(false);
+    if (!nxt.done) {
+      expect(nxt.blocked ?? []).toEqual([]);
+      expect(nxt.node.id).toBe("1.2");
+    }
+  });
+});
+
+describe("M3.4.4-1 실효 의존 ready/stale", () => {
+  it("(a) 조상 의존 상속: 1.2 미완료 시 1.3.2 not ready", async () => {
+    const svc = new CoreService(createMemoryStore(), passEval);
+    const { session } = await svc.pfStart({ request: "r", toolCatalog: catalog });
+    const sid = session.id;
+    await svc.pfResolve({
+      sessionId: sid, nodeId: "1", decision: "split",
+      children: [{ goal: "a" }, { goal: "b" }, { goal: "c", dependsOn: ["1.2"] }],
+    });
+    await svc.pfResolve({ sessionId: sid, nodeId: "1.2", decision: "split", children: [{ goal: "b1" }, { goal: "b2" }] });
+    await svc.pfResolve({ sessionId: sid, nodeId: "1.3", decision: "split", children: [{ goal: "c1" }, { goal: "c2" }] });
+    const leaf = async (id: string) => {
+      await svc.pfReport({ ...rep(), sessionId: sid, nodeId: id, args: { v: id } });
+      await svc.pfResolve({
+        sessionId: sid, nodeId: id, decision: "leaf",
+        tool: { server: "fs", name: "read" }, argSpecs: { v: { kind: "fixed", value: id } },
+      });
+    };
+    await leaf("1.1");
+    // 1.2 미완료: 다음은 1.2.1이어야지 1.3.x가 아니어야 함
+    const nxt = await svc.pfNext(sid);
+    expect(nxt.done).toBe(false);
+    if (!nxt.done) expect(nxt.node.id).toBe("1.2.1");
+  });
+
+  it("(c) var 참조: dependsOn 없어도 1.1 이후 의미 + 1.1 변경 시 stale", async () => {
+    const svc = new CoreService(createMemoryStore(), passEval);
+    const { session } = await svc.pfStart({ request: "r", toolCatalog: catalog });
+    const sid = session.id;
+    await svc.pfResolve({ sessionId: sid, nodeId: "1", decision: "split", children: [{ goal: "a" }, { goal: "b" }] });
+    await svc.pfReport({ ...rep(), sessionId: sid, nodeId: "1.1", args: { v: "a" } });
+    await svc.pfResolve({
+      sessionId: sid, nodeId: "1.1", decision: "leaf",
+      tool: { server: "fs", name: "read" }, argSpecs: { v: { kind: "fixed", value: "a" } },
+    });
+    await svc.pfReport({ ...rep(), sessionId: sid, nodeId: "1.2", args: { w: "x" } });
+    await svc.pfResolve({
+      sessionId: sid, nodeId: "1.2", decision: "leaf",
+      tool: { server: "fs", name: "read" },
+      argSpecs: { w: { kind: "var", ref: "$1.1" } },
+    });
+    // 1.1 변경 → var 참조 노드 stale
+    await svc.pfReopen(sid, "1.1", "change");
+    await svc.pfReport({ ...rep(), sessionId: sid, nodeId: "1.1", args: { v: "a2" } });
+    await svc.pfResolve({
+      sessionId: sid, nodeId: "1.1", decision: "leaf",
+      tool: { server: "fs", name: "read" }, argSpecs: { v: { kind: "fixed", value: "a2" } },
+    });
+    const tree = await svc.pfTree(sid);
+    expect(tree.nodes.find((n) => n.id === "1.2")?.status).toBe("open");
+  });
+});
+
+describe("M3.4.4-2 교착 불변식 (seed 고정 무작위)", () => {
+  function mulberry32(seed: number): () => number {
+    let a = seed >>> 0;
+    return () => {
+      a |= 0;
+      a = (a + 0x6d2b79f5) | 0;
+      let t = Math.imul(a ^ (a >>> 15), 1 | a);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  function hasHuman(live: Map<string, Node>): boolean {
+    return [...live.values()].some((n) => n.status === "needs_human");
+  }
+
+  it("50개 무작위 그래프: 승격/종결, blocked 2회 연속 금지", () => {
+    for (let seed = 1; seed <= 50; seed++) {
+      const rnd = mulberry32(seed);
+      const ids = ["1", "1.1", "1.2", "2", "2.1"];
+      const nodes = ids.map((id) => {
+        const r = rnd();
+        const st = r < 0.5 ? "open" : r < 0.8 ? "probing" : "split";
+        const deps: string[] = [];
+        const k = Math.floor(rnd() * 3);
+        for (let i = 0; i < k; i++) deps.push(ids[Math.floor(rnd() * ids.length)]);
+        const kids: string[] = [];
+        if (st === "split") {
+          const n = 1 + Math.floor(rnd() * 2);
+          for (let i = 0; i < n; i++) kids.push(ids[Math.floor(rnd() * ids.length)]);
+        }
+        // API 도달 가능 상태만: 실패 시도는 open/probing에만
+        const fail = st !== "split" && rnd() < 0.3;
+        return {
+          id, status: st, dependsOn: deps, children: kids,
+          attempts: fail ? [{ verdict: "fail" as const }] : [],
+        } as unknown as Node;
+      });
+      const live = new Map(nodes.map((n) => [n.id, n]));
+      const promotable = (m: Map<string, Node>, id: string): boolean => {
+        const t = m.get(id);
+        return !!t && (t.status === "open" || t.status === "probing");
+      };
+      let prevBlocked = "";
+      let terminated = false;
+      for (let step = 0; step < 10; step++) {
+        const cur = [...live.values()].filter((n) => n.status === "open" || n.status === "probing");
+        if (cur.length === 0 || hasHuman(live)) {
+          terminated = true;
+          break;
+        }
+        const { blocked, causes } = computeDeadlock(cur, live);
+        const sig = JSON.stringify(blocked);
+        expect(sig === prevBlocked && blocked.length > 0, `seed ${seed} step ${step}: blocked 반복`).toBe(false);
+        prevBlocked = sig;
+        if (blocked.length === 0) {
+          terminated = true;
+          break;
+        }
+        let promoted = false;
+        for (const c of causes) {
+          if (promotable(live, c)) {
+            const t = live.get(c)!;
+            live.set(c, { ...t, status: "needs_human" });
+            promoted = true;
+          }
+        }
+        if (!promoted && cur.length > 0) {
+          const f = cur[0];
+          live.set(f.id, { ...f, status: "needs_human" });
+        }
+      }
+      expect(terminated, `seed ${seed}: 미종결`).toBe(true);
+    }
+  });
+});
+
+describe("M3.4.4-1 실효 의존 ready/stale", () => {
+  it("(a) 조상 의존 상속: 1.2 미완료 시 1.3.2 not ready", async () => {
+    const svc = new CoreService(createMemoryStore(), passEval);
+    const { session } = await svc.pfStart({ request: "r", toolCatalog: catalog });
+    const sid = session.id;
+    await svc.pfResolve({
+      sessionId: sid, nodeId: "1", decision: "split",
+      children: [{ goal: "a" }, { goal: "b" }, { goal: "c", dependsOn: ["1.2"] }],
+    });
+    await svc.pfResolve({ sessionId: sid, nodeId: "1.2", decision: "split", children: [{ goal: "b1" }, { goal: "b2" }] });
+    await svc.pfResolve({ sessionId: sid, nodeId: "1.3", decision: "split", children: [{ goal: "c1" }, { goal: "c2" }] });
+    await svc.pfReport({ ...rep(), sessionId: sid, nodeId: "1.1", args: { v: "a" } });
+    await svc.pfResolve({
+      sessionId: sid, nodeId: "1.1", decision: "leaf",
+      tool: { server: "fs", name: "read" }, argSpecs: { v: { kind: "fixed", value: "a" } },
+    });
+    const nxt = await svc.pfNext(sid);
+    expect(nxt.done).toBe(false);
+    if (!nxt.done) expect(nxt.node.id).toBe("1.2.1");
+  });
+
+  it("(c) var 참조: dependsOn 없어도 1.1 변경 시 stale", async () => {
+    const svc = new CoreService(createMemoryStore(), passEval);
+    const { session } = await svc.pfStart({ request: "r", toolCatalog: catalog });
+    const sid = session.id;
+    await svc.pfResolve({ sessionId: sid, nodeId: "1", decision: "split", children: [{ goal: "a" }, { goal: "b" }] });
+    await svc.pfReport({ ...rep(), sessionId: sid, nodeId: "1.1", args: { v: "a" } });
+    await svc.pfResolve({
+      sessionId: sid, nodeId: "1.1", decision: "leaf",
+      tool: { server: "fs", name: "read" }, argSpecs: { v: { kind: "fixed", value: "a" } },
+    });
+    await svc.pfReport({ ...rep(), sessionId: sid, nodeId: "1.2", args: { w: "x" } });
+    await svc.pfResolve({
+      sessionId: sid, nodeId: "1.2", decision: "leaf",
+      tool: { server: "fs", name: "read" },
+      argSpecs: { w: { kind: "var", ref: "$1.1" } },
+    });
+    await svc.pfReopen(sid, "1.1", "change");
+    await svc.pfReport({ ...rep(), sessionId: sid, nodeId: "1.1", args: { v: "a2" } });
+    await svc.pfResolve({
+      sessionId: sid, nodeId: "1.1", decision: "leaf",
+      tool: { server: "fs", name: "read" }, argSpecs: { v: { kind: "fixed", value: "a2" } },
+    });
+    const tree = await svc.pfTree(sid);
+    expect(tree.nodes.find((n) => n.id === "1.2")?.status).toBe("open");
+  });
+});
+
+describe("M3.4.4-3 split dependsOn 검증", () => {
+  it("기존도 형제도 아니면 bad_request", async () => {
+    const svc = new CoreService(createMemoryStore(), passEval);
+    const { session } = await svc.pfStart({ request: "r", toolCatalog: catalog });
+    await expect(
+      svc.pfResolve({
+        sessionId: session.id, nodeId: "1", decision: "split",
+        children: [{ goal: "x", dependsOn: ["9.9"] }],
+      }),
+    ).rejects.toThrow(/dep_missing/);
+    // 형제 의존은 허용
+    const ok = await svc.pfResolve({
+      sessionId: session.id, nodeId: "1", decision: "split",
+      children: [{ goal: "a" }, { goal: "b", dependsOn: ["1.1"] }],
+    });
+    expect(ok.created).toHaveLength(2);
+  }, 30000);
 });
 
 describe("M3.4.3-2 펼친 순환 split 거부", () => {
@@ -171,9 +373,11 @@ describe("M3.4.3-3 stale: split 유지 + 자손 leaf만 open", () => {
     });
     const tree = await svc.pfTree(sid);
     const byId = new Map(tree.nodes.map((n) => [n.id, n]));
+    // M3.4.4-1(b) 정정: 1.3.2도 조상(1.3)의 dependsOn ["1.2"]를 상속하므로 함께 open.
+    // (M3.4.3 당시 기대값 '1.3.2 leaf 유지'는 상속 미반영 가정이었다.)
     expect(byId.get("1.3")?.status).toBe("split");
     expect(byId.get("1.3.1")?.status).toBe("open");
-    expect(byId.get("1.3.2")?.status).toBe("leaf");
+    expect(byId.get("1.3.2")?.status).toBe("open");
     expect(byId.get("1.1")?.status).toBe("leaf");
   });
 });

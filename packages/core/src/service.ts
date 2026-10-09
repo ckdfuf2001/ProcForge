@@ -55,7 +55,7 @@ export function consumeRetry(
  */
 import { isResolved } from "@procforge/shared/deps.js";
 export { isResolved };
-import { expandDepLeafs, hasCycle } from "@procforge/shared/deps.js";
+import { effectiveDeps, expandDepLeafs, hasCycle, hasLineageDep } from "@procforge/shared/deps.js";
 
 /**
  * 첫 pass 결과 형태 기반 auto constraint 생성 (M1.5-2).
@@ -89,8 +89,9 @@ export function autoConstraints(
 }
 
 /**
- * 교착 판정 순수 함수 (M3.4.3-1, 테스트용 export).
- * ready 0 + pending(open/probing) 노드들에 대해 waitingOn·원인을 계산.
+ * 교착 판정 순수 함수 (M3.4.3-1, M3.4.4-2, 테스트용 export).
+ * waitingOn 각 항목을 펼친 leaf까지 내려가 failed/needs_human/빈 split 원인을 탐색.
+ * 원인이 하나도 없는 stuck 노드는 자신을 needs_human 승격 대상으로 보고 (dep_pending).
  */
 export function computeDeadlock(
   stuck: Node[],
@@ -98,32 +99,48 @@ export function computeDeadlock(
 ): { blocked: BlockedEntry[]; causes: string[] } {
   const blocked: BlockedEntry[] = [];
   const causes = new Map<string, BlockedReason>();
+  const unresolved = (d: string): boolean => {
+    const t = byId.get(d);
+    return !t || !isResolved(t, byId);
+  };
   for (const n of stuck) {
-    const waitingOn: string[] = [];
+    // M3.4.4-1: 원시 미해소 + 실효 미해소 합집합
+    const waitingOn = [...new Set([...n.dependsOn.filter(unresolved), ...effectiveDeps(n, byId).filter(unresolved)])];
     let reason: BlockedReason = "dep_pending";
-    for (const d of n.dependsOn) {
+    for (const d of waitingOn) {
       const dep = byId.get(d);
       if (!dep) {
-        waitingOn.push(d);
         reason = "dep_missing";
         continue;
       }
-      if (dep.status === "split" && expandDepLeafs(d, byId).length === 0) {
-        waitingOn.push(d);
+      const leaves = expandDepLeafs(d, byId);
+      if (dep.status === "split" && leaves.length === 0) {
         reason = "dep_empty_split";
         causes.set(d, reason);
         continue;
       }
-      const last = dep.attempts[dep.attempts.length - 1];
-      if (!isResolved(dep, byId)) {
-        waitingOn.push(d);
+      for (const leaf of leaves) {
+        const t = byId.get(leaf);
+        if (!t) {
+          reason = "dep_missing";
+          continue;
+        }
+        if (t.status === "needs_human") causes.set(leaf, "dep_pending");
+        const last = t.attempts[t.attempts.length - 1];
         if (last?.verdict === "fail") {
           reason = "dep_failed";
-          causes.set(d, reason);
+          causes.set(leaf, reason);
         }
       }
     }
-    if (waitingOn.length > 0) blocked.push({ nodeId: n.id, waitingOn, reason });
+    if (waitingOn.length > 0) {
+      // 원인 0개(원시·펼친 어느 쪽에도 원인이 없음) → 자신을 승격 (dep_pending)
+      const related = new Set([...waitingOn, ...waitingOn.flatMap((d) => expandDepLeafs(d, byId))]);
+      if (![...causes.keys()].some((c) => related.has(c))) {
+        causes.set(n.id, "dep_pending");
+      }
+      blocked.push({ nodeId: n.id, waitingOn, reason });
+    }
   }
   return { blocked, causes: [...causes.keys()] };
 }
@@ -152,8 +169,7 @@ export class CoreService implements CoreClient {
    */
   private hashFor(sid: string, n: Node, preloaded?: Map<string, Node>): string {
     const byId = preloaded ?? this.store.getNodes(sid);
-    const leafs = n.dependsOn.flatMap((d) => expandDepLeafs(d, byId));
-    const depHs = [...new Set(leafs.map((id) => byId.get(id)?.hash ?? `missing:${id}`))].sort();
+    const depHs = [...new Set(effectiveDeps(n, byId).map((id) => byId.get(id)?.hash ?? `missing:${id}`))].sort();
     return computeNodeHash({ goal: n.goal, args: n.args, constraints: n.constraints, dependsOn: depHs });
   }
 
@@ -170,8 +186,7 @@ export class CoreService implements CoreClient {
       const all = this.store.getNodes(sid);
       for (const n of all.values()) {
         if (n.id === cur || seen.has(n.id)) continue;
-        const deps = n.dependsOn.flatMap((d) => expandDepLeafs(d, all));
-        if (!deps.includes(cur)) continue;
+        if (!effectiveDeps(n, all).includes(cur)) continue;
         seen.add(n.id);
         const nh = this.hashFor(sid, n);
         if (nh === n.hash) continue;
@@ -237,7 +252,7 @@ export class CoreService implements CoreClient {
       .filter(
         (n) =>
           (n.status === "open" || n.status === "probing") &&
-          n.dependsOn.every((d) => {
+          effectiveDeps(n, byId).every((d) => {
             const dep = byId.get(d);
             return dep !== undefined && isResolved(dep, byId);
           }),
@@ -259,11 +274,20 @@ export class CoreService implements CoreClient {
         .filter((n) => n.status === "open" || n.status === "probing")
         .sort((a, b) => compareNodeIds(a.id, b.id));
       const { blocked, causes } = computeDeadlock(stuck, byId);
-      // 원인 노드 needs_human 승격
+      // 원인 노드 needs_human 승격. 승격 가능 원인이 하나도 없으면 첫 stuck 자승격.
+      // (빈 split 등 승격 불가 원인만 있을 때 무한 동일 blocked 방지)
+      const promoted: string[] = [];
       for (const cid of causes) {
         const c = this.node(sessionId, cid);
         if (c.status === "open" || c.status === "probing") {
           this.store.saveNode(sessionId, { ...c, status: "needs_human" });
+          promoted.push(cid);
+        }
+      }
+      if (blocked.length > 0 && promoted.length === 0 && stuck.length > 0) {
+        const f = this.node(sessionId, stuck[0].id);
+        if (f.status === "open" || f.status === "probing") {
+          this.store.saveNode(sessionId, { ...f, status: "needs_human" });
         }
       }
       const first = stuck[0];
@@ -483,16 +507,31 @@ export class CoreService implements CoreClient {
           return { node: next, instruction: `분해 깊이가 maxDepth(${s.limits.maxDepth})를 초과해 needs_human으로 전환했다.` };
         }
         if (all.length + input.children.length > s.limits.maxNodes) throw err("bad_request", "maxNodes exceeded");
+        // M3.4.4-3: 자식 dependsOn은 기존 노드 또는 같은 요청의 형제만 허용
+        {
+          const siblingIds = new Set(input.children.map((_, i) => `${n.id}.${i + 1}`));
+          const existing = new Set(all.map((x) => x.id));
+          for (const c of input.children) {
+            for (const d of c.dependsOn ?? []) {
+              if (!existing.has(d) && !siblingIds.has(d)) {
+                throw err("bad_request", `dep_missing: unknown dependsOn ${d}. 기존 노드 또는 형제만 지정하라.`);
+              }
+            }
+          }
+        }
         // M3.4.3-2: 펼친 그래프 기준 순환이면 분해 거부 (저장 전)
         {
           const tentative = new Map(all.map((x) => [x.id, { ...x } as Node]));
           input.children.forEach((c, i) => {
             const id = `${n.id}.${i + 1}`;
-            tentative.set(id, { id, dependsOn: c.dependsOn ?? [], children: [], status: "open" } as unknown as Node);
+            tentative.set(id, { id, parentId: n.id, dependsOn: c.dependsOn ?? [], children: [], status: "open" } as unknown as Node);
           });
           const parentAsSplit = { ...n, status: "split" as const, children: input.children.map((_, i) => `${n.id}.${i + 1}`) };
           tentative.set(n.id, parentAsSplit);
           if (hasCycle([...tentative.values()])) throw err("bad_request", "split creates dependency cycle");
+          for (const c of input.children.map((_, i) => `${n.id}.${i + 1}`)) {
+            if (hasLineageDep(tentative.get(c)!, tentative)) throw err("bad_request", "split creates dependency cycle (lineage)");
+          }
         }
         const created: Node[] = input.children.map((c, i) => {
           const id = `${n.id}.${i + 1}`;
