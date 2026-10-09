@@ -109,6 +109,22 @@ node packages/local/dist/cli.js test --session <sid> --mode record --update-gold
 `--update-golden` 없이는 golden/cassette를 절대 수정하지 않는다.
 MCP에서는 `pf_test` 도구로 동일 실행 (요약 + report 경로 반환).
 
+## 5b. 추적·export·절차서 (M3.5/M4)
+
+```powershell
+node packages/local/dist/cli.js trace <sid>
+node packages/local/dist/cli.js export <sid> --redact --out share.zip
+node packages/local/dist/cli.js test --session <sid> --mode record --allow-project-read
+# 확정 후 export (MCP: pf_finalize)
+node packages/local/dist/cli.js test procedures/<name> --param month=2026-10
+```
+
+- `trace`: 호출 순서·시도/판정/조언·소요시간 + M3.5 측정행.
+- `export --redact`: 파일 내용을 `{sha256,size}` 기술자로 대체한 zip.
+  `--include-originals`로 원문 병행 포함.
+- 절차서 형식 명세: `docs/PROCEDURE-FORMAT.md`.
+- dogfood 측정 기록: `docs/M3.5-dogfood.md`.
+
 ## 6. 문제 해결
 
 - MCP 연결 실패: `node packages/local/dist/main.js <projectRoot>`를 직접 실행해 stdio 응답 확인.
