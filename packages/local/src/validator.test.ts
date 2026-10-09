@@ -183,4 +183,57 @@ describe("validator 10종", () => {
     const parent2: Node = { ...parent, children: ["1.1", "1.2"] };
     expect(validateTree(s, [parent2, sib1, sib2]).some((e) => e.code === "dep_on_lineage")).toBe(false);
   });
+
+  it("M3.4.3-2 펼친 순환: 3→2(split)→2.1→3", () => {
+    const s = baseSession();
+    const n2: Node = {
+      ...leaf("2"),
+      status: "split",
+      tool: undefined,
+      args: undefined,
+      attempts: [],
+      children: ["2.1"],
+    };
+    const n21 = leaf("2.1", { parentId: "2", dependsOn: ["3"] });
+    const n3 = leaf("3", { dependsOn: ["2"] });
+    const errs = validateTree(s, [n2, n21, n3]);
+    expect(errs.some((e) => e.code === "cycle")).toBe(true);
+  });
+
+  it("M3.4.3-4 additionalProperties:false 낯선 키 + type 배열", () => {
+    const s = baseSession({
+      toolCatalog: [
+        {
+          server: "fs",
+          name: "read",
+          inputSchema: {
+            type: "object",
+            properties: {
+              file_path: { type: "string" },
+              mode: { type: ["string", "null"] },
+            },
+            required: ["file_path"],
+            additionalProperties: false,
+          } as unknown as Record<string, unknown>,
+          schemaHash: "abc",
+        },
+      ],
+    });
+    const bad = leaf("1", {
+      args: {
+        file_path: { kind: "fixed", value: "a" },
+        filepath: { kind: "fixed", value: "a" },
+        mode: { kind: "fixed", value: null },
+      },
+    });
+    const errs = validateTree(s, [bad]);
+    expect(errs.some((e) => e.code === "bad_args" && /filepath/.test(e.message))).toBe(true);
+    const good = leaf("1", {
+      args: {
+        file_path: { kind: "fixed", value: "a" },
+        mode: { kind: "fixed", value: null },
+      },
+    });
+    expect(validateTree(s, [good])).toEqual([]);
+  });
 });

@@ -1,5 +1,7 @@
 import type { Node, Session } from "@procforge/shared/schema.js";
 import { NodeIdSchema } from "@procforge/shared/schema.js";
+import { checkUnknownKeys, matchesType, readSchemaProps } from "@procforge/shared/args-schema.js";
+import { hasCycle } from "@procforge/shared/deps.js";
 
 export type ValidationError = {
   code: string;
@@ -60,31 +62,28 @@ function checkFixedAgainstInputSchema(
   args: Node["args"],
   inputSchema: Record<string, unknown>,
 ): string | null {
-  // inputSchema는 JSON Schema object 형태를 가정: { type?, properties?, required? }
-  const props = (inputSchema["properties"] as Record<string, Record<string, unknown>> | undefined) ?? {};
-  const required = (inputSchema["required"] as string[] | undefined) ?? [];
+  // inputSchema는 JSON Schema object 형태를 가정 (M3.4.3-4 공용 검사 + type 배열)
+  const { properties: props, required } = readSchemaProps(inputSchema);
   if (!args) {
     return required.length > 0 ? `missing required args: ${required.join(",")}` : null;
   }
   for (const r of required) {
     if (!(r in args)) return `missing required arg: ${r}`;
   }
+  const { unknownKeys, suggestions } = checkUnknownKeys(Object.keys(args), inputSchema);
+  if (unknownKeys.length > 0) {
+    const hints = unknownKeys.map((k) =>
+      suggestions[k]?.length ? `${k} (유사: ${suggestions[k].join(", ")})` : k,
+    );
+    return `argSpecs unknown: ${hints.join("; ")}`;
+  }
   for (const [k, spec] of Object.entries(args)) {
     if (spec.kind !== "fixed") continue;
     const prop = props[k];
-    if (!prop) continue; // additionalProperties 허용 가정
-    const t = prop["type"] as string | undefined;
+    if (!prop) continue;
+    const t = prop["type"] as string | string[] | undefined;
     const v = (spec as { value: unknown }).value;
-    if (t) {
-      const ok =
-        (t === "string" && typeof v === "string") ||
-        (t === "number" && typeof v === "number") ||
-        (t === "integer" && typeof v === "number" && Number.isInteger(v)) ||
-        (t === "boolean" && typeof v === "boolean") ||
-        (t === "array" && Array.isArray(v)) ||
-        (t === "object" && v !== null && typeof v === "object" && !Array.isArray(v));
-      if (!ok) return `arg ${k}: expected ${t}`;
-    }
+    if (t && !matchesType(v, t)) return `arg ${k}: expected ${Array.isArray(t) ? t.join("|") : t}`;
     if (prop["enum"] !== undefined) {
       const en = prop["enum"] as unknown[];
       if (!en.some((e) => JSON.stringify(e) === JSON.stringify(v))) return `arg ${k}: not in enum`;
@@ -221,30 +220,8 @@ export function validateTree(session: Session, nodes: Node[], opts: ValidateOpti
     }
   }
 
-  // 순환 의존 (10-5)
-  const WHITE = 0, GRAY = 1, BLACK = 2;
-  const color = new Map<string, number>();
-  let hasCycle = false;
-  const dfs = (id: string) => {
-    color.set(id, GRAY);
-    const n = byId.get(id);
-    if (n) {
-      for (const d of n.dependsOn) {
-        if (!byId.has(d)) continue;
-        const c = color.get(d) ?? WHITE;
-        if (c === GRAY) {
-          hasCycle = true;
-          return;
-        }
-        if (c === WHITE) dfs(d);
-      }
-    }
-    color.set(id, BLACK);
-  };
-  for (const n of nodes) {
-    if ((color.get(n.id) ?? WHITE) === WHITE) dfs(n.id);
-  }
-  if (hasCycle) errors.push({ code: "cycle", message: "dependency cycle detected" });
+  // 순환 의존 (10-5, M3.4.3-2 펼친 그래프 기준 공용 검사)
+  if (hasCycle(nodes)) errors.push({ code: "cycle", message: "dependency cycle detected" });
 
   return errors;
 }
