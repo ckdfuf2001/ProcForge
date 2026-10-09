@@ -340,4 +340,14 @@ export class ProcForgeApp {
     if (!n) throw pfError("not_found", `노드 없음: ${a.nodeId}`, "pf_tree로 id를 확인하라.");
     return { node: n };
   }
+
+  async lock(a: any): Promise<Record<string, unknown>> {
+    const sid = a.sessionId as string;
+    return this.locked(sid, async () => {
+      const s = this.fresh(sid);
+      const n = await this.core.pfLock(sid, a.nodeId as string);
+      this.store.touch(sid);
+      return { node: nodeSummary(n, s.limits) };
+    });
+  }
 }

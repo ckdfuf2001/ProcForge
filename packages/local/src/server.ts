@@ -506,7 +506,7 @@ export function buildServer(deps: ServerDeps): McpServer {
     },
   );
 
-  W(
+  R(
     "pf_lock",
     {
       title: "노드 잠금",
@@ -521,11 +521,7 @@ export function buildServer(deps: ServerDeps): McpServer {
     },
     async (a: any) => {
       try {
-        const sid = a.sessionId as string;
-        const s = requireFresh(deps, sid);
-        const n = await client.pfLock(sid, a.nodeId as string);
-        deps.store.touch(sid);
-        return ok({ node: nodeSummary(n, s.limits) });
+        return ok(await app.lock(a));
       } catch (e) {
         return errResult(e);
       }
