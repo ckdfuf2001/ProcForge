@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { join, relative, resolve } from "node:path";
+import { join } from "node:path";
 import { readFileSync } from "node:fs";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -7,7 +7,17 @@ import { z } from "zod";
 import type { CoreClient } from "@procforge/shared/core-client.js";
 import { NodeIdSchema, SessionIdSchema, ConstraintSchema } from "@procforge/shared/schema.js";
 import { ingestArtifacts, normalizeArgSpecs, readManifest, setupSandbox } from "./artifacts.js";
-import { collectExistingPaths, collectResultFiles } from "./capture.js";
+import {
+  collectExistingPaths,
+  collectResultFiles,
+  diffSnapshot,
+  readCaptureRecord,
+  readPreSnapshot,
+  takeSandboxSnapshot,
+  toBaseRel,
+  writeCaptureRecord,
+  writePreSnapshot,
+} from "./capture.js";
 import { collectCatalog } from "./catalog.js";
 import { logger } from "./logger.js";
 import type { FileStore } from "./filestore.js";
@@ -248,6 +258,15 @@ export function buildServer(deps: ServerDeps): McpServer {
         const out = await client.pfNext(a.sessionId as string);
         deps.store.touch(a.sessionId as string);
         if (out.done) return ok({ done: true });
+        // M4.1-7: 노드 분기 직전 sandbox 스냅샷 (pf_report 입출력 판정용)
+        try {
+          writePreSnapshot(
+            deps.procforgeDir, a.sessionId as string, out.node.id,
+            takeSandboxSnapshot(join(deps.procforgeDir, "sandbox", a.sessionId as string)),
+          );
+        } catch {
+          // 추적 실패 무시
+        }
         return ok({
           done: false,
           node: nodeSummary(out.node, s.limits),
@@ -296,21 +315,50 @@ export function buildServer(deps: ServerDeps): McpServer {
         const args = (a.args ?? {}) as Record<string, unknown>;
         const baseDir = strictSandbox ? join(deps.procforgeDir, "sandbox", sid) : deps.projectRoot;
         const cat = sess.toolCatalog.find((t) => t.server === toolRef.server && t.name === toolRef.name);
-        // M3.6-2/3 자동 캡처: in/inout 인자 + out 인자 + 응답 JSON 안의 기존 파일 (호스트 제출 불필요)
-        const autoPaths = [
-          ...collectExistingPaths({ baseDir, tool: toolRef, args, catalogEntry: cat, roles: ["in", "inout"] }),
-          ...collectExistingPaths({ baseDir, tool: toolRef, args, catalogEntry: cat, roles: ["out"] }),
-          ...(a.resultJson !== undefined ? collectResultFiles({ baseDir, resultJson: a.resultJson }) : []),
-        ];
-        const hostPaths = (a.artifacts ?? []) as string[];
-        const allPaths = [...new Set([...autoPaths, ...hostPaths])];
+        // M4.1-7 스냅샷 판정: 새로 생기거나 바뀐 파일 → out, 그 외 자동분 → in.
+        // 호스트 제출분은 명시 입력(in) 유지. 스냅샷 없으면 기존 로직 폴백 + 경고.
+        const reportWarnings: string[] = [];
+        let outRels: Set<string> | undefined;
+        if (strictSandbox) {
+          const pre = readPreSnapshot(deps.procforgeDir, sid, nid);
+          if (!pre) {
+            reportWarnings.push(`스냅샷 없음(${nid}): 기존 존재 기반 캡처로 폴백 (pf_next 경유 권장)`);
+          } else {
+            const d = diffSnapshot(pre, baseDir);
+            outRels = new Set([...d.created, ...d.modified]);
+          }
+        }
+        const relOf = (p: string) => toBaseRel(baseDir, p);
+        type CapJob = { p: string; out: boolean };
+        const jobs: CapJob[] = [];
+        const pushUnique = (p: string, out: boolean) => {
+          if (jobs.some((j) => j.p === p)) return;
+          jobs.push({ p, out });
+        };
+        for (const p of collectExistingPaths({ baseDir, tool: toolRef, args, catalogEntry: cat, roles: ["in", "inout"] })) {
+          pushUnique(p, outRels?.has(relOf(p)) ?? false);
+        }
+        for (const p of collectExistingPaths({ baseDir, tool: toolRef, args, catalogEntry: cat, roles: ["out"] })) {
+          pushUnique(p, true);
+        }
+        if (a.resultJson !== undefined) {
+          for (const p of collectResultFiles({ baseDir, resultJson: a.resultJson })) {
+            pushUnique(p, outRels?.has(relOf(p)) ?? false);
+          }
+        }
+        for (const p of (a.artifacts ?? []) as string[]) pushUnique(p, false);
         let stored: string[] = [];
         let contents: Record<string, string> = {};
-        if (allPaths.length > 0) {
-          const ing = ingestArtifacts({ procforgeDir: deps.procforgeDir, sessionId: sid, nodeId: nid, attemptId, baseDir, paths: allPaths, maxBytes: maxArtifactBytes });
+        if (jobs.length > 0) {
+          const ing = ingestArtifacts({ procforgeDir: deps.procforgeDir, sessionId: sid, nodeId: nid, attemptId, baseDir, paths: jobs.map((j) => j.p), maxBytes: maxArtifactBytes });
           stored = ing.stored;
           contents = ing.contents;
         }
+        // in/out 기록 (확정 시 out은 golden에서 제외)
+        writeCaptureRecord(deps.procforgeDir, sid, nid, attemptId, {
+          ins: stored.filter((_, i) => !jobs[i].out),
+          outs: stored.filter((_, i) => jobs[i].out),
+        });
         const out = await client.pfReport({
           sessionId: sid,
           nodeId: nid,
@@ -326,7 +374,7 @@ export function buildServer(deps: ServerDeps): McpServer {
           attemptId,
         });
         deps.store.touch(sid);
-        return ok(out as unknown as Record<string, unknown>);
+        return ok({ ...(out as unknown as Record<string, unknown>), warnings: reportWarnings });
       } catch (e) {
         return errResult(e);
       }
@@ -406,6 +454,10 @@ export function buildServer(deps: ServerDeps): McpServer {
         const cur = deps.store.getNode(sid, nodeId);
         const last = cur?.attempts[cur.attempts.length - 1];
         if (cur && last) {
+          // M4.1-7: 보고 시 out 판정분은 attempt에서 제외 (golden 입력 순수 유지, 증거 파일은 보존)
+          const sidecar = readCaptureRecord(deps.procforgeDir, sid, nodeId, last.id);
+          const outSet = new Set(sidecar?.outs ?? []);
+          const kept = last.artifacts.filter((fx) => !outSet.has(fx));
           const fixedArgs: Record<string, unknown> = {};
           for (const [k, spec] of Object.entries(norm.specs)) {
             if (spec.kind === "fixed") fixedArgs[k] = (spec as { value: unknown }).value;
@@ -417,18 +469,22 @@ export function buildServer(deps: ServerDeps): McpServer {
           );
           const toolRef = a.tool as { server: string; name: string };
           const cat = s.toolCatalog.find((t) => t.server === toolRef.server && t.name === toolRef.name);
-          const relOf = (p: string) => relative(resolve(baseDir), resolve(resolve(baseDir), p)).split("\\").join("/");
+          const relOf = (p: string) => toBaseRel(baseDir, p);
           const fresh = collectExistingPaths({
             baseDir, tool: toolRef, args: fixedArgs, specs: norm.specs, catalogEntry: cat, roles: ["in", "inout"],
           }).filter((p) => !covered.has(relOf(p)));
+          const merged = [...kept];
           if (fresh.length > 0) {
             const ing = ingestArtifacts({
               procforgeDir: deps.procforgeDir, sessionId: sid, nodeId, attemptId: last.id,
               baseDir, paths: fresh, maxBytes: maxArtifactBytes, startIndex: last.artifacts.length,
             });
+            merged.push(...ing.stored);
+          }
+          if (merged.length !== last.artifacts.length) {
             deps.store.saveNode(sid, {
               ...cur,
-              attempts: cur.attempts.map((at) => (at.id === last.id ? { ...at, artifacts: [...at.artifacts, ...ing.stored] } : at)),
+              attempts: cur.attempts.map((at) => (at.id === last.id ? { ...at, artifacts: merged } : at)),
             });
           }
         }

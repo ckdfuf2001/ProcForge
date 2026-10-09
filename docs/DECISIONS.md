@@ -160,6 +160,12 @@
   실패 시 롤백 시도.
 - [M4.1-6] 절차 이름 규칙 `^[a-z0-9][a-z0-9-]{0,63}$` (skill 호환). 위반은
   bad_request. 기존 대문자·언더스코어 이름은 거부된다.
+- [M4.1-7] 입출력 판정은 sandbox 스냅샷 기준 — pf_next가 노드를 내줄 때
+  sandbox 파일 {path,size,mtimeMs}을 nodes/<id>/pre-snapshot.json에 기록.
+  보고 시 새로 생기거나 바뀐 파일 → out, 그 외 자동분 + 호스트 제출분 → in.
+  out은 attempt 증거로 ingest하되 확정 시 golden에서 제외 (run fs 미복사).
+  명시 path(확정 시)는 스냅샷보다 우선. 스냅샷 없으면 기존 로직 폴백 +
+  pf_report warnings. 스냅샷은 sandbox만 (strict=false는 폴백).
 
 ## M3.2
 

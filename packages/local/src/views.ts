@@ -95,6 +95,7 @@ export const PfReportOutputSchema = z.object({
   failedConstraints: z.array(z.string()),
   unverified: z.array(z.string()).optional(),
   instruction: z.string(),
+  warnings: z.array(z.string()).optional(),
 });
 export const PfSplitOutputSchema = z.object({
   node: NodeSummarySchema,
