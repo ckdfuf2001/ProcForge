@@ -1,4 +1,4 @@
-import { mkdirSync, copyFileSync, existsSync, readdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, copyFileSync, existsSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
@@ -61,6 +61,31 @@ function procDir(procforgeDir: string, name: string): string {
   return join(procforgeDir, "procedures", name);
 }
 
+/**
+ * 원자 디렉터리 교체 (M4.1-5). Windows는 rename 덮어쓰기가 안 되므로
+ * 기존 폴더를 .old로 이동 후 교체·삭제. 실패 시 롤백 시도.
+ */
+export function swapDir(tmpDir: string, finalDir: string): void {
+  if (!existsSync(finalDir)) {
+    renameSync(tmpDir, finalDir);
+    return;
+  }
+  const oldDir = `${finalDir}.old`;
+  if (existsSync(oldDir)) rmSync(oldDir, { recursive: true, force: true });
+  renameSync(finalDir, oldDir);
+  try {
+    renameSync(tmpDir, finalDir);
+  } catch (e) {
+    try {
+      renameSync(oldDir, finalDir);
+    } catch {
+      // 롤백 best-effort
+    }
+    throw e;
+  }
+  rmSync(oldDir, { recursive: true, force: true });
+}
+
 export type FinalizeOptions = {
   /** 명령 파일 출력 루트 (기본: procforgeDir의 부모 = projectRoot 가정) */
   projectRoot?: string;
@@ -121,6 +146,16 @@ export function finalizeSession(
   }
 
   const dir = procDir(procforgeDir, name);
+  // M4.1-1 force 게이트 (쓰기 전 거부). M4.1-5: tmp 빌드 후 원자 교체.
+  const projectRoot = opts.projectRoot ?? dirname(procforgeDir);
+  const commandFile = join(projectRoot, ".opencode", "command", `${name}.md`);
+  if (!opts.force && existsSync(commandFile)) {
+    throw Object.assign(
+      new Error(`명령 파일이 이미 있음: ${commandFile} (--force로 덮어쓰기)`),
+      { code: "bad_request" },
+    );
+  }
+  const buildDir = `${dir}.tmp-${randomUUID()}`;
   const doc: ProcedureDoc = {
     format: "procforge-procedure",
     version: 1,
@@ -151,7 +186,7 @@ export function finalizeSession(
   };
   const files: string[] = [];
   const put = (rel: string, data: string | Buffer) => {
-    const p = join(dir, rel);
+    const p = join(buildDir, rel);
     mkdirSync(dirname(p), { recursive: true });
     writeFileSync(p, data);
     files.push(rel.replace(/\\/g, "/"));
@@ -160,16 +195,6 @@ export function finalizeSession(
   put("PROCEDURE.md", renderProcedureMd(doc));
   put("SKILL.md", renderSkillMd(doc));
   const commandMd = renderCommandMd(doc);
-  // M4.1-1: 명령 파일은 프로젝트에 출력, procedures 안에는 사본만.
-  // 기존 파일이 있고 force가 없으면 여기서 거부 (procedures 쓰기 전).
-  const projectRoot = opts.projectRoot ?? dirname(procforgeDir);
-  const commandFile = join(projectRoot, ".opencode", "command", `${name}.md`);
-  if (!opts.force && existsSync(commandFile)) {
-    throw Object.assign(
-      new Error(`명령 파일이 이미 있음: ${commandFile} (--force로 덮어쓰기)`),
-      { code: "bad_request" },
-    );
-  }
   put("command.md", commandMd);
   // tests/: golden + cassette 사본
   const sessDir = join(procforgeDir, "sessions", sessionId);
@@ -184,8 +209,8 @@ export function finalizeSession(
           continue;
         }
         const rel = p.substring(abs.length + 1).replace(/\\/g, "/");
-        mkdirSync(dirname(join(dir, dstRel, rel)), { recursive: true });
-        copyFileSync(p, join(dir, dstRel, rel));
+        mkdirSync(dirname(join(buildDir, dstRel, rel)), { recursive: true });
+        copyFileSync(p, join(buildDir, dstRel, rel));
         files.push(`${dstRel}/${rel}`);
       }
     };
@@ -195,8 +220,15 @@ export function finalizeSession(
   copyTree("cassettes", "tests/cassettes");
   const mf = join(sessDir, "fixtures-manifest.json");
   if (existsSync(mf)) {
-    copyFileSync(mf, join(dir, "tests", "fixtures-manifest.json"));
+    copyFileSync(mf, join(buildDir, "tests", "fixtures-manifest.json"));
     files.push("tests/fixtures-manifest.json");
+  }
+  // M4.1-5: tmp에 빌드 후 원자 교체 (실패 시 tmp 정리)
+  try {
+    swapDir(buildDir, dir);
+  } catch (e) {
+    rmSync(buildDir, { recursive: true, force: true });
+    throw e;
   }
   mkdirSync(dirname(commandFile), { recursive: true });
   writeFileSync(commandFile, commandMd);

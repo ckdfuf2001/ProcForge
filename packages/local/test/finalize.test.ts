@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { collectCatalog } from "../src/catalog.js";
@@ -199,5 +199,21 @@ describe("pf_finalize", () => {
     const out = finalizeSession(pfdir, sid, "substr-test", { projectRoot: root });
     expect(out.warnings.some((w) => w.includes("부분 포함"))).toBe(true);
     expect(out.warnings.some((w) => w.includes("golden.output"))).toBe(true);
+  }, 30000);
+
+  it("M4.1-5 재-finalize: 원자 교체, 잔재 없음", async () => {
+    const sid = await scripted();
+    const first = finalizeSession(pfdir, sid, "atomic-test", { projectRoot: root });
+    expect(first.dir).toBe(join(pfdir, "procedures", "atomic-test"));
+    // 세션 변경 후 재-finalize (force: 명령 파일 덮어쓰기)
+    const store = new FileStore(pfdir);
+    const n = store.getNode(sid, "1.1")!;
+    store.saveNode(sid, { ...n, goal: `${n.goal} v2` });
+    const again = finalizeSession(pfdir, sid, "atomic-test", { projectRoot: root, force: true });
+    expect(again.dir).toBe(first.dir);
+    // 내용이 교체됐고 tmp/.old 잔재가 없음
+    expect(readFileSync(join(again.dir, "PROCEDURE.md"), "utf8")).toContain("v2");
+    const leftovers = readdirSync(join(pfdir, "procedures")).filter((e) => e.includes(".tmp-") || e.endsWith(".old"));
+    expect(leftovers).toEqual([]);
   }, 30000);
 });
