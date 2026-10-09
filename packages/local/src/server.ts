@@ -40,6 +40,8 @@ export const TOOL_NAMES = [
   "pf_get_node",
   "pf_lock",
   "pf_reopen",
+  "pf_edit_args",
+  "pf_edit_node",
   "pf_refresh_catalog",
   "pf_test",
   "pf_finalize",
@@ -478,6 +480,65 @@ export function buildServer(deps: ServerDeps): McpServer {
     async (a: any) => {
       try {
         return ok(await app.reopen(a));
+      } catch (e) {
+        return errResult(e);
+      }
+    },
+  );
+
+  R(
+    "pf_edit_args",
+    {
+      title: "확정 인자 수정",
+      description: [
+        "확정 인자를 수정한다.",
+        "선수: pf_confirm_leaf 이후.",
+        "patch(set: 바꿀 인자 분류, remove: 지울 키). fixed 값 수정·fixed↔var 전환.",
+        "leaf는 open으로, 수정분은 suggestedArgs에 저장. 다음: pf_next.",
+      ].join("\n"),
+      inputSchema: {
+        sessionId: SessionIdSchema,
+        nodeId: NodeIdSchema,
+        patch: z.object({
+          set: z.record(ArgSpecShape).optional(),
+          remove: z.array(z.string()).optional(),
+        }),
+      },
+      outputSchema: OUTPUT_SCHEMAS["pf_edit_args"] as never,
+      annotations: WRITE_ANN,
+    },
+    async (a: any) => {
+      try {
+        return ok(await app.editArgs(a));
+      } catch (e) {
+        return errResult(e);
+      }
+    },
+  );
+
+  R(
+    "pf_edit_node",
+    {
+      title: "목표·조건 직접 수정",
+      description: [
+        "목표·검사 조건을 직접 수정한다.",
+        "선수: 노드 존재.",
+        "goal(선택), addConstraints(선택), removeConstraintIds(선택, 하나 이상 필요).",
+        "목표 변경 시 leaf는 open으로. 다음: pf_next.",
+      ].join("\n"),
+      inputSchema: {
+        sessionId: SessionIdSchema,
+        nodeId: NodeIdSchema,
+        goal: z.string().min(1).optional(),
+        addConstraints: z.array(ConstraintSchema).optional(),
+        removeConstraintIds: z.array(z.string()).optional(),
+      },
+      outputSchema: OUTPUT_SCHEMAS["pf_edit_node"] as never,
+      annotations: WRITE_ANN,
+    },
+    async (a: any) => {
+      try {
+        return ok(await app.editNode(a));
       } catch (e) {
         return errResult(e);
       }

@@ -389,6 +389,39 @@ export class ProcForgeApp {
     });
   }
 
+  async editArgs(a: any): Promise<Record<string, unknown>> {
+    const sid = a.sessionId as string;
+    return this.locked(sid, async () => {
+      const s = this.fresh(sid);
+      const out = await this.core.pfEditArgs({
+        sessionId: sid,
+        nodeId: a.nodeId as string,
+        patch: {
+          set: a.patch?.set as Record<string, import("@procforge/shared/schema.js").ArgSpec> | undefined,
+          remove: a.patch?.remove as string[] | undefined,
+        },
+      });
+      this.store.touch(sid);
+      return { node: nodeSummary(out.node, s.limits), instruction: out.instruction };
+    });
+  }
+
+  async editNode(a: any): Promise<Record<string, unknown>> {
+    const sid = a.sessionId as string;
+    return this.locked(sid, async () => {
+      const s = this.fresh(sid);
+      const out = await this.core.pfEditNode({
+        sessionId: sid,
+        nodeId: a.nodeId as string,
+        goal: a.goal as string | undefined,
+        addConstraints: a.addConstraints as import("@procforge/shared/schema.js").Constraint[] | undefined,
+        removeConstraintIds: a.removeConstraintIds as string[] | undefined,
+      });
+      this.store.touch(sid);
+      return { node: nodeSummary(out.node, s.limits), instruction: out.instruction };
+    });
+  }
+
   async refreshCatalog(): Promise<Record<string, unknown>> {
     const c = await collectCatalog(this.projectRoot, { cacheDir: join(this.procforgeDir, "cache"), refresh: true });
     return {

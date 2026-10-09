@@ -131,6 +131,8 @@ export const PfTreeOutputSchema = z.object({
 export const PfGetNodeOutputSchema = z.object({ node: NodeSchema });
 export const PfLockOutputSchema = z.object({ node: NodeSummarySchema });
 export const PfReopenOutputSchema = z.object({ node: NodeSummarySchema });
+export const PfEditArgsOutputSchema = z.object({ node: NodeSummarySchema, instruction: z.string() });
+export const PfEditNodeOutputSchema = z.object({ node: NodeSummarySchema, instruction: z.string() });
 export const PfApproveOutputSchema = z.object({ node: NodeSummarySchema });
 export const CatalogEntrySummarySchema = z.object({ server: z.string(), name: z.string(), schemaHash: z.string() });
 export const PfRefreshCatalogOutputSchema = z.object({
@@ -170,6 +172,8 @@ export const OUTPUT_SCHEMAS: Record<string, z.ZodTypeAny> = {
   pf_get_node: PfGetNodeOutputSchema,
   pf_lock: PfLockOutputSchema,
   pf_reopen: PfReopenOutputSchema,
+  pf_edit_args: PfEditArgsOutputSchema,
+  pf_edit_node: PfEditNodeOutputSchema,
   pf_approve: PfApproveOutputSchema,
   pf_refresh_catalog: PfRefreshCatalogOutputSchema,
   pf_test: PfTestOutputSchema,

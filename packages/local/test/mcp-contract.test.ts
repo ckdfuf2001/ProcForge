@@ -59,6 +59,8 @@ const EXPECTED_ANNOTATIONS: Record<string, Record<string, boolean>> = {
   pf_get_node: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
   pf_lock: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
   pf_reopen: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+  pf_edit_args: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+  pf_edit_node: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
   pf_refresh_catalog: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
   pf_finalize: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
 };
@@ -147,6 +149,46 @@ describe("도구 응답 계약 (outputSchema 통과)", () => {
       await close();
     }
   });
+
+  it("M4.2-2 pf_edit_args/node E2E", async () => {
+    const { mcp, close } = await linked();
+    try {
+      const call = async (name: string, args: Record<string, unknown>) => {
+        const r = await mcp.callTool({ name, arguments: args });
+        expect(r.isError, `${name} should succeed`).toBeFalsy();
+        const parsed = (OUTPUT_SCHEMAS[name] as { safeParse: (v: unknown) => { success: boolean } }).safeParse(r.structuredContent);
+        expect(parsed.success, `${name} outputSchema`).toBe(true);
+        return r.structuredContent as Record<string, unknown>;
+      };
+      const started = await call("pf_start", { request: "편집" });
+      const sid = started["sessionId"] as string;
+      await call("pf_split", { sessionId: sid, nodeId: "1", children: [{ goal: "a" }] });
+      await call("pf_report", {
+        sessionId: sid, nodeId: "1.1",
+        tool: { server: "opencode", name: "read" }, args: { path: "x" },
+        resultSummary: "ok", selfVerdict: "pass", selfReason: "ok",
+      });
+      await call("pf_confirm_leaf", {
+        sessionId: sid, nodeId: "1.1",
+        tool: { server: "opencode", name: "read" }, argSpecs: { path: { kind: "fixed", value: "x" } },
+      });
+      // 인자 수정 → open + suggestedArgs 고지
+      const edited = await call("pf_edit_args", {
+        sessionId: sid, nodeId: "1.1", patch: { set: { path: { kind: "fixed", value: "y" } } },
+      });
+      expect((edited["node"] as { status: string }).status).toBe("open");
+      const nxt = await call("pf_next", { sessionId: sid });
+      expect((nxt["instruction"] as string)).toMatch(/사람이 인자를 수정함/);
+      // 목표 수정
+      const renamed = await call("pf_edit_node", { sessionId: sid, nodeId: "1.1", goal: "b" });
+      expect((renamed["node"] as { goal: string }).goal).toBe("b");
+      // 빈 패치 거부
+      const bad = await mcp.callTool({ name: "pf_edit_args", arguments: { sessionId: sid, nodeId: "1.1", patch: {} } });
+      expect(bad.isError).toBe(true);
+    } finally {
+      await close();
+    }
+  }, 30000);
 
   it("에러 봉투: session_not_found", async () => {
     const { mcp, close } = await linked();

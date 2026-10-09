@@ -208,6 +208,8 @@
   세션 기준으로 구현).
 - getEvents + Store.readEvents — 메모리·파일 구현, sinceSeq 지원. Tx는 base
   위임 (미확정분 제외).
+- MCP pf_edit_args/pf_edit_node — App 1:1 + tools/list 등록 (순서 고정).
+  빈 patch도 변경 없음으로 거부.
 
 ## M3.2
 

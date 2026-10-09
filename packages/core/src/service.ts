@@ -813,6 +813,9 @@ export class CoreService implements CoreClient {
         }
       }
       const remove = new Set(input.patch.remove ?? []);
+      if (Object.keys(set).length === 0 && remove.size === 0) {
+        throw err("bad_request", "변경 없음 (patch.set/remove 중 하나 필요).");
+      }
       const merged: Record<string, ArgSpec> = {};
       for (const [k, spec] of Object.entries(n.args)) {
         if (!remove.has(k)) merged[k] = spec;
