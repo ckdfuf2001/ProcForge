@@ -240,7 +240,7 @@ server.registerTool("pf_report", spec, async (a) => {
 | 마일스톤 | 항목 | 상태 | 커밋 | CI run | 비고 |
 |---|---|---|---|---|---|
 | M0~M4.1 | 기존 작업 | [x] | `ac97ac6` | run 20 | |
-| M4.2 | 0단계 공용 기반 | [~] | | | errors/dto/validator/revision/events 진행 중 |
+| M4.2 | 0단계 공용 기반 | [x] | `93c71c1` | https://github.com/ckdfuf2001/ProcForge/actions/runs/37889763724 | errors/dto/validator/revision/events 완료 |
 | M4.2 | 1단계 server.ts 로직 이전 | [ ] | | | |
 | M4.2 | 2단계 신규 CoreClient 메서드 | [ ] | | | |
 | M4.2 | 3단계 M4.1.1 버그 1~7 | [ ] | | | |
