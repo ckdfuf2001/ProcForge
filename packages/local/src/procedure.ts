@@ -50,13 +50,27 @@ export type FinalizeResult = {
   dir: string;
   warnings: string[];
   files: string[];
+  /** 프로젝트 명령 파일 절대경로 (M4.1-1) */
+  commandFile: string;
 };
 
 function procDir(procforgeDir: string, name: string): string {
   return join(procforgeDir, "procedures", name);
 }
 
-export function finalizeSession(procforgeDir: string, sessionId: string, name: string): FinalizeResult {
+export type FinalizeOptions = {
+  /** 명령 파일 출력 루트 (기본: procforgeDir의 부모 = projectRoot 가정) */
+  projectRoot?: string;
+  /** 기존 명령 파일 덮어쓰기 허용 */
+  force?: boolean;
+};
+
+export function finalizeSession(
+  procforgeDir: string,
+  sessionId: string,
+  name: string,
+  opts: FinalizeOptions = {},
+): FinalizeResult {
   if (!/^[A-Za-z0-9_-]+$/.test(name)) {
     throw Object.assign(new Error(`bad procedure name: ${name}`), { code: "bad_request" });
   }
@@ -123,7 +137,18 @@ export function finalizeSession(procforgeDir: string, sessionId: string, name: s
   put("procedure.json", JSON.stringify(doc, null, 2));
   put("PROCEDURE.md", renderProcedureMd(doc));
   put("SKILL.md", renderSkillMd(doc));
-  put(".opencode/command/command.md", renderCommandMd(doc));
+  const commandMd = renderCommandMd(doc);
+  // M4.1-1: 명령 파일은 프로젝트에 출력, procedures 안에는 사본만.
+  // 기존 파일이 있고 force가 없으면 여기서 거부 (procedures 쓰기 전).
+  const projectRoot = opts.projectRoot ?? dirname(procforgeDir);
+  const commandFile = join(projectRoot, ".opencode", "command", `${name}.md`);
+  if (!opts.force && existsSync(commandFile)) {
+    throw Object.assign(
+      new Error(`명령 파일이 이미 있음: ${commandFile} (--force로 덮어쓰기)`),
+      { code: "bad_request" },
+    );
+  }
+  put("command.md", commandMd);
   // tests/: golden + cassette 사본
   const sessDir = join(procforgeDir, "sessions", sessionId);
   const copyTree = (srcRel: string, dstRel: string) => {
@@ -151,7 +176,9 @@ export function finalizeSession(procforgeDir: string, sessionId: string, name: s
     copyFileSync(mf, join(dir, "tests", "fixtures-manifest.json"));
     files.push("tests/fixtures-manifest.json");
   }
-  return { name, dir, warnings, files: files.sort() };
+  mkdirSync(dirname(commandFile), { recursive: true });
+  writeFileSync(commandFile, commandMd);
+  return { name, dir, warnings, files: files.sort(), commandFile };
 }
 
 function renderProcedureMd(doc: ProcedureDoc): string {

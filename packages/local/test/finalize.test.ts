@@ -75,7 +75,7 @@ describe("pf_finalize", () => {
     expect(rec.summary.fail).toBe(0);
     const out = finalizeSession(pfdir, sid, "monthly-test");
     expect(out.warnings.some((w) => w.includes("2026-09"))).toBe(true);
-    for (const f of ["procedure.json", "PROCEDURE.md", "SKILL.md", ".opencode/command/command.md"]) {
+    for (const f of ["procedure.json", "PROCEDURE.md", "SKILL.md", "command.md"]) {
       expect(existsSync(join(out.dir, f)), f).toBe(true);
     }
     const doc = ProcedureDocSchema.parse(JSON.parse(readFileSync(join(out.dir, "procedure.json"), "utf8")));
@@ -95,6 +95,26 @@ describe("pf_finalize", () => {
     // 1.2를 reopen하여 미해결 상태로
     await client.pfReopen(sid, "1.2", "test");
     expect(() => finalizeSession(pfdir, sid, "bad")).toThrow(/미해결 노드: 1\.2/);
+  }, 30000);
+
+  it("M4.1-1 명령 파일: 프로젝트 출력 + 사본, force 규칙", async () => {
+    const sid = await scripted();
+    const a = finalizeSession(pfdir, sid, "cmd-a", { projectRoot: root });
+    const b = finalizeSession(pfdir, sid, "cmd-b", { projectRoot: root });
+    // 두 절차 → 파일 두 개, 이름 충돌 없음
+    expect(a.commandFile).toBe(join(root, ".opencode", "command", "cmd-a.md"));
+    expect(b.commandFile).toBe(join(root, ".opencode", "command", "cmd-b.md"));
+    expect(existsSync(a.commandFile)).toBe(true);
+    expect(existsSync(b.commandFile)).toBe(true);
+    expect(readFileSync(a.commandFile, "utf8")).toContain("cmd-a");
+    expect(readFileSync(b.commandFile, "utf8")).toContain("cmd-b");
+    // procedures 안에는 사본만
+    expect(readFileSync(join(pfdir, "procedures", "cmd-a", "command.md"), "utf8")).toContain("cmd-a");
+    // 기존 파일 + force 없음 → 거부
+    expect(() => finalizeSession(pfdir, sid, "cmd-a", { projectRoot: root })).toThrow(/--force/);
+    // force면 덮어쓰기
+    const again = finalizeSession(pfdir, sid, "cmd-a", { projectRoot: root, force: true });
+    expect(existsSync(again.commandFile)).toBe(true);
   }, 30000);
 
   it("params 재바인딩: --param month=2026-10", async () => {

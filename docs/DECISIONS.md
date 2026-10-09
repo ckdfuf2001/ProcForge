@@ -144,6 +144,12 @@
   경고 (엄격화는 실측 스키마 확인 후). 버전은 카탈로그 fingerprint에 포함.
   runner read는 offset(0-based 시작 줄)/limit(줄 수) 지원.
 
+## M4.1 (finalize/capture 보정)
+
+- [M4.1-1] 명령 파일은 `<projectRoot>/.opencode/command/<name>.md`에 출력
+  (projectRoot 생략 시 procforgeDir 부모). 기존 파일 + force 없음 → 쓰기 전
+  거부. procedures/<name>/ 안에는 `command.md` 사본만.
+
 ## M3.2
 
 - [M3.2-1] passthrough도 generated는 golden attempt 기록값. live 모드 추가(생성 재생성,

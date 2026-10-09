@@ -153,6 +153,7 @@ export const PfFinalizeOutputSchema = z.object({
   dir: z.string(),
   warnings: z.array(z.string()),
   files: z.array(z.string()),
+  commandFile: z.string().optional(),
 });
 
 export const OUTPUT_SCHEMAS: Record<string, z.ZodTypeAny> = {

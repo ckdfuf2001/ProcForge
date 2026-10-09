@@ -871,9 +871,10 @@ export function buildServer(deps: ServerDeps): McpServer {
         "확정 트리를 절차서로 export한다.",
         "선수: 전 노드 resolved(leaf 또는 완성 split) 후.",
         "sessionId(필수), name(필수, 영숫자/_/-).",
+        "force(선택, 기존 명령 파일 덮어쓰기).",
         "procedure.json·PROCEDURE.md·SKILL.md·tests·command 반환. 다음: pf_test로 검증.",
       ].join("\n"),
-      inputSchema: { sessionId: SessionIdSchema, name: z.string().min(1) },
+      inputSchema: { sessionId: SessionIdSchema, name: z.string().min(1), force: z.boolean().optional() },
       outputSchema: OUTPUT_SCHEMAS["pf_finalize"] as never,
       annotations: WRITE_ANN,
     },
@@ -881,7 +882,10 @@ export function buildServer(deps: ServerDeps): McpServer {
       try {
         const sid = a.sessionId as string;
         requireFresh(deps, sid);
-        const out = finalizeSession(deps.procforgeDir, sid, a.name as string);
+        const out = finalizeSession(deps.procforgeDir, sid, a.name as string, {
+          projectRoot: deps.projectRoot,
+          force: (a.force as boolean | undefined) ?? false,
+        });
         deps.store.touch(sid);
         return ok(out as unknown as Record<string, unknown>);
       } catch (e) {
