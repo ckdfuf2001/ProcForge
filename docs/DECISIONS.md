@@ -169,6 +169,15 @@
 - [M4.1-8] SKILL.md/command.md는 "검증(replay)만 가능, 새 데이터 실행은
   미지원(M5)"으로 표기 (params 변경분은 drift 검출).
 
+## M4.2 (계층 정리 + M4.1.1 보정)
+
+- [M4.2-0] 0단계 공용 기반 — shared/errors(ProcForgeError·코드 목록,
+  core/service·server err() 교체), shared/dto(Actor·EventEntry·변경
+  입출력 envelope), validator shared 이동, 세션 revision(신규 0·구 세션
+  로드 시 파일 마이그레이션), events.jsonl R7 append/read 헬퍼(미연결).
+  방출 지점 연결·revision 증가/충돌 검사는 1~2단계에서 (core는 파일을
+  모르므로 local/App 측에서). trace buildTrace는 R7행 무시로 선방어.
+
 ## M3.2
 
 - [M3.2-1] passthrough도 generated는 golden attempt 기록값. live 모드 추가(생성 재생성,

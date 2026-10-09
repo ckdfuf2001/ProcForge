@@ -3,7 +3,7 @@ import { mkdtempSync, existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createLocalStack } from "../src/core-inprocess.js";
-import { buildTrace, formatTraceMarkdown, logEvent, readEvents } from "../src/trace.js";
+import { buildTrace, formatTraceMarkdown, logEvent, readEvents, appendStateEvent, readStateEvents } from "../src/trace.js";
 import { exportSession, listZip, readZipEntry, writeZip } from "../src/export.js";
 import type { CoreClient } from "@procforge/shared/core-client.js";
 
@@ -110,5 +110,17 @@ describe("trace/export", () => {
     expect(ascii.readUInt16LE(p + 8)).toBe(0); // central flags
     const nonAscii = writeZip([{ name: "작업.json", data: Buffer.from("{}") }]);
     expect(nonAscii.readUInt16LE(8)).toBe(0x0800);
+  });
+
+  it("M4.2-0 상태 이벤트: seq 증가 + 호출 추적과 공존", async () => {
+    const sid = await scripted();
+    const e1 = appendStateEvent(pfdir, sid, { actor: "host", method: "pfReport", nodeIds: ["1.1"], beforeHash: "a", afterHash: "b", summary: "pass" });
+    const e2 = appendStateEvent(pfdir, sid, { actor: "host", method: "pfConfirmLeaf", nodeIds: ["1.1"], beforeHash: "b", afterHash: "c", summary: "leaf" });
+    expect(e1.seq).toBe(1);
+    expect(e2.seq).toBe(2);
+    expect(readStateEvents(pfdir, sid).map((e) => e.method)).toEqual(["pfReport", "pfConfirmLeaf"]);
+    // 호출 추적에는 상태 이벤트가 섞이지 않음
+    expect(readEvents(pfdir, sid).length).toBe(1);
+    expect(buildTrace(pfdir, sid).callsTotal).toBe(1);
   });
 });

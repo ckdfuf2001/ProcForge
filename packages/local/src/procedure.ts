@@ -329,6 +329,7 @@ export function importProcedure(
     rootId: parsed.nodes.find((n) => n.parentId === null)?.id ?? parsed.nodes[0]?.id ?? "1",
     limits: { maxDepth: 20, maxRetries: 2, maxNodes: 500 },
     createdAt: new Date().toISOString(),
+    revision: 0,
   };
   store.saveSession(session);
   for (const n of parsed.nodes) {

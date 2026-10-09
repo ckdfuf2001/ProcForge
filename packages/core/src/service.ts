@@ -218,6 +218,7 @@ export class CoreService implements CoreClient {
       rootId: "1",
       limits,
       createdAt: new Date().toISOString(),
+      revision: 0,
       opencodeVersion: input.opencodeVersion ?? "unknown",
     };
     this.store.saveSession(session);

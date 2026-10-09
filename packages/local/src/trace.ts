@@ -1,6 +1,7 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Session } from "@procforge/shared/schema.js";
+import { EventEntrySchema, type EventEntry } from "@procforge/shared/dto.js";
 import { FileStore } from "./filestore.js";
 
 // pf_* 호출 기록 + 세션 추적 (M3.5 dogfood 측정 지원).
@@ -35,7 +36,50 @@ export function readEvents(procforgeDir: string, sessionId: string): TraceEvent[
     const t = line.trim();
     if (!t) continue;
     try {
-      out.push(JSON.parse(t) as TraceEvent);
+      const parsed = JSON.parse(t) as TraceEvent;
+      // M4.2-0: 상태 이벤트(R7)와 공존 — tool 호출 기록만 집계
+      if (typeof parsed.tool !== "string") continue;
+      out.push(parsed);
+    } catch {
+      // 손상 줄 무시
+    }
+  }
+  return out;
+}
+
+/**
+ * 상태 변경 이벤트 append (M4.2-0, R7). seq는 기존 R7 항목 max+1.
+ * 호출 추적(TraceEvent)과 같은 events.jsonl에 공존한다.
+ */
+export function appendStateEvent(
+  procforgeDir: string,
+  sessionId: string,
+  entry: Omit<EventEntry, "seq" | "at"> & { at?: string },
+): EventEntry {
+  const existing = readStateEvents(procforgeDir, sessionId);
+  const seq = existing.reduce((m, e) => Math.max(m, e.seq), 0) + 1;
+  const full = EventEntrySchema.parse({ ...entry, seq, at: entry.at ?? new Date().toISOString() });
+  try {
+    const p = eventsFile(procforgeDir, sessionId);
+    mkdirSync(dirname(p), { recursive: true });
+    appendFileSync(p, JSON.stringify(full) + "\n");
+  } catch {
+    // 추적 실패는 본 동작에 영향 없음
+  }
+  return full;
+}
+
+/** R7 상태 이벤트만 읽기 */
+export function readStateEvents(procforgeDir: string, sessionId: string): EventEntry[] {
+  const p = eventsFile(procforgeDir, sessionId);
+  if (!existsSync(p)) return [];
+  const out: EventEntry[] = [];
+  for (const line of readFileSync(p, "utf8").split("\n")) {
+    const t = line.trim();
+    if (!t) continue;
+    try {
+      const parsed = EventEntrySchema.safeParse(JSON.parse(t));
+      if (parsed.success) out.push(parsed.data);
     } catch {
       // 손상 줄 무시
     }

@@ -675,6 +675,12 @@ describe("M1.5-1 pass여도 leaf 자동 확정 없음", () => {
     expect(s2.session.opencodeVersion).toBe("unknown");
   });
 
+  it("M4.2-0 새 세션 revision 0", async () => {
+    const svc = new CoreService(createMemoryStore(), passEval);
+    const s = await svc.pfStart({ request: "r", toolCatalog: catalog });
+    expect(s.session.revision).toBe(0);
+  });
+
   it("M3.6-5 미참조 dependsOn은 경고만 (dep_without_dataflow)", async () => {
     const svc = new CoreService(createMemoryStore(), passEval);
     const s = await svc.pfStart({ request: "r", toolCatalog: catalog });

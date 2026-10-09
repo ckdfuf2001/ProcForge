@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { mkdtempSync, writeFileSync, existsSync } from "node:fs";
+import { mkdtempSync, writeFileSync, existsSync, readFileSync, mkdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
@@ -20,6 +20,24 @@ describe("FileStore ID 이중 검증 (M2.6-2)", () => {
     expect(() => store.getNode(sid, "../../x")).toThrow(/bad node id/);
     expect(() => store.getNode("not-a-uuid", "1")).toThrow(/bad session id/);
     expect(() => store.getNodes("../escape")).toThrow();
+  });
+
+  it("M4.2-0 구 세션 로드 시 revision 0 마이그레이션", () => {
+    const legacy = {
+      id: sid,
+      request: "r",
+      params: {},
+      toolCatalog: [],
+      rootId: "1",
+      limits: { maxDepth: 3, maxRetries: 2, maxNodes: 10 },
+      createdAt: new Date().toISOString(),
+    };
+    mkdirSync(join(dir, "sessions", sid), { recursive: true });
+    writeFileSync(join(dir, "sessions", sid, "session.json"), JSON.stringify(legacy));
+    expect(store.getSession(sid)?.revision).toBe(0);
+    // 파일에도 기록됨
+    const raw = JSON.parse(readFileSync(join(dir, "sessions", sid, "session.json"), "utf8")) as Record<string, unknown>;
+    expect(raw["revision"]).toBe(0);
   });
 });
 

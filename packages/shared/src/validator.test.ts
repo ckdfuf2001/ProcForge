@@ -22,6 +22,7 @@ function baseSession(over: Partial<Session> = {}): Session {
     rootId: "1",
     limits: { maxDepth: 3, maxRetries: 2, maxNodes: 10 },
     createdAt: new Date().toISOString(),
+    revision: 0,
     ...over,
   };
 }
