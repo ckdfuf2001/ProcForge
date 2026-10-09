@@ -528,7 +528,7 @@ export function buildServer(deps: ServerDeps): McpServer {
     },
   );
 
-  W(
+  R(
     "pf_reopen",
     {
       title: "노드 재오픈",
@@ -543,11 +543,7 @@ export function buildServer(deps: ServerDeps): McpServer {
     },
     async (a: any) => {
       try {
-        const sid = a.sessionId as string;
-        const s = requireFresh(deps, sid);
-        const n = await client.pfReopen(sid, a.nodeId as string, a.reason as string);
-        deps.store.touch(sid);
-        return ok({ node: nodeSummary(n, s.limits) });
+        return ok(await app.reopen(a));
       } catch (e) {
         return errResult(e);
       }

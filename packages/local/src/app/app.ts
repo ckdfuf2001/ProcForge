@@ -350,4 +350,14 @@ export class ProcForgeApp {
       return { node: nodeSummary(n, s.limits) };
     });
   }
+
+  async reopen(a: any): Promise<Record<string, unknown>> {
+    const sid = a.sessionId as string;
+    return this.locked(sid, async () => {
+      const s = this.fresh(sid);
+      const n = await this.core.pfReopen(sid, a.nodeId as string, a.reason as string);
+      this.store.touch(sid);
+      return { node: nodeSummary(n, s.limits) };
+    });
+  }
 }
