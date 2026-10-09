@@ -9,7 +9,7 @@ import { FileStore } from "../filestore.js";
 import { evaluateAll } from "../checker.js";
 import { logger } from "../logger.js";
 import { writeAtomicFile } from "../fsutil.js";
-import { normalizeArgSpecs } from "../artifacts.js";
+import { normalizeArgSpecs, fixtureFileExists } from "../artifacts.js";
 import { ConnectionPool } from "./connections.js";
 import { findRecording, loadCassette, recordKey, saveRecording, toToolResponse } from "./recordings.js";
 import { resolveArgs } from "./resolve.js";
@@ -353,7 +353,8 @@ async function execNode(
   }
 
   // 판정 (checker 재사용, llm_rubric·deferred는 별도 집계)
-  const fileExists = (p: string) => existsSync(join(opts.procforgeDir, "sessions", opts.sessionId, p));
+  // M3.6-3: fixture 존재 검사는 바이너리 존재+크기>0 (sha256 비교 금지)
+  const fileExists = (p: string) => fixtureFileExists(join(opts.procforgeDir, "sessions", opts.sessionId, p));
   const nodeOutputs: Record<string, unknown> = {};
   for (const [k, v] of outputs) nodeOutputs[k] = v;
   const r = evaluateAll(n.constraints, {

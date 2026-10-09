@@ -128,6 +128,15 @@
 - [M3.6-6] generated E2E — fake-ppt fill_template에 content(선택) 인자 추가
   (파일·응답에 반영). 1.3 content=generated(inputs 1.2)로 record→replay→
   passthrough 통과.
+- [M3.6-2] 입력 자동 캡처 — pf_report/pf_confirm_leaf 시 local이 in/inout
+  역할 인자 파일을 fixtures에 자동 ingest (호스트 제출 불필요, best-effort:
+  존재하는 baseDir 안 파일만, 실패 금지). 역할은 명시 path → 내장 고정 →
+  paths.ts 추정. 확정 시에는 명시 역할 + 미수집분만 같은 attempt에 append
+  (startIndex, 해시는 attempt 미포함이라 무관).
+- [M3.6-3] 출력 자동 캡처 — out 역할 인자 + 응답 JSON 문자열 중 baseDir에
+  실제 존재하는 파일을 artifacts로 ingest (최대 10개, URL 제외). 첫 pass의
+  auto file_exists가 그대로 부착된다. 바이너리(pptx 등)는 sha256 비교 없이
+  존재+크기>0만 검사 (fixtureFileExists, 확장자 기준).
 
 ## M3.2
 

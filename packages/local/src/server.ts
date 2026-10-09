@@ -1,12 +1,13 @@
 import { randomUUID } from "node:crypto";
-import { join } from "node:path";
+import { join, relative, resolve } from "node:path";
 import { readFileSync } from "node:fs";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import type { CoreClient } from "@procforge/shared/core-client.js";
 import { NodeIdSchema, SessionIdSchema, ConstraintSchema } from "@procforge/shared/schema.js";
-import { ingestArtifacts, normalizeArgSpecs, setupSandbox } from "./artifacts.js";
+import { ingestArtifacts, normalizeArgSpecs, readManifest, setupSandbox } from "./artifacts.js";
+import { collectExistingPaths, collectResultFiles } from "./capture.js";
 import { collectCatalog } from "./catalog.js";
 import { logger } from "./logger.js";
 import type { FileStore } from "./filestore.js";
@@ -287,15 +288,25 @@ export function buildServer(deps: ServerDeps): McpServer {
     async (a: any) => {
       try {
         const sid = a.sessionId as string;
-        requireFresh(deps, sid);
+        const sess = requireFresh(deps, sid);
         const nid = a.nodeId as string;
         const attemptId = randomUUID();
+        const toolRef = a.tool as { server: string; name: string };
+        const args = (a.args ?? {}) as Record<string, unknown>;
+        const baseDir = strictSandbox ? join(deps.procforgeDir, "sandbox", sid) : deps.projectRoot;
+        const cat = sess.toolCatalog.find((t) => t.server === toolRef.server && t.name === toolRef.name);
+        // M3.6-2/3 자동 캡처: in/inout 인자 + out 인자 + 응답 JSON 안의 기존 파일 (호스트 제출 불필요)
+        const autoPaths = [
+          ...collectExistingPaths({ baseDir, tool: toolRef, args, catalogEntry: cat, roles: ["in", "inout"] }),
+          ...collectExistingPaths({ baseDir, tool: toolRef, args, catalogEntry: cat, roles: ["out"] }),
+          ...(a.resultJson !== undefined ? collectResultFiles({ baseDir, resultJson: a.resultJson }) : []),
+        ];
+        const hostPaths = (a.artifacts ?? []) as string[];
+        const allPaths = [...new Set([...autoPaths, ...hostPaths])];
         let stored: string[] = [];
         let contents: Record<string, string> = {};
-        const arts = a.artifacts as string[] | undefined;
-        if (arts && arts.length > 0) {
-          const baseDir = strictSandbox ? join(deps.procforgeDir, "sandbox", sid) : deps.projectRoot;
-          const ing = ingestArtifacts({ procforgeDir: deps.procforgeDir, sessionId: sid, nodeId: nid, attemptId, baseDir, paths: arts, maxBytes: maxArtifactBytes });
+        if (allPaths.length > 0) {
+          const ing = ingestArtifacts({ procforgeDir: deps.procforgeDir, sessionId: sid, nodeId: nid, attemptId, baseDir, paths: allPaths, maxBytes: maxArtifactBytes });
           stored = ing.stored;
           contents = ing.contents;
         }
@@ -389,6 +400,37 @@ export function buildServer(deps: ServerDeps): McpServer {
           sandboxDir: join(deps.procforgeDir, "sandbox", sid),
           projectRoot: deps.projectRoot,
         });
+        // M3.6-2 확정 시 추캡처: 명시 in/inout fixed 경로 중 미수집분 (attempt 보정, 해시 무관)
+        const nodeId = a.nodeId as string;
+        const cur = deps.store.getNode(sid, nodeId);
+        const last = cur?.attempts[cur.attempts.length - 1];
+        if (cur && last) {
+          const fixedArgs: Record<string, unknown> = {};
+          for (const [k, spec] of Object.entries(norm.specs)) {
+            if (spec.kind === "fixed") fixedArgs[k] = (spec as { value: unknown }).value;
+          }
+          const baseDir = strictSandbox ? join(deps.procforgeDir, "sandbox", sid) : deps.projectRoot;
+          const manifest = readManifest(deps.procforgeDir, sid);
+          const covered = new Set(
+            last.artifacts.map((fx) => manifest[fx]).filter((v): v is string => typeof v === "string"),
+          );
+          const toolRef = a.tool as { server: string; name: string };
+          const cat = s.toolCatalog.find((t) => t.server === toolRef.server && t.name === toolRef.name);
+          const relOf = (p: string) => relative(resolve(baseDir), resolve(resolve(baseDir), p)).split("\\").join("/");
+          const fresh = collectExistingPaths({
+            baseDir, tool: toolRef, args: fixedArgs, specs: norm.specs, catalogEntry: cat, roles: ["in", "inout"],
+          }).filter((p) => !covered.has(relOf(p)));
+          if (fresh.length > 0) {
+            const ing = ingestArtifacts({
+              procforgeDir: deps.procforgeDir, sessionId: sid, nodeId, attemptId: last.id,
+              baseDir, paths: fresh, maxBytes: maxArtifactBytes, startIndex: last.artifacts.length,
+            });
+            deps.store.saveNode(sid, {
+              ...cur,
+              attempts: cur.attempts.map((at) => (at.id === last.id ? { ...at, artifacts: [...at.artifacts, ...ing.stored] } : at)),
+            });
+          }
+        }
         const out = await client.pfResolve({
           sessionId: sid,
           nodeId: a.nodeId as string,

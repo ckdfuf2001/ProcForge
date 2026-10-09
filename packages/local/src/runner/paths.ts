@@ -65,7 +65,8 @@ function posixRel(fsDir: string, abs: string): string {
   return relative(fsDir, abs).split(sep).join("/");
 }
 
-function looksLikePath(v: string): boolean {
+/** 경로처럼 보이는 문자열 판정 (URL 제외). 캡처 대상 선별용으로 export */
+export function looksLikePath(v: string): boolean {
   if (v.length === 0 || v.length > 512 || v.includes("\n")) return false;
   return /[/\\]/.test(v) || /\.[A-Za-z0-9]{1,5}$/.test(v);
 }

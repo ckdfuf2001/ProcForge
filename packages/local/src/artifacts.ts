@@ -68,8 +68,7 @@ function appendManifest(procforgeDir: string, sessionId: string, entries: Record
   writeAtomicFile(p, JSON.stringify(cur, null, 2));
 }
 
-const MIME_BY_EXT: Record<string, string> = {
-  ".txt": "text/plain",
+const MIME_BY_EXT: Record<string, string> = {  ".txt": "text/plain",
   ".md": "text/markdown",
   ".json": "application/json",
   ".j2": "text/plain",
@@ -80,6 +79,22 @@ const MIME_BY_EXT: Record<string, string> = {
   ".jpg": "image/jpeg",
   ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
 };
+
+const BINARY_EXTS = new Set([".png", ".jpg", ".jpeg", ".pptx", ".pdf", ".zip", ".bin"]);
+
+/**
+ * fixture 존재 검사 (M3.6-3): 바이너리는 존재+크기>0, 텍스트는 존재만.
+ * sha256 비교 금지 (바이너리는 실행마다 바뀔 수 있음).
+ */
+export function fixtureFileExists(absPath: string): boolean {
+  try {
+    if (!existsSync(absPath) || statSync(absPath).isDirectory()) return false;
+    if (BINARY_EXTS.has(extname(absPath).toLowerCase())) return statSync(absPath).size > 0;
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 export type Ingested = {
   /** Attempt.artifacts에 기록할 fixture 상대경로들 */
@@ -97,6 +112,8 @@ export function ingestArtifacts(input: {
   baseDir: string;
   paths: string[];
   maxBytes?: number;
+  /** fixture 파일명 인덱스 시작값 (확정 시 추캡처 append용, 기본 0) */
+  startIndex?: number;
 }): Ingested {
   const maxBytes = input.maxBytes ?? 5 * 1024 * 1024;
   const stored: string[] = [];
@@ -104,13 +121,14 @@ export function ingestArtifacts(input: {
   const manifestEntries: Record<string, string> = {};
   const base = resolve(input.baseDir);
   input.paths.forEach((p, i) => {
+    const idx = (input.startIndex ?? 0) + i;
     const abs = assertSafePath(input.baseDir, p);
     const size = statSync(abs).size;
     if (size > maxBytes) {
       throw Object.assign(new Error(`artifact too large: ${p} (${size} > ${maxBytes})`), { code: "bad_request" });
     }
     const buf = readFileSync(abs);
-    const destRel = join("fixtures", input.nodeId, input.attemptId, `${i}-${basename(abs)}`);
+    const destRel = join("fixtures", input.nodeId, input.attemptId, `${idx}-${basename(abs)}`);
     const destAbs = join(input.procforgeDir, "sessions", input.sessionId, destRel);
     mkdirSync(dirname(destAbs), { recursive: true });
     copyFileSync(abs, destAbs);
