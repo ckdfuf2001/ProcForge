@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { compareNormalized } from "@procforge/shared/normalize.js";
+import { compareNormalized, maskParamsValues } from "@procforge/shared/normalize.js";
 import { compareNodeIds } from "@procforge/shared/ids.js";
 import { effectiveDeps, expandDepLeafs, rawDepSources } from "@procforge/shared/deps.js";
 import type { Node } from "@procforge/shared/schema.js";
@@ -331,9 +331,9 @@ async function execNode(
 
   outputs.set(n.id, resp.resultJson ?? resp.resultText);
 
-  // drift 검출: passthrough에서만 golden 정규화 비교 (M3.1-1/2)
+  // drift 검출: passthrough에서만 golden 정규화 비교 (M3.1-1/2, M3.6-4 자리표시자 복원)
   if (mode === "passthrough" && n.golden) {
-    const d = compareNormalized(n.golden.output, resp.resultText, n.golden.ignore ?? [], fsDir);
+    const d = compareNormalized(n.golden.output, resp.resultText, n.golden.ignore ?? [], fsDir, params);
     if (!d.equal) {
       if (opts.updateGolden) {
         updateNodeGolden(opts, n, resp);
@@ -397,6 +397,8 @@ function updateNodeGolden(opts: RunOptions, n: Node, resp: ToolResponse): void {
   const cur = store.getNode(opts.sessionId, n.id);
   if (!cur) return;
   // updateGolden은 golden.output만 갱신 (fixtures는 pf_report 소유). (DECISIONS M3)
-  const next: Node = { ...cur, golden: { fixtures: [...(cur.golden?.fixtures ?? [])], output: resp.resultText, attemptId: cur.golden?.attemptId, ignore: cur.golden?.ignore ?? [] } };
+  // M3.6-4: 갱신 시에도 params 자리표시자로 저장
+  const params = store.getSession(opts.sessionId)?.params ?? {};
+  const next: Node = { ...cur, golden: { fixtures: [...(cur.golden?.fixtures ?? [])], output: maskParamsValues(resp.resultText, params), attemptId: cur.golden?.attemptId, ignore: cur.golden?.ignore ?? [] } };
   store.saveNode(opts.sessionId, next);
 }

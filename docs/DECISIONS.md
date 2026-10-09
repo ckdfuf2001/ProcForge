@@ -120,6 +120,11 @@
 - [M3.6-5] dep_without_dataflow — confirm_leaf 시 dependsOn 중 var($노드...,
   조상 포함)/generated(inputs, 노드 id) 어디에서도 참조되지 않으면 warnings에만
   기록 (에러 아님). 참조 파서는 shared/args-schema 공용.
+- [M3.6-4] golden params 치환 — 확정 시 golden.output 안의 params 값은
+  JSON 문자열 완전 일치만 `${params.key}` 자리표시자로 저장 (부분 문자열
+  치환 금지. 비JSON은 길이 4 이상 값만 치환). passthrough 비교·--update-golden
+  갱신 시 현재 params로 복원/재치환. 모르는 키 자리표시자는 그대로 두어
+  drift로 검출.
 
 ## M3.2
 

@@ -220,6 +220,20 @@ describe("M3 runner", () => {
     }
   }, 30000);
 
+  it("M3.6-4 golden params 치환: --param 변경해도 passthrough 통과", async () => {
+    const sid = await scriptedSession();
+    await runSession({ procforgeDir: pfdir, projectRoot: root, allowProjectRead: true, sessionId: sid, mode: "record" });
+    // 확정 시 params 값이 자리표시자로 저장됨
+    const store = new FileStore(pfdir);
+    expect(store.getNode(sid, "1.3")!.golden?.output).toContain("${params.month}");
+    // params 변경 후 passthrough: 복원 비교로 통과
+    const sess = store.getSession(sid)!;
+    store.saveSession({ ...sess, params: { month: "2026-10" } });
+    const pass = await runSession({ procforgeDir: pfdir, projectRoot: root, allowProjectRead: true, sessionId: sid, mode: "passthrough" });
+    expect(pass.summary.fail).toBe(0);
+    expect(pass.summary.pass).toBe(3);
+  }, 30000);
+
   it("실패 전파: 상류 실패 → 하류 blocked", async () => {
     const collected = await collectCatalog(root);
     const builtin = collected.entries.filter((e) => e.server === "opencode");

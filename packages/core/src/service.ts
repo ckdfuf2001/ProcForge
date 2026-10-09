@@ -36,6 +36,7 @@ function err(code: string, message: string): Error {
 }
 
 import { checkUnknownKeys, selfAndAncestors, similarKey, varRefNodeId } from "@procforge/shared/args-schema.js";
+import { maskParamsValues } from "@procforge/shared/normalize.js";
 export { similarKey };
 
 /**
@@ -625,7 +626,8 @@ export class CoreService implements CoreClient {
           status: "leaf",
           tool: { server: input.tool.server, name: input.tool.name, schemaHash: cat.schemaHash },
           args: input.argSpecs,
-          golden: { fixtures: [...last!.artifacts], output: last!.resultSummary, attemptId: last!.id, ignore: input.goldenIgnore ?? [] },
+          // M3.6-4: golden 출력 안의 params 값은 자리표시자로 저장 (재바인딩 대비)
+          golden: { fixtures: [...last!.artifacts], output: maskParamsValues(last!.resultSummary, s.params), attemptId: last!.id, ignore: input.goldenIgnore ?? [] },
         };
         if (input.sideEffect) next.sideEffect = input.sideEffect;
         next.hash = this.hashFor(s.id, next);

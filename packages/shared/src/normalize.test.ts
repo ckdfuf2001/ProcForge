@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { normalizeOutputText, compareNormalized } from "../src/normalize.js";
+import { normalizeOutputText, compareNormalized, maskParamsValues, restoreParamsPlaceholders } from "../src/normalize.js";
 
 describe("normalize", () => {
   it("RUNFS/UUID/TIME 플레이스홀더", () => {
@@ -39,5 +39,19 @@ describe("normalize", () => {
     const d = compareNormalized("hello world", "hello WORLD");
     expect(d.equal).toBe(false);
     if (!d.equal) expect(d.path).toBe("(char 6)");
+  });
+
+  it("M3.6-4 params 치환/복원", () => {
+    const masked = maskParamsValues(JSON.stringify({ output: "o", month: "2026-09" }), { month: "2026-09" });
+    expect(JSON.parse(masked)).toEqual({ output: "o", month: "${params.month}" });
+    // 부분 문자열은 치환하지 않음
+    const partial = maskParamsValues(JSON.stringify({ f: "report-2026-09.pptx" }), { month: "2026-09" });
+    expect(JSON.parse(partial)).toEqual({ f: "report-2026-09.pptx" });
+    expect(restoreParamsPlaceholders(masked, { month: "2026-10" })).toContain("2026-10");
+    expect(restoreParamsPlaceholders(masked, {})).toContain("${params.month}");
+    // 치환된 golden + 새 params 실제값 = equal
+    const actual = JSON.stringify({ output: "o", month: "2026-10" });
+    expect(compareNormalized(masked, actual, [], undefined, { month: "2026-10" }).equal).toBe(true);
+    expect(compareNormalized(masked, actual, []).equal).toBe(false);
   });
 });

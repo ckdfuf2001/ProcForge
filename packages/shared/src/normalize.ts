@@ -2,6 +2,49 @@
 
 const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
 const ISO_RE = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:?\d{2})?/g;
+const PARAM_REF_RE = /\$\{params\.([A-Za-z0-9_.-]+)\}/g;
+
+/**
+ * 확정 시 golden.output 안의 params 값을 ${params.key} 자리표시자로 저장 (M3.6-4).
+ * - JSON이면 파싱 후 문자열 값의 완전 일치만 치환 (부분 문자열 치환 금지).
+ * - JSON이 아니면 길이가 4 이상인 값의 모든 출현을 치환.
+ */
+export function maskParamsValues(text: string, params: Record<string, string>): string {
+  const entries = Object.entries(params).filter(([, v]) => v.length > 0);
+  if (entries.length === 0) return text;
+  try {
+    const parsed: unknown = JSON.parse(text);
+    return JSON.stringify(maskJsonValue(parsed, new Map(entries)));
+  } catch {
+    let out = text;
+    for (const [k, v] of entries) {
+      if (v.length < 4) continue;
+      out = out.split(v).join(`\${params.${k}}`);
+    }
+    return out;
+  }
+}
+
+function maskJsonValue(v: unknown, params: Map<string, string>): unknown {
+  if (typeof v === "string") {
+    for (const [k, val] of params) {
+      if (v === val) return `\${params.${k}}`;
+    }
+    return v;
+  }
+  if (Array.isArray(v)) return v.map((x) => maskJsonValue(x, params));
+  if (v !== null && typeof v === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, x] of Object.entries(v as Record<string, unknown>)) out[k] = maskJsonValue(x, params);
+    return out;
+  }
+  return v;
+}
+
+/** 비교 시 자리표시자를 현재 params로 복원. 모르는 키는 그대로 둔다. */
+export function restoreParamsPlaceholders(text: string, params: Record<string, string>): string {
+  return text.replace(PARAM_REF_RE, (m, k: string) => (k in params ? params[k] : m));
+}
 
 export function normalizeOutputText(text: string, runFsAbs?: string): string {
   let out = text;
@@ -64,9 +107,10 @@ function excerpt(s: string, at: number): string {
  * golden 출력과 실제 출력 비교.
  * - 둘 다 JSON 파싱되면 구조 비교 (ignore 경로 제거 후). diff는 첫 불일치 JSON 경로 + 앞뒤 200자.
  * - 아니면 정규화 후 텍스트 비교. diff는 첫 불일치 위치 앞뒤 200자.
+ * - expected의 ${params.k} 자리표시자는 params로 복원 후 비교 (M3.6-4).
  */
-export function compareNormalized(expected: string, actual: string, ignore: string[] = [], runFsAbs?: string): NormalizedDiff {
-  const e = normalizeOutputText(expected, runFsAbs);
+export function compareNormalized(expected: string, actual: string, ignore: string[] = [], runFsAbs?: string, params?: Record<string, string>): NormalizedDiff {
+  const e = normalizeOutputText(restoreParamsPlaceholders(expected, params ?? {}), runFsAbs);
   const a = normalizeOutputText(actual, runFsAbs);
   let ej: unknown;
   let aj: unknown;
