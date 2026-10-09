@@ -344,7 +344,7 @@ export function buildServer(deps: ServerDeps): McpServer {
     },
   );
 
-  W(
+  R(
     "pf_ask_human",
     {
       title: "사람에게 질문",
@@ -365,18 +365,7 @@ export function buildServer(deps: ServerDeps): McpServer {
     },
     async (a: any) => {
       try {
-        const sid = a.sessionId as string;
-        const s = requireFresh(deps, sid);
-        logger.info("pf_ask_human", { sessionId: sid, nodeId: a.nodeId, question: a.question });
-        const out = await client.pfResolve({
-          sessionId: sid,
-          nodeId: a.nodeId as string,
-          decision: "ask_human",
-          plan: a.plan as { tool: { server: string; name: string }; args: Record<string, unknown> } | undefined,
-          note: a.question as string,
-        });
-        deps.store.touch(sid);
-        return ok({ node: nodeSummary(out.node, s.limits), instruction: out.instruction });
+        return ok(await app.askHuman(a));
       } catch (e) {
         return errResult(e);
       }

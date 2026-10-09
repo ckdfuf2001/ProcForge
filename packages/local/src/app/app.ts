@@ -262,4 +262,21 @@ export class ProcForgeApp {
       };
     });
   }
+
+  async askHuman(a: any): Promise<Record<string, unknown>> {
+    const sid = a.sessionId as string;
+    return this.locked(sid, async () => {
+      const s = this.fresh(sid);
+      logger.info("pf_ask_human", { sessionId: sid, nodeId: a.nodeId, question: a.question });
+      const out = await this.core.pfResolve({
+        sessionId: sid,
+        nodeId: a.nodeId as string,
+        decision: "ask_human",
+        plan: a.plan as { tool: { server: string; name: string }; args: Record<string, unknown> } | undefined,
+        note: a.question as string,
+      });
+      this.store.touch(sid);
+      return { node: nodeSummary(out.node, s.limits), instruction: out.instruction };
+    });
+  }
 }
