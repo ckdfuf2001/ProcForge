@@ -267,7 +267,7 @@ export function buildServer(deps: ServerDeps): McpServer {
     },
   );
 
-  W(
+  R(
     "pf_split",
     {
       title: "노드 분해",
@@ -287,17 +287,7 @@ export function buildServer(deps: ServerDeps): McpServer {
     },
     async (a: any) => {
       try {
-        const sid = a.sessionId as string;
-        const s = requireFresh(deps, sid);
-        const kids = a.children as { goal: string; dependsOn?: string[]; sideEffect?: "none" | "local_write" | "external" }[] | undefined;
-        if (!kids || kids.length === 0) throw err("bad_request", "children이 비었다.", "최소 1개의 {goal}을 넣어 pf_split 재호출.");
-        const out = await client.pfResolve({ sessionId: sid, nodeId: a.nodeId as string, decision: "split", children: kids });
-        deps.store.touch(sid);
-        return ok({
-          node: nodeSummary(out.node, s.limits),
-          created: (out.created ?? []).map((c) => nodeSummary(c, s.limits)),
-          instruction: out.instruction,
-        });
+        return ok(await app.split(a));
       } catch (e) {
         return errResult(e);
       }

@@ -174,4 +174,20 @@ export class ProcForgeApp {
       return { ...(out as unknown as Record<string, unknown>), warnings: reportWarnings };
     });
   }
+
+  async split(a: any): Promise<Record<string, unknown>> {
+    const sid = a.sessionId as string;
+    return this.locked(sid, async () => {
+      const s = this.fresh(sid);
+      const kids = a.children as { goal: string; dependsOn?: string[]; sideEffect?: "none" | "local_write" | "external" }[] | undefined;
+      if (!kids || kids.length === 0) throw pfError("bad_request", "children이 비었다.", "최소 1개의 {goal}을 넣어 pf_split 재호출.");
+      const out = await this.core.pfResolve({ sessionId: sid, nodeId: a.nodeId as string, decision: "split", children: kids });
+      this.store.touch(sid);
+      return {
+        node: nodeSummary(out.node, s.limits),
+        created: (out.created ?? []).map((c) => nodeSummary(c, s.limits)),
+        instruction: out.instruction,
+      };
+    });
+  }
 }
