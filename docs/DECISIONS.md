@@ -182,6 +182,27 @@
 - [M3.4.1-7] CI 매트릭스에 windows-latest 추가. Windows 실패는 skip 없이 수정
   (자식 프로세스 경로 fileURL·구분자·대소문자 이슈 해결).
 
+## M4 (절차서 산출 + 검증 강화)
+
+- [M4-1] pf_finalize는 local 전담 (core 변경 없음). resolved = 전 노드 leaf 또는
+  완성 split (shared isResolved). 미해결 목록과 함께 bad_request.
+  fixed==params는 warning만 (차단 아님).
+- [M4-2] procedure.json이 재실행 단일 원천. 실행 시 새 세션으로 import
+  (goldenArgs→attempts 재구성으로 generated 해결, 경로 무변경). params는 import 시
+  덮어씀. command 파일은 procedures/<name>/.opencode/command/에 두고 프로젝트로
+  복사해 사용.
+- [M4-3] numeric_match expectedRef는 runner에서만 판정. core에는 nodeOutputs이
+  없어 deferred→unverified (llm_rubric와 같은 통로, 사유 요구 없음).
+  부가세 자동 변환(regex)은 문구 검사에 불과하므로 제거 → llm_rubric +
+  pfAdvise 응답의 numeric_match 제안 안내로 대체.
+- [M4-4] pf_advise proposedConstraints: 제안 있을 때만 평가 경로 (없으면 기존
+  자동 변환). fixture 내용 + 최신 요약으로 실제 평가. 채택=결정적 판정 가능
+  (pass/fail 무관), 거부 사유 반환. 채택 0개 → llm_rubric 폴백. CoreClient에
+  4번째 선택 인자로 추가 (기존 호출 호환).
+- [M4-5] trace는 events.jsonl(서버 기록) + 노드 기록 폴백 이중 지원. export zip은
+  STORE 무압축 자작 (의존성 없음), Python zipfile·Expand-Archive 호환 검증.
+  M3.5 실측은 사람 담당, 에이전트는 도구+측정표까지.
+
 ## M3.4.4 (실효 의존 통일 + 교착 종결)
 
 - [M3.4.4-1] shared/deps에 effectiveDeps(raw own+조상+var 펼침, 자기·자손 제외) 신설.
