@@ -1,5 +1,5 @@
-import { existsSync, statSync } from "node:fs";
-import { isAbsolute, relative, resolve } from "node:path";
+import { existsSync, readFileSync, statSync } from "node:fs";
+import { isAbsolute, join, relative, resolve } from "node:path";
 import { isEscapeRel, ingestArtifacts } from "../artifacts.js";
 import { inferPathRole, looksLikePath } from "../runner/paths.js";
 import { toBaseRel, writeCaptureRecord } from "./snapshot.js";
@@ -142,6 +142,27 @@ export function classifyReportPaths(input: {
   }
   for (const p of input.hostPaths ?? []) pushUnique(p, false);
   return jobs;
+}
+
+/** 확정 시도 fixture 내용 읽기 (M4, pf_advise 평가용. 텍스트 200KB 상한) */
+export function readFixtureContents(input: {
+  procforgeDir: string;
+  sessionId: string;
+  nodeId: string;
+  getNode: (sessionId: string, nodeId: string) => { attempts: { artifacts: string[] }[] } | undefined;
+}): Record<string, string> | undefined {
+  const cur = input.getNode(input.sessionId, input.nodeId);
+  const lastFx = cur?.attempts[cur.attempts.length - 1]?.artifacts ?? [];
+  if (lastFx.length === 0) return undefined;
+  const contents: Record<string, string> = {};
+  for (const fx of lastFx) {
+    try {
+      contents[fx] = readFileSync(join(input.procforgeDir, "sessions", input.sessionId, fx), "utf8").slice(0, 200000);
+    } catch {
+      // 읽기 실패 파일은 제외
+    }
+  }
+  return contents;
 }
 
 /** 수집 목록 ingest + in/out 기록. 반환은 ingest 결과 그대로 */

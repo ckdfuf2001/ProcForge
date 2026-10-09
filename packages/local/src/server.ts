@@ -10,9 +10,6 @@ import { collectCatalog } from "./catalog.js";
 import { logger } from "./logger.js";
 import type { FileStore } from "./filestore.js";
 import { OUTPUT_SCHEMAS, nodeSummary } from "./views.js";
-import { runSession } from "./runner/index.js";
-import { runProcedureTest } from "./runner/procedure-run.js";
-import { finalizeSession } from "./procedure.js";
 import { logEvent } from "./trace.js";
 import { ProcForgeApp, PROMPT_TEXT, DEFAULT_SESSION_TTL_MS } from "./app/app.js";
 
@@ -400,7 +397,7 @@ export function buildServer(deps: ServerDeps): McpServer {
     },
   );
 
-  W(
+  R(
     "pf_advise",
     {
       title: "조언 등록",
@@ -421,34 +418,7 @@ export function buildServer(deps: ServerDeps): McpServer {
     },
     async (a: any) => {
       try {
-        const sid = a.sessionId as string;
-        const s = requireFresh(deps, sid);
-        const nid = a.nodeId as string;
-        // 최신 attempt의 fixture 내용을 읽어 core 평가에 전달 (M4)
-        let fixtureContents: Record<string, string> | undefined;
-        const cur = deps.store.getNode(sid, nid);
-        const lastFx = cur?.attempts[cur.attempts.length - 1]?.artifacts ?? [];
-        if (lastFx.length > 0) {
-          fixtureContents = {};
-          for (const fx of lastFx) {
-            try {
-              fixtureContents[fx] = readFileSync(join(deps.procforgeDir, "sessions", sid, fx), "utf8").slice(0, 200000);
-            } catch {
-              // 읽기 실패 파일은 제외
-            }
-          }
-        }
-        const out = await client.pfAdvise(sid, nid, a.text as string, {
-          proposedConstraints: a.proposedConstraints as unknown[] | undefined,
-          fixtureContents,
-        });
-        deps.store.touch(sid);
-        return ok({
-          constraints: out.constraints.map((c) => ({ id: c.id, kind: c.kind, summary: `${c.kind}` })),
-          rejected: out.rejected,
-          ...(out.note ? { note: out.note } : {}),
-          node: nodeSummary(out.node, s.limits),
-        });
+        return ok(await app.advise(a));
       } catch (e) {
         return errResult(e);
       }
@@ -623,14 +593,7 @@ export function buildServer(deps: ServerDeps): McpServer {
     },
     async (a: any) => {
       try {
-        const sid = a.sessionId as string;
-        requireFresh(deps, sid);
-        const out = finalizeSession(deps.procforgeDir, sid, a.name as string, {
-          projectRoot: deps.projectRoot,
-          force: (a.force as boolean | undefined) ?? false,
-        });
-        deps.store.touch(sid);
-        return ok(out as unknown as Record<string, unknown>);
+        return ok(await app.finalize(a));
       } catch (e) {
         return errResult(e);
       }

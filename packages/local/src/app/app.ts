@@ -9,11 +9,12 @@ import { nodeSummary } from "../views.js";
 import { seedSandbox } from "../services/workspace.js";
 import { logger } from "../logger.js";
 import { diffSnapshot, readCaptureRecord, readPreSnapshot, takeSandboxSnapshot, toBaseRel, writePreSnapshot } from "../services/snapshot.js";
-import { classifyReportPaths, collectExistingPaths, ingestReportJobs } from "../services/artifacts.js";
+import { classifyReportPaths, collectExistingPaths, ingestReportJobs, readFixtureContents } from "../services/artifacts.js";
 import { ingestArtifacts, normalizeArgSpecs, readManifest } from "../artifacts.js";
 import { runSession } from "../runner/index.js";
 import { runProcedureTest } from "../runner/procedure-run.js";
 import { writeJUnitFile } from "../services/runner.js";
+import { writeProcedure } from "../services/procedureWriter.js";
 
 // ProcForge 유스케이스층 (M4.2-1). 사용자 행동 1개 = 메서드 1개.
 // 어댑터(server/cli/ui)는 입력 검증·호출·응답 포맷만 하고 정책·파일 작업은 여기에 위임한다.
@@ -293,6 +294,30 @@ export class ProcForgeApp {
     });
   }
 
+  async advise(a: any): Promise<Record<string, unknown>> {
+    const sid = a.sessionId as string;
+    return this.locked(sid, async () => {
+      const s = this.fresh(sid);
+      const nid = a.nodeId as string;
+      // 최신 attempt의 fixture 내용을 읽어 core 평가에 전달 (M4)
+      const fixtureContents = readFixtureContents({
+        procforgeDir: this.procforgeDir, sessionId: sid, nodeId: nid,
+        getNode: (ss, nn) => this.store.getNode(ss, nn),
+      });
+      const out = await this.core.pfAdvise(sid, nid, a.text as string, {
+        proposedConstraints: a.proposedConstraints as unknown[] | undefined,
+        fixtureContents,
+      });
+      this.store.touch(sid);
+      return {
+        constraints: out.constraints.map((c) => ({ id: c.id, kind: c.kind, summary: `${c.kind}` })),
+        rejected: out.rejected,
+        ...(out.note ? { note: out.note } : {}),
+        node: nodeSummary(out.node, s.limits),
+      };
+    });
+  }
+
   async tree(a: any): Promise<Record<string, unknown>> {
     const sid = a.sessionId as string;
     const s = this.fresh(sid);
@@ -421,5 +446,20 @@ export class ProcForgeApp {
       blocked: report.summary.blocked,
       reportPath,
     };
+  }
+
+  async finalize(a: any): Promise<Record<string, unknown>> {
+    const sid = a.sessionId as string;
+    this.fresh(sid);
+    const { doc, warnings } = await this.core.pfBuildProcedure(sid, a.name as string);
+    const written = writeProcedure({
+      procforgeDir: this.procforgeDir,
+      projectRoot: this.projectRoot,
+      sessionId: sid,
+      doc,
+      force: (a.force as boolean | undefined) ?? false,
+    });
+    this.store.touch(sid);
+    return { name: doc.name, dir: written.dir, warnings, files: written.files, commandFile: written.commandFile };
   }
 }
