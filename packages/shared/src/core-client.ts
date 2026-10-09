@@ -1,5 +1,6 @@
 import type { Constraint, Node, Session, ArgSpec, SideEffect } from "./schema.js";
 import type { Actor } from "./dto.js";
+import type { ProcedureDoc } from "./procedure.js";
 
 // local → core 호출은 반드시 이 인터페이스를 통해서만 한다. (가이드 §3, §8)
 // M0~M5: packages/core가 이 인터페이스의 in-process 구현을 제공한다.
@@ -141,6 +142,8 @@ export interface CoreClient {
   pfReopen(sessionId: string, nodeId: string, reason: string, opts?: ChangeOpts): Promise<Node>;
   /** attempt artifacts 교체 (server 직접 저장 대체) */
   amendAttemptArtifacts(input: AmendAttemptArtifactsInput): Promise<{ node: Node; revision: number }>;
+  /** 절차서 문서 조립 (M4.2-1, 검증·params 경고 포함. 파일 쓰기는 local) */
+  pfBuildProcedure(sessionId: string, name: string): Promise<{ doc: ProcedureDoc; warnings: string[] }>;
   /** external dry-run 계획 승인/거부 (M2.6-4) */
   pfApprove(sessionId: string, nodeId: string, approved: boolean, note?: string, opts?: ChangeOpts): Promise<Node>;
 }
