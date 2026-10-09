@@ -51,6 +51,8 @@
 ```
 
 - **R1. 세션·노드 상태 변경은 CoreClient 메서드로만 한다.** `FileStore` 쓰기 메서드는 core in-process 구현만 호출할 수 있다.
+  - App이 FileStore를 쓰는 용도는 sandbox·fixture·capture·manifest 등 로컬 파일뿐이다. 세션·노드 읽기, 세션 TTL·touch, 세션 잠금은 core 책임이다.
+  - App 조립은 진입점(main.ts / cli.ts 진입부)에서 한다. server.ts는 완성된 App만 받는다.
 - **R2. 파일 작업은 LocalServices가 맡는다.** LocalServices는 세션 상태를 직접 바꾸지 않고 결과 데이터를 App에 돌려준다.
 - **R3. 어댑터는 얇게 둔다.** 입력 스키마 검증, App 호출, 응답 포맷, 에러 변환, 응답 크기 자르기만 한다. 상태·정책 판단 if문, 파일 접근, store 접근 금지.
 - **R4. MCP 도구와 App 메서드는 1:1.** 나중에 UI 버튼도 같은 App 메서드를 호출한다. 새 기능은 CoreClient → App → 어댑터 순서로 만든다.
@@ -181,6 +183,29 @@ server.registerTool("pf_report", spec, async (a) => {
 - 2절 표의 `pfEditArgs`, `pfEditNode`, `amendAttemptArtifacts`, `pfUpdateCatalog`, `pfBuildProcedure`, `getEvents`.
 - MCP 도구 `pf_edit_args`, `pf_edit_node` 추가.
 
+### M4.2 2.5단계: App의 core 데이터 직접 접근 제거 (3단계 앞, 먼저 수행)
+
+1. App의 `store.getSession`/`store.getNode` → `core.getSession`/`core.getNode`.
+   TTL 판정과 touch를 core로 이동(core가 `session_not_found`를 직접 던짐).
+   errResult의 메시지 정규식 변환 제거.
+2. 세션 잠금을 core `change()` 안으로 이동. Store 인터페이스에 `withLock(sid, fn)` 추가,
+   FileStore는 lockfile, MemoryStore는 no-op. App의 `locked()` 제거.
+3. 커밋 원자화: `pending-<rev>.json`에 전체 변경을 먼저 원자 저장 → 노드 → 세션 → 이벤트
+   반영 → pending 삭제. 세션을 열 때 pending이 남아 있으면 재반영.
+   테스트: 두 번째 노드 저장 실패 주입 → 재로드 시 전부 반영 또는 전부 미반영.
+4. `pf_next`: READ_ONLY_TOOLS에서 제거, WRITE_ANN, 잠금 적용. 읽기 전용 모드에서 비노출.
+5. `confirmLeaf`: 결과물 수정과 leaf 확정을 core 변경 1회로 통합 (pfResolve leaf 입력에
+   artifacts 포함). 테스트: 확정 실패 시 revision·attempt 결과물 불변.
+6. 변경 도구 응답에 `revision`, `changedNodeIds` 포함. 입력에 `expectedRevision?`,
+   `actor?`(MCP 기본값 host). 인자를 순서대로 받는 core 메서드는 객체 입력으로 통일.
+7. App 메서드 입력 타입을 shared DTO로 교체 (`any` 제거). 반환 타입도 DTO로.
+8. `change()` 본문이 Promise를 반환하면 internal로 즉시 실패하는 방어 코드 + 테스트.
+
+완료 기준:
+- server.ts·app.ts에 `getSession|getNode|getNodes|acquireLock|touch|getLastUsed` 호출 0건(grep).
+- CoreClient를 FileStore 없는 별도 MemoryStore로 바꾼 구성에서 MCP 계약 테스트 통과
+  (App의 로컬 파일 작업은 별도 임시 폴더). M6 분리 가능성의 실증 테스트다.
+
 **3단계: M4.1.1 버그 수정**
 1. 스냅샷 대비 바뀐 파일은 `inout`으로 분류. 원본은 seed → 앞 노드 캡처 기록 → pf_next 시점 사본(5MB 이하, `nodes/<id>/pre/`) 순서로 찾아 fixture 저장. 못 찾으면 confirm 시 bad_request. 테스트: 기존 pptx 수정 노드가 확정 후 replay 통과.
 2. `junitPath`는 `assertSafePath`로 프로젝트 안만 허용. 생략 시 `runs/<runId>/junit.xml`.
@@ -261,6 +286,7 @@ server.registerTool("pf_report", spec, async (a) => {
 | M4.2 | 0.5단계 revision·events core 이관 | [x] | `7eb43b3` | https://github.com/ckdfuf2001/ProcForge/actions/runs/37954762511 | 1~4 완료 |
 | M4.2 | 1단계 server.ts 로직 이전 | [x] | `3fbdecf` | https://github.com/ckdfuf2001/ProcForge/actions/runs/37961465051 | 16개 도구 + core 2종 선행 |
 | M4.2 | 2단계 신규 CoreClient 메서드 | [x] | `55a93d1` | https://github.com/ckdfuf2001/ProcForge/actions/runs/37983222893 | edit×2·catalog·events·MCP 2종 |
+| M4.2 | 2.5단계 App 직접 접근 제거 | [ ] | | | |
 | M4.2 | 3단계 M4.1.1 버그 1~7 | [ ] | | | |
 | M4.2 | 4단계 강제 장치 1~6 | [ ] | | | |
 | M3.5 | PPT 실사용 테스트 | [ ] | | | 사람 진행 |
@@ -279,3 +305,4 @@ server.registerTool("pf_report", spec, async (a) => {
 |---|---|---|---|
 | 2026-10-09 | 전체 | v2 작성 (CoreClient / App / LocalServices 계층, M4.2~M7 로드맵) | 상태 변경 경로 단일화, UI·원격 core 대비 |
 | 2026-10-09 | 0, 1, 6, 8 | 0.1 진행표 기록 규칙 보완(docs: 허용), R6 revision core 책임 명시, R7 events.jsonl 분리·seq=revision, 0.5단계 신설 | 1단계에서 옮기는 메서드마다 revision·이벤트를 자동 획득하도록 순서 조정 (전체 작업량 감소) |
+| 2026-10-09 | 1, 6, 8 | R1 App 직접 접근 금지 명시 + 2.5단계 신설 (core getSession/getNode·withLock·pending 원자 커밋·응답 revision·DTO) | 3단계 전에 core·파일 저장소 분리 가능성을 실증하면 이후 작업이 설정 변경 수준으로 축소 |
