@@ -599,60 +599,7 @@ export function buildServer(deps: ServerDeps): McpServer {
     },
     async (a: any) => {
       try {
-        const { writeFileSync } = await import("node:fs");
-        if (a.procedure) {
-          const { report, sessionId: imported } = await runProcedureTest(deps.procforgeDir, deps.projectRoot, a.procedure as string, {
-            procforgeDir: deps.procforgeDir,
-            projectRoot: deps.projectRoot,
-            mode: (a.mode as "record" | "replay" | "passthrough" | "live" | undefined) ?? "replay",
-            params: (a.params as Record<string, string> | undefined) ?? {},
-            updateGolden: (a.updateGolden as boolean | undefined) ?? false,
-            allowProjectRead: (a.allowProjectRead as boolean | undefined) ?? false,
-          });
-          if (a.junitPath) {
-            const { toJUnit } = await import("./runner/index.js");
-            writeFileSync(a.junitPath as string, toJUnit(report));
-          }
-          return ok({
-            runId: report.runId,
-            mode: report.mode,
-            passed: report.summary.pass,
-            failed: report.summary.fail,
-            unverified: report.summary.unverified,
-            skipped: report.summary.skipped,
-            blocked: report.summary.blocked,
-            reportPath: join(deps.procforgeDir, "runs", report.runId, "report.json"),
-            sessionId: imported,
-          });
-        }
-        if (!a.sessionId) throw err("bad_request", "sessionId 또는 procedure 중 하나가 필요하다.");
-        const sid = a.sessionId as string;
-        requireFresh(deps, sid);
-        const report = await runSession({
-          procforgeDir: deps.procforgeDir,
-          projectRoot: deps.projectRoot,
-          sessionId: sid,
-          nodeId: a.nodeId as string | undefined,
-          mode: (a.mode as "record" | "replay" | "passthrough" | "live" | undefined) ?? "replay",
-          updateGolden: (a.updateGolden as boolean | undefined) ?? false,
-          allowProjectRead: (a.allowProjectRead as boolean | undefined) ?? false,
-        });
-        deps.store.touch(sid);
-        const reportPath = join(deps.procforgeDir, "runs", report.runId, "report.json");
-        if (a.junitPath) {
-          const { toJUnit } = await import("./runner/index.js");
-          writeFileSync(a.junitPath as string, toJUnit(report));
-        }
-        return ok({
-          runId: report.runId,
-          mode: report.mode,
-          passed: report.summary.pass,
-          failed: report.summary.fail,
-          unverified: report.summary.unverified,
-          skipped: report.summary.skipped,
-          blocked: report.summary.blocked,
-          reportPath,
-        });
+        return ok(await app.test(a));
       } catch (e) {
         return errResult(e);
       }

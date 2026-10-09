@@ -11,6 +11,9 @@ import { logger } from "../logger.js";
 import { diffSnapshot, readCaptureRecord, readPreSnapshot, takeSandboxSnapshot, toBaseRel, writePreSnapshot } from "../services/snapshot.js";
 import { classifyReportPaths, collectExistingPaths, ingestReportJobs } from "../services/artifacts.js";
 import { ingestArtifacts, normalizeArgSpecs, readManifest } from "../artifacts.js";
+import { runSession } from "../runner/index.js";
+import { runProcedureTest } from "../runner/procedure-run.js";
+import { writeJUnitFile } from "../services/runner.js";
 
 // ProcForge 유스케이스층 (M4.2-1). 사용자 행동 1개 = 메서드 1개.
 // 어댑터(server/cli/ui)는 입력 검증·호출·응답 포맷만 하고 정책·파일 작업은 여기에 위임한다.
@@ -367,6 +370,56 @@ export class ProcForgeApp {
       entries: c.entries.map((e) => ({ server: e.server, name: e.name, schemaHash: e.schemaHash })),
       warnings: c.warnings,
       cached: c.cached,
+    };
+  }
+
+  async test(a: any): Promise<Record<string, unknown>> {
+    if (a.procedure) {
+      const { report, sessionId: imported } = await runProcedureTest(this.procforgeDir, this.projectRoot, a.procedure as string, {
+        procforgeDir: this.procforgeDir,
+        projectRoot: this.projectRoot,
+        mode: (a.mode as "record" | "replay" | "passthrough" | "live" | undefined) ?? "replay",
+        params: (a.params as Record<string, string> | undefined) ?? {},
+        updateGolden: (a.updateGolden as boolean | undefined) ?? false,
+        allowProjectRead: (a.allowProjectRead as boolean | undefined) ?? false,
+      });
+      if (a.junitPath) writeJUnitFile(a.junitPath as string, report);
+      return {
+        runId: report.runId,
+        mode: report.mode,
+        passed: report.summary.pass,
+        failed: report.summary.fail,
+        unverified: report.summary.unverified,
+        skipped: report.summary.skipped,
+        blocked: report.summary.blocked,
+        reportPath: join(this.procforgeDir, "runs", report.runId, "report.json"),
+        sessionId: imported,
+      };
+    }
+    if (!a.sessionId) throw pfError("bad_request", "sessionId 또는 procedure 중 하나가 필요하다.");
+    const sid = a.sessionId as string;
+    this.fresh(sid);
+    const report = await runSession({
+      procforgeDir: this.procforgeDir,
+      projectRoot: this.projectRoot,
+      sessionId: sid,
+      nodeId: a.nodeId as string | undefined,
+      mode: (a.mode as "record" | "replay" | "passthrough" | "live" | undefined) ?? "replay",
+      updateGolden: (a.updateGolden as boolean | undefined) ?? false,
+      allowProjectRead: (a.allowProjectRead as boolean | undefined) ?? false,
+    });
+    this.store.touch(sid);
+    const reportPath = join(this.procforgeDir, "runs", report.runId, "report.json");
+    if (a.junitPath) writeJUnitFile(a.junitPath as string, report);
+    return {
+      runId: report.runId,
+      mode: report.mode,
+      passed: report.summary.pass,
+      failed: report.summary.fail,
+      unverified: report.summary.unverified,
+      skipped: report.summary.skipped,
+      blocked: report.summary.blocked,
+      reportPath,
     };
   }
 }
