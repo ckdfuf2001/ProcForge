@@ -162,6 +162,26 @@
 - [M3.4-8] 녹화 응답 정규화: record 시 runFs 절대경로 → {RUNFS}(양 구분자),
   replay 시 현재 runFs로 복원 + 옛 runs/<id>/fs 패턴 마이그레이션.
 
+## M3.4.1
+
+- [M3.4.1-1] cassette 버전화 {version: 2, entries}. 로드 시 무버전이면 1회
+  마이그레이션 후 v2 저장. restore는 {RUNFS} 복원만. 마이그레이션은
+  runId/fsDir 리터럴 우선, 없으면 공백 허용 개선 정규식 + 경고.
+  Recording에 runId/fsDir 기록 (save 시).
+- [M3.4.1-2] 경로 정규화 단일 함수 runner/pathnorm.ts. 치환 형태 = 원형,
+  "/"형, JSON 이스케이프형(JSON.stringify slice), 각 "/" 변형. 드라이브 대소문자
+  무시. 녹화 키 + 응답 정규화가 공유.
+- [M3.4.1-3] inferPathRole 토큰화(snake/kebab/camel 분해). weakIn은 마지막 토큰이
+  경로 토큰(path/file/filepath/dir/directory/folder/src/source/template) 또는
+  전체명이 IN_EXACT일 때만 (filename 제외). weakIn + 비경로값은 원문 유지 + 경고.
+  쓰기 툴 profile/xpath/file_type/input_language 보존 테스트.
+- [M3.4.1-4] loadCassette 파싱 실패 → 원본 .corrupt-<ts> 이동 + bad_request.
+- [M3.4.1-5] 펼침 빈손(split 자손 leaf 0개·자식 id 부재) 의존은 blocked.
+  core isResolved(false)와 판정 일치 테스트.
+- [M3.4.1-6] mapRel의 코드 없는 Error 3곳 → bad_request 통일.
+- [M3.4.1-7] CI 매트릭스에 windows-latest 추가. Windows 실패는 skip 없이 수정
+  (자식 프로세스 경로 fileURL·구분자·대소문자 이슈 해결).
+
 ## M1
 
 - [M1-1] checker 주입 — §6 pf_report의 verdict 계산은 local checker(§7)가 소유. core는 `EvaluateFn`을 생성자 주입받고 기본값은 constraints-empty→pass, 그 외→fail. 이유: core→local import 순환 방지 + 의존방향(local→core 금지) 유지. M2에서 local MCP 핸들러가 `checker.evaluateAll`을 주입한다.
