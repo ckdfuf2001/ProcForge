@@ -382,6 +382,62 @@ describe("M3.4.3-3 stale: split 유지 + 자손 leaf만 open", () => {
   });
 });
 
+describe("M4 advise 제안/채택", () => {
+  const fxEval = (constraints: { kind: string; spec: Record<string, unknown>; id: string }[], ctx: { artifacts?: Record<string, string> }) => {
+    const failed = constraints.filter((c) => {
+      if (c.kind === "file_exists") return !(ctx.artifacts && (c.spec["path"] as string) in ctx.artifacts);
+      return false;
+    }).map((c) => c.id);
+    return { verdict: (failed.length > 0 ? "fail" : "pass") as "pass" | "fail", failedConstraints: failed };
+  };
+  const unverifiedEval = () => ({ verdict: "pass" as const, failedConstraints: [] as string[], unverified: ["x"] });
+
+  it("유효 제안 채택 / 참조 오류·rubric 거부 / 전부 거부 시 rubric 저장", async () => {
+    const svc = new CoreService(createMemoryStore(), fxEval as never);
+    const { session } = await svc.pfStart({ request: "r", toolCatalog: catalog });
+    const sid = session.id;
+    await svc.pfResolve({ sessionId: sid, nodeId: "1", decision: "ask_human" });
+    const fx = { "out/a.txt": "hello" };
+    const out = await svc.pfAdvise(sid, "1", "파일 확인", {
+      proposedConstraints: [
+        { id: "p1", kind: "file_exists", spec: { path: "out/a.txt" }, source: "human" },
+        { id: "p2", kind: "json_path_exists", spec: { path: "x", jsonPointer: "/nope" }, source: "human" },
+        { id: "p3", kind: "llm_rubric", spec: { rubric: "느낌" }, source: "human" },
+        { nope: true },
+      ],
+      fixtureContents: fx,
+    });
+    expect(out.constraints.map((c) => c.id).sort()).toEqual(["p1", "p2"]);
+    expect(out.rejected.map((r) => (r.proposal as { id?: string }).id ?? "?")).toContain("p3");
+    expect(out.rejected).toHaveLength(2);
+    const tree = await svc.pfTree(sid);
+    expect(tree.nodes[0].status).toBe("open");
+  });
+
+  it("판정 불가(unverified) 제안은 거부", async () => {
+    const svc = new CoreService(createMemoryStore(), unverifiedEval as never);
+    const { session } = await svc.pfStart({ request: "r", toolCatalog: catalog });
+    const sid = session.id;
+    await svc.pfResolve({ sessionId: sid, nodeId: "1", decision: "ask_human" });
+    const out = await svc.pfAdvise(sid, "1", "문체를 다듬어라", {
+      proposedConstraints: [{ id: "p1", kind: "equals", spec: { expected: 1, actual: 1 }, source: "human" }],
+      fixtureContents: {},
+    });
+    expect(out.constraints).toHaveLength(1);
+    expect(out.constraints[0].kind).toBe("llm_rubric");
+    expect(out.rejected).toHaveLength(1);
+  });
+
+  it("부가세 조언은 rubric + numeric 제안 안내", async () => {
+    const svc = new CoreService(createMemoryStore(), passEval);
+    const { session } = await svc.pfStart({ request: "r", toolCatalog: catalog });
+    const sid = session.id;
+    const out = await svc.pfAdvise(sid, "1", "매출은 부가세 제외로");
+    expect(out.constraints[0].kind).toBe("llm_rubric");
+    expect(out.note ?? "").toMatch(/proposedConstraints/);
+  });
+});
+
 describe("M2.5-6 세션 핸들 UUID", () => {
   it("세션 id는 UUID", async () => {
     const svc = new CoreService(createMemoryStore(), passEval);

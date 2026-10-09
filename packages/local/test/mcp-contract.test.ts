@@ -60,6 +60,7 @@ const EXPECTED_ANNOTATIONS: Record<string, Record<string, boolean>> = {
   pf_lock: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
   pf_reopen: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
   pf_refresh_catalog: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+  pf_finalize: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
 };
 
 describe("tools/list 스냅샷 (결정적 순서·annotations)", () => {

@@ -1,16 +1,19 @@
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
+import { readFileSync } from "node:fs";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import type { CoreClient } from "@procforge/shared/core-client.js";
-import { NodeIdSchema, SessionIdSchema } from "@procforge/shared/schema.js";
+import { NodeIdSchema, SessionIdSchema, ConstraintSchema } from "@procforge/shared/schema.js";
 import { ingestArtifacts, normalizeArgSpecs, setupSandbox } from "./artifacts.js";
 import { collectCatalog } from "./catalog.js";
 import { logger } from "./logger.js";
 import type { FileStore } from "./filestore.js";
 import { OUTPUT_SCHEMAS, nodeSummary } from "./views.js";
 import { runSession } from "./runner/index.js";
+import { runProcedureTest } from "./runner/procedure-run.js";
+import { finalizeSession } from "./procedure.js";
 import { logEvent } from "./trace.js";
 
 export const DEFAULT_SESSION_TTL_MS = 30 * 24 * 3600 * 1000;
@@ -45,6 +48,7 @@ export const TOOL_NAMES = [
   "pf_reopen",
   "pf_refresh_catalog",
   "pf_test",
+  "pf_finalize",
 ] as const;
 
 export const READ_ONLY_TOOLS = ["pf_next", "pf_tree", "pf_get_node"] as const;
@@ -508,10 +512,15 @@ export function buildServer(deps: ServerDeps): McpServer {
       description: [
         "사람 조언을 조건으로 등록한다.",
         "선수: needs_human 노드.",
-        "text(필수, 예: \"매출은 세전 기준\").",
-        "생성된 조건과 갱신 노드 반환. needs_human이면 open 복귀. 다음: pf_next.",
+        "text(필수, 예: \"매출은 세전 기준\"), proposedConstraints(선택, 호스트 제안 조건 배열).",
+        "제안은 최신 fixture로 평가해 채택/거부. needs_human이면 open 복귀. 다음: pf_next.",
       ].join("\n"),
-      inputSchema: { sessionId: SessionIdSchema, nodeId: NodeIdSchema, text: z.string().min(1) },
+      inputSchema: {
+        sessionId: SessionIdSchema,
+        nodeId: NodeIdSchema,
+        text: z.string().min(1),
+        proposedConstraints: z.array(ConstraintSchema).optional(),
+      },
       outputSchema: OUTPUT_SCHEMAS["pf_advise"] as never,
       annotations: WRITE_ANN,
     },
@@ -519,10 +528,30 @@ export function buildServer(deps: ServerDeps): McpServer {
       try {
         const sid = a.sessionId as string;
         const s = requireFresh(deps, sid);
-        const out = await client.pfAdvise(sid, a.nodeId as string, a.text as string);
+        const nid = a.nodeId as string;
+        // 최신 attempt의 fixture 내용을 읽어 core 평가에 전달 (M4)
+        let fixtureContents: Record<string, string> | undefined;
+        const cur = deps.store.getNode(sid, nid);
+        const lastFx = cur?.attempts[cur.attempts.length - 1]?.artifacts ?? [];
+        if (lastFx.length > 0) {
+          fixtureContents = {};
+          for (const fx of lastFx) {
+            try {
+              fixtureContents[fx] = readFileSync(join(deps.procforgeDir, "sessions", sid, fx), "utf8").slice(0, 200000);
+            } catch {
+              // 읽기 실패 파일은 제외
+            }
+          }
+        }
+        const out = await client.pfAdvise(sid, nid, a.text as string, {
+          proposedConstraints: a.proposedConstraints as unknown[] | undefined,
+          fixtureContents,
+        });
         deps.store.touch(sid);
         return ok({
           constraints: out.constraints.map((c) => ({ id: c.id, kind: c.kind, summary: `${c.kind}` })),
+          rejected: out.rejected,
+          ...(out.note ? { note: out.note } : {}),
           node: nodeSummary(out.node, s.limits),
         });
       } catch (e) {
@@ -711,14 +740,16 @@ export function buildServer(deps: ServerDeps): McpServer {
       title: "절차서 테스트",
       description: [
         "확정 트리를 LLM 없이 재실행한다.",
-        "선수: 전 노드 leaf 확정 후.",
-        "sessionId(필수), nodeId(서브트리, 선택), mode(record|replay|passthrough|live, 기본 replay),",
+        "선수: 전 노드 leaf 확정 후 (세션) 또는 finalize 산출물 (절차서).",
+        "sessionId 또는 procedure(둘 중 하나, 예: 'monthly-2026-09'), nodeId(서브트리, 선택),",
+        "mode(record|replay|passthrough|live, 기본 replay), params(절차서 재바인딩),",
         "updateGolden(선택), allowProjectRead(선택), junitPath(선택).",
         "요약과 report 경로 반환. 다음: 실패 노드는 pf_tree로 확인.",
       ].join("\n"),
       inputSchema: {
-        sessionId: SessionIdSchema,
-        nodeId: NodeIdSchema.optional(),
+        sessionId: SessionIdSchema.optional(),
+        procedure: z.string().optional(),
+        params: z.record(z.string()).optional(),
         mode: z.enum(["record", "replay", "passthrough", "live"]).optional(),
         updateGolden: z.boolean().optional(),
         allowProjectRead: z.boolean().optional(),
@@ -730,6 +761,32 @@ export function buildServer(deps: ServerDeps): McpServer {
     async (a: any) => {
       try {
         const { writeFileSync } = await import("node:fs");
+        if (a.procedure) {
+          const { report, sessionId: imported } = await runProcedureTest(deps.procforgeDir, deps.projectRoot, a.procedure as string, {
+            procforgeDir: deps.procforgeDir,
+            projectRoot: deps.projectRoot,
+            mode: (a.mode as "record" | "replay" | "passthrough" | "live" | undefined) ?? "replay",
+            params: (a.params as Record<string, string> | undefined) ?? {},
+            updateGolden: (a.updateGolden as boolean | undefined) ?? false,
+            allowProjectRead: (a.allowProjectRead as boolean | undefined) ?? false,
+          });
+          if (a.junitPath) {
+            const { toJUnit } = await import("./runner/index.js");
+            writeFileSync(a.junitPath as string, toJUnit(report));
+          }
+          return ok({
+            runId: report.runId,
+            mode: report.mode,
+            passed: report.summary.pass,
+            failed: report.summary.fail,
+            unverified: report.summary.unverified,
+            skipped: report.summary.skipped,
+            blocked: report.summary.blocked,
+            reportPath: join(deps.procforgeDir, "runs", report.runId, "report.json"),
+            sessionId: imported,
+          });
+        }
+        if (!a.sessionId) throw err("bad_request", "sessionId 또는 procedure 중 하나가 필요하다.");
         const sid = a.sessionId as string;
         requireFresh(deps, sid);
         const report = await runSession({
@@ -757,6 +814,33 @@ export function buildServer(deps: ServerDeps): McpServer {
           blocked: report.summary.blocked,
           reportPath,
         });
+      } catch (e) {
+        return errResult(e);
+      }
+    },
+  );
+
+  R(
+    "pf_finalize",
+    {
+      title: "절차서 확정",
+      description: [
+        "확정 트리를 절차서로 export한다.",
+        "선수: 전 노드 resolved(leaf 또는 완성 split) 후.",
+        "sessionId(필수), name(필수, 영숫자/_/-).",
+        "procedure.json·PROCEDURE.md·SKILL.md·tests·command 반환. 다음: pf_test로 검증.",
+      ].join("\n"),
+      inputSchema: { sessionId: SessionIdSchema, name: z.string().min(1) },
+      outputSchema: OUTPUT_SCHEMAS["pf_finalize"] as never,
+      annotations: WRITE_ANN,
+    },
+    async (a: any) => {
+      try {
+        const sid = a.sessionId as string;
+        requireFresh(deps, sid);
+        const out = finalizeSession(deps.procforgeDir, sid, a.name as string);
+        deps.store.touch(sid);
+        return ok(out as unknown as Record<string, unknown>);
       } catch (e) {
         return errResult(e);
       }

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   computeNodeHash,
+  ConstraintSchema,
   type Constraint,
   type Node,
   type Session,
@@ -10,6 +11,7 @@ import type {
   BlockedReason,
   CoreClient,
   EvaluateFn,
+  PfAdviseInput,
   PfAdviseOutput,
   PfNextOutput,
   PfReportInput,
@@ -22,7 +24,7 @@ import type {
 import { createMemoryStore } from "./store.js";
 import type { Store } from "@procforge/shared/store.js";
 import { defaultEvaluate } from "./evaluate.js";
-import { adviceToConstraints } from "./advice.js";
+import { adviceToConstraints, suggestsNumericRef } from "./advice.js";
 import { compareNodeIds } from "@procforge/shared/ids.js";
 
 function newAttemptId(): string {
@@ -619,10 +621,69 @@ export class CoreService implements CoreClient {
     }
   }
 
-  async pfAdvise(sessionId: string, nodeId: string, text: string): Promise<PfAdviseOutput> {
+  async pfAdvise(
+    sessionId: string,
+    nodeId: string,
+    text: string,
+    opts: NonNullable<PfAdviseInput["opts"]> = {},
+  ): Promise<PfAdviseOutput> {
     const s = this.sess(sessionId);
     const n = this.node(sessionId, nodeId);
-    const constraints = adviceToConstraints(text);
+    let constraints: Constraint[];
+    let rejected: { proposal: unknown; reason: string }[] = [];
+    let suggestNote = "";
+    if (opts.proposedConstraints && opts.proposedConstraints.length > 0) {
+      // M4: 호스트 제안 → 최신 fixture로 평가해 채택/거부
+      const adopted: Constraint[] = [];
+      const fx = opts.fixtureContents ?? {};
+      const last = n.attempts[n.attempts.length - 1];
+      let resultJson: unknown;
+      for (const content of Object.values(fx)) {
+        try {
+          resultJson = JSON.parse(content);
+          break;
+        } catch {
+          // 텍스트 fixture는 건너뜀
+        }
+      }
+      for (const p of opts.proposedConstraints) {
+        const parsed = ConstraintSchema.safeParse(p);
+        if (!parsed.success) {
+          rejected.push({ proposal: p, reason: `형식 오류: ${parsed.error.issues[0]?.message ?? "invalid"}` });
+          continue;
+        }
+        const c = parsed.data;
+        if (c.kind === "llm_rubric") {
+          rejected.push({ proposal: p, reason: "llm_rubric은 제안 불가 (자동 판정 불가)" });
+          continue;
+        }
+        try {
+          const r = this.evaluate([c], {
+            resultSummary: last?.resultSummary,
+            resultJson,
+            artifacts: fx,
+          });
+          if (r.unverified && r.unverified.length > 0) {
+            rejected.push({ proposal: p, reason: "판정 불가 (runner 위임 항목 포함)" });
+            continue;
+          }
+          adopted.push({ ...c, source: "human", note: c.note ?? text });
+        } catch (e) {
+          rejected.push({ proposal: p, reason: e instanceof Error ? e.message : String(e) });
+        }
+      }
+      if (adopted.length === 0) {
+        adopted.push(...adviceToConstraints(text));
+      }
+      constraints = adopted;
+    } else {
+      constraints = adviceToConstraints(text);
+      if (suggestsNumericRef(text)) {
+        suggestNote =
+          ` 금액 비교가 필요하면 numeric_match(expectedRef=$<노드>.output.<필드>, tolerance)를 ` +
+          `proposedConstraints로 제안하라 (runner에서 판정).`;
+      }
+    }
     const next: Node = {
       ...n,
       constraints: [...n.constraints, ...constraints],
@@ -633,7 +694,8 @@ export class CoreService implements CoreClient {
     next.hash = this.hashFor(s.id, next);
     this.store.saveNode(s.id, next);
     if (oldHash !== next.hash) this.propagateStale(s.id, nodeId);
-    return { constraints, node: this.node(sessionId, nodeId) };
+    const node = this.node(sessionId, nodeId);
+    return { constraints, rejected, node, ...(suggestNote ? { note: suggestNote } : {}) };
   }
 
   async pfTree(sessionId: string): Promise<{ nodes: Node[]; session: Session }> {

@@ -134,6 +134,41 @@ describe("checker kinds", () => {
     expect(evaluateConstraint(c, { resultJson: { no: 1 } }).pass).toBe(false);
   });
 
+  it("numeric_match expectedRef (M4)", () => {
+    const c = {
+      id: "n",
+      kind: "numeric_match",
+      spec: { path: "total", expectedRef: "$1.output.gross", tolerance: 0.01 },
+      source: "human",
+    } as never;
+    // nodeOutputs 없음 → deferred (core는 unverified 처리)
+    const d = evaluateConstraint(c as never, { resultJson: { total: 100 } });
+    expect(d.pass).toBe(false);
+    expect(d.deferred).toBe(true);
+    // runner: outputs로 판정
+    const p = evaluateConstraint(c as never, {
+      resultJson: { total: 100 },
+      nodeOutputs: { "1": { gross: 100 } },
+    });
+    expect(p.pass).toBe(true);
+    const f = evaluateConstraint(c as never, {
+      resultJson: { total: 200 },
+      nodeOutputs: { "1": { gross: 100 } },
+    });
+    expect(f.pass).toBe(false);
+    expect(f.deferred).toBeFalsy();
+    // ref 대상이 숫자가 아니면 fail (지연 아님)
+    const t = evaluateConstraint(c as never, {
+      resultJson: { total: 100 },
+      nodeOutputs: { "1": { gross: "x" } },
+    });
+    expect(t.pass).toBe(false);
+    // evaluateAll에서는 deferred가 unverified로 집계 (verdict는 pass 유지)
+    const all = evaluateAll([c] as never, { resultJson: { total: 100 } });
+    expect(all.verdict).toBe("pass");
+    expect(all.unverified).toEqual(["n"]);
+    expect(all.failedConstraints).toEqual([]);
+  });
   it("llm_rubric is unverifiable", () => {
     const c: Constraint = { id: "c", kind: "llm_rubric", spec: { rubric: "자연스러운 문체" }, source: "human" };
     const r = evaluateConstraint(c, {});

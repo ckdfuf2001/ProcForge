@@ -81,7 +81,22 @@ export type PfResolveOutput = {
 
 export type PfAdviseOutput = {
   constraints: Constraint[];
+  rejected: { proposal: unknown; reason: string }[];
   node: Node;
+  /** 추가 안내 (M4 numeric 제안 유도 등) */
+  note?: string;
+};
+
+export type PfAdviseInput = {
+  sessionId: string;
+  nodeId: string;
+  text: string;
+  opts?: {
+    /** 호스트 제안 조건 (M4). core가 최신 fixture로 평가해 채택/거부 */
+    proposedConstraints?: unknown[];
+    /** 최신 fixture 내용 (local이 읽어 전달, M4) */
+    fixtureContents?: Record<string, string>;
+  };
 };
 
 // local checker → core 주입 계약. core·local 모두 shared 타입만 사용.
@@ -95,7 +110,7 @@ export interface CoreClient {
   pfNext(sessionId: string): Promise<PfNextOutput>;
   pfReport(input: PfReportInput): Promise<PfReportOutput>;
   pfResolve(input: PfResolveInput): Promise<PfResolveOutput>;
-  pfAdvise(sessionId: string, nodeId: string, text: string): Promise<PfAdviseOutput>;
+  pfAdvise(sessionId: string, nodeId: string, text: string, opts?: PfAdviseInput["opts"]): Promise<PfAdviseOutput>;
   pfTree(sessionId: string): Promise<{ nodes: Node[]; session: Session }>;
   pfLock(sessionId: string, nodeId: string): Promise<Node>;
   pfReopen(sessionId: string, nodeId: string, reason: string): Promise<Node>;

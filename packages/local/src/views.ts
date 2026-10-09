@@ -109,6 +109,8 @@ export const PfRetryOutputSchema = z.object({ node: NodeSummarySchema, instructi
 export const PfAskHumanOutputSchema = z.object({ node: NodeSummarySchema, instruction: z.string() });
 export const PfAdviseOutputSchema = z.object({
   constraints: z.array(ConstraintSummarySchema),
+  rejected: z.array(z.object({ proposal: z.unknown(), reason: z.string() })),
+  note: z.string().optional(),
   node: NodeSummarySchema,
 });
 export const TreeEntrySchema = z.object({
@@ -143,6 +145,13 @@ export const PfTestOutputSchema = z.object({
   skipped: z.number(),
   blocked: z.number(),
   reportPath: z.string(),
+  sessionId: z.string().optional(),
+});
+export const PfFinalizeOutputSchema = z.object({
+  name: z.string(),
+  dir: z.string(),
+  warnings: z.array(z.string()),
+  files: z.array(z.string()),
 });
 
 export const OUTPUT_SCHEMAS: Record<string, z.ZodTypeAny> = {
@@ -161,4 +170,5 @@ export const OUTPUT_SCHEMAS: Record<string, z.ZodTypeAny> = {
   pf_approve: PfApproveOutputSchema,
   pf_refresh_catalog: PfRefreshCatalogOutputSchema,
   pf_test: PfTestOutputSchema,
+  pf_finalize: PfFinalizeOutputSchema,
 };

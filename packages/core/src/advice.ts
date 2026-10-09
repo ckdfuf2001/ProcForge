@@ -6,18 +6,6 @@ let seq = 0;
 export function adviceToConstraints(text: string): Constraint[] {
   const t = text.trim();
   const id = () => `hc-${Date.now().toString(36)}-${seq++}`;
-  // "매출은 부가세 제외" 계열: 요약에 세전 기준 명시를 강제하는 regex (결정적 검사 가능)
-  if (/부가세/.test(t) && /(제외|별도|미포함|세전)/.test(t)) {
-    return [
-      {
-        id: id(),
-        kind: "regex",
-        spec: { path: "summary", pattern: "부가세.?제외|세전|VAT[^\\n]*excl", flags: "i" },
-        source: "human",
-        note: text,
-      },
-    ];
-  }
   // "N개", "N장" 개수 언급 → 결과 JSON의 items 배열 길이로 검사 (M2 가정, DECISIONS 참조)
   const countMatch = /(\d+)\s*(개|장|슬라이드|페이지)/.exec(t);
   if (countMatch) {
@@ -40,4 +28,13 @@ export function adviceToConstraints(text: string): Constraint[] {
   }
   // 변환 불가 → llm_rubric
   return [{ id: id(), kind: "llm_rubric", spec: { rubric: t }, source: "human", note: text }];
+}
+
+/**
+ * 금액 비교 조언 감지 (M4). 부가세 regex 변환(M1.5)은 문구 검사에 불과하므로 제거.
+ * 해당 조언은 llm_rubric로 저장하고, pfAdvise 응답에서 numeric_match(expectedRef)
+ * 제안을 안내한다.
+ */
+export function suggestsNumericRef(text: string): boolean {
+  return /부가세|세전|세후|금액|합계/.test(text);
 }

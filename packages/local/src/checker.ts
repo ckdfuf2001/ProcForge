@@ -6,13 +6,27 @@ export type CheckContext = {
   resultJson?: unknown;
   artifacts?: Record<string, string>;
   fileExists?: (path: string) => boolean;
+  /** 다른 노드 출력 (numeric expectedRef 해결용, M4. runner만 제공) */
+  nodeOutputs?: Record<string, unknown>;
 };
 
 export type CheckResult = {
   pass: boolean;
   reason?: string;
   needsHuman?: boolean;
+  /** core가 아닌 runner에서 판정 (M4) */
+  deferred?: boolean;
 };
+
+/** "$<id>.output[.path]" 참조 해결 */
+export function resolveNodeRef(ref: string, outputs: Record<string, unknown>): { found: boolean; value: unknown } {
+  const m = /^\$(\d+(?:\.\d+)*)\.output\.?(.*)$/.exec(ref);
+  if (!m) return { found: false, value: undefined };
+  if (!(m[1] in outputs)) return { found: false, value: undefined };
+  const base = outputs[m[1]];
+  if (!m[2]) return { found: true, value: base };
+  return getByDotPath(base, m[2]);
+}
 
 export function getByDotPath(root: unknown, path: string): { found: boolean; value: unknown } {
   if (!path) return { found: true, value: root };
@@ -243,15 +257,28 @@ export function evaluateConstraint(c: Constraint, ctx: CheckContext): CheckResul
         v = r.value;
       }
       if (typeof v !== "number" || Number.isNaN(v)) return { pass: false, reason: "target is not a number" };
-      if (c.spec.expected !== undefined) {
+      // expectedRef는 runner에서만 판정 (M4). core에는 nodeOutputs이 없어 deferred.
+      let expected = c.spec.expected;
+      if (c.spec.expectedRef !== undefined) {
+        if (ctx.nodeOutputs === undefined) {
+          return { pass: false, reason: "deferred to runner (expectedRef)", deferred: true };
+        }
+        const r = resolveNodeRef(c.spec.expectedRef, ctx.nodeOutputs);
+        if (!r.found) return { pass: false, reason: `ref not found: ${c.spec.expectedRef}`, deferred: true };
+        if (typeof r.value !== "number" || Number.isNaN(r.value as number)) {
+          return { pass: false, reason: `ref is not a number: ${c.spec.expectedRef}` };
+        }
+        expected = r.value as number;
+      }
+      if (expected !== undefined) {
         const tol = c.spec.tolerance ?? 0;
-        if (Math.abs(v - c.spec.expected) > tol)
-          return { pass: false, reason: `${v} != ${c.spec.expected}±${tol}` };
+        if (Math.abs(v - expected) > tol)
+          return { pass: false, reason: `${v} != ${expected}±${tol}` };
         return { pass: true };
       }
       if (c.spec.min !== undefined && v < c.spec.min) return { pass: false, reason: `${v} < min ${c.spec.min}` };
       if (c.spec.max !== undefined && v > c.spec.max) return { pass: false, reason: `${v} > max ${c.spec.max}` };
-      if (c.spec.expected === undefined && c.spec.min === undefined && c.spec.max === undefined)
+      if (expected === undefined && c.spec.min === undefined && c.spec.max === undefined)
         return { pass: false, reason: "no expected/min/max given" };
       return { pass: true };
     }
@@ -284,6 +311,11 @@ export function evaluateAll(
     }
     const r = evaluateConstraint(c, ctx);
     details[c.id] = r;
+    // runner 위임(deferred)은 실패가 아님 (M4)
+    if (r.deferred) {
+      unverified.push(c.id);
+      continue;
+    }
     if (!r.pass) failed.push(c.id);
   }
   const verdict: Verdict = failed.length > 0 ? "fail" : unverified.length > 0 && constraints.length === unverified.length && constraints.length > 0 ? "unverifiable" : failed.length === 0 ? "pass" : "fail";

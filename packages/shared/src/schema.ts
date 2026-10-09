@@ -121,6 +121,8 @@ export const ConstraintNumericMatchSchema = ConstraintBase.extend({
     path: z.string().optional(),
     value: z.number().optional(),
     expected: z.number().optional(),
+    /** 값 대신 다른 노드 출력 참조 (M4). runner에서만 판정, core는 deferred */
+    expectedRef: z.string().optional(),
     tolerance: z.number().min(0).optional(),
     min: z.number().optional(),
     max: z.number().optional(),
