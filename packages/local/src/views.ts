@@ -84,6 +84,9 @@ export const PfStartOutputSchema = z.object({
 export const PfNextOutputSchema = z.object({
   done: z.boolean(),
   node: NodeSummarySchema.optional(),
+  blocked: z
+    .array(z.object({ nodeId: z.string(), waitingOn: z.array(z.string()), reason: z.string() }))
+    .optional(),
   instruction: z.string().optional(),
 });
 export const PfReportOutputSchema = z.object({

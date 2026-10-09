@@ -221,7 +221,12 @@ export function buildServer(deps: ServerDeps): McpServer {
         const out = await client.pfNext(a.sessionId as string);
         deps.store.touch(a.sessionId as string);
         if (out.done) return ok({ done: true });
-        return ok({ done: false, node: nodeSummary(out.node, s.limits), instruction: out.instruction });
+        return ok({
+          done: false,
+          node: nodeSummary(out.node, s.limits),
+          ...(out.blocked ? { blocked: out.blocked } : {}),
+          instruction: out.instruction,
+        });
       } catch (e) {
         return errResult(e);
       }

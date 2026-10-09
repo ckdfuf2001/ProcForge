@@ -163,6 +163,22 @@ describe("도구 응답 계약 (outputSchema 통과)", () => {
     }
   });
 
+  it("교착 응답: blocked 목록 포함", async () => {
+    const { mcp, close } = await linked();
+    try {
+      const started = (await mcp.callTool({ name: "pf_start", arguments: { request: "deadlock" } })).structuredContent as { sessionId: string };
+      const sid = started.sessionId;
+      await mcp.callTool({ name: "pf_split", arguments: { sessionId: sid, nodeId: "1", children: [{ goal: "x", dependsOn: ["9.9"] }] } });
+      const r = await mcp.callTool({ name: "pf_next", arguments: { sessionId: sid } });
+      expect(r.isError).toBeFalsy();
+      const body = r.structuredContent as { done: boolean; blocked?: { nodeId: string; reason: string }[] };
+      expect(body.done).toBe(false);
+      expect(body.blocked?.[0]).toMatchObject({ nodeId: "1.1", reason: "dep_missing" });
+    } finally {
+      await close();
+    }
+  });
+
   it("에러 봉투: bad_request 힌트 (빈 children)", async () => {
     const { mcp, close } = await linked();
     try {
