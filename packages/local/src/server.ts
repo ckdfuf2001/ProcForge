@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { readFileSync } from "node:fs";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -7,9 +6,6 @@ import { z } from "zod";
 import type { CoreClient } from "@procforge/shared/core-client.js";
 import { NodeIdSchema, SessionIdSchema, ConstraintSchema } from "@procforge/shared/schema.js";
 import { errorCodeOf, pfError, type ErrorCode, type ProcForgeError } from "@procforge/shared/errors.js";
-import { ingestArtifacts, normalizeArgSpecs, readManifest, setupSandbox } from "./artifacts.js";
-import { readCaptureRecord, toBaseRel } from "./services/snapshot.js";
-import { collectExistingPaths } from "./services/artifacts.js";
 import { collectCatalog } from "./catalog.js";
 import { logger } from "./logger.js";
 import type { FileStore } from "./filestore.js";
@@ -294,7 +290,7 @@ export function buildServer(deps: ServerDeps): McpServer {
     },
   );
 
-  W(
+  R(
     "pf_confirm_leaf",
     {
       title: "leaf 확정",
@@ -318,63 +314,7 @@ export function buildServer(deps: ServerDeps): McpServer {
     },
     async (a: any) => {
       try {
-        const sid = a.sessionId as string;
-        const s = requireFresh(deps, sid);
-        if (!a.argSpecs) throw err("bad_request", "argSpecs가 없다.", "마지막 실행 인자 키를 모두 분류해 pf_confirm_leaf 재호출.");
-        const norm = normalizeArgSpecs(a.argSpecs as Record<string, import("@procforge/shared/schema.js").ArgSpec>, {
-          sandboxDir: join(deps.procforgeDir, "sandbox", sid),
-          projectRoot: deps.projectRoot,
-        });
-        // M3.6-2 확정 시 추캡처: 명시 in/inout fixed 경로 중 미수집분 (attempt 보정, 해시 무관)
-        const nodeId = a.nodeId as string;
-        const cur = deps.store.getNode(sid, nodeId);
-        const last = cur?.attempts[cur.attempts.length - 1];
-        if (cur && last) {
-          // M4.1-7: 보고 시 out 판정분은 attempt에서 제외 (golden 입력 순수 유지, 증거 파일은 보존)
-          const sidecar = readCaptureRecord(deps.procforgeDir, sid, nodeId, last.id);
-          const outSet = new Set(sidecar?.outs ?? []);
-          const kept = last.artifacts.filter((fx) => !outSet.has(fx));
-          const fixedArgs: Record<string, unknown> = {};
-          for (const [k, spec] of Object.entries(norm.specs)) {
-            if (spec.kind === "fixed") fixedArgs[k] = (spec as { value: unknown }).value;
-          }
-          const baseDir = strictSandbox ? join(deps.procforgeDir, "sandbox", sid) : deps.projectRoot;
-          const manifest = readManifest(deps.procforgeDir, sid);
-          const covered = new Set(
-            last.artifacts.map((fx) => manifest[fx]).filter((v): v is string => typeof v === "string"),
-          );
-          const toolRef = a.tool as { server: string; name: string };
-          const cat = s.toolCatalog.find((t) => t.server === toolRef.server && t.name === toolRef.name);
-          const relOf = (p: string) => toBaseRel(baseDir, p);
-          const fresh = collectExistingPaths({
-            baseDir, tool: toolRef, args: fixedArgs, specs: norm.specs, catalogEntry: cat, roles: ["in", "inout"],
-          }).filter((p) => !covered.has(relOf(p)));
-          const merged = [...kept];
-          if (fresh.length > 0) {
-            const ing = ingestArtifacts({
-              procforgeDir: deps.procforgeDir, sessionId: sid, nodeId, attemptId: last.id,
-              baseDir, paths: fresh, maxBytes: maxArtifactBytes, startIndex: last.artifacts.length,
-            });
-            merged.push(...ing.stored);
-          }
-          if (merged.length !== last.artifacts.length) {
-            deps.store.saveNode(sid, {
-              ...cur,
-              attempts: cur.attempts.map((at) => (at.id === last.id ? { ...at, artifacts: merged } : at)),
-            });
-          }
-        }
-        const out = await client.pfResolve({
-          sessionId: sid,
-          nodeId: a.nodeId as string,
-          decision: "leaf",
-          tool: a.tool as { server: string; name: string },
-          argSpecs: norm.specs as never,
-          sideEffect: a.sideEffect as "none" | "local_write" | "external" | undefined,
-          goldenIgnore: a.ignore as string[] | undefined,
-        });
-        deps.store.touch(sid);
-        return ok({ node: nodeSummary(out.node, s.limits), instruction: out.instruction, warnings: norm.warnings });
+        return ok(await app.confirmLeaf(a));
       } catch (e) {
         return errResult(e);
       }

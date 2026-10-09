@@ -100,6 +100,16 @@ export type PfAdviseOutput = {
   note?: string;
 };
 
+/** attempt artifacts 교체 (M4.2-1, 확정 보정용). golden은 이후 leaf 확정 시 재구성 */
+export type AmendAttemptArtifactsInput = {
+  sessionId: string;
+  nodeId: string;
+  attemptId: string;
+  artifacts: string[];
+  expectedRevision?: number;
+  actor?: Actor;
+};
+
 export type PfAdviseInput = {
   sessionId: string;
   nodeId: string;
@@ -129,6 +139,8 @@ export interface CoreClient {
   pfTree(sessionId: string): Promise<{ nodes: Node[]; session: Session }>;
   pfLock(sessionId: string, nodeId: string, opts?: ChangeOpts): Promise<Node>;
   pfReopen(sessionId: string, nodeId: string, reason: string, opts?: ChangeOpts): Promise<Node>;
+  /** attempt artifacts 교체 (server 직접 저장 대체) */
+  amendAttemptArtifacts(input: AmendAttemptArtifactsInput): Promise<{ node: Node; revision: number }>;
   /** external dry-run 계획 승인/거부 (M2.6-4) */
   pfApprove(sessionId: string, nodeId: string, approved: boolean, note?: string, opts?: ChangeOpts): Promise<Node>;
 }

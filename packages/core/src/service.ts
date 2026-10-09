@@ -18,6 +18,7 @@ import type {
   PfReportOutput,
   PfResolveInput,
   PfResolveOutput,
+  AmendAttemptArtifactsInput,
   PfStartInput,
   PfStartOutput,
 } from "@procforge/shared/core-client.js";
@@ -786,6 +787,24 @@ export class CoreService implements CoreClient {
     const node = this.node(sessionId, nodeId);
     return { result: { constraints, rejected, node, ...(suggestNote ? { note: suggestNote } : {}) }, summary: `advise ${nodeId} +${constraints.length}` };
   });
+  }
+
+  /** attempt artifacts 교체 (M4.2-1, server 직접 저장 대체) */
+  async amendAttemptArtifacts(input: AmendAttemptArtifactsInput): Promise<{ node: Node; revision: number }> {
+    const node = this.change<Node>(input.sessionId, { method: "amendAttemptArtifacts", expectedRevision: input.expectedRevision, actor: input.actor }, () => {
+      const n = this.node(input.sessionId, input.nodeId);
+      if (n.locked) throw err("conflict", `node ${n.id} is locked`);
+      const idx = n.attempts.findIndex((a) => a.id === input.attemptId);
+      if (idx === -1) throw err("not_found", `attempt ${input.attemptId} not found`);
+      const next: Node = {
+        ...n,
+        attempts: n.attempts.map((a, i) => (i === idx ? { ...a, artifacts: [...input.artifacts] } : a)),
+      };
+      this.store.saveNode(input.sessionId, next);
+      return { result: next, summary: `amend ${input.nodeId} ${input.attemptId} ${input.artifacts.length}` };
+    });
+    const s = this.base.getSession(input.sessionId);
+    return { node, revision: s?.revision ?? 0 };
   }
 
   async pfTree(sessionId: string): Promise<{ nodes: Node[]; session: Session }> {

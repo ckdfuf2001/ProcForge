@@ -7,8 +7,9 @@ import type { FileStore } from "../filestore.js";
 import { collectCatalog } from "../catalog.js";
 import { nodeSummary } from "../views.js";
 import { seedSandbox } from "../services/workspace.js";
-import { diffSnapshot, readPreSnapshot, takeSandboxSnapshot, writePreSnapshot } from "../services/snapshot.js";
-import { classifyReportPaths, ingestReportJobs } from "../services/artifacts.js";
+import { diffSnapshot, readCaptureRecord, readPreSnapshot, takeSandboxSnapshot, toBaseRel, writePreSnapshot } from "../services/snapshot.js";
+import { classifyReportPaths, collectExistingPaths, ingestReportJobs } from "../services/artifacts.js";
+import { ingestArtifacts, normalizeArgSpecs, readManifest } from "../artifacts.js";
 
 // ProcForge 유스케이스층 (M4.2-1). 사용자 행동 1개 = 메서드 1개.
 // 어댑터(server/cli/ui)는 입력 검증·호출·응답 포맷만 하고 정책·파일 작업은 여기에 위임한다.
@@ -172,6 +173,65 @@ export class ProcForgeApp {
       });
       this.store.touch(sid);
       return { ...(out as unknown as Record<string, unknown>), warnings: reportWarnings };
+    });
+  }
+
+  async confirmLeaf(a: any): Promise<Record<string, unknown>> {
+    const sid = a.sessionId as string;
+    return this.locked(sid, async () => {
+      const s = this.fresh(sid);
+      if (!a.argSpecs) throw pfError("bad_request", "argSpecs가 없다.", "마지막 실행 인자 키를 모두 분류해 pf_confirm_leaf 재호출.");
+      const norm = normalizeArgSpecs(a.argSpecs as Record<string, import("@procforge/shared/schema.js").ArgSpec>, {
+        sandboxDir: join(this.procforgeDir, "sandbox", sid),
+        projectRoot: this.projectRoot,
+      });
+      // M3.6-2 확정 시 추캡처: 명시 in/inout fixed 경로 중 미수집분
+      const nodeId = a.nodeId as string;
+      const cur = this.store.getNode(sid, nodeId);
+      const last = cur?.attempts[cur.attempts.length - 1];
+      if (cur && last) {
+        // M4.1-7: 보고 시 out 판정분은 attempt에서 제외 (golden 입력 순수 유지, 증거 파일은 보존)
+        const sidecar = readCaptureRecord(this.procforgeDir, sid, nodeId, last.id);
+        const outSet = new Set(sidecar?.outs ?? []);
+        const kept = last.artifacts.filter((fx) => !outSet.has(fx));
+        const fixedArgs: Record<string, unknown> = {};
+        for (const [k, spec] of Object.entries(norm.specs)) {
+          if (spec.kind === "fixed") fixedArgs[k] = (spec as { value: unknown }).value;
+        }
+        const baseDir = this.strictSandbox ? join(this.procforgeDir, "sandbox", sid) : this.projectRoot;
+        const manifest = readManifest(this.procforgeDir, sid);
+        const covered = new Set(
+          last.artifacts.map((fx) => manifest[fx]).filter((v): v is string => typeof v === "string"),
+        );
+        const toolRef = a.tool as { server: string; name: string };
+        const cat = s.toolCatalog.find((t) => t.server === toolRef.server && t.name === toolRef.name);
+        const relOf = (p: string) => toBaseRel(baseDir, p);
+        const fresh = collectExistingPaths({
+          baseDir, tool: toolRef, args: fixedArgs, specs: norm.specs, catalogEntry: cat, roles: ["in", "inout"],
+        }).filter((p) => !covered.has(relOf(p)));
+        const merged = [...kept];
+        if (fresh.length > 0) {
+          const ing = ingestArtifacts({
+            procforgeDir: this.procforgeDir, sessionId: sid, nodeId, attemptId: last.id,
+            baseDir, paths: fresh, maxBytes: this.maxArtifactBytes, startIndex: last.artifacts.length,
+          });
+          merged.push(...ing.stored);
+        }
+        if (merged.length !== last.artifacts.length) {
+          await this.core.amendAttemptArtifacts({ sessionId: sid, nodeId, attemptId: last.id, artifacts: merged });
+        }
+      }
+      const out = await this.core.pfResolve({
+        sessionId: sid,
+        nodeId: a.nodeId as string,
+        decision: "leaf",
+        tool: a.tool as { server: string; name: string },
+        argSpecs: norm.specs as never,
+        sideEffect: a.sideEffect as "none" | "local_write" | "external" | undefined,
+        goldenIgnore: a.ignore as string[] | undefined,
+      });
+      this.store.touch(sid);
+      return { node: nodeSummary(out.node, s.limits), instruction: out.instruction, warnings: norm.warnings };
     });
   }
 

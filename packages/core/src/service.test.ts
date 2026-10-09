@@ -761,6 +761,21 @@ describe("M4.2-0.5 revision·이벤트 트랜잭션", () => {
     await svc.pfNext(s.session.id);
     expect((await svc.pfTree(s.session.id)).session.revision).toBe(0);
   });
+
+  it("amendAttemptArtifacts: 교체 + revision +1", async () => {
+    const svc = new CoreService(createMemoryStore(), passEval);
+    const s = await svc.pfStart({ request: "r", toolCatalog: catalog });
+    await svc.pfReport({ ...rep(), sessionId: s.session.id, args: { path: "a" } });
+    const tree = await svc.pfTree(s.session.id);
+    const last = tree.nodes[0].attempts[0];
+    const r = await svc.amendAttemptArtifacts({ sessionId: s.session.id, nodeId: "1", attemptId: last.id, artifacts: ["fx/a.txt"] });
+    expect(r.node.attempts[0].artifacts).toEqual(["fx/a.txt"]);
+    expect(r.revision).toBe(tree.session.revision + 1);
+    expect((await svc.pfTree(s.session.id)).session.revision).toBe(tree.session.revision + 1);
+    await expect(
+      svc.amendAttemptArtifacts({ sessionId: s.session.id, nodeId: "1", attemptId: "00000000-0000-4000-8000-000000000000", artifacts: [] }),
+    ).rejects.toThrow(/attempt .* not found/);
+  });
 });
 
   it("M3.6-5 미참조 dependsOn은 경고만 (dep_without_dataflow)", async () => {
