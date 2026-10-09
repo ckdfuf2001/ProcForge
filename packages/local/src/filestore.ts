@@ -1,11 +1,10 @@
-import { mkdirSync, renameSync, writeFileSync, readFileSync, readdirSync, existsSync, unlinkSync, statSync } from "node:fs";
+import { mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync, unlinkSync, statSync } from "node:fs";
 import { join, dirname } from "node:path";
 import type { Store } from "@procforge/shared/store.js";
 import type { Node, Session } from "@procforge/shared/schema.js";
 import { NodeIdSchema, NodeSchema, SessionIdSchema, SessionSchema } from "@procforge/shared/schema.js";
 import { logger } from "./logger.js";
-
-const WARN_BYTES = 1_000_000;
+import { writeAtomicFile } from "./fsutil.js";
 
 /** ID 이중 검증 (M2.6-2). 서버 zod에 더해 저장소 진입부에서도 검사. */
 export function assertSessionId(sid: string): void {
@@ -25,11 +24,7 @@ export class FileStore implements Store {
   }
 
   private writeAtomic(path: string, data: string): void {
-    if (data.length > WARN_BYTES) logger.warn(`large session file: ${path} (${data.length} bytes)`);
-    mkdirSync(dirname(path), { recursive: true });
-    const tmp = `${path}.${process.pid}.tmp`;
-    writeFileSync(tmp, data);
-    renameSync(tmp, path);
+    writeAtomicFile(path, data);
   }
 
   // 동기 I/O + 싱글 스레드이므로 세션 단위 쓰기는 원자적.

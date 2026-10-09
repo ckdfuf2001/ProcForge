@@ -182,6 +182,20 @@
 - [M3.4.1-7] CI 매트릭스에 windows-latest 추가. Windows 실패는 skip 없이 수정
   (자식 프로세스 경로 fileURL·구분자·대소문자 이슈 해결).
 
+## M3.4.2 (CI green)
+
+- [M3.4.2-1] pnpm/action-setup의 version 핀 제거 (packageManager 필드 사용).
+  packageManager pnpm@9.0.0 = 로컬 일치 확인, lockfileVersion 9.0.
+- [M3.4.2-2] job defaults run shell bash (grep 검사 Windows 호환).
+- [M3.4.2-3] lockfile 강제 종료 테스트: Windows=taskkill /f, 그 외 SIGKILL +
+  exit 이벤트 대기 (고정 sleep 제거). 플랫폼 분기는 테스트 내부에 한정.
+- [M3.4.2-4] writeAtomic EPERM/EBUSY/EACCES 재시도 (최대 5회, 50ms 간격).
+  local/src/fsutil.ts로 일원화 (filestore/artifacts/recordings/catalog/run).
+- [M3.4.2-5] 테스트 명령을 CI와 동일하게 `pnpm -r run test -- --run
+  --testTimeout=20000 --hookTimeout=20000` (`pnpm -r test --` 형식은 pnpm이
+  옵션을 거부하므로 `run` 경유).
+- [M3.4.2-6] README CI 배지 추가. 이후 보고에는 Actions run URL 포함.
+
 ## M1
 
 - [M1-1] checker 주입 — §6 pf_report의 verdict 계산은 local checker(§7)가 소유. core는 `EvaluateFn`을 생성자 주입받고 기본값은 constraints-empty→pass, 그 외→fail. 이유: core→local import 순환 방지 + 의존방향(local→core 금지) 유지. M2에서 local MCP 핸들러가 `checker.evaluateAll`을 주입한다.

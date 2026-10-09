@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { compareNormalized } from "@procforge/shared/normalize.js";
 import { compareNodeIds } from "@procforge/shared/ids.js";
@@ -8,6 +8,7 @@ import type { Node } from "@procforge/shared/schema.js";
 import { FileStore } from "../filestore.js";
 import { evaluateAll } from "../checker.js";
 import { logger } from "../logger.js";
+import { writeAtomicFile } from "../fsutil.js";
 import { normalizeArgSpecs } from "../artifacts.js";
 import { ConnectionPool } from "./connections.js";
 import { findRecording, loadCassette, recordKey, saveRecording, toToolResponse } from "./recordings.js";
@@ -218,7 +219,7 @@ export async function runSession(opts: RunOptions): Promise<RunReport> {
       nodeHashes: Object.fromEntries([...store.getNodes(opts.sessionId).values()].map((n) => [n.id, n.hash])),
     };
     mkdirSync(runDir, { recursive: true });
-    writeFileSync(join(runDir, "report.json"), JSON.stringify(report, null, 2));
+    writeAtomicFile(join(runDir, "report.json"), JSON.stringify(report, null, 2));
     // lastPassHash 병합 저장 (M3.3-5): pass만 갱신, 미실행 유지, fail/blocked 삭제
     const prevPass = readLastPass(opts.procforgeDir, opts.sessionId).hashes;
     const merged: Record<string, string> = { ...prevPass };
@@ -228,8 +229,7 @@ export async function runSession(opts: RunOptions): Promise<RunReport> {
       else if (r.status === "fail" || r.status === "blocked") delete merged[r.nodeId];
     }
     const latestPath = latestReportPath(opts.procforgeDir, opts.sessionId);
-    mkdirSync(dirname(latestPath), { recursive: true });
-    writeFileSync(latestPath, JSON.stringify({ runId, at: report.at, nodeHashes: report.nodeHashes, lastPassHash: merged }));
+    writeAtomicFile(latestPath, JSON.stringify({ runId, at: report.at, nodeHashes: report.nodeHashes, lastPassHash: merged }));
     logger.info("run complete", { runId, ...summary, durationMs: Date.now() - t0 });
     return report;
   } finally {

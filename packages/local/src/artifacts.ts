@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
-import { copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { join, resolve, relative, basename, dirname, sep, isAbsolute, extname } from "node:path";
 import type { ArgSpec } from "@procforge/shared/schema.js";
+import { writeAtomicFile } from "./fsutil.js";
 
 // 호스트는 경로만 제출, 실제 읽기·복사는 local이 수행 (M2).
 // - 프로젝트 루트 밖 경로 거부, 심볼릭 링크 탈출 거부
@@ -64,10 +65,7 @@ function appendManifest(procforgeDir: string, sessionId: string, entries: Record
   const p = manifestFile(procforgeDir, sessionId);
   const cur = readManifest(procforgeDir, sessionId);
   Object.assign(cur, entries);
-  mkdirSync(dirname(p), { recursive: true });
-  const tmp = `${p}.${process.pid}.tmp`;
-  writeFileSync(tmp, JSON.stringify(cur, null, 2));
-  renameSync(tmp, p);
+  writeAtomicFile(p, JSON.stringify(cur, null, 2));
 }
 
 const MIME_BY_EXT: Record<string, string> = {

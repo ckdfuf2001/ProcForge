@@ -1,9 +1,10 @@
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { existsSync, readFileSync, renameSync } from "node:fs";
+import { join } from "node:path";
 import { relativizeRunPath } from "./workdir.js";
 import { replacePathForms } from "./pathnorm.js";
 import { logger } from "../logger.js";
+import { writeAtomicFile } from "../fsutil.js";
 import type { ToolResponse } from "./types.js";
 
 // VCR 방식 녹화 (M3). 매칭 키 = server+tool+정규화 args(키 정렬, runs 경로 → 상대경로) 해시.
@@ -124,9 +125,7 @@ export function loadCassette(procforgeDir: string, sessionId: string, nodeId: st
   // v1 → 1회 마이그레이션 후 v2로 저장 (M3.4.1-1)
   const entries = parsed.entries.map(migrateEntry);
   try {
-    const tmp = `${p}.${process.pid}.tmp`;
-    writeFileSync(tmp, JSON.stringify({ version: CASSETTE_VERSION, entries }, null, 2));
-    renameSync(tmp, p);
+    writeAtomicFile(p, JSON.stringify({ version: CASSETTE_VERSION, entries }, null, 2));
   } catch {
     // 저장 실패해도 읽기는 진행
   }
@@ -183,10 +182,7 @@ export function saveRecording(
   const entries = loadCassette(procforgeDir, sessionId, nodeId).filter((e) => e.key !== rec.key);
   entries.push(normalized);
   const p = cassetteFile(procforgeDir, sessionId, nodeId);
-  mkdirSync(dirname(p), { recursive: true });
-  const tmp = `${p}.${process.pid}.tmp`;
-  writeFileSync(tmp, JSON.stringify({ version: CASSETTE_VERSION, entries }, null, 2));
-  renameSync(tmp, p);
+  writeAtomicFile(p, JSON.stringify({ version: CASSETTE_VERSION, entries }, null, 2));
 }
 
 export function toToolResponse(rec: Recording, fsDir: string): ToolResponse {

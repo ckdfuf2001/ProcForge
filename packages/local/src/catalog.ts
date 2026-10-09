@@ -1,7 +1,8 @@
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, writeFileSync, statSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
+import { writeAtomicFile } from "./fsutil.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import type { ToolCatalogEntry } from "@procforge/shared/schema.js";
@@ -191,8 +192,7 @@ export async function collectCatalog(
   }
   if (cachePath) {
     try {
-      mkdirSync(dirname(cachePath), { recursive: true });
-      writeFileSync(cachePath, JSON.stringify({ at: Date.now(), fingerprint, entries, warnings }));
+      writeAtomicFile(cachePath, JSON.stringify({ at: Date.now(), fingerprint, entries, warnings }));
     } catch {
       // 캐시 실패는 무시
     }

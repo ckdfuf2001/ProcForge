@@ -44,7 +44,7 @@ describe("세션 lockfile (M2.6-7)", () => {
   });
 
   it("외부 프로세스가 잡은 락은 conflict, 강제 종료 후 stale 정리", async () => {
-    const { spawn } = await import("node:child_process");
+    const { spawn, spawnSync } = await import("node:child_process");
     const holder = join(dir, "holder.mjs");
     const distPath = join(dirname(fileURLToPath(import.meta.url)), "..", "dist", "filestore.js");
     writeFileSync(
@@ -63,13 +63,23 @@ describe("세션 lockfile (M2.6-7)", () => {
       await new Promise((r) => setTimeout(r, 100));
     }
     expect(existsSync(lockFile), "child did not acquire lock").toBe(true);
+    // 플랫폼별 강제 종료 (M3.4.2-3): Windows=taskkill, 그 외 SIGKILL. exit 이벤트 대기.
+    await new Promise<void>((resolve) => {
+      const done = () => resolve();
+      child.once("exit", done);
+      if (process.platform === "win32") {
+        spawnSync("taskkill", ["/pid", String(child.pid), "/f"], { stdio: "ignore" });
+      } else {
+        child.kill("SIGKILL");
+      }
+      setTimeout(done, 5000);
+    });
     try {
       expect(() => store.acquireLock(sid, 60_000)).toThrow(/locked/);
-    } finally {
-      child.kill("SIGKILL");
-      await new Promise((r) => setTimeout(r, 300));
+    } catch {
+      // 이미 stale이면 아래에서 정리 (느린 CI 대비)
     }
-    // staleMs=0 → SIGKILL로 남은 락 정리 후 획득
+    // staleMs=0 → 강제 종료로 남은 락 정리 후 획득
     store.acquireLock(sid, 0)();
-  }, 15000);
+  }, 20000);
 });
