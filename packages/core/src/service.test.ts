@@ -22,11 +22,115 @@ const rep = (over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
+describe("M3.4-7 additionalProperties:false 낯선 키 거부", () => {
+  const strictCat: Session["toolCatalog"] = [
+    {
+      server: "fs",
+      name: "read",
+      inputSchema: { type: "object", properties: { file_path: { type: "string" } }, required: ["file_path"], additionalProperties: false } as unknown as Record<string, unknown>,
+      schemaHash: "h1",
+    },
+  ];
+  it("오타 키 거부 + 유사 키 제안, 허용 스키마는 통과", async () => {
+    const svc = new CoreService(createMemoryStore(), passEval);
+    const { session } = await svc.pfStart({ request: "r", toolCatalog: strictCat });
+    await svc.pfReport({ ...rep(), sessionId: session.id, tool: { server: "fs", name: "read" }, args: { file_path: "a" } });
+    const typoSpecs = {
+      file_path: { kind: "fixed", value: "a" },
+      filepath: { kind: "fixed", value: "a" },
+    } as never;
+    await expect(
+      svc.pfResolve({ sessionId: session.id, nodeId: "1", decision: "leaf", tool: { server: "fs", name: "read" }, argSpecs: typoSpecs }),
+    ).rejects.toThrow(/argSpecs unknown/);
+    try {
+      await svc.pfResolve({
+        sessionId: session.id,
+        nodeId: "1",
+        decision: "leaf",
+        tool: { server: "fs", name: "read" },
+        argSpecs: typoSpecs,
+      });
+      expect.unreachable();
+    } catch (e) {
+      expect((e as Error).message).toMatch(/file_path/);
+      expect((e as { code?: string }).code).toBe("bad_args");
+    }
+    // additionalProperties:true 스키마는 통과
+    const svc2 = new CoreService(createMemoryStore(), passEval);
+    const openCat: Session["toolCatalog"] = [
+      { server: "fs", name: "read", inputSchema: { type: "object", properties: {}, additionalProperties: true } as unknown as Record<string, unknown>, schemaHash: "h1" },
+    ];
+    const s2 = await svc2.pfStart({ request: "r", toolCatalog: openCat });
+    await svc2.pfReport({ ...rep(), sessionId: s2.session.id, tool: { server: "fs", name: "read" }, args: { anything: 1 } });
+    const done = await svc2.pfResolve({
+      sessionId: s2.session.id,
+      nodeId: "1",
+      decision: "leaf",
+      tool: { server: "fs", name: "read" },
+      argSpecs: { anything: { kind: "fixed", value: 1 } },
+    });
+    expect(done.node.status).toBe("leaf");
+  });
+});
+
 describe("M2.5-6 세션 핸들 UUID", () => {
   it("세션 id는 UUID", async () => {
     const svc = new CoreService(createMemoryStore(), passEval);
     const { session } = await svc.pfStart({ request: "r", toolCatalog: catalog });
     expect(session.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+  });
+});
+
+describe("M3.4-6 펼친 의존 hash + stale 전파", () => {
+  const echoCat: Session["toolCatalog"] = [
+    { server: "e", name: "echo", inputSchema: {}, schemaHash: "h9" },
+  ];
+  const repE = (over: Record<string, unknown> = {}) => ({
+    sessionId: "",
+    nodeId: "1",
+    tool: { server: "e", name: "echo" },
+    args: {},
+    resultSummary: "ok",
+    selfVerdict: "pass" as const,
+    selfReason: "ok",
+    ...over,
+  });
+  async function confirmedTree() {
+    const svc = new CoreService(createMemoryStore(), passEval);
+    const { session } = await svc.pfStart({ request: "r", toolCatalog: echoCat });
+    const sid = session.id;
+    await svc.pfResolve({
+      sessionId: sid, nodeId: "1", decision: "split",
+      children: [{ goal: "a" }, { goal: "b" }, { goal: "draft", dependsOn: ["1.2"] }],
+    });
+    await svc.pfResolve({ sessionId: sid, nodeId: "1.2", decision: "split", children: [{ goal: "b1" }, { goal: "b2" }] });
+    const leaf = async (id: string, v: string) => {
+      await svc.pfReport({ ...repE(), sessionId: sid, nodeId: id, args: { v } });
+      await svc.pfResolve({
+        sessionId: sid, nodeId: id, decision: "leaf",
+        tool: { server: "e", name: "echo" }, argSpecs: { v: { kind: "fixed", value: v } },
+      });
+    };
+    await leaf("1.1", "a");
+    await leaf("1.2.1", "b1");
+    await leaf("1.2.2", "b2");
+    await leaf("1.3", "d");
+    return { svc, sid };
+  }
+
+  it("2.1 argSpec 변경 → draft stale(open), 무관 노드는 유지", async () => {
+    const { svc, sid } = await confirmedTree();
+    await svc.pfReopen(sid, "1.2.1", "change");
+    await svc.pfReport({ ...repE(), sessionId: sid, nodeId: "1.2.1", args: { v: "b1-new" } });
+    await svc.pfResolve({
+      sessionId: sid, nodeId: "1.2.1", decision: "leaf",
+      tool: { server: "e", name: "echo" }, argSpecs: { v: { kind: "fixed", value: "b1-new" } },
+    });
+    const tree = await svc.pfTree(sid);
+    const byId = new Map(tree.nodes.map((n) => [n.id, n]));
+    expect(byId.get("1.3")?.status).toBe("open");
+    expect(byId.get("1.1")?.status).toBe("leaf");
+    expect(byId.get("1.2.1")?.status).toBe("leaf");
   });
 });
 

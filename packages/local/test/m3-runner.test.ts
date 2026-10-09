@@ -363,8 +363,24 @@ describe("M3.2 runner", () => {
     expect(rep.summary.fail).toBe(0);
   }, 30000);
 
-  it("폴백 off: fixture 없으면 재녹화 에러", async () => {
-    const sid = await scriptedSession();
+  it("폴백 off: 확정 in + fixture 없으면 재녹화 에러", async () => {
+    const started = await client.pfStart({
+      request: "off", toolCatalog: (await collectCatalog(root)).entries,
+      limits: { maxDepth: 3, maxRetries: 2, maxNodes: 10 },
+    });
+    const sid = started.session.id;
+    await client.pfResolve({ sessionId: sid, nodeId: "1", decision: "split", children: [{ goal: "x" }] });
+    await client.pfReport({
+      sessionId: sid, nodeId: "1.1",
+      tool: { server: "fake-ppt", name: "echo" }, args: { title: "nofile.txt" },
+      resultSummary: JSON.stringify({ title: "nofile.txt" }), resultJson: { title: "nofile.txt" },
+      selfVerdict: "pass", selfReason: "ok",
+    });
+    await client.pfResolve({
+      sessionId: sid, nodeId: "1.1", decision: "leaf",
+      tool: { server: "fake-ppt", name: "echo" },
+      argSpecs: { title: { kind: "fixed", value: "nofile.txt", path: "in" } } as never,
+    });
     const rep = await runSession({ procforgeDir: pfdir, projectRoot: root, sessionId: sid, mode: "record", nodeId: "1.1" });
     expect(rep.summary.fail).toBe(1);
     expect(rep.results.find((r) => r.nodeId === "1.1")?.detail).toMatch(/fixture 없음/);
@@ -512,5 +528,112 @@ describe("M3.3 runner", () => {
     writeOpencodeConfig(BROKEN_CMD);
     const rep = await runSession({ procforgeDir: pfdir, projectRoot: root, sessionId: sid, mode: "replay" });
     expect(rep.summary.fail).toBe(0);
+  }, 60000);
+});
+
+describe("M3.4 runner", () => {
+  it("readOnly 툴 인자는 확정 없이 유지, replay 통과", async () => {
+    const collected = await collectCatalog(root);
+    const entries = collected.entries.map((e) =>
+      e.name === "search" ? { ...e, annotations: { readOnlyHint: true } } : e,
+    );
+    const started = await client.pfStart({
+      request: "검색", toolCatalog: entries,
+      limits: { maxDepth: 3, maxRetries: 2, maxNodes: 10 },
+    });
+    const sid = started.session.id;
+    await client.pfResolve({ sessionId: sid, nodeId: "1", decision: "split", children: [{ goal: "검색" }] });
+    const args = { query: "부가세", title: "1/2분기" };
+    await client.pfReport({
+      sessionId: sid, nodeId: "1.1",
+      tool: { server: "fake-ppt", name: "search" }, args,
+      resultSummary: JSON.stringify({ hits: ["부가세", "1/2분기"] }),
+      resultJson: { hits: ["부가세", "1/2분기"] },
+      selfVerdict: "pass", selfReason: "ok",
+    });
+    await client.pfResolve({
+      sessionId: sid, nodeId: "1.1", decision: "leaf",
+      tool: { server: "fake-ppt", name: "search" },
+      argSpecs: {
+        query: { kind: "fixed", value: "부가세" },
+        title: { kind: "fixed", value: "1/2분기" },
+      } as never,
+    });
+    const rec = await runSession({ procforgeDir: pfdir, projectRoot: root, sessionId: sid, mode: "record" });
+    expect(rec.summary.fail).toBe(0);
+    const cas = JSON.parse(readFileSync(join(pfdir, "sessions", sid, "cassettes", "1.1.json"), "utf8")) as {
+      entries: { args: Record<string, unknown> }[];
+    };
+    expect(cas.entries[0].args).toEqual(args);
+    writeOpencodeConfig(BROKEN_CMD);
+    const rep = await runSession({ procforgeDir: pfdir, projectRoot: root, sessionId: sid, mode: "replay" });
+    expect(rep.summary.fail).toBe(0);
+  }, 30000);
+
+  it("draft stale: 2.1 변경 → core draft open + --changed 재실행", async () => {
+    const collected = await collectCatalog(root);
+    const started = await client.pfStart({
+      request: "draft", toolCatalog: collected.entries,
+      limits: { maxDepth: 4, maxRetries: 2, maxNodes: 20 },
+    });
+    const sid = started.session.id;
+    await client.pfResolve({
+      sessionId: sid, nodeId: "1", decision: "split",
+      children: [{ goal: "a" }, { goal: "b" }, { goal: "draft", dependsOn: ["1.2"] }],
+    });
+    await client.pfResolve({ sessionId: sid, nodeId: "1.2", decision: "split", children: [{ goal: "b1" }, { goal: "b2" }] });
+    const leaf = async (id: string, v: string) => {
+      await client.pfReport({
+        sessionId: sid, nodeId: id,
+        tool: { server: "fake-ppt", name: "echo" }, args: { title: v },
+        resultSummary: JSON.stringify({ title: v }), resultJson: { title: v },
+        selfVerdict: "pass", selfReason: "ok",
+      });
+      await client.pfResolve({
+        sessionId: sid, nodeId: id, decision: "leaf",
+        tool: { server: "fake-ppt", name: "echo" },
+        argSpecs: { title: { kind: "fixed", value: v } } as never,
+      });
+    };
+    await leaf("1.1", "a");
+    await leaf("1.2.1", "b1");
+    await leaf("1.2.2", "b2");
+    await leaf("1.3", "d");
+    await runSession({ procforgeDir: pfdir, projectRoot: root, sessionId: sid, mode: "record" });
+    // 1.2.1 argSpec 변경 → draft(1.3) stale
+    await client.pfReopen(sid, "1.2.1", "change");
+    await client.pfReport({
+      sessionId: sid, nodeId: "1.2.1",
+      tool: { server: "fake-ppt", name: "echo" }, args: { title: "b1-new" },
+      resultSummary: JSON.stringify({ title: "b1-new" }), resultJson: { title: "b1-new" },
+      selfVerdict: "pass", selfReason: "ok",
+    });
+    await client.pfResolve({
+      sessionId: sid, nodeId: "1.2.1", decision: "leaf",
+      tool: { server: "fake-ppt", name: "echo" },
+      argSpecs: { title: { kind: "fixed", value: "b1-new" } } as never,
+    });
+    // core: draft open, 무관 노드 유지
+    const tree = await client.pfTree(sid);
+    expect(tree.nodes.find((n) => n.id === "1.3")?.status).toBe("open");
+    expect(tree.nodes.find((n) => n.id === "1.1")?.status).toBe("leaf");
+    // draft 재확정 후 record --changed → 1.2.1 + 1.3만 재실행
+    await client.pfReport({
+      sessionId: sid, nodeId: "1.3",
+      tool: { server: "fake-ppt", name: "echo" }, args: { title: "d" },
+      resultSummary: JSON.stringify({ title: "d" }), resultJson: { title: "d" },
+      selfVerdict: "pass", selfReason: "ok",
+    });
+    await client.pfResolve({
+      sessionId: sid, nodeId: "1.3", decision: "leaf",
+      tool: { server: "fake-ppt", name: "echo" },
+      argSpecs: { title: { kind: "fixed", value: "d" } } as never,
+    });
+    const chRec = await runSession({ procforgeDir: pfdir, projectRoot: root, sessionId: sid, mode: "record", changed: true });
+    const execIds = chRec.results.filter((r) => r.status !== "skipped").map((r) => r.nodeId);
+    expect(execIds).toContain("1.2.1");
+    expect(execIds).toContain("1.3");
+    expect(execIds).not.toContain("1.1");
+    expect(chRec.summary.fail).toBe(0);
   }, 60000);
 });

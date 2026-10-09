@@ -159,4 +159,28 @@ describe("validator 10종", () => {
     const s = baseSession();
     expect(validateTree(s, [leaf("1")])).toEqual([]);
   });
+
+  it("M3.4-5 조상/자손 의존은 dep_on_lineage", () => {
+    const s = baseSession();
+    const parent: Node = {
+      ...leaf("1"),
+      status: "split",
+      tool: undefined,
+      args: undefined,
+      attempts: [],
+      children: ["1.1"],
+    };
+    // 자식이 부모에 의존 → lineage
+    const childDepParent = leaf("1.1", { parentId: "1", dependsOn: ["1"] });
+    expect(validateTree(s, [parent, childDepParent]).some((e) => e.code === "dep_on_lineage")).toBe(true);
+    // 부모가 자손에 의존 → lineage
+    const parentDepChild: Node = { ...parent, dependsOn: ["1.1"] };
+    const child = leaf("1.1", { parentId: "1" });
+    expect(validateTree(s, [parentDepChild, child]).some((e) => e.code === "dep_on_lineage")).toBe(true);
+    // 형제 의존은 정상
+    const sib1 = leaf("1.1", { parentId: "1" });
+    const sib2 = leaf("1.2", { parentId: "1", dependsOn: ["1.1"] });
+    const parent2: Node = { ...parent, children: ["1.1", "1.2"] };
+    expect(validateTree(s, [parent2, sib1, sib2]).some((e) => e.code === "dep_on_lineage")).toBe(false);
+  });
 });

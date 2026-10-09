@@ -65,6 +65,7 @@ function err(code: string, message: string, hint?: string): Error {
 
 const HINTS: Record<string, string> = {
   bad_request: "입력을 고쳐 재호출하라.",
+  bad_args: "등록된 인자만 사용하라. 오타·유사 키를 확인하고 pf_confirm_leaf 재호출.",
   conflict: "pf_tree로 현재 상태를 확인하고 상태에 맞는 도구를 호출하라.",
   not_found: "pf_tree로 id를 확인하라.",
   session_not_found: "pf_start로 새 세션을 시작하라.",

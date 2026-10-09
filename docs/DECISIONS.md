@@ -143,6 +143,25 @@
   descendantLeafs, core·runner 공용). split 출력={childId:output}. $2.2 같은
   자식 직접 참조는 기존 규칙 그대로.
 
+## M3.4
+
+- [M3.4-1] readOnly는 확정 아님. 미확정 역할은 경고 후 원문 유지(URL 포함).
+  toolReadOnly는 weakIn 판정에만 사용(미존재 시 out 금지 → in 실패).
+- [M3.4-2] existsInScope는 폴백 on일 때만 projectRoot 검사.
+- [M3.4-3] 절대경로 일원화: fs 안은 상대경로와 동일 규칙. fs 밖은 in + 폴백 on +
+  프로젝트 안 + 존재만 허용, 나머지 전부 거부(프로젝트 미지정 시도 거부).
+- [M3.4-4] inout은 run fs 내 존재 필수(미존재 → fixture bad_request).
+  inout의 projectRoot 폴백 없음(편집 쓰기의 원본 침범 방지).
+- [M3.4-5] latest.json에 lastPassHash 병합 저장(pass만 갱신·미실행 유지·
+  fail/blocked 삭제). --changed는 불일치·부재를 변경으로 처리.
+- [M3.4-6] 노드 hash의 의존 입력 = 펼친 leaf hash 집합. hashFor+propagateStale을
+  resolve/split/report-pass/advise에 적용. split 자식은 빈 해시 저장 금지
+  (FileStore 엄격 파싱 때문, 계산 후 저장).
+- [M3.4-7] confirm_leaf additionalProperties:false + 등록 외 키 → bad_args
+  (편집 거리 2 이내 유사 키 제안). validator는 조상/자손 의존을 dep_on_lineage로 거부.
+- [M3.4-8] 녹화 응답 정규화: record 시 runFs 절대경로 → {RUNFS}(양 구분자),
+  replay 시 현재 runFs로 복원 + 옛 runs/<id>/fs 패턴 마이그레이션.
+
 ## M1
 
 - [M1-1] checker 주입 — §6 pf_report의 verdict 계산은 local checker(§7)가 소유. core는 `EvaluateFn`을 생성자 주입받고 기본값은 constraints-empty→pass, 그 외→fail. 이유: core→local import 순환 방지 + 의존방향(local→core 금지) 유지. M2에서 local MCP 핸들러가 `checker.evaluateAll`을 주입한다.

@@ -61,4 +61,13 @@ server.tool(
   },
 );
 
+server.tool(
+  "search",
+  "Search text (M3.4 readOnly test)",
+  { query: z.string(), title: z.string().optional() },
+  async ({ query, title }) => {
+    return { content: [{ type: "text", text: JSON.stringify({ hits: [query, title ?? null] }) }] };
+  },
+);
+
 await server.connect(new StdioServerTransport());

@@ -74,7 +74,31 @@ describe("rewritePaths", () => {
     expect(r["a"]).toBe(join(fsDir, "in.txt"));
   });
 
-  it("readOnly면 미지정 역할도 in", () => {
-    expect(() => rewritePaths({ m: "new-file.txt" }, { m: undefined }, { fsDir, toolReadOnly: true })).toThrow();
+  it("readOnly는 확정 아님: 미지정 역할은 유지", () => {
+    const r = rewritePaths({ m: "new-file.txt" }, { m: undefined }, { fsDir, toolReadOnly: true });
+    expect(r["m"]).toBe("new-file.txt");
+  });
+
+  it("weakIn + readOnly + 미존재 → in(실패), 비-readOnly → out", () => {
+    expect(() => rewritePaths({ m: "new-file.txt" }, { m: "weakIn" }, { fsDir, toolReadOnly: true })).toThrow();
+    const r = rewritePaths({ m: "new-file.txt" }, { m: "weakIn" }, { fsDir });
+    expect(r["m"]).toBe(join(fsDir, "new-file.txt"));
+  });
+
+  it("절대경로: fs 밖 + 폴백 off → 거부, on + 프로젝트 안 + 존재 → 허용", () => {
+    const outsideProject = join(tmpdir(), "pf-outside-x.txt");
+    writeFileSync(outsideProject, "x");
+    const inFs = join(fsDir, "in.txt");
+    // fs 안 절대경로는 상대경로와 동일 규칙
+    expect(rewritePaths({ a: inFs }, { a: "in" }, { fsDir })["a"]).toBe(inFs);
+    // fs 밖 + off → 거부
+    expect(() => rewritePaths({ a: outsideProject }, { a: "in" }, { fsDir, projectRoot: fsDir })).toThrow(/fixture 없음/);
+    // fs 밖 + on + 프로젝트 밖 → 거부
+    expect(() => rewritePaths({ a: outsideProject }, { a: "in" }, { fsDir, projectRoot: fsDir, allowProjectRead: true })).toThrow(/fixture 없음/);
+    // fs 밖 + on + 프로젝트 안 + 존재 → 허용
+    const projFile = join(fsDir, "proj.txt");
+    writeFileSync(projFile, "x");
+    const r = rewritePaths({ a: projFile }, { a: "in" }, { fsDir: join(fsDir, "empty"), projectRoot: fsDir, allowProjectRead: true });
+    expect(r["a"]).toBe(projFile);
   });
 });

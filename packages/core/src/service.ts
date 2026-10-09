@@ -31,6 +31,23 @@ function err(code: string, message: string): Error {
   return Object.assign(new Error(message), { code });
 }
 
+/** 유사 키 제안용 편집 거리 (M3.4-7, 상한 3) */
+export function similarKey(a: string, b: string): boolean {
+  if (a === b) return true;
+  const la = a.length;
+  const lb = b.length;
+  if (Math.abs(la - lb) > 3) return false;
+  let prev = Array.from({ length: lb + 1 }, (_, i) => i);
+  for (let i = 1; i <= la; i++) {
+    const cur = [i];
+    for (let j = 1; j <= lb; j++) {
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    }
+    prev = cur;
+  }
+  return prev[lb] <= 2;
+}
+
 /**
  * 재시도 경계 통일 (M1.5-6): 총 시도 횟수 = maxRetries + 1.
  * 실패 보고(pfReport)와 수동 재시도(pfResolve retry) 두 경로가 이 함수만 사용.
@@ -50,6 +67,7 @@ export function consumeRetry(
  */
 import { isResolved } from "@procforge/shared/deps.js";
 export { isResolved };
+import { expandDepLeafs } from "@procforge/shared/deps.js";
 
 /**
  * 첫 pass 결과 형태 기반 auto constraint 생성 (M1.5-2).
@@ -98,6 +116,42 @@ export class CoreService implements CoreClient {
     const n = this.store.getNode(sid, nid);
     if (!n) throw err("not_found", `node ${nid} not found`);
     return n;
+  }
+
+  /**
+   * 노드 hash 계산 (M3.4-6): 의존 입력은 expandDepLeafs 결과 leaf들의 저장 hash.
+   * core stale 전파와 runner --changed가 이 값으로 일치한다.
+   */
+  private hashFor(sid: string, n: Node, preloaded?: Map<string, Node>): string {
+    const byId = preloaded ?? this.store.getNodes(sid);
+    const leafs = n.dependsOn.flatMap((d) => expandDepLeafs(d, byId));
+    const depHs = [...new Set(leafs.map((id) => byId.get(id)?.hash ?? `missing:${id}`))].sort();
+    return computeNodeHash({ goal: n.goal, args: n.args, constraints: n.constraints, dependsOn: depHs });
+  }
+
+  /**
+   * stale 전파 일반화 (M3.4-6, 구 §5 규칙): origin 변경 후, 펼친 의존에 origin을
+   * 포함하는 하류 노드의 hash를 재계산·저장하고, 바뀌었으면 leaf/split을 open으로.
+   */
+  private propagateStale(sid: string, originId: string): void {
+    const queue = [originId];
+    const seen = new Set<string>([originId]);
+    while (queue.length > 0) {
+      const cur = queue.shift()!;
+      const all = this.store.getNodes(sid);
+      for (const n of all.values()) {
+        if (n.id === cur || seen.has(n.id)) continue;
+        const deps = n.dependsOn.flatMap((d) => expandDepLeafs(d, all));
+        if (!deps.includes(cur)) continue;
+        seen.add(n.id);
+        const nh = this.hashFor(sid, n);
+        if (nh !== n.hash) {
+          const reopened = n.status === "leaf" || n.status === "split" ? "open" as const : n.status;
+          this.store.saveNode(sid, { ...n, hash: nh, status: reopened });
+          queue.push(n.id);
+        }
+      }
+    }
   }
 
   async pfStart(input: PfStartInput): Promise<PfStartOutput> {
@@ -287,8 +341,9 @@ export class CoreService implements CoreClient {
         constraints,
         attempts: [...n.attempts, { ...attemptBase, verdict: "pass" as const, failedConstraints: [] }],
       };
-      next.hash = computeNodeHash({ goal: next.goal, args: next.args, constraints: next.constraints, dependsOn: next.dependsOn });
+      next.hash = this.hashFor(s.id, next);
       this.store.saveNode(s.id, next);
+      if (next.hash !== n.hash) this.propagateStale(s.id, n.id);
       const autoNote = constraints.length > n.constraints.length ? ` 결과 형태 기반 auto constraint ${constraints.length - n.constraints.length}개 부착.` : "";
       return {
         verdict,
@@ -391,14 +446,19 @@ export class CoreService implements CoreClient {
             hash: "",
             locked: false,
           };
-          child.hash = computeNodeHash({ goal: child.goal, args: {}, constraints: [], dependsOn: child.dependsOn });
+          child.hash = "";
           return child;
         });
-        const next: Node = { ...n, status: "split", children: created.map((c) => c.id) };
-        next.hash = computeNodeHash({ goal: next.goal, args: next.args, constraints: next.constraints, dependsOn: next.dependsOn });
+        // 해시 계산 후 저장 (빈 해시를 저장하지 않음 — FileStore 파싱 때문)
+        const base = this.store.getNodes(s.id);
+        for (const c of created) base.set(c.id, c);
+        const withHashes = created.map((c) => ({ ...c, hash: this.hashFor(s.id, c, base) }));
+        for (const h of withHashes) this.store.saveNode(s.id, h);
+        const next: Node = { ...n, status: "split", children: withHashes.map((c) => c.id) };
+        next.hash = this.hashFor(s.id, next);
         this.store.saveNode(s.id, next);
-        for (const c of created) this.store.saveNode(s.id, c);
-        return { node: next, created, instruction: `분해 완료. 자식 ${created.length}개를 순서대로 pf_next로 처리하라.` };
+        this.propagateStale(s.id, n.id);
+        return { node: next, created: withHashes, instruction: `분해 완료. 자식 ${withHashes.length}개를 순서대로 pf_next로 처리하라.` };
       }
       case "leaf": {
         // M1.5-1: leaf 확정은 여기서만. pass여도 report에서 자동 확정 없음.
@@ -419,6 +479,19 @@ export class CoreService implements CoreClient {
         if (!input.argSpecs) throw err("bad_request", "leaf requires argSpecs");
         const missing = Object.keys(last.args).filter((k) => !(k in input.argSpecs!));
         if (missing.length > 0) throw err("bad_request", `argSpecs missing: ${missing.join(",")}`);
+        // M3.4-7: additionalProperties:false 스키마는 등록 외 키 거부 (유사 키 제안)
+        const schemaProps = (cat.inputSchema as { properties?: Record<string, unknown>; additionalProperties?: boolean } | undefined);
+        if (schemaProps && schemaProps.additionalProperties === false && schemaProps.properties) {
+          const allowed = Object.keys(schemaProps.properties);
+          const unknownKeys = Object.keys(input.argSpecs).filter((k) => !allowed.includes(k));
+          if (unknownKeys.length > 0) {
+            const hints = unknownKeys.map((k) => {
+              const sim = allowed.filter((a) => similarKey(a, k));
+              return sim.length > 0 ? `${k} (유사: ${sim.join(", ")})` : k;
+            });
+            throw err("bad_args", `argSpecs unknown: ${hints.join("; ")}. 등록된 인자만 사용하라.`);
+          }
+        }
         const warnings: string[] = [];
         for (const [k, spec] of Object.entries(input.argSpecs)) {
           if (spec.kind === "fixed") {
@@ -435,8 +508,9 @@ export class CoreService implements CoreClient {
           golden: { fixtures: [...last!.artifacts], output: last!.resultSummary, attemptId: last!.id, ignore: input.goldenIgnore ?? [] },
         };
         if (input.sideEffect) next.sideEffect = input.sideEffect;
-        next.hash = computeNodeHash({ goal: next.goal, args: next.args, constraints: next.constraints, dependsOn: next.dependsOn });
+        next.hash = this.hashFor(s.id, next);
         this.store.saveNode(s.id, next);
+        this.propagateStale(s.id, n.id);
         return {
           node: next,
           instruction: warnings.length > 0 ? `leaf 확정. 경고: ${warnings.join("; ")}` : `leaf 확정. pf_next로 계속하라.`,
@@ -456,22 +530,9 @@ export class CoreService implements CoreClient {
       status: n.status === "needs_human" ? "open" : n.status,
     };
     const oldHash = n.hash;
-    next.hash = computeNodeHash({ goal: next.goal, args: next.args, constraints: next.constraints, dependsOn: next.dependsOn });
+    next.hash = this.hashFor(s.id, next);
     this.store.saveNode(s.id, next);
-    if (oldHash !== next.hash) {
-      const all = [...this.store.getNodes(s.id).values()];
-      const queue = all.filter((x) => x.dependsOn.includes(nodeId));
-      const seen = new Set<string>();
-      while (queue.length > 0) {
-        const cur = queue.shift()!;
-        if (seen.has(cur.id)) continue;
-        seen.add(cur.id);
-        if (cur.status === "leaf" || cur.status === "split") {
-          this.store.saveNode(s.id, { ...cur, status: "open" });
-        }
-        for (const y of all) if (y.dependsOn.includes(cur.id)) queue.push(y);
-      }
-    }
+    if (oldHash !== next.hash) this.propagateStale(s.id, nodeId);
     return { constraints, node: this.node(sessionId, nodeId) };
   }
 

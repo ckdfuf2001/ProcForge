@@ -91,10 +91,12 @@ export function rewritePaths(
   const base = resolve(opts.fsDir);
   const proot = opts.projectRoot ? resolve(opts.projectRoot) : undefined;
   const existsInScope = (v: string): boolean => {
+    // M3.4-2: 폴백 off면 run fs만 검사
     if (isAbsolute(v)) return existsSync(v);
     const rel = v.split("\\").join("/");
     if (isEscapeRel(rel, "/")) return false;
     if (existsSync(resolve(base, rel))) return true;
+    if (!opts.allowProjectRead) return false;
     return proot ? existsSync(resolve(proot, rel)) : false;
   };
   const fixtureError = (argName: string, v: string): Error =>
@@ -107,23 +109,38 @@ export function rewritePaths(
       else r = "in";
     } else {
       r = role as PathRole | undefined;
-      if (!r && opts.toolReadOnly) r = "in";
     }
     if (!r) return v;
+    // M3.4-3 절대경로 일원화
     if (isAbsolute(v)) {
-      if (!isEscapeRel(posixRel(base, resolve(v)), "/")) return resolve(v);
-      if (r === "in" && proot && !opts.allowProjectRead) throw fixtureError(argName, v);
+      const abs = resolve(v);
+      if (!isEscapeRel(posixRel(base, abs), "/")) {
+        // run fs 안: 상대경로와 동일 규칙
+        return mapRel(posixRel(base, abs), r, argName);
+      }
+      // run fs 밖: in + 폴백 on + 프로젝트 안 + 존재만 허용. 나머지 전부 거부
+      if (
+        r === "in" &&
+        proot &&
+        opts.allowProjectRead &&
+        !isEscapeRel(posixRel(proot, abs), "/") &&
+        existsSync(abs)
+      ) {
+        return abs;
+      }
       if (r === "out") throw new Error(`출력 경로가 run fs 밖: ${argName}=${v}`);
-      if (r === "inout") throw fixtureError(argName, v);
-      return v;
+      throw fixtureError(argName, v);
     }
     const rel = v.split("\\").join("/");
     if (isEscapeRel(rel, "/")) throw new Error(`경로 탈출: ${argName}=${v}`);
+    return mapRel(rel, r, argName);
+  };
+  const mapRel = (rel: string, r: PathRole, argName: string): string => {
     if (r === "out") return resolve(base, rel);
     if (r === "inout") {
       const abs = resolve(base, rel);
       if (existsSync(abs)) return abs;
-      throw fixtureError(argName, v);
+      throw fixtureError(argName, rel);
     }
     const fsAbs = resolve(base, rel);
     if (existsSync(fsAbs)) return fsAbs;
@@ -131,8 +148,8 @@ export function rewritePaths(
       const pAbs = resolve(proot, rel);
       if (existsSync(pAbs)) return pAbs;
     }
-    if (proot && !opts.allowProjectRead) throw fixtureError(argName, v);
-    throw new Error(`입력 없음: ${argName}=${v}`);
+    if (proot && !opts.allowProjectRead) throw fixtureError(argName, rel);
+    throw new Error(`입력 없음: ${argName}=${rel}`);
   };
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(args)) {
@@ -140,9 +157,9 @@ export function rewritePaths(
       out[k] = v; // URL 형태는 항상 제외 (M3.3-2)
       continue;
     }
-    let role = roles[k];
-    if (role === undefined && opts.toolReadOnly) role = "in";
+    const role = roles[k];
     if (role === undefined) {
+      // M3.4-1: readOnly는 확정 아님. 미확정은 경고 후 원문 유지.
       if (looksLikePath(v)) logger.warn("unconfirmed path kept", { arg: k, value: v });
       out[k] = v;
       continue;

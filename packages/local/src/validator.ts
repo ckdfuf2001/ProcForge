@@ -130,9 +130,30 @@ export function validateTree(session: Session, nodes: Node[], opts: ValidateOpti
       else if (c.parentId !== n.id)
         errors.push({ code: "children_link", nodeId: n.id, message: `child ${ch} parentId mismatch` });
     }
-    // dependsOn 존재
+    // dependsOn 존재 + 혈통 검사 (M3.4-5: 자기 조상/자손 의존 금지)
+    const ancestors = new Set<string>();
+    {
+      let cur: Node | undefined = n;
+      while (cur?.parentId) {
+        ancestors.add(cur.parentId);
+        cur = byId.get(cur.parentId);
+      }
+    }
+    const descendants = new Set<string>();
+    {
+      const queue = [...n.children];
+      while (queue.length > 0) {
+        const c = queue.shift()!;
+        if (descendants.has(c)) continue;
+        descendants.add(c);
+        const cn = byId.get(c);
+        if (cn) queue.push(...cn.children);
+      }
+    }
     for (const d of n.dependsOn) {
       if (!byId.has(d)) errors.push({ code: "bad_depend", nodeId: n.id, message: `dependsOn ${d} not found` });
+      else if (ancestors.has(d) || descendants.has(d))
+        errors.push({ code: "dep_on_lineage", nodeId: n.id, message: `dependsOn ${d} is ancestor/descendant (deadlock)` });
     }
 
     // leaf 검사

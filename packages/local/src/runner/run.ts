@@ -263,10 +263,7 @@ async function execNode(
       roles[k] = "inout";
       continue;
     }
-    if (readOnly) {
-      roles[k] = "in";
-      continue;
-    }
+    // M3.4-1: readOnly는 확정 아님. infer 결과 그대로 (weakIn 포함).
     roles[k] = inferPathRole(k, inputSchema);
   }
   const args = rewritePaths(
@@ -295,7 +292,7 @@ async function execNode(
     // 모든 모드에서 실제 호출 금지 (M3)
     const rec = findRecording(loadCassette(opts.procforgeDir, opts.sessionId, n.id), key);
     if (rec) {
-      resp = toToolResponse(rec);
+      resp = toToolResponse(rec, fsDir);
     } else {
       mocked = true;
       resp = { resultText: "[mock external]", resultJson: { mock: true } };
@@ -304,7 +301,7 @@ async function execNode(
     // M3.1-1: replay는 녹화 적중 + constraints만. golden 비교 없음.
     const rec = findRecording(loadCassette(opts.procforgeDir, opts.sessionId, n.id), key);
     if (!rec) throw new Error(`녹화 없음: ${server}/${tool} (키 ${key}). record 모드로 먼저 녹화하라.`);
-    resp = toToolResponse(rec);
+    resp = toToolResponse(rec, fsDir);
   } else {
     // record / passthrough: 실제 호출
     resp = await pool.call(server, tool, args);
@@ -316,7 +313,7 @@ async function execNode(
         args,
         response: { summary: resp.resultText, json: resp.resultJson },
         at: new Date().toISOString(),
-      });
+      }, fsDir);
     }
   }
 
