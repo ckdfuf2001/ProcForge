@@ -18,8 +18,16 @@ export type PfStartOutput = {
 };
 
 export type PfNextOutput =
-  | { done: false; node: Node; instruction: string }
+  | { done: false; node: Node; blocked?: BlockedEntry[]; instruction: string }
   | { done: true };
+
+export type BlockedReason = "dep_failed" | "dep_empty_split" | "dep_missing" | "dep_pending";
+
+export type BlockedEntry = {
+  nodeId: string;
+  waitingOn: string[];
+  reason: BlockedReason;
+};
 
 export type PfReportInput = {
   sessionId: string;
