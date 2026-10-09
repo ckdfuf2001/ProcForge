@@ -39,6 +39,15 @@ describe("FileStore ID 이중 검증 (M2.6-2)", () => {
     const raw = JSON.parse(readFileSync(join(dir, "sessions", sid, "session.json"), "utf8")) as Record<string, unknown>;
     expect(raw["revision"]).toBe(0);
   });
+
+  it("M4.2-0.5 appendEvents는 events.jsonl에 누적", () => {
+    store.appendEvents(sid, [
+      { seq: 1, revision: 1, at: "2026-10-09T00:00:00Z", actor: "host", method: "pfReport", nodeIds: ["1"], beforeHash: "a", afterHash: "b", summary: "r" },
+    ]);
+    const lines = readFileSync(join(dir, "sessions", sid, "events.jsonl"), "utf8").trim().split("\n");
+    expect(lines.length).toBe(1);
+    expect(JSON.parse(lines[0])).toMatchObject({ seq: 1, method: "pfReport" });
+  });
 });
 
 describe("세션 lockfile (M2.6-7)", () => {

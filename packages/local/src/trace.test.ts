@@ -112,13 +112,17 @@ describe("trace/export", () => {
     expect(nonAscii.readUInt16LE(8)).toBe(0x0800);
   });
 
-  it("M4.2-0 상태 이벤트: seq 증가 + 호출 추적과 공존", async () => {
+  it("M4.2-0.5 상태 이벤트: seq == revision + 호출 추적과 공존", async () => {
     const sid = await scripted();
-    const e1 = appendStateEvent(pfdir, sid, { actor: "host", method: "pfReport", nodeIds: ["1.1"], beforeHash: "a", afterHash: "b", summary: "pass" });
-    const e2 = appendStateEvent(pfdir, sid, { actor: "host", method: "pfConfirmLeaf", nodeIds: ["1.1"], beforeHash: "b", afterHash: "c", summary: "leaf" });
+    const e1 = appendStateEvent(pfdir, sid, { revision: 1, actor: "host", method: "pfReport", nodeIds: ["1.1"], beforeHash: "a", afterHash: "b", summary: "pass" });
+    const e2 = appendStateEvent(pfdir, sid, { revision: 2, actor: "host", method: "pfConfirmLeaf", nodeIds: ["1.1"], beforeHash: "b", afterHash: "c", summary: "leaf" });
     expect(e1.seq).toBe(1);
     expect(e2.seq).toBe(2);
-    expect(readStateEvents(pfdir, sid).map((e) => e.method)).toEqual(["pfReport", "pfConfirmLeaf"]);
+    const all = readStateEvents(pfdir, sid);
+    // core 트랜잭션 방출분 포함 전부 seq == revision
+    for (const e of all) expect(e.seq).toBe(e.revision);
+    const mine = all.filter((e) => e.summary === "pass" || e.summary === "leaf");
+    expect(mine.map((e) => e.method)).toEqual(["pfReport", "pfConfirmLeaf"]);
     // 호출 추적에는 상태 이벤트가 섞이지 않음
     expect(readEvents(pfdir, sid).length).toBe(1);
     expect(buildTrace(pfdir, sid).callsTotal).toBe(1);

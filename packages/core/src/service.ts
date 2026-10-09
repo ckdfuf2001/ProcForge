@@ -23,6 +23,7 @@ import type {
 } from "@procforge/shared/core-client.js";
 import { createMemoryStore } from "./store.js";
 import type { Store } from "@procforge/shared/store.js";
+import { TxStore } from "./txn.js";
 import { defaultEvaluate } from "./evaluate.js";
 import { adviceToConstraints, suggestsNumericRef } from "./advice.js";
 import { compareNodeIds } from "@procforge/shared/ids.js";
@@ -37,6 +38,9 @@ function err(code: ErrorCode, message: string): ProcForgeError {
 
 import { checkUnknownKeys, selfAndAncestors, similarKey, varRefNodeId } from "@procforge/shared/args-schema.js";
 import { maskParamsValues } from "@procforge/shared/normalize.js";
+import { combineHashes } from "@procforge/shared/hash.js";
+import type { Actor } from "@procforge/shared/dto.js";
+import type { ChangeOpts } from "@procforge/shared/core-client.js";
 import { pfError, type ErrorCode, type ProcForgeError } from "@procforge/shared/errors.js";
 export { similarKey };
 
@@ -150,10 +154,65 @@ export function computeDeadlock(
 }
 
 export class CoreService implements CoreClient {
+  private tx: TxStore | undefined;
+
   constructor(
-    private store: Store = createMemoryStore(),
+    private base: Store = createMemoryStore(),
     private evaluate: EvaluateFn = defaultEvaluate,
   ) {}
+
+  /** 변경 메서드 안에서는 tx 오버레이 경유. NOTE: 본문은 await 없이 동기 실행 */
+  private get store(): Store {
+    return this.tx ?? this.base;
+  }
+
+  /**
+   * R6 변경 트랜잭션 (M4.2-0.5): expectedRevision 비교 → 본문(버퍼링) →
+   * revision+1 → 이벤트 기록 → 저장. 쓰기 없으면 그대로 반환.
+   */
+  private change<R>(
+    sessionId: string,
+    op: { method: string; expectedRevision?: number; actor?: Actor },
+    body: () => { result: R; summary: string },
+  ): R {
+    const pre = this.base.getSession(sessionId);
+    if (!pre) throw err("not_found", `session ${sessionId} not found`);
+    if (op.expectedRevision !== undefined && pre.revision !== op.expectedRevision) {
+      throw err("conflict", `revision mismatch: expected ${op.expectedRevision}, actual ${pre.revision}`);
+    }
+    const before = new Map<string, string>();
+    for (const [id, n] of this.base.getNodes(sessionId)) before.set(id, n.hash);
+    const prev = this.tx;
+    const tx = new TxStore(this.base);
+    this.tx = tx;
+    try {
+      const { result, summary } = body();
+      const changed = tx.writtenNodeIds(sessionId);
+      if (changed.length === 0) return result;
+      const cur = tx.getSession(sessionId);
+      if (!cur) throw err("not_found", `session ${sessionId} not found`);
+      const bumped: Session = { ...cur, revision: cur.revision + 1 };
+      tx.saveSession(bumped);
+      const after = new Map<string, string>();
+      for (const [id, n] of tx.getNodes(sessionId)) after.set(id, n.hash);
+      const pick = (m: Map<string, string>) => combineHashes(changed.map((id) => m.get(id) ?? `missing:${id}`));
+      tx.appendEvents(sessionId, [{
+        seq: bumped.revision,
+        revision: bumped.revision,
+        at: new Date().toISOString(),
+        actor: op.actor ?? "host",
+        method: op.method,
+        nodeIds: [...changed].sort(),
+        beforeHash: pick(before),
+        afterHash: pick(after),
+        summary,
+      }]);
+      tx.commit();
+      return result;
+    } finally {
+      this.tx = prev;
+    }
+  }
 
   private sess(sid: string): Session {
     const s = this.store.getSession(sid);
@@ -249,10 +308,11 @@ export class CoreService implements CoreClient {
     };
   }
 
-  async pfNext(sessionId: string): Promise<PfNextOutput> {
+  async pfNext(sessionId: string, opts: ChangeOpts = {}): Promise<PfNextOutput> {
+  return this.change<PfNextOutput>(sessionId, { method: "pfNext", expectedRevision: opts.expectedRevision, actor: opts.actor }, () => {
     this.sess(sessionId);
     const nodes = [...this.store.getNodes(sessionId).values()];
-    if (nodes.length === 0) return { done: true };
+    if (nodes.length === 0) return { result: { done: true }, summary: "next done" };
     const byId = new Map(nodes.map((n) => [n.id, n]));
     const ready = nodes
       .filter(
@@ -266,14 +326,14 @@ export class CoreService implements CoreClient {
       .sort((a, b) => compareNodeIds(a.id, b.id));
     if (ready.length === 0) {
       const pending = nodes.some((n) => n.status === "open" || n.status === "probing" || n.status === "needs_human");
-      if (!pending) return { done: true };
+      if (!pending) return { result: { done: true }, summary: "next done" };
       const h = nodes.filter((n) => n.status === "needs_human").sort((a, b) => compareNodeIds(a.id, b.id))[0];
       if (h) {
-        return {
+        return { result: {
           done: false,
           node: h,
           instruction: `노드 ${h.id}는 사람의 조언이 필요하다. pf_advise로 조언을 등록하라.`,
-        };
+        }, summary: `next needs_human ${h.id}` };
       }
       // M3.4.3-1 교착: ready 0 + pending + needs_human 없음
       const stuck = nodes
@@ -298,33 +358,35 @@ export class CoreService implements CoreClient {
       }
       const first = stuck[0];
       const causeIds = causes.join(",");
-      return {
+      return { result: {
         done: false,
         node: first,
         blocked,
         instruction:
           `교착: ${blocked.map((b) => `${b.nodeId}(${b.reason})`).join(", ")}. ` +
           `원인 노드(${causeIds || "없음"})에 pf_advise 또는 pf_reopen 하라.`,
-      };
+      }, summary: `next deadlock ${first.id}` };
     }
     const n = ready[0];
     if (n.sideEffect === "external") {
-      return {
+      return { result: {
         done: false,
         node: n,
         instruction: `노드 ${n.id}는 외부 부작용(external)이다. 실제 실행 금지. dry-run으로 수행할 계획을 pf_report 대신 pf_ask_human으로 보고하고 사람 승인을 받아라.`,
-      };
+      }, summary: `next external ${n.id}` };
     }
-    return {
+    return { result: {
       done: false,
       node: n,
       instruction:
         `노드 ${n.id}(${n.goal}): 툴 1회로 가능한지 판단하라. 가능하면 sandbox(.procforge/sandbox/${sessionId}/) 사본에서 실행 후 ` +
         `pf_report(selfVerdict/selfReason 필수), 아니면 pf_split. pass여도 leaf 자동 확정 없음 — pf_confirm_leaf(tool, argSpecs) 제출이 필요하다.`,
-    };
+    }, summary: `next ${n.id}` };
+  });
   }
 
   async pfReport(input: PfReportInput): Promise<PfReportOutput> {
+  return this.change<PfReportOutput>(input.sessionId, { method: "pfReport", expectedRevision: input.expectedRevision, actor: input.actor }, () => {
     const s = this.sess(input.sessionId);
     const n = this.node(input.sessionId, input.nodeId);
     if (!input.selfVerdict || !input.selfReason)
@@ -353,11 +415,11 @@ export class CoreService implements CoreClient {
         ],
       };
       this.store.saveNode(s.id, updated);
-      return {
+      return { result: {
         verdict: "fail",
         failedConstraints: [],
         instruction: `외부 부작용 노드는 실제 실행 금지. dry-run 계획을 세워 pf_ask_human으로 사람 승인을 요청하라.`,
-      };
+      }, summary: `report ${n.id} blocked-external` };
     }
 
     // catalog 확인
@@ -384,12 +446,12 @@ export class CoreService implements CoreClient {
         attempts: [...n.attempts, { ...attemptBase, verdict: "fail" as const, failedConstraints: missingReasons }],
       };
       this.store.saveNode(s.id, next);
-      return {
+      return { result: {
         verdict: "fail",
         failedConstraints: missingReasons,
         unverified: rubricIds,
         instruction: `llm_rubric 판정 사유 누락(${missingReasons.join(",")}). needs_human. pf_advise로 조언을 보충하거나 pf_retry 후 rubricReasons에 id별 판정 사유를 채워 다시 pf_report하라.`,
-      };
+      }, summary: `report ${n.id} rubric-missing` };
     }
 
     // verdict 계산 (M1.5-2): constraints가 비었으면 selfVerdict 사용
@@ -430,14 +492,14 @@ export class CoreService implements CoreClient {
       this.store.saveNode(s.id, next);
       if (next.hash !== n.hash) this.propagateStale(s.id, n.id);
       const autoNote = constraints.length > n.constraints.length ? ` 결과 형태 기반 auto constraint ${constraints.length - n.constraints.length}개 부착.` : "";
-      return {
+      return { result: {
         verdict,
         failedConstraints: [],
         unverified,
         instruction:
           `통과. 그러나 leaf 자동 확정은 하지 않는다.${autoNote} pf_confirm_leaf(tool, argSpecs)로 확정 신청하라. ` +
           `argSpecs는 마지막 실행 인자 키를 모두 분류(fixed/var/generated)해야 하며 누락 시 bad_request.`,
-      };
+      }, summary: `report ${n.id} pass` };
     }
     // fail → 재시도 경계 (M1.5-6)
     const { status, retries } = consumeRetry(n, s.limits);
@@ -448,7 +510,7 @@ export class CoreService implements CoreClient {
       attempts: [...n.attempts, { ...attemptBase, verdict: "fail" as const, failedConstraints }],
     };
     this.store.saveNode(s.id, next);
-    return {
+    return { result: {
       verdict,
       failedConstraints,
       unverified,
@@ -456,10 +518,12 @@ export class CoreService implements CoreClient {
         status === "needs_human"
           ? `실패(재시도 소진: 총 ${n.attempts.length + 1}회). needs_human. 사유: ${input.selfReason}. pf_advise로 조언을 받거나 pf_split으로 분해하라.`
           : `실패(재시도 ${retries}/${s.limits.maxRetries}). 사유: ${input.selfReason}. 반영해 다시 실행 후 pf_report하라.`,
-    };
+    }, summary: `report ${n.id} fail` };
+  });
   }
 
   async pfResolve(input: PfResolveInput): Promise<PfResolveOutput> {
+  return this.change<PfResolveOutput>(input.sessionId, { method: "pfResolve", expectedRevision: input.expectedRevision, actor: input.actor }, () => {
     const s = this.sess(input.sessionId);
     const n = this.node(input.sessionId, input.nodeId);
 
@@ -485,21 +549,21 @@ export class CoreService implements CoreClient {
             ],
           };
           this.store.saveNode(s.id, next);
-          return { node: next, instruction: `dry-run 계획을 저장했다. pf_approve로 승인/거부를 받아라.` };
+          return { result: { node: next, instruction: `dry-run 계획을 저장했다. pf_approve로 승인/거부를 받아라.` }, summary: `ask_human ${n.id} plan` };
         }
         const next = { ...n, status: "needs_human" as const };
         this.store.saveNode(s.id, next);
-        return { node: next, instruction: `노드 ${n.id}를 needs_human으로 전환했다. pf_advise를 기다려라.` };
+        return { result: { node: next, instruction: `노드 ${n.id}를 needs_human으로 전환했다. pf_advise를 기다려라.` }, summary: `ask_human ${n.id}` };
       }
       case "retry": {
         if (n.locked) throw err("conflict", "locked");
         const { status, retries } = consumeRetry(n, s.limits);
         const next = { ...n, status, retries };
         this.store.saveNode(s.id, next);
-        return {
+        return { result: {
           node: next,
           instruction: status === "needs_human" ? "재시도 한도 초과로 needs_human." : `재시도 ${retries}/${s.limits.maxRetries}. 실행 후 pf_report.`,
-        };
+        }, summary: `retry ${n.id} ${status}` };
       }
       case "split": {
         if (n.locked) throw err("conflict", `locked node ${n.id} cannot be split`);
@@ -510,7 +574,7 @@ export class CoreService implements CoreClient {
         if (n.depth + 1 > s.limits.maxDepth) {
           const next = { ...n, status: "needs_human" as const };
           this.store.saveNode(s.id, next);
-          return { node: next, instruction: `분해 깊이가 maxDepth(${s.limits.maxDepth})를 초과해 needs_human으로 전환했다.` };
+          return { result: { node: next, instruction: `분해 깊이가 maxDepth(${s.limits.maxDepth})를 초과해 needs_human으로 전환했다.` }, summary: `split ${n.id} maxdepth` };
         }
         if (all.length + input.children.length > s.limits.maxNodes) throw err("bad_request", "maxNodes exceeded");
         // M3.4.4-3: 자식 dependsOn은 기존 노드 또는 같은 요청의 형제만 허용
@@ -569,7 +633,7 @@ export class CoreService implements CoreClient {
         next.hash = this.hashFor(s.id, next);
         this.store.saveNode(s.id, next);
         this.propagateStale(s.id, n.id);
-        return { node: next, created: withHashes, instruction: `분해 완료. 자식 ${withHashes.length}개를 순서대로 pf_next로 처리하라.` };
+        return { result: { node: next, created: withHashes, instruction: `분해 완료. 자식 ${withHashes.length}개를 순서대로 pf_next로 처리하라.` }, summary: `split ${n.id} +${withHashes.length}` };
       }
       case "leaf": {
         // M1.5-1: leaf 확정은 여기서만. pass여도 report에서 자동 확정 없음.
@@ -636,12 +700,13 @@ export class CoreService implements CoreClient {
         next.hash = this.hashFor(s.id, next);
         this.store.saveNode(s.id, next);
         this.propagateStale(s.id, n.id);
-        return {
+        return { result: {
           node: next,
           instruction: warnings.length > 0 ? `leaf 확정. 경고: ${warnings.join("; ")}` : `leaf 확정. pf_next로 계속하라.`,
-        };
+        }, summary: `leaf ${n.id} ${input.tool.server}/${input.tool.name}` };
       }
     }
+  });
   }
 
   async pfAdvise(
@@ -650,6 +715,7 @@ export class CoreService implements CoreClient {
     text: string,
     opts: NonNullable<PfAdviseInput["opts"]> = {},
   ): Promise<PfAdviseOutput> {
+  return this.change<PfAdviseOutput>(sessionId, { method: "pfAdvise", expectedRevision: opts.expectedRevision, actor: opts.actor }, () => {
     const s = this.sess(sessionId);
     const n = this.node(sessionId, nodeId);
     let constraints: Constraint[];
@@ -718,7 +784,8 @@ export class CoreService implements CoreClient {
     this.store.saveNode(s.id, next);
     if (oldHash !== next.hash) this.propagateStale(s.id, nodeId);
     const node = this.node(sessionId, nodeId);
-    return { constraints, rejected, node, ...(suggestNote ? { note: suggestNote } : {}) };
+    return { result: { constraints, rejected, node, ...(suggestNote ? { note: suggestNote } : {}) }, summary: `advise ${nodeId} +${constraints.length}` };
+  });
   }
 
   async pfTree(sessionId: string): Promise<{ nodes: Node[]; session: Session }> {
@@ -726,7 +793,8 @@ export class CoreService implements CoreClient {
     return { session: s, nodes: [...this.store.getNodes(sessionId).values()].sort((a, b) => compareNodeIds(a.id, b.id)) };
   }
 
-  async pfApprove(sessionId: string, nodeId: string, approved: boolean, note?: string): Promise<Node> {
+  async pfApprove(sessionId: string, nodeId: string, approved: boolean, note?: string, opts: ChangeOpts = {}): Promise<Node> {
+  return this.change<Node>(sessionId, { method: "pfApprove", expectedRevision: opts.expectedRevision, actor: opts.actor }, () => {
     const s = this.sess(sessionId);
     const n = this.node(sessionId, nodeId);
     if (n.locked) throw err("conflict", `node ${n.id} is locked`);
@@ -737,7 +805,7 @@ export class CoreService implements CoreClient {
         throw err("conflict", `node ${n.id} has no dry-run plan to approve. submit plan via ask_human first.`);
       const next: Node = { ...n, status: "probing", approval: { at: new Date().toISOString(), note } };
       this.store.saveNode(s.id, next);
-      return next;
+      return { result: next, summary: `approve ${nodeId} yes` };
     }
     const next: Node = {
       ...n,
@@ -746,21 +814,26 @@ export class CoreService implements CoreClient {
       advice: [...n.advice, { at: new Date().toISOString(), text: note ?? "plan rejected" }],
     };
     this.store.saveNode(s.id, next);
-    return next;
+    return { result: next, summary: `approve ${nodeId} no` };
+  });
   }
 
-  async pfLock(sessionId: string, nodeId: string): Promise<Node> {
+  async pfLock(sessionId: string, nodeId: string, opts: ChangeOpts = {}): Promise<Node> {
+  return this.change<Node>(sessionId, { method: "pfLock", expectedRevision: opts.expectedRevision, actor: opts.actor }, () => {
     const n = this.node(sessionId, nodeId);
     const next = { ...n, locked: true };
     this.store.saveNode(sessionId, next);
-    return next;
+    return { result: next, summary: `lock ${nodeId}` };
+  });
   }
 
-  async pfReopen(sessionId: string, nodeId: string, _reason: string): Promise<Node> {
+  async pfReopen(sessionId: string, nodeId: string, _reason: string, opts: ChangeOpts = {}): Promise<Node> {
+  return this.change<Node>(sessionId, { method: "pfReopen", expectedRevision: opts.expectedRevision, actor: opts.actor }, () => {
     const n = this.node(sessionId, nodeId);
     const next = { ...n, locked: false, status: "open" as const };
     this.store.saveNode(sessionId, next);
-    return next;
+    return { result: next, summary: `reopen ${nodeId}` };
+  });
   }
 }
 

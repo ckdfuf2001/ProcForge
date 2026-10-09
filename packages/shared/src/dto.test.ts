@@ -3,6 +3,7 @@ import { ActorSchema, EventEntrySchema, ChangeInputBaseSchema, MutationOutputBas
 
 const event = {
   seq: 1,
+  revision: 1,
   at: "2026-10-09T00:00:00Z",
   actor: "host",
   method: "pfReport",

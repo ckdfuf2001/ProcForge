@@ -1,11 +1,13 @@
 import type { Store } from "@procforge/shared/store.js";
 import type { Node, Session } from "@procforge/shared/schema.js";
+import type { EventEntry } from "@procforge/shared/dto.js";
 
 export type { Store };
 
 export function createMemoryStore(): Store {
   const sessions = new Map<string, Session>();
   const nodes = new Map<string, Map<string, Node>>();
+  const events = new Map<string, EventEntry[]>();
   return {
     getSession: (id) => sessions.get(id),
     saveSession: (s) => {
@@ -17,6 +19,9 @@ export function createMemoryStore(): Store {
     saveNode: (sid, n) => {
       if (!nodes.has(sid)) nodes.set(sid, new Map());
       nodes.get(sid)!.set(n.id, { ...n });
+    },
+    appendEvents: (sid, evts) => {
+      events.set(sid, [...(events.get(sid) ?? []), ...evts]);
     },
   };
 }

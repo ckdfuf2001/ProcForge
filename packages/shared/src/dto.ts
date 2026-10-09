@@ -8,9 +8,10 @@ import { SessionIdSchema } from "./schema.js";
 export const ActorSchema = z.enum(["host", "human", "runner"]);
 export type Actor = z.infer<typeof ActorSchema>;
 
-/** 상태 변경 이벤트 1건 (R7, events.jsonl 한 줄) */
+/** 상태 변경 이벤트 1건 (R7, events.jsonl 한 줄). seq == revision */
 export const EventEntrySchema = z.object({
   seq: z.number().int().min(1),
+  revision: z.number().int().min(0),
   at: z.string().min(1),
   actor: ActorSchema,
   method: z.string().min(1),

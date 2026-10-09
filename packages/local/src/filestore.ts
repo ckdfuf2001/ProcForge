@@ -1,7 +1,8 @@
-import { mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync, unlinkSync, statSync } from "node:fs";
+import { mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync, unlinkSync, statSync, appendFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import type { Store } from "@procforge/shared/store.js";
 import type { Node, Session } from "@procforge/shared/schema.js";
+import type { EventEntry } from "@procforge/shared/dto.js";
 import { NodeIdSchema, NodeSchema, SessionIdSchema, SessionSchema } from "@procforge/shared/schema.js";
 import { logger } from "./logger.js";
 import { writeAtomicFile } from "./fsutil.js";
@@ -77,6 +78,14 @@ export class FileStore implements Store {
     assertSessionId(sessionId);
     assertNodeId(n.id);
     this.writeAtomic(join(this.sessionDir(sessionId), "nodes", `${n.id}.json`), JSON.stringify(n, null, 2));
+  }
+
+  /** 상태 이벤트 append (R6, 실패를 삼키지 않는다) */
+  appendEvents(sessionId: string, events: EventEntry[]): void {
+    assertSessionId(sessionId);
+    const dir = this.sessionDir(sessionId);
+    mkdirSync(dir, { recursive: true });
+    appendFileSync(join(dir, "events.jsonl"), events.map((e) => JSON.stringify(e)).join("\n") + "\n");
   }
 
   // ---- 세션 lockfile (M2.6-7, 프로세스 간 advisory lock) ----

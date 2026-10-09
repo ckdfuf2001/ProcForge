@@ -177,6 +177,11 @@
   로드 시 파일 마이그레이션), events.jsonl R7 append/read 헬퍼(미연결).
   방출 지점 연결·revision 증가/충돌 검사는 1~2단계에서 (core는 파일을
   모르므로 local/App 측에서). trace buildTrace는 R7행 무시로 선방어.
+- [M4.2-0.5-1] revision·이벤트 core 이관 — TxStore 오버레이로 변경 메서드를
+  감싸고 commit 순서 appendEvents → 저장. 쓰기 없으면 bump 생략(pfNext
+  읽기 경로). pfStart는 생성이라 이벤트 없이 revision 0. runner 직접
+  저장(updateGolden)·확정 보정·procedure import는 이번 단계에서 우회 유지
+  (1~2단계에서 core 경로로). 메서드 본문은 await 없이 동기 유지.
 
 ## M3.2
 

@@ -48,24 +48,19 @@ export function readEvents(procforgeDir: string, sessionId: string): TraceEvent[
 }
 
 /**
- * 상태 변경 이벤트 append (M4.2-0, R7). seq는 기존 R7 항목 max+1.
+ * 상태 변경 이벤트 append (M4.2-0.5, R7). seq == revision (호출자가 전달).
  * 호출 추적(TraceEvent)과 같은 events.jsonl에 공존한다.
+ * R7: 기록 실패를 삼키지 않는다.
  */
 export function appendStateEvent(
   procforgeDir: string,
   sessionId: string,
   entry: Omit<EventEntry, "seq" | "at"> & { at?: string },
 ): EventEntry {
-  const existing = readStateEvents(procforgeDir, sessionId);
-  const seq = existing.reduce((m, e) => Math.max(m, e.seq), 0) + 1;
-  const full = EventEntrySchema.parse({ ...entry, seq, at: entry.at ?? new Date().toISOString() });
-  try {
-    const p = eventsFile(procforgeDir, sessionId);
-    mkdirSync(dirname(p), { recursive: true });
-    appendFileSync(p, JSON.stringify(full) + "\n");
-  } catch {
-    // 추적 실패는 본 동작에 영향 없음
-  }
+  const full = EventEntrySchema.parse({ ...entry, seq: entry.revision, at: entry.at ?? new Date().toISOString() });
+  const p = eventsFile(procforgeDir, sessionId);
+  mkdirSync(dirname(p), { recursive: true });
+  appendFileSync(p, JSON.stringify(full) + "\n");
   return full;
 }
 

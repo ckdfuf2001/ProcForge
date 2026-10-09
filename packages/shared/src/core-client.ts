@@ -1,8 +1,15 @@
 import type { Constraint, Node, Session, ArgSpec, SideEffect } from "./schema.js";
+import type { Actor } from "./dto.js";
 
 // local → core 호출은 반드시 이 인터페이스를 통해서만 한다. (가이드 §3, §8)
 // M0~M5: packages/core가 이 인터페이스의 in-process 구현을 제공한다.
 // M6: HTTP CoreClient 구현으로 교체한다. local 소스에서 core 직접 import 금지.
+
+/** 변경 메서드 공통 옵션 (M4.2-0.5, R6). 생략 시 검사 없이 진행, actor는 host */
+export type ChangeOpts = {
+  expectedRevision?: number;
+  actor?: Actor;
+};
 
 export type PfStartInput = {
   request: string;
@@ -48,6 +55,8 @@ export type PfReportInput = {
   rubricReasons?: Record<string, string>;
   /** local이 미리 채번한 attempt id (fixture 경로 결정용, M2). 없으면 core가 채번 */
   attemptId?: string;
+  expectedRevision?: number;
+  actor?: Actor;
 };
 
 export type PfReportOutput = {
@@ -73,6 +82,8 @@ export type PfResolveInput = {
   note?: string;
   /** leaf 확정 시 golden.ignore로 기록할 JSON 경로 (M3.1-2) */
   goldenIgnore?: string[];
+  expectedRevision?: number;
+  actor?: Actor;
 };
 
 export type PfResolveOutput = {
@@ -98,6 +109,8 @@ export type PfAdviseInput = {
     proposedConstraints?: unknown[];
     /** 최신 fixture 내용 (local이 읽어 전달, M4) */
     fixtureContents?: Record<string, string>;
+    expectedRevision?: number;
+    actor?: Actor;
   };
 };
 
@@ -109,13 +122,13 @@ export type EvaluateFn = (
 
 export interface CoreClient {
   pfStart(input: PfStartInput): Promise<PfStartOutput>;
-  pfNext(sessionId: string): Promise<PfNextOutput>;
+  pfNext(sessionId: string, opts?: ChangeOpts): Promise<PfNextOutput>;
   pfReport(input: PfReportInput): Promise<PfReportOutput>;
   pfResolve(input: PfResolveInput): Promise<PfResolveOutput>;
   pfAdvise(sessionId: string, nodeId: string, text: string, opts?: PfAdviseInput["opts"]): Promise<PfAdviseOutput>;
   pfTree(sessionId: string): Promise<{ nodes: Node[]; session: Session }>;
-  pfLock(sessionId: string, nodeId: string): Promise<Node>;
-  pfReopen(sessionId: string, nodeId: string, reason: string): Promise<Node>;
+  pfLock(sessionId: string, nodeId: string, opts?: ChangeOpts): Promise<Node>;
+  pfReopen(sessionId: string, nodeId: string, reason: string, opts?: ChangeOpts): Promise<Node>;
   /** external dry-run 계획 승인/거부 (M2.6-4) */
-  pfApprove(sessionId: string, nodeId: string, approved: boolean, note?: string): Promise<Node>;
+  pfApprove(sessionId: string, nodeId: string, approved: boolean, note?: string, opts?: ChangeOpts): Promise<Node>;
 }
