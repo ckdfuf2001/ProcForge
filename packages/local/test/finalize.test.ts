@@ -45,7 +45,7 @@ function writeOpencodeConfig(cmd: string[]) {
 }
 
 function appFor() {
-  return new ProcForgeApp({ core: client, store: new FileStore(pfdir), procforgeDir: pfdir, projectRoot: root });
+  return new ProcForgeApp({ core: client, procforgeDir: pfdir, projectRoot: root });
 }
 
 async function scripted(): Promise<string> {

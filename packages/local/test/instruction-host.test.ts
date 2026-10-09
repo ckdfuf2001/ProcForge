@@ -56,8 +56,8 @@ describe("M2.6-1 instruction 도구명 일치", () => {
 
 describe("instruction-following host E2E", () => {
   it("instruction 첫 언급 도구만 호출해 단일 세션 완료", async () => {
-    const { client, store } = createLocalStack(pfdir);
-    const app = new ProcForgeApp({ core: client, store, procforgeDir: pfdir, projectRoot: root });
+    const { client } = createLocalStack(pfdir);
+    const app = new ProcForgeApp({ core: client, procforgeDir: pfdir, projectRoot: root });
     const server = buildServer({ app, procforgeDir: pfdir });
     const [ct, st] = InMemoryTransport.createLinkedPair();
     const mcp = new Client({ name: "follow-host", version: "0.0.0" });

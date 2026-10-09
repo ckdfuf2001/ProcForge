@@ -2,7 +2,6 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { CoreClient } from "@procforge/shared/core-client.js";
 import { pfError } from "@procforge/shared/errors.js";
-import type { FileStore } from "../filestore.js";
 import { collectCatalog } from "../catalog.js";
 import { nodeSummary } from "../views.js";
 import { seedSandbox } from "../services/workspace.js";
@@ -17,6 +16,7 @@ import { writeProcedure } from "../services/procedureWriter.js";
 
 // ProcForge 유스케이스층 (M4.2-1). 사용자 행동 1개 = 메서드 1개.
 // 어댑터(server/cli/ui)는 입력 검증·호출·응답 포맷만 하고 정책·파일 작업은 여기에 위임한다.
+// 세션 잠금은 core change()가 맡는다 (M4.2-2.5-2). 세션·노드 읽기는 core 경유.
 
 export const DEFAULT_SESSION_TTL_MS = 30 * 24 * 3600 * 1000;
 
@@ -33,8 +33,6 @@ export const PROMPT_TEXT = [
 
 export type AppDeps = {
   core: CoreClient;
-  /** 세션 잠금용 (2.5-2에서 core로 이동 예정, 그 외 용도 없음) */
-  store: FileStore;
   procforgeDir: string;
   projectRoot: string;
   /** 표시용 세션 TTL (판정은 core 소유) */
@@ -45,7 +43,6 @@ export type AppDeps = {
 
 export class ProcForgeApp {
   private core: CoreClient;
-  private store: FileStore;
   private procforgeDir: string;
   private projectRoot: string;
   private sessionTtlMs: number | undefined;
@@ -54,22 +51,11 @@ export class ProcForgeApp {
 
   constructor(deps: AppDeps) {
     this.core = deps.core;
-    this.store = deps.store;
     this.procforgeDir = deps.procforgeDir;
     this.projectRoot = deps.projectRoot;
     this.sessionTtlMs = deps.sessionTtlMs;
     this.strictSandbox = deps.strictSandbox ?? true;
     this.maxArtifactBytes = deps.maxArtifactBytes ?? 5 * 1024 * 1024;
-  }
-
-  /** 변경계 유스케이스용 세션 락 (server W() 이동) */
-  private async locked<T>(sessionId: string, fn: () => Promise<T> | T): Promise<T> {
-    const release = this.store.acquireLock(sessionId);
-    try {
-      return await fn();
-    } finally {
-      release();
-    }
   }
 
   async start(a: any): Promise<Record<string, unknown>> {    const collected = a.toolCatalog
@@ -98,7 +84,6 @@ export class ProcForgeApp {
     const sid = a.sessionId as string;
     const s = await this.core.getSession(sid);
     const out = await this.core.pfNext(sid);
-    
     if (out.done) return { done: true };
     // M4.1-7: 노드 분기 직전 sandbox 스냅샷 (pf_report 입출력 판정용)
     try {
@@ -119,197 +104,175 @@ export class ProcForgeApp {
 
   async report(a: any): Promise<Record<string, unknown>> {
     const sid = a.sessionId as string;
-    return this.locked(sid, async () => {
-      const sess = await this.core.getSession(sid);
-      const nid = a.nodeId as string;
-      const attemptId = randomUUID();
-      const toolRef = a.tool as { server: string; name: string };
-      const args = (a.args ?? {}) as Record<string, unknown>;
-      const baseDir = this.strictSandbox ? join(this.procforgeDir, "sandbox", sid) : this.projectRoot;
-      const cat = sess.toolCatalog.find((t) => t.server === toolRef.server && t.name === toolRef.name);
-      // M4.1-7 스냅샷 판정: 새로 생기거나 바뀐 파일 → out, 그 외 자동분 → in.
-      // 호스트 제출분은 명시 입력(in) 유지. 스냅샷 없으면 기존 로직 폴백 + 경고.
-      const reportWarnings: string[] = [];
-      let outRels: Set<string> | undefined;
-      if (this.strictSandbox) {
-        const pre = readPreSnapshot(this.procforgeDir, sid, nid);
-        if (!pre) {
-          reportWarnings.push(`스냅샷 없음(${nid}): 기존 존재 기반 캡처로 폴백 (pf_next 경유 권장)`);
-        } else {
-          const d = diffSnapshot(pre, baseDir);
-          outRels = new Set([...d.created, ...d.modified]);
-        }
+    const sess = await this.core.getSession(sid);
+    const nid = a.nodeId as string;
+    const attemptId = randomUUID();
+    const toolRef = a.tool as { server: string; name: string };
+    const args = (a.args ?? {}) as Record<string, unknown>;
+    const baseDir = this.strictSandbox ? join(this.procforgeDir, "sandbox", sid) : this.projectRoot;
+    const cat = sess.toolCatalog.find((t) => t.server === toolRef.server && t.name === toolRef.name);
+    // M4.1-7 스냅샷 판정: 새로 생기거나 바뀐 파일 → out, 그 외 자동분 → in.
+    // 호스트 제출분은 명시 입력(in) 유지. 스냅샷 없으면 기존 로직 폴백 + 경고.
+    const reportWarnings: string[] = [];
+    let outRels: Set<string> | undefined;
+    if (this.strictSandbox) {
+      const pre = readPreSnapshot(this.procforgeDir, sid, nid);
+      if (!pre) {
+        reportWarnings.push(`스냅샷 없음(${nid}): 기존 존재 기반 캡처로 폴백 (pf_next 경유 권장)`);
+      } else {
+        const d = diffSnapshot(pre, baseDir);
+        outRels = new Set([...d.created, ...d.modified]);
       }
-      const jobs = classifyReportPaths({
-        baseDir, tool: toolRef, args, catalogEntry: cat,
-        resultJson: a.resultJson, hostPaths: (a.artifacts ?? []) as string[], outRels,
-      });
-      const { stored, contents } = ingestReportJobs({
-        procforgeDir: this.procforgeDir, sessionId: sid, nodeId: nid,
-        attemptId, baseDir, jobs, maxBytes: this.maxArtifactBytes,
-      });
-      const out = await this.core.pfReport({
-        sessionId: sid,
-        nodeId: nid,
-        tool: toolRef,
-        args,
-        resultSummary: a.resultSummary as string,
-        resultJson: a.resultJson,
-        artifacts: stored,
-        artifactContents: contents,
-        selfVerdict: a.selfVerdict as "pass" | "fail",
-        selfReason: a.selfReason as string,
-        rubricReasons: a.rubricReasons as Record<string, string> | undefined,
-        attemptId,
-      });
-      
-      return { ...(out as unknown as Record<string, unknown>), warnings: reportWarnings };
+    }
+    const jobs = classifyReportPaths({
+      baseDir, tool: toolRef, args, catalogEntry: cat,
+      resultJson: a.resultJson, hostPaths: (a.artifacts ?? []) as string[], outRels,
     });
+    const { stored, contents } = ingestReportJobs({
+      procforgeDir: this.procforgeDir, sessionId: sid, nodeId: nid,
+      attemptId, baseDir, jobs, maxBytes: this.maxArtifactBytes,
+    });
+    const out = await this.core.pfReport({
+      sessionId: sid,
+      nodeId: nid,
+      tool: toolRef,
+      args,
+      resultSummary: a.resultSummary as string,
+      resultJson: a.resultJson,
+      artifacts: stored,
+      artifactContents: contents,
+      selfVerdict: a.selfVerdict as "pass" | "fail",
+      selfReason: a.selfReason as string,
+      rubricReasons: a.rubricReasons as Record<string, string> | undefined,
+      attemptId,
+    });
+    return { ...(out as unknown as Record<string, unknown>), warnings: reportWarnings };
   }
 
   async confirmLeaf(a: any): Promise<Record<string, unknown>> {
     const sid = a.sessionId as string;
-    return this.locked(sid, async () => {
-      const s = await this.core.getSession(sid);
-      if (!a.argSpecs) throw pfError("bad_request", "argSpecs가 없다.", "마지막 실행 인자 키를 모두 분류해 pf_confirm_leaf 재호출.");
-      const norm = normalizeArgSpecs(a.argSpecs as Record<string, import("@procforge/shared/schema.js").ArgSpec>, {
-        sandboxDir: join(this.procforgeDir, "sandbox", sid),
-        projectRoot: this.projectRoot,
-      });
-      // M3.6-2 확정 시 추캡처: 명시 in/inout fixed 경로 중 미수집분
-      const nodeId = a.nodeId as string;
-      const cur = await this.core.getNode(sid, nodeId);
-      const last = cur?.attempts[cur.attempts.length - 1];
-      if (cur && last) {
-        // M4.1-7: 보고 시 out 판정분은 attempt에서 제외 (golden 입력 순수 유지, 증거 파일은 보존)
-        const sidecar = readCaptureRecord(this.procforgeDir, sid, nodeId, last.id);
-        const outSet = new Set(sidecar?.outs ?? []);
-        const kept = last.artifacts.filter((fx) => !outSet.has(fx));
-        const fixedArgs: Record<string, unknown> = {};
-        for (const [k, spec] of Object.entries(norm.specs)) {
-          if (spec.kind === "fixed") fixedArgs[k] = (spec as { value: unknown }).value;
-        }
-        const baseDir = this.strictSandbox ? join(this.procforgeDir, "sandbox", sid) : this.projectRoot;
-        const manifest = readManifest(this.procforgeDir, sid);
-        const covered = new Set(
-          last.artifacts.map((fx) => manifest[fx]).filter((v): v is string => typeof v === "string"),
-        );
-        const toolRef = a.tool as { server: string; name: string };
-        const cat = s.toolCatalog.find((t) => t.server === toolRef.server && t.name === toolRef.name);
-        const relOf = (p: string) => toBaseRel(baseDir, p);
-        const fresh = collectExistingPaths({
-          baseDir, tool: toolRef, args: fixedArgs, specs: norm.specs, catalogEntry: cat, roles: ["in", "inout"],
-        }).filter((p) => !covered.has(relOf(p)));
-        const merged = [...kept];
-        if (fresh.length > 0) {
-          const ing = ingestArtifacts({
-            procforgeDir: this.procforgeDir, sessionId: sid, nodeId, attemptId: last.id,
-            baseDir, paths: fresh, maxBytes: this.maxArtifactBytes, startIndex: last.artifacts.length,
-          });
-          merged.push(...ing.stored);
-        }
-        if (merged.length !== last.artifacts.length) {
-          await this.core.amendAttemptArtifacts({ sessionId: sid, nodeId, attemptId: last.id, artifacts: merged });
-        }
-      }
-      const out = await this.core.pfResolve({
-        sessionId: sid,
-        nodeId: a.nodeId as string,
-        decision: "leaf",
-        tool: a.tool as { server: string; name: string },
-        argSpecs: norm.specs as never,
-        sideEffect: a.sideEffect as "none" | "local_write" | "external" | undefined,
-        goldenIgnore: a.ignore as string[] | undefined,
-      });
-      
-      return { node: nodeSummary(out.node, s.limits), instruction: out.instruction, warnings: norm.warnings };
+    const s = await this.core.getSession(sid);
+    if (!a.argSpecs) throw pfError("bad_request", "argSpecs가 없다.", "마지막 실행 인자 키를 모두 분류해 pf_confirm_leaf 재호출.");
+    const norm = normalizeArgSpecs(a.argSpecs as Record<string, import("@procforge/shared/schema.js").ArgSpec>, {
+      sandboxDir: join(this.procforgeDir, "sandbox", sid),
+      projectRoot: this.projectRoot,
     });
+    // M3.6-2 확정 시 추캡처: 명시 in/inout fixed 경로 중 미수집분
+    const nodeId = a.nodeId as string;
+    const cur = await this.core.getNode(sid, nodeId);
+    const last = cur?.attempts[cur.attempts.length - 1];
+    if (cur && last) {
+      // M4.1-7: 보고 시 out 판정분은 attempt에서 제외 (golden 입력 순수 유지, 증거 파일은 보존)
+      const sidecar = readCaptureRecord(this.procforgeDir, sid, nodeId, last.id);
+      const outSet = new Set(sidecar?.outs ?? []);
+      const kept = last.artifacts.filter((fx) => !outSet.has(fx));
+      const fixedArgs: Record<string, unknown> = {};
+      for (const [k, spec] of Object.entries(norm.specs)) {
+        if (spec.kind === "fixed") fixedArgs[k] = (spec as { value: unknown }).value;
+      }
+      const baseDir = this.strictSandbox ? join(this.procforgeDir, "sandbox", sid) : this.projectRoot;
+      const manifest = readManifest(this.procforgeDir, sid);
+      const covered = new Set(
+        last.artifacts.map((fx) => manifest[fx]).filter((v): v is string => typeof v === "string"),
+      );
+      const toolRef = a.tool as { server: string; name: string };
+      const cat = s.toolCatalog.find((t) => t.server === toolRef.server && t.name === toolRef.name);
+      const relOf = (p: string) => toBaseRel(baseDir, p);
+      const fresh = collectExistingPaths({
+        baseDir, tool: toolRef, args: fixedArgs, specs: norm.specs, catalogEntry: cat, roles: ["in", "inout"],
+      }).filter((p) => !covered.has(relOf(p)));
+      const merged = [...kept];
+      if (fresh.length > 0) {
+        const ing = ingestArtifacts({
+          procforgeDir: this.procforgeDir, sessionId: sid, nodeId, attemptId: last.id,
+          baseDir, paths: fresh, maxBytes: this.maxArtifactBytes, startIndex: last.artifacts.length,
+        });
+        merged.push(...ing.stored);
+      }
+      if (merged.length !== last.artifacts.length) {
+        await this.core.amendAttemptArtifacts({ sessionId: sid, nodeId, attemptId: last.id, artifacts: merged });
+      }
+    }
+    const out = await this.core.pfResolve({
+      sessionId: sid,
+      nodeId: a.nodeId as string,
+      decision: "leaf",
+      tool: a.tool as { server: string; name: string },
+      argSpecs: norm.specs as never,
+      sideEffect: a.sideEffect as "none" | "local_write" | "external" | undefined,
+      goldenIgnore: a.ignore as string[] | undefined,
+    });
+    return { node: nodeSummary(out.node, s.limits), instruction: out.instruction, warnings: norm.warnings };
   }
 
   async retry(a: any): Promise<Record<string, unknown>> {
     const sid = a.sessionId as string;
-    return this.locked(sid, async () => {
-      const s = await this.core.getSession(sid);
-      logger.info("pf_retry", { sessionId: sid, nodeId: a.nodeId, reason: a.reason });
-      const out = await this.core.pfResolve({ sessionId: sid, nodeId: a.nodeId as string, decision: "retry" });
-      
-      return { node: nodeSummary(out.node, s.limits), instruction: out.instruction };
-    });
+    const s = await this.core.getSession(sid);
+    logger.info("pf_retry", { sessionId: sid, nodeId: a.nodeId, reason: a.reason });
+    const out = await this.core.pfResolve({ sessionId: sid, nodeId: a.nodeId as string, decision: "retry" });
+    return { node: nodeSummary(out.node, s.limits), instruction: out.instruction };
   }
 
   async split(a: any): Promise<Record<string, unknown>> {
     const sid = a.sessionId as string;
-    return this.locked(sid, async () => {
-      const s = await this.core.getSession(sid);
-      const kids = a.children as { goal: string; dependsOn?: string[]; sideEffect?: "none" | "local_write" | "external" }[] | undefined;
-      if (!kids || kids.length === 0) throw pfError("bad_request", "children이 비었다.", "최소 1개의 {goal}을 넣어 pf_split 재호출.");
-      const out = await this.core.pfResolve({ sessionId: sid, nodeId: a.nodeId as string, decision: "split", children: kids });
-      
-      return {
-        node: nodeSummary(out.node, s.limits),
-        created: (out.created ?? []).map((c) => nodeSummary(c, s.limits)),
-        instruction: out.instruction,
-      };
-    });
+    const s = await this.core.getSession(sid);
+    const kids = a.children as { goal: string; dependsOn?: string[]; sideEffect?: "none" | "local_write" | "external" }[] | undefined;
+    if (!kids || kids.length === 0) throw pfError("bad_request", "children이 비었다.", "최소 1개의 {goal}을 넣어 pf_split 재호출.");
+    const out = await this.core.pfResolve({ sessionId: sid, nodeId: a.nodeId as string, decision: "split", children: kids });
+    return {
+      node: nodeSummary(out.node, s.limits),
+      created: (out.created ?? []).map((c) => nodeSummary(c, s.limits)),
+      instruction: out.instruction,
+    };
   }
 
   async askHuman(a: any): Promise<Record<string, unknown>> {
     const sid = a.sessionId as string;
-    return this.locked(sid, async () => {
-      const s = await this.core.getSession(sid);
-      logger.info("pf_ask_human", { sessionId: sid, nodeId: a.nodeId, question: a.question });
-      const out = await this.core.pfResolve({
-        sessionId: sid,
-        nodeId: a.nodeId as string,
-        decision: "ask_human",
-        plan: a.plan as { tool: { server: string; name: string }; args: Record<string, unknown> } | undefined,
-        note: a.question as string,
-      });
-      
-      return { node: nodeSummary(out.node, s.limits), instruction: out.instruction };
+    const s = await this.core.getSession(sid);
+    logger.info("pf_ask_human", { sessionId: sid, nodeId: a.nodeId, question: a.question });
+    const out = await this.core.pfResolve({
+      sessionId: sid,
+      nodeId: a.nodeId as string,
+      decision: "ask_human",
+      plan: a.plan as { tool: { server: string; name: string }; args: Record<string, unknown> } | undefined,
+      note: a.question as string,
     });
+    return { node: nodeSummary(out.node, s.limits), instruction: out.instruction };
   }
 
   async approve(a: any): Promise<Record<string, unknown>> {
     const sid = a.sessionId as string;
-    return this.locked(sid, async () => {
-      const s = await this.core.getSession(sid);
-      const n = await this.core.pfApprove(sid, a.nodeId as string, a.approved as boolean, a.note as string | undefined);
-      
-      return { node: nodeSummary(n, s.limits) };
-    });
+    const s = await this.core.getSession(sid);
+    const n = await this.core.pfApprove(sid, a.nodeId as string, a.approved as boolean, a.note as string | undefined);
+    return { node: nodeSummary(n, s.limits) };
   }
 
   async advise(a: any): Promise<Record<string, unknown>> {
     const sid = a.sessionId as string;
-    return this.locked(sid, async () => {
-      const s = await this.core.getSession(sid);
-      const nid = a.nodeId as string;
-      // 최신 attempt의 fixture 내용을 읽어 core 평가에 전달 (M4)
-      const cur = await this.core.getNode(sid, nid);
-      const fixtureContents = readFixtureContents({
-        procforgeDir: this.procforgeDir, sessionId: sid,
-        artifacts: cur.attempts[cur.attempts.length - 1]?.artifacts ?? [],
-      });
-      const out = await this.core.pfAdvise(sid, nid, a.text as string, {
-        proposedConstraints: a.proposedConstraints as unknown[] | undefined,
-        fixtureContents,
-      });
-      
-      return {
-        constraints: out.constraints.map((c) => ({ id: c.id, kind: c.kind, summary: `${c.kind}` })),
-        rejected: out.rejected,
-        ...(out.note ? { note: out.note } : {}),
-        node: nodeSummary(out.node, s.limits),
-      };
+    const s = await this.core.getSession(sid);
+    const nid = a.nodeId as string;
+    // 최신 attempt의 fixture 내용을 읽어 core 평가에 전달 (M4)
+    const cur = await this.core.getNode(sid, nid);
+    const fixtureContents = readFixtureContents({
+      procforgeDir: this.procforgeDir, sessionId: sid,
+      artifacts: cur.attempts[cur.attempts.length - 1]?.artifacts ?? [],
     });
+    const out = await this.core.pfAdvise(sid, nid, a.text as string, {
+      proposedConstraints: a.proposedConstraints as unknown[] | undefined,
+      fixtureContents,
+    });
+    return {
+      constraints: out.constraints.map((c) => ({ id: c.id, kind: c.kind, summary: `${c.kind}` })),
+      rejected: out.rejected,
+      ...(out.note ? { note: out.note } : {}),
+      node: nodeSummary(out.node, s.limits),
+    };
   }
 
   async tree(a: any): Promise<Record<string, unknown>> {
     const sid = a.sessionId as string;
     const s = await this.core.getSession(sid);
     const { nodes } = await this.core.pfTree(sid);
-    
     const detail = (a.detail as string | undefined) ?? "summary";
     const limit = (a.limit as number | undefined) ?? 50;
     const cursor = (a.cursor as number | undefined) ?? 0;
@@ -350,7 +313,6 @@ export class ProcForgeApp {
     const sid = a.sessionId as string;
     await this.core.getSession(sid);
     const { nodes } = await this.core.pfTree(sid);
-    
     const n = nodes.find((x) => x.id === (a.nodeId as string));
     if (!n) throw pfError("not_found", `노드 없음: ${a.nodeId}`, "pf_tree로 id를 확인하라.");
     return { node: n };
@@ -358,55 +320,43 @@ export class ProcForgeApp {
 
   async lock(a: any): Promise<Record<string, unknown>> {
     const sid = a.sessionId as string;
-    return this.locked(sid, async () => {
-      const s = await this.core.getSession(sid);
-      const n = await this.core.pfLock(sid, a.nodeId as string);
-      
-      return { node: nodeSummary(n, s.limits) };
-    });
+    const s = await this.core.getSession(sid);
+    const n = await this.core.pfLock(sid, a.nodeId as string);
+    return { node: nodeSummary(n, s.limits) };
   }
 
   async reopen(a: any): Promise<Record<string, unknown>> {
     const sid = a.sessionId as string;
-    return this.locked(sid, async () => {
-      const s = await this.core.getSession(sid);
-      const n = await this.core.pfReopen(sid, a.nodeId as string, a.reason as string);
-      
-      return { node: nodeSummary(n, s.limits) };
-    });
+    const s = await this.core.getSession(sid);
+    const n = await this.core.pfReopen(sid, a.nodeId as string, a.reason as string);
+    return { node: nodeSummary(n, s.limits) };
   }
 
   async editArgs(a: any): Promise<Record<string, unknown>> {
     const sid = a.sessionId as string;
-    return this.locked(sid, async () => {
-      const s = await this.core.getSession(sid);
-      const out = await this.core.pfEditArgs({
-        sessionId: sid,
-        nodeId: a.nodeId as string,
-        patch: {
-          set: a.patch?.set as Record<string, import("@procforge/shared/schema.js").ArgSpec> | undefined,
-          remove: a.patch?.remove as string[] | undefined,
-        },
-      });
-      
-      return { node: nodeSummary(out.node, s.limits), instruction: out.instruction };
+    const s = await this.core.getSession(sid);
+    const out = await this.core.pfEditArgs({
+      sessionId: sid,
+      nodeId: a.nodeId as string,
+      patch: {
+        set: a.patch?.set as Record<string, import("@procforge/shared/schema.js").ArgSpec> | undefined,
+        remove: a.patch?.remove as string[] | undefined,
+      },
     });
+    return { node: nodeSummary(out.node, s.limits), instruction: out.instruction };
   }
 
   async editNode(a: any): Promise<Record<string, unknown>> {
     const sid = a.sessionId as string;
-    return this.locked(sid, async () => {
-      const s = await this.core.getSession(sid);
-      const out = await this.core.pfEditNode({
-        sessionId: sid,
-        nodeId: a.nodeId as string,
-        goal: a.goal as string | undefined,
-        addConstraints: a.addConstraints as import("@procforge/shared/schema.js").Constraint[] | undefined,
-        removeConstraintIds: a.removeConstraintIds as string[] | undefined,
-      });
-      
-      return { node: nodeSummary(out.node, s.limits), instruction: out.instruction };
+    const s = await this.core.getSession(sid);
+    const out = await this.core.pfEditNode({
+      sessionId: sid,
+      nodeId: a.nodeId as string,
+      goal: a.goal as string | undefined,
+      addConstraints: a.addConstraints as import("@procforge/shared/schema.js").Constraint[] | undefined,
+      removeConstraintIds: a.removeConstraintIds as string[] | undefined,
     });
+    return { node: nodeSummary(out.node, s.limits), instruction: out.instruction };
   }
 
   async refreshCatalog(): Promise<Record<string, unknown>> {
@@ -453,7 +403,6 @@ export class ProcForgeApp {
       updateGolden: (a.updateGolden as boolean | undefined) ?? false,
       allowProjectRead: (a.allowProjectRead as boolean | undefined) ?? false,
     });
-    
     const reportPath = join(this.procforgeDir, "runs", report.runId, "report.json");
     if (a.junitPath) writeJUnitFile(a.junitPath as string, report);
     return {
@@ -479,7 +428,6 @@ export class ProcForgeApp {
       doc,
       force: (a.force as boolean | undefined) ?? false,
     });
-    
     return { name: doc.name, dir: written.dir, warnings, files: written.files, commandFile: written.commandFile };
   }
 }

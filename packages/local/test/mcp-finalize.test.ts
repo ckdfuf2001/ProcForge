@@ -40,8 +40,8 @@ afterEach(() => {
 
 describe("M4 MCP finalize/procedure", () => {
   it("pf_finalize → pf_test(procedure) 통과", async () => {
-    const { client, store } = createLocalStack(pfdir);
-    const app = new ProcForgeApp({ core: client, store, procforgeDir: pfdir, projectRoot: root });
+    const { client } = createLocalStack(pfdir);
+    const app = new ProcForgeApp({ core: client, procforgeDir: pfdir, projectRoot: root });
     const server = buildServer({ app, procforgeDir: pfdir });
     const [ct, st] = InMemoryTransport.createLinkedPair();
     const mcp = new Client({ name: "test", version: "0.0.0" });
@@ -81,8 +81,8 @@ describe("M4 MCP finalize/procedure", () => {
   }, 30000);
 
   it("pf_advise 제안 채택/거부 (MCP)", async () => {
-    const { client, store } = createLocalStack(pfdir);
-    const app = new ProcForgeApp({ core: client, store, procforgeDir: pfdir, projectRoot: root });
+    const { client } = createLocalStack(pfdir);
+    const app = new ProcForgeApp({ core: client, procforgeDir: pfdir, projectRoot: root });
     const server = buildServer({ app, procforgeDir: pfdir });
     const [ct, st] = InMemoryTransport.createLinkedPair();
     const mcp = new Client({ name: "test", version: "0.0.0" });

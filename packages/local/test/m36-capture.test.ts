@@ -40,8 +40,8 @@ afterEach(() => {
 });
 
 async function linked() {
-  const { client, store } = createLocalStack(pfdir);
-  const app = new ProcForgeApp({ core: client, store, procforgeDir: pfdir, projectRoot: root });
+  const { client } = createLocalStack(pfdir);
+  const app = new ProcForgeApp({ core: client, procforgeDir: pfdir, projectRoot: root });
   const server = buildServer({ app, procforgeDir: pfdir });
   const [ct, st] = InMemoryTransport.createLinkedPair();
   const mcp = new Client({ name: "m36-host", version: "0.0.0" });

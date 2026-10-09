@@ -13,6 +13,6 @@ const strictSandbox = process.env.PROCFORGE_STRICT_SANDBOX !== "0";
 const maxArtifactBytes = Number(process.env.PROCFORGE_MAX_ARTIFACT_BYTES ?? `${5 * 1024 * 1024}`);
 
 // App 조립은 진입점에서 (M4.2-2.5). server는 완성된 App만 받는다.
-const { client, store } = createLocalStack(procforgeDir, { sessionTtlMs });
-const app = new ProcForgeApp({ core: client, store, procforgeDir, projectRoot, sessionTtlMs, strictSandbox, maxArtifactBytes });
+const { client } = createLocalStack(procforgeDir, { sessionTtlMs });
+const app = new ProcForgeApp({ core: client, procforgeDir, projectRoot, sessionTtlMs, strictSandbox, maxArtifactBytes });
 await runStdio({ app, procforgeDir, readOnly });
