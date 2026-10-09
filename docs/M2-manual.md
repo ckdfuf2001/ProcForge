@@ -123,8 +123,8 @@ node packages/local/dist/cli.js test procedures/<name> --param month=2026-10
 ```
 
 - `trace`: 호출 순서·시도/판정/조언·소요시간 + M3.5 측정행.
-- `export --redact`: 파일 내용을 `{sha256,size}` 기술자로 대체한 zip.
-  `--include-originals`로 원문 병행 포함.
+- `export --redact`: 공유용 zip. 원본 대신 `<원본명>.redacted.json` 기술자
+  (`{sha256,size}`)만 포함 — 실제 내용을 보려면 `--include-originals` 추가.
 - 절차서 형식 명세: `docs/PROCEDURE-FORMAT.md`.
 - dogfood 측정 기록: `docs/M3.5-dogfood.md`.
 

@@ -53,8 +53,8 @@ describe("trace/export", () => {
     expect(existsSync(out)).toBe(true);
     const buf = readFileSync(out);
     const names = listZip(buf).map((e) => e.name);
-    expect(names.some((n) => n.endsWith("session.json"))).toBe(true);
-    const sessionEntry = names.find((n) => n.endsWith("session.json"))!;
+    expect(names.some((n) => n === "session.json.redacted.json")).toBe(true);
+    const sessionEntry = names.find((n) => n === "session.json.redacted.json")!;
     const meta = JSON.parse(readZipEntry(buf, sessionEntry).toString("utf8")) as { redacted: boolean; sha256: string; size: number };
     expect(meta.redacted).toBe(true);
     expect(meta.sha256).toMatch(/^[0-9a-f]{64}$/);

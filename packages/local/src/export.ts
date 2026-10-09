@@ -140,7 +140,8 @@ export function exportSession(opts: ExportOptions): { outPath: string; files: nu
           sha256: createHash("sha256").update(buf).digest("hex"),
           size: buf.length,
         });
-        entries.push({ name: keepOriginal ? `${rel}.redacted.json` : rel, data: Buffer.from(meta, "utf8") });
+        // 기술자는 원본 파일명을 가리지 않고 별도 이름 사용
+        entries.push({ name: `${rel}.redacted.json`, data: Buffer.from(meta, "utf8") });
       }
     }
   };
