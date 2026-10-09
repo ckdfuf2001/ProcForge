@@ -73,3 +73,18 @@ export function checkUnknownKeys(
   }
   return { unknownKeys, suggestions };
 }
+
+/** var 참조($노드[.output...]/params)에서 노드 출력 참조 id 추출 (M3.6-5) */
+export function varRefNodeId(ref: string): string | undefined {
+  if (/^\$\{params\.[A-Za-z0-9_.-]+\}$/.test(ref)) return undefined;
+  const m = /^\$(\d+(?:\.\d+)*)/.exec(ref);
+  return m ? m[1] : undefined;
+}
+
+/** 자기 + 조상 prefix들 ("1.2" → ["1.2", "1"]) */
+export function selfAndAncestors(id: string): string[] {
+  const parts = id.split(".");
+  const out: string[] = [];
+  for (let i = parts.length; i >= 1; i--) out.push(parts.slice(0, i).join("."));
+  return out;
+}

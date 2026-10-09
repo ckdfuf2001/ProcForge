@@ -117,6 +117,9 @@
   검증용). redact-only zip은 기술자만 포함하므로 request/goal/args/
   resultSummary/golden/녹화본/fixture 내부 문자열이 원천 차단된다 (회귀 테스트로
   고유 문자열 부재 확인). 텍스트 파일에도 기술자가 생기는 것은 버그가 아님.
+- [M3.6-5] dep_without_dataflow — confirm_leaf 시 dependsOn 중 var($노드...,
+  조상 포함)/generated(inputs, 노드 id) 어디에서도 참조되지 않으면 warnings에만
+  기록 (에러 아님). 참조 파서는 shared/args-schema 공용.
 
 ## M3.2
 

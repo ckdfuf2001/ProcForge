@@ -666,6 +666,50 @@ describe("M1.5-1 pass여도 leaf 자동 확정 없음", () => {
     });
     expect(leaf.instruction).toMatch(/var/);
   });
+
+  it("M3.6-5 미참조 dependsOn은 경고만 (dep_without_dataflow)", async () => {
+    const svc = new CoreService(createMemoryStore(), passEval);
+    const s = await svc.pfStart({ request: "r", toolCatalog: catalog });
+    await svc.pfResolve({
+      sessionId: s.session.id, nodeId: "1", decision: "split",
+      children: [{ goal: "a" }, { goal: "b", dependsOn: ["1.1"] }],
+    });
+    await svc.pfReport({ ...rep(), sessionId: s.session.id, nodeId: "1.1", args: { path: "a" } });
+    await svc.pfResolve({
+      sessionId: s.session.id, nodeId: "1.1", decision: "leaf",
+      tool: { server: "fs", name: "read" },
+      argSpecs: { path: { kind: "fixed", value: "a" } },
+    });
+    await svc.pfReport({ ...rep(), sessionId: s.session.id, nodeId: "1.2", args: { path: "b", prev: "x" } });
+    // prev가 $1.1 참조 → 경고 없음
+    const ok = await svc.pfResolve({
+      sessionId: s.session.id, nodeId: "1.2", decision: "leaf",
+      tool: { server: "fs", name: "read" },
+      argSpecs: { path: { kind: "fixed", value: "b" }, prev: { kind: "var", ref: "$1.1.output" } },
+    });
+    expect(ok.node.status).toBe("leaf");
+    expect(ok.instruction).not.toMatch(/dep_without_dataflow/);
+    // 참조 없이 확정 → 경고 포함되나 leaf 성공
+    const s2 = await svc.pfStart({ request: "r2", toolCatalog: catalog });
+    await svc.pfResolve({
+      sessionId: s2.session.id, nodeId: "1", decision: "split",
+      children: [{ goal: "a" }, { goal: "b", dependsOn: ["1.1"] }],
+    });
+    await svc.pfReport({ ...rep(), sessionId: s2.session.id, nodeId: "1.1", args: { path: "a" } });
+    await svc.pfResolve({
+      sessionId: s2.session.id, nodeId: "1.1", decision: "leaf",
+      tool: { server: "fs", name: "read" },
+      argSpecs: { path: { kind: "fixed", value: "a" } },
+    });
+    await svc.pfReport({ ...rep(), sessionId: s2.session.id, nodeId: "1.2", args: { path: "b" } });
+    const warned = await svc.pfResolve({
+      sessionId: s2.session.id, nodeId: "1.2", decision: "leaf",
+      tool: { server: "fs", name: "read" },
+      argSpecs: { path: { kind: "fixed", value: "b" } },
+    });
+    expect(warned.node.status).toBe("leaf");
+    expect(warned.instruction).toMatch(/dep_without_dataflow: 1\.1/);
+  });
 });
 
 describe("M1.5-2 selfVerdict + auto constraint", () => {

@@ -35,7 +35,7 @@ function err(code: string, message: string): Error {
   return Object.assign(new Error(message), { code });
 }
 
-import { checkUnknownKeys, similarKey } from "@procforge/shared/args-schema.js";
+import { checkUnknownKeys, selfAndAncestors, similarKey, varRefNodeId } from "@procforge/shared/args-schema.js";
 export { similarKey };
 
 /**
@@ -600,6 +600,24 @@ export class CoreService implements CoreClient {
             const v = (spec as { value: unknown }).value;
             if (typeof v === "string" && Object.values(s.params).includes(v))
               warnings.push(`arg ${k} 값 "${v}"이 params와 동일 — var(${"${params.*"}) 후보`);
+          }
+        }
+        // M3.6-5: dependsOn 중 var/generated 어디에서도 참조되지 않으면 경고 (에러 아님)
+        {
+          const referenced = new Set<string>();
+          for (const spec of Object.values(input.argSpecs)) {
+            if (spec.kind === "var") {
+              const id = varRefNodeId((spec as { ref: string }).ref);
+              if (id) for (const a of selfAndAncestors(id)) referenced.add(a);
+            } else if (spec.kind === "generated") {
+              for (const inp of (spec as { inputs?: string[] }).inputs ?? []) {
+                if (/^\d+(\.\d+)*$/.test(inp)) for (const a of selfAndAncestors(inp)) referenced.add(a);
+                else referenced.add(inp);
+              }
+            }
+          }
+          for (const d of n.dependsOn) {
+            if (!referenced.has(d)) warnings.push(`dep_without_dataflow: ${d} (어느 var/generated 인자에서도 참조되지 않음)`);
           }
         }
         const next: Node = {
