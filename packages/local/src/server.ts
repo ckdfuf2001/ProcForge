@@ -8,15 +8,8 @@ import type { CoreClient } from "@procforge/shared/core-client.js";
 import { NodeIdSchema, SessionIdSchema, ConstraintSchema } from "@procforge/shared/schema.js";
 import { errorCodeOf, pfError, type ErrorCode, type ProcForgeError } from "@procforge/shared/errors.js";
 import { ingestArtifacts, normalizeArgSpecs, readManifest, setupSandbox } from "./artifacts.js";
-import {
-  collectExistingPaths,
-  collectResultFiles,
-  diffSnapshot,
-  readCaptureRecord,
-  readPreSnapshot,
-  toBaseRel,
-  writeCaptureRecord,
-} from "./services/snapshot.js";
+import { readCaptureRecord, toBaseRel } from "./services/snapshot.js";
+import { collectExistingPaths } from "./services/artifacts.js";
 import { collectCatalog } from "./catalog.js";
 import { logger } from "./logger.js";
 import type { FileStore } from "./filestore.js";
@@ -239,7 +232,7 @@ export function buildServer(deps: ServerDeps): McpServer {
     },
   );
 
-  W(
+  R(
     "pf_report",
     {
       title: "실행 결과 보고",
@@ -267,74 +260,7 @@ export function buildServer(deps: ServerDeps): McpServer {
     },
     async (a: any) => {
       try {
-        const sid = a.sessionId as string;
-        const sess = requireFresh(deps, sid);
-        const nid = a.nodeId as string;
-        const attemptId = randomUUID();
-        const toolRef = a.tool as { server: string; name: string };
-        const args = (a.args ?? {}) as Record<string, unknown>;
-        const baseDir = strictSandbox ? join(deps.procforgeDir, "sandbox", sid) : deps.projectRoot;
-        const cat = sess.toolCatalog.find((t) => t.server === toolRef.server && t.name === toolRef.name);
-        // M4.1-7 스냅샷 판정: 새로 생기거나 바뀐 파일 → out, 그 외 자동분 → in.
-        // 호스트 제출분은 명시 입력(in) 유지. 스냅샷 없으면 기존 로직 폴백 + 경고.
-        const reportWarnings: string[] = [];
-        let outRels: Set<string> | undefined;
-        if (strictSandbox) {
-          const pre = readPreSnapshot(deps.procforgeDir, sid, nid);
-          if (!pre) {
-            reportWarnings.push(`스냅샷 없음(${nid}): 기존 존재 기반 캡처로 폴백 (pf_next 경유 권장)`);
-          } else {
-            const d = diffSnapshot(pre, baseDir);
-            outRels = new Set([...d.created, ...d.modified]);
-          }
-        }
-        const relOf = (p: string) => toBaseRel(baseDir, p);
-        type CapJob = { p: string; out: boolean };
-        const jobs: CapJob[] = [];
-        const pushUnique = (p: string, out: boolean) => {
-          if (jobs.some((j) => j.p === p)) return;
-          jobs.push({ p, out });
-        };
-        for (const p of collectExistingPaths({ baseDir, tool: toolRef, args, catalogEntry: cat, roles: ["in", "inout"] })) {
-          pushUnique(p, outRels?.has(relOf(p)) ?? false);
-        }
-        for (const p of collectExistingPaths({ baseDir, tool: toolRef, args, catalogEntry: cat, roles: ["out"] })) {
-          pushUnique(p, true);
-        }
-        if (a.resultJson !== undefined) {
-          for (const p of collectResultFiles({ baseDir, resultJson: a.resultJson })) {
-            pushUnique(p, outRels?.has(relOf(p)) ?? false);
-          }
-        }
-        for (const p of (a.artifacts ?? []) as string[]) pushUnique(p, false);
-        let stored: string[] = [];
-        let contents: Record<string, string> = {};
-        if (jobs.length > 0) {
-          const ing = ingestArtifacts({ procforgeDir: deps.procforgeDir, sessionId: sid, nodeId: nid, attemptId, baseDir, paths: jobs.map((j) => j.p), maxBytes: maxArtifactBytes });
-          stored = ing.stored;
-          contents = ing.contents;
-        }
-        // in/out 기록 (확정 시 out은 golden에서 제외)
-        writeCaptureRecord(deps.procforgeDir, sid, nid, attemptId, {
-          ins: stored.filter((_, i) => !jobs[i].out),
-          outs: stored.filter((_, i) => jobs[i].out),
-        });
-        const out = await client.pfReport({
-          sessionId: sid,
-          nodeId: nid,
-          tool: a.tool as { server: string; name: string },
-          args: a.args as Record<string, unknown>,
-          resultSummary: a.resultSummary as string,
-          resultJson: a.resultJson,
-          artifacts: stored,
-          artifactContents: contents,
-          selfVerdict: a.selfVerdict as "pass" | "fail",
-          selfReason: a.selfReason as string,
-          rubricReasons: a.rubricReasons as Record<string, string> | undefined,
-          attemptId,
-        });
-        deps.store.touch(sid);
-        return ok({ ...(out as unknown as Record<string, unknown>), warnings: reportWarnings });
+        return ok(await app.report(a));
       } catch (e) {
         return errResult(e);
       }

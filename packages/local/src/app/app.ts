@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { randomUUID } from "node:crypto";
 import type { CoreClient } from "@procforge/shared/core-client.js";
 import type { Session } from "@procforge/shared/schema.js";
 import { pfError } from "@procforge/shared/errors.js";
@@ -6,7 +7,8 @@ import type { FileStore } from "../filestore.js";
 import { collectCatalog } from "../catalog.js";
 import { nodeSummary } from "../views.js";
 import { seedSandbox } from "../services/workspace.js";
-import { takeSandboxSnapshot, writePreSnapshot } from "../services/snapshot.js";
+import { diffSnapshot, readPreSnapshot, takeSandboxSnapshot, writePreSnapshot } from "../services/snapshot.js";
+import { classifyReportPaths, ingestReportJobs } from "../services/artifacts.js";
 
 // ProcForge 유스케이스층 (M4.2-1). 사용자 행동 1개 = 메서드 1개.
 // 어댑터(server/cli/ui)는 입력 검증·호출·응답 포맷만 하고 정책·파일 작업은 여기에 위임한다.
@@ -121,5 +123,55 @@ export class ProcForgeApp {
       ...(out.blocked ? { blocked: out.blocked } : {}),
       instruction: out.instruction,
     };
+  }
+
+  async report(a: any): Promise<Record<string, unknown>> {
+    const sid = a.sessionId as string;
+    return this.locked(sid, async () => {
+      const sess = this.fresh(sid);
+      const nid = a.nodeId as string;
+      const attemptId = randomUUID();
+      const toolRef = a.tool as { server: string; name: string };
+      const args = (a.args ?? {}) as Record<string, unknown>;
+      const baseDir = this.strictSandbox ? join(this.procforgeDir, "sandbox", sid) : this.projectRoot;
+      const cat = sess.toolCatalog.find((t) => t.server === toolRef.server && t.name === toolRef.name);
+      // M4.1-7 스냅샷 판정: 새로 생기거나 바뀐 파일 → out, 그 외 자동분 → in.
+      // 호스트 제출분은 명시 입력(in) 유지. 스냅샷 없으면 기존 로직 폴백 + 경고.
+      const reportWarnings: string[] = [];
+      let outRels: Set<string> | undefined;
+      if (this.strictSandbox) {
+        const pre = readPreSnapshot(this.procforgeDir, sid, nid);
+        if (!pre) {
+          reportWarnings.push(`스냅샷 없음(${nid}): 기존 존재 기반 캡처로 폴백 (pf_next 경유 권장)`);
+        } else {
+          const d = diffSnapshot(pre, baseDir);
+          outRels = new Set([...d.created, ...d.modified]);
+        }
+      }
+      const jobs = classifyReportPaths({
+        baseDir, tool: toolRef, args, catalogEntry: cat,
+        resultJson: a.resultJson, hostPaths: (a.artifacts ?? []) as string[], outRels,
+      });
+      const { stored, contents } = ingestReportJobs({
+        procforgeDir: this.procforgeDir, sessionId: sid, nodeId: nid,
+        attemptId, baseDir, jobs, maxBytes: this.maxArtifactBytes,
+      });
+      const out = await this.core.pfReport({
+        sessionId: sid,
+        nodeId: nid,
+        tool: toolRef,
+        args,
+        resultSummary: a.resultSummary as string,
+        resultJson: a.resultJson,
+        artifacts: stored,
+        artifactContents: contents,
+        selfVerdict: a.selfVerdict as "pass" | "fail",
+        selfReason: a.selfReason as string,
+        rubricReasons: a.rubricReasons as Record<string, string> | undefined,
+        attemptId,
+      });
+      this.store.touch(sid);
+      return { ...(out as unknown as Record<string, unknown>), warnings: reportWarnings };
+    });
   }
 }
