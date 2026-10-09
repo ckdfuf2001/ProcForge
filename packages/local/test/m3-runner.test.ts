@@ -637,3 +637,79 @@ describe("M3.4 runner", () => {
     expect(chRec.summary.fail).toBe(0);
   }, 60000);
 });
+
+describe("M3.4.1 runner", () => {
+  it("쓰기 툴 비경로 인자는 원문 보존 (profile/xpath/file_type/input_language)", async () => {
+    const started = await client.pfStart({
+      request: "쓰기", toolCatalog: (await collectCatalog(root)).entries,
+      limits: { maxDepth: 3, maxRetries: 2, maxNodes: 10 },
+    });
+    const sid = started.session.id;
+    await client.pfResolve({ sessionId: sid, nodeId: "1", decision: "split", children: [{ goal: "쓰기" }] });
+    const args = {
+      path: "out.txt",
+      content: "hi",
+      profile: "admin",
+      xpath: "//title",
+      file_type: "pptx",
+      input_language: "ko",
+    };
+    await client.pfReport({
+      sessionId: sid, nodeId: "1.1",
+      tool: { server: "opencode", name: "write" }, args,
+      resultSummary: "wrote out.txt", resultJson: { wrote: "out.txt" },
+      selfVerdict: "pass", selfReason: "ok",
+    });
+    await client.pfResolve({
+      sessionId: sid, nodeId: "1.1", decision: "leaf",
+      tool: { server: "opencode", name: "write" },
+      argSpecs: {
+        path: { kind: "fixed", value: "out.txt" },
+        content: { kind: "fixed", value: "hi" },
+        profile: { kind: "fixed", value: "admin" },
+        xpath: { kind: "fixed", value: "//title" },
+        file_type: { kind: "fixed", value: "pptx" },
+        input_language: { kind: "fixed", value: "ko" },
+      } as never,
+    });
+    const rec = await runSession({ procforgeDir: pfdir, projectRoot: root, sessionId: sid, mode: "record" });
+    expect(rec.summary.fail).toBe(0);
+    expect(existsSync(join(pfdir, "runs", rec.runId, "fs", "out.txt"))).toBe(true);
+  }, 30000);
+
+  it("빈 펼침 의존은 blocked (자식 id 부재) + isResolved 일치", async () => {
+    const { isResolved } = await import("@procforge/shared/deps.js");
+    const started = await client.pfStart({
+      request: "빈펼침", toolCatalog: (await collectCatalog(root)).entries,
+      limits: { maxDepth: 4, maxRetries: 2, maxNodes: 20 },
+    });
+    const sid = started.session.id;
+    await client.pfResolve({
+      sessionId: sid, nodeId: "1", decision: "split",
+      children: [{ goal: "묶음" }, { goal: "대기", dependsOn: ["1.1"] }],
+    });
+    await client.pfResolve({ sessionId: sid, nodeId: "1.1", decision: "split", children: [{ goal: "b1" }] });
+    // 1.2를 leaf로 확정 (의존은 1.1)
+    await client.pfReport({
+      sessionId: sid, nodeId: "1.2",
+      tool: { server: "fake-ppt", name: "echo" }, args: { title: "w" },
+      resultSummary: JSON.stringify({ title: "w" }), resultJson: { title: "w" },
+      selfVerdict: "pass", selfReason: "ok",
+    });
+    await client.pfResolve({
+      sessionId: sid, nodeId: "1.2", decision: "leaf",
+      tool: { server: "fake-ppt", name: "echo" },
+      argSpecs: { title: { kind: "fixed", value: "w" } } as never,
+    });
+    // 자식 id를 부재 id로 바꿈 (손상 시뮬레이션)
+    const store = new FileStore(pfdir);
+    const b = store.getNode(sid, "1.1")!;
+    store.saveNode(sid, { ...b, children: ["9.9"] });
+    const byId = new Map([...store.getNodes(sid).values()].map((n) => [n.id, n]));
+    expect(isResolved(byId.get("1.1")!, byId)).toBe(false);
+    const rep = await runSession({ procforgeDir: pfdir, projectRoot: root, sessionId: sid, mode: "replay" });
+    const waiting = rep.results.find((r) => r.nodeId === "1.2")!;
+    expect(waiting.status).toBe("blocked");
+    expect(waiting.detail).toMatch(/1\.1/);
+  }, 30000);
+});

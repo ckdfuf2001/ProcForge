@@ -157,24 +157,35 @@ export async function runSession(opts: RunOptions): Promise<RunReport> {
         resultOf.set(n.id, r);
         continue;
       }
-      // 실패 전파 (M3.1-4/M3.3-6): split 의존은 자손 leaf로 펼침.
-      // 범위 내 의존이 fail/blocked이거나 출력이 없으면 blocked
-      const badDep = n.dependsOn
-        .flatMap((d) => expandDepLeafs(d, byIdAll))
-        .find((d) => {
+      // 실패 전파 (M3.1-4/M3.3-6/M3.4.1-5): split 의존은 자손 leaf로 펼침.
+      // 펼침이 비면(자손 leaf 0개·자식 id 부재) blocked. 범위 내 의존이
+      // fail/blocked이거나 출력이 없으면 blocked
+      let blockedBy: string | undefined;
+      for (const dep of n.dependsOn) {
+        const leaves = expandDepLeafs(dep, byIdAll);
+        if (leaves.length === 0) {
+          blockedBy = dep;
+          break;
+        }
+        const bad = leaves.find((d) => {
           if (!targets.has(d)) return false; // 범위 밖은 golden 선주입됨
           const dr = resultOf.get(d);
           if (!dr) return true;
           return dr.status === "fail" || dr.status === "blocked" || !outputs.has(d);
         });
-      if (badDep) {
-        const r: NodeResult = { nodeId: n.id, status: "blocked", failedConstraints: [], detail: `blocked by ${badDep}`, durationMs: Date.now() - start };
+        if (bad) {
+          blockedBy = bad;
+          break;
+        }
+      }
+      if (blockedBy) {
+        const r: NodeResult = { nodeId: n.id, status: "blocked", failedConstraints: [], detail: `blocked by ${blockedBy}`, durationMs: Date.now() - start };
         results.push(r);
         resultOf.set(n.id, r);
         continue;
       }
       try {
-        const r = await execNode(opts, session.params, outputs, pool, fsDir, n, mode, new Map(all.map((x) => [x.id, x])));
+        const r = await execNode(opts, session.params, outputs, pool, fsDir, n, mode, new Map(all.map((x) => [x.id, x])), runId);
         results.push(r);
         resultOf.set(n.id, r);
       } catch (e) {
@@ -236,6 +247,7 @@ async function execNode(
   n: Node,
   mode: RunMode,
   byId: Map<string, Node>,
+  runId: string,
 ): Promise<NodeResult> {
   const start = Date.now();
   // 구 세션 마이그레이션: 절대경로 fixed → 상대경로 (M3.2-2)
@@ -313,7 +325,7 @@ async function execNode(
         args,
         response: { summary: resp.resultText, json: resp.resultJson },
         at: new Date().toISOString(),
-      }, fsDir);
+      }, fsDir, runId);
     }
   }
 
