@@ -11,6 +11,7 @@ import { logger } from "./logger.js";
 import type { FileStore } from "./filestore.js";
 import { OUTPUT_SCHEMAS, nodeSummary } from "./views.js";
 import { runSession } from "./runner/index.js";
+import { logEvent } from "./trace.js";
 
 export const DEFAULT_SESSION_TTL_MS = 30 * 24 * 3600 * 1000;
 
@@ -133,7 +134,7 @@ export function buildServer(deps: ServerDeps): McpServer {
   const enabled = (name: string) => !deps.readOnly || (READ_ONLY_TOOLS as readonly string[]).includes(name);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const R = (name: string, config: any, cb: any) => {
-    if (enabled(name)) server.registerTool(name, config, cb);
+    if (enabled(name)) server.registerTool(name, config, logged(name, cb) as never);
   };
   // 쓰기 도구는 세션 lockfile로 프로세스 간 보호 (M2.6-7)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -142,11 +143,31 @@ export function buildServer(deps: ServerDeps): McpServer {
     server.registerTool(name, config as never, (async (a: any, extra: any) => {
       const release = deps.store.acquireLock(a.sessionId);
       try {
-        return await cb(a, extra);
+        return await logged(name, cb)(a, extra);
       } finally {
         release();
       }
     }) as never);
+  };
+  // pf_* 호출 기록 (trace용, M3.5)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const logged = (name: string, cb: any) => async (a: any, extra: any) => {
+    const r = (await cb(a, extra)) as { isError?: boolean; structuredContent?: { sessionId?: string } };
+    try {
+      const sid = (a.sessionId as string | undefined) ?? r.structuredContent?.sessionId ?? "";
+      if (sid) {
+        logEvent(deps.procforgeDir, {
+          at: new Date().toISOString(),
+          tool: name,
+          sessionId: sid,
+          nodeId: a.nodeId as string | undefined,
+          ok: !r.isError,
+        });
+      }
+    } catch {
+      // 추적 실패 무시
+    }
+    return r;
   };
   const strictSandbox = deps.strictSandbox ?? true;
   const maxArtifactBytes = deps.maxArtifactBytes ?? 5 * 1024 * 1024;

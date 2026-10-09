@@ -3,6 +3,8 @@ import { parseArgs } from "node:util";
 import { resolve } from "node:path";
 import { writeFileSync } from "node:fs";
 import { runSession, toJUnit } from "./runner/index.js";
+import { buildTrace, formatTraceMarkdown } from "./trace.js";
+import { exportSession } from "./export.js";
 
 const { values, positionals } = parseArgs({
   args: process.argv.slice(2),
@@ -18,16 +20,20 @@ const { values, positionals } = parseArgs({
     changed: { type: "boolean", default: false },
     "procforge-dir": { type: "string" },
     "project-root": { type: "string" },
+    redact: { type: "boolean", default: false },
+    "include-originals": { type: "boolean", default: false },
+    out: { type: "string" },
   },
   allowPositionals: true,
 });
 
-async function main(): Promise<number> {
-  const [cmd] = positionals;
-  if (cmd !== "test") {
-    console.error("usage: procforge test --session <id> [--node <id>] [--mode record|replay|passthrough|live] [--update-golden] [--allow-bash] [--allow-project-read] [--changed] [--junit out.xml]");
-    return 2;
-  }
+function dirs(): { projectRoot: string; procforgeDir: string } {
+  const projectRoot = resolve(values["project-root"] ?? process.env.PROCFORGE_PROJECT_ROOT ?? process.cwd());
+  const procforgeDir = resolve(values["procforge-dir"] ?? process.env.PROCFORGE_DIR ?? `${projectRoot}/.procforge`);
+  return { projectRoot, procforgeDir };
+}
+
+async function cmdTest(): Promise<number> {
   if (values.procedure && !values.session) {
     console.error("procedure 실행은 M5에서 지원 (현재는 --session만)");
     return 2;
@@ -45,8 +51,7 @@ async function main(): Promise<number> {
     console.error("--update-golden은 record/passthrough에서만 허용 (replay 불가)");
     return 2;
   }
-  const projectRoot = resolve(values["project-root"] ?? process.env.PROCFORGE_PROJECT_ROOT ?? process.cwd());
-  const procforgeDir = resolve(values["procforge-dir"] ?? process.env.PROCFORGE_DIR ?? `${projectRoot}/.procforge`);
+  const { projectRoot, procforgeDir } = dirs();
   try {
     const report = await runSession({
       procforgeDir,
@@ -68,6 +73,55 @@ async function main(): Promise<number> {
     console.error(`error: ${e instanceof Error ? e.message : String(e)}`);
     return 1;
   }
+}
+
+async function cmdTrace(): Promise<number> {
+  const [sid] = positionals.slice(1);
+  if (!sid) {
+    console.error("usage: procforge trace <sessionId>");
+    return 2;
+  }
+  const { procforgeDir } = dirs();
+  try {
+    console.log(formatTraceMarkdown(buildTrace(procforgeDir, sid)));
+    return 0;
+  } catch (e) {
+    console.error(`error: ${e instanceof Error ? e.message : String(e)}`);
+    return 1;
+  }
+}
+
+async function cmdExport(): Promise<number> {
+  const [sid] = positionals.slice(1);
+  if (!sid) {
+    console.error("usage: procforge export <sessionId> [--redact] [--include-originals] [--out path]");
+    return 2;
+  }
+  const { procforgeDir } = dirs();
+  try {
+    const outPath = resolve(values.out ?? `${procforgeDir}/exports/${sid}.zip`);
+    const r = exportSession({
+      procforgeDir,
+      sessionId: sid,
+      outPath,
+      redact: values.redact ?? false,
+      includeOriginals: values["include-originals"] ?? false,
+    });
+    console.log(`exported: ${r.outPath} (${r.files} files, redacted=${r.redacted})`);
+    return 0;
+  } catch (e) {
+    console.error(`error: ${e instanceof Error ? e.message : String(e)}`);
+    return 1;
+  }
+}
+
+async function main(): Promise<number> {
+  const [cmd] = positionals;
+  if (cmd === "test") return cmdTest();
+  if (cmd === "trace") return cmdTrace();
+  if (cmd === "export") return cmdExport();
+  console.error("usage: procforge <test|trace|export> ...");
+  return 2;
 }
 
 process.exit(await main());

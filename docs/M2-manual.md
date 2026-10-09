@@ -1,12 +1,11 @@
-# M2/M2.5 수동 검증 (OpenCode + ProcForge local MCP)
+# M2/M2.5 수동 검증 (OpenCode + ProcForge local MCP, Windows 기준)
 
-## 0. 도구 구성 (M2.5)
+## 0. 도구 구성 (M2.5+M4)
 
-등록 도구 15개 (결정적 순서):
+등록 도구 16개 (결정적 순서):
 `pf_start`, `pf_next`, `pf_report`, `pf_split`, `pf_confirm_leaf`, `pf_retry`,
 `pf_ask_human`, `pf_approve`, `pf_advise`, `pf_tree`, `pf_get_node`, `pf_lock`,
-`pf_reopen`, `pf_refresh_catalog`, `pf_test`.
-`pf_finalize`/`pf_test`는 M5/M3까지 미등록. 구 `pf_resolve`는 위 4개로 분리됨.
+`pf_reopen`, `pf_refresh_catalog`, `pf_test`, `pf_finalize`.
 프롬프트 `procforge_decompose` 1개 등록.
 
 환경변수: `PROCFORGE_READ_ONLY=1`이면 읽기 3종(`pf_next`, `pf_tree`, `pf_get_node`)만 등록.
@@ -19,27 +18,49 @@ pnpm install
 pnpm -r build
 ```
 
-## 2. OpenCode에 local MCP 등록
+## 2. OpenCode에 MCP 등록 (Windows, 그대로 복사 가능)
 
-프로젝트 루트 `opencode.json` (없으면 생성)에 추가:
+프로젝트 루트 `opencode.json` (없으면 생성). `<REPO>`는 ProcForge 체크아웃 경로:
 
 ```json
 {
   "mcp": {
     "procforge": {
       "type": "local",
-      "command": ["node", "D:/opencode/opencode-exe/workspace/repos/ProcForge/packages/local/dist/main.js", "."],
+      "command": ["node", "<REPO>/packages/local/dist/main.js", "."],
+      "enabled": true
+    },
+    "pptx": {
+      "type": "local",
+      "command": ["pptx-mcp-server"],
       "enabled": true
     }
   }
 }
 ```
 
+- PPT 서버 설치: `pip install "pptx-mcp-server[mcp]"` (knorq-ai, 선택 근거는 `docs/M3.5-dogfood.md`).
 - `command` 세 번째 인자(`.`)는 프로젝트 루트다. 생략 시 `PROCFORGE_PROJECT_ROOT` 환경변수, 그것도 없으면 cwd.
 - `.procforge/` 저장 위치 변경: `PROCFORGE_DIR` 환경변수.
 - 전역 등록은 `%USERPROFILE%/.config/opencode/opencode.json`에 동일 항목 추가.
 
 주의: 수정 후 OpenCode 재시작 (MCP 서버는 시작 시 연결).
+
+## 2b. 시작부터 replay까지 (복사 순서)
+
+```powershell
+pnpm install
+pnpm -r build
+```
+
+OpenCode 대화창에서 프롬프트 `procforge_decompose` 실행 후 요청 입력
+(예: "a.pptx를 9월 월간보고서로 완성해라"). 분해 루프 완료 후:
+
+```powershell
+node packages/local/dist/cli.js test --session <sid> --mode record --allow-project-read
+node packages/local/dist/cli.js test --session <sid> --mode replay --junit report.xml
+node packages/local/dist/cli.js trace <sid>
+```
 
 ## 3. 확인 절차
 
@@ -67,7 +88,7 @@ pnpm -r build
 npx @modelcontextprotocol/inspector node packages/local/dist/main.js <projectRoot>
 ```
 
-브라우저에서 Tools 탭: 13개 도구 목록·입력 스키마·annotations 확인.
+브라우저에서 Tools 탭: 16개 도구 목록·입력 스키마·annotations 확인.
 `pf_start` → `pf_next` → `pf_split` 순으로 호출해 structuredContent 응답 확인.
 Prompts 탭: `procforge_decompose` 조회. Errors 탭에 스택 노출이 없는지 확인.
 
@@ -92,4 +113,4 @@ MCP에서는 `pf_test` 도구로 동일 실행 (요약 + report 경로 반환).
 
 - MCP 연결 실패: `node packages/local/dist/main.js <projectRoot>`를 직접 실행해 stdio 응답 확인.
 - 카탈로그 수집 실패: `warnings` 필드에 서버별 사유 기록. `enabled: false` 서버는 건너뜀.
-- 외부 부작용 노드: `pf_report` 대신 `pf_resolve(ask_human)` 후 사람 승인 절차.
+- 외부 부작용 노드: `pf_ask_human`으로 승인 요청 후 `pf_approve`.

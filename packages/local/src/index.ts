@@ -5,4 +5,6 @@ export * from "./artifacts.js";
 export * from "./catalog.js";
 export * from "./server.js";
 export * from "./fsutil.js";
+export * from "./trace.js";
+export * from "./export.js";
 export * from "./runner/index.js";
