@@ -8,6 +8,7 @@ import { isResolved } from "@procforge/shared/deps.js";
 import { compareNodeIds } from "@procforge/shared/ids.js";
 import { restoreParamsPlaceholders } from "@procforge/shared/normalize.js";
 import { FileStore } from "./filestore.js";
+import { validateTree } from "./validator.js";
 import { constraintSummary } from "./views.js";
 
 // 확정 트리 → 절차서 export/import (M4). procedure.json이 재실행 입력의 단일 원천.
@@ -86,6 +87,14 @@ export function finalizeSession(
   const unresolved = nodes.filter((n) => !isResolved(n, byId)).map((n) => n.id);
   if (unresolved.length > 0) {
     throw Object.assign(new Error(`미해결 노드: ${unresolved.join(", ")}`), { code: "bad_request" });
+  }
+  // M4.1-4: 구조 검증 (10종). 오류 있으면 목록과 함께 거부.
+  const violations = validateTree(session, nodes);
+  if (violations.length > 0) {
+    throw Object.assign(
+      new Error(`검증 오류 ${violations.length}건: ${violations.map((v) => `[${v.code}]${v.nodeId ? ` ${v.nodeId}` : ""} ${v.message}`).join("; ")}`),
+      { code: "bad_request" },
+    );
   }
   // fixed == params 경고 (재사용 깨짐). M4.1-3: 부분 문자열 포함까지 확대
   // (짧은 값 오경보 방지: 길이 3 이상만). golden은 자리표시자 복원 후 검사.

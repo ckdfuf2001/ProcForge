@@ -153,6 +153,8 @@
   1.10 < 1.2 전도 방지).
 - [M4.1-3] params 경고 확대 — fixed 문자열의 부분 포함(길이 3 이상 값만) +
   golden.output 포함 (자리표시자 복원 후 검사).
+- [M4.1-4] finalize 전 validateTree 실행. 오류 있으면 bad_request + 목록
+  (resolved 검사 이후).
 
 ## M3.2
 

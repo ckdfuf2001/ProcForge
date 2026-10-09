@@ -97,6 +97,21 @@ describe("pf_finalize", () => {
     expect(() => finalizeSession(pfdir, sid, "bad")).toThrow(/미해결 노드: 1\.2/);
   }, 30000);
 
+  it("M4.1-4 검증 오류 시 bad_request + 목록", async () => {
+    const sid = await scripted();
+    const store = new FileStore(pfdir);
+    const n = store.getNode(sid, "1.1")!;
+    store.saveNode(sid, { ...n, tool: { server: "nope", name: "nope", schemaHash: "x" } });
+    try {
+      finalizeSession(pfdir, sid, "invalid-test", { projectRoot: root });
+      expect.unreachable();
+    } catch (e) {
+      expect((e as { code?: string }).code).toBe("bad_request");
+      expect((e as Error).message).toMatch(/검증 오류/);
+      expect((e as Error).message).toContain("1.1");
+    }
+  }, 30000);
+
   it("M4.1-1 명령 파일: 프로젝트 출력 + 사본, force 규칙", async () => {
     const sid = await scripted();
     const a = finalizeSession(pfdir, sid, "cmd-a", { projectRoot: root });
