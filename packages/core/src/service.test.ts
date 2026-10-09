@@ -705,6 +705,7 @@ function recordingStore(inner = createMemoryStore(), opts: { failAppend?: boolea
       appended.push({ sid, evts });
       inner.appendEvents(sid, evts);
     },
+    readEvents: (sid) => inner.readEvents(sid),
   };
   return { store, calls, appended };
 }
@@ -1129,6 +1130,29 @@ describe("M4.2-2 pfUpdateCatalog", () => {
       svc.pfUpdateCatalog({ sessionId: s.session.id, entries: [{ server: "fs" }] }),
     ).rejects.toThrow(/bad catalog entry/);
     expect((await svc.pfTree(s.session.id)).session.revision).toBe(1);
+  });
+});
+
+describe("M4.2-2 getEvents", () => {
+  it("이벤트 조회 + sinceSeq", async () => {
+    const svc = new CoreService(createMemoryStore(), passEval);
+    const s = await svc.pfStart({ request: "r", toolCatalog: catalog });
+    expect(await svc.getEvents(s.session.id)).toEqual([]);
+    await svc.pfReport({ ...rep(), sessionId: s.session.id });
+    await svc.pfResolve({
+      sessionId: s.session.id, nodeId: "1", decision: "leaf",
+      tool: { server: "fs", name: "read" },
+      argSpecs: { path: { kind: "fixed", value: "a" } },
+    });
+    const all = await svc.getEvents(s.session.id);
+    expect(all.map((e) => e.method)).toEqual(["pfReport", "pfResolve"]);
+    expect(all.map((e) => e.seq)).toEqual([1, 2]);
+    expect(await svc.getEvents(s.session.id, 1)).toHaveLength(1);
+  });
+
+  it("없는 세션 조회 거부", async () => {
+    const svc = new CoreService(createMemoryStore(), passEval);
+    await expect(svc.getEvents("123e4567-e89b-42d3-a456-426614174000")).rejects.toThrow(/not found/);
   });
 });
 

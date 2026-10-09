@@ -47,7 +47,7 @@ import { maskParamsValues, restoreParamsPlaceholders } from "@procforge/shared/n
 import { PROCEDURE_NAME_RE, type ProcedureDoc } from "@procforge/shared/procedure.js";
 import { validateTree } from "@procforge/shared/validator.js";
 import { combineHashes } from "@procforge/shared/hash.js";
-import type { Actor } from "@procforge/shared/dto.js";
+import type { Actor, EventEntry } from "@procforge/shared/dto.js";
 import type { ChangeOpts } from "@procforge/shared/core-client.js";
 import { pfError, type ErrorCode, type ProcForgeError } from "@procforge/shared/errors.js";
 export { similarKey };
@@ -979,6 +979,13 @@ export class CoreService implements CoreClient {
       }),
     };
     return { doc, warnings };
+  }
+
+  /** 상태 이벤트 조회 (M4.2-2, 읽기 전용) */
+  async getEvents(sessionId: string, sinceSeq?: number): Promise<EventEntry[]> {
+    this.sess(sessionId);
+    const all = this.store.readEvents(sessionId);
+    return sinceSeq === undefined ? all : all.filter((e) => e.seq > sinceSeq);
   }
 
   async pfTree(sessionId: string): Promise<{ nodes: Node[]; session: Session }> {

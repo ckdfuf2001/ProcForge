@@ -23,5 +23,6 @@ export function createMemoryStore(): Store {
     appendEvents: (sid, evts) => {
       events.set(sid, [...(events.get(sid) ?? []), ...evts]);
     },
+    readEvents: (sid) => [...(events.get(sid) ?? [])],
   };
 }

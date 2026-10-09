@@ -3,6 +3,7 @@ import { join, dirname } from "node:path";
 import type { Store } from "@procforge/shared/store.js";
 import type { Node, Session } from "@procforge/shared/schema.js";
 import type { EventEntry } from "@procforge/shared/dto.js";
+import { EventEntrySchema } from "@procforge/shared/dto.js";
 import { NodeIdSchema, NodeSchema, SessionIdSchema, SessionSchema } from "@procforge/shared/schema.js";
 import { logger } from "./logger.js";
 import { writeAtomicFile } from "./fsutil.js";
@@ -78,6 +79,25 @@ export class FileStore implements Store {
     const dir = this.sessionDir(sessionId);
     mkdirSync(dir, { recursive: true });
     appendFileSync(join(dir, "events.jsonl"), events.map((e) => JSON.stringify(e)).join("\n") + "\n");
+  }
+
+  /** 상태 이벤트 조회 (R7 히스토리 원천, R7형만) */
+  readEvents(sessionId: string): EventEntry[] {
+    assertSessionId(sessionId);
+    const p = join(this.sessionDir(sessionId), "events.jsonl");
+    if (!existsSync(p)) return [];
+    const out: EventEntry[] = [];
+    for (const line of readFileSync(p, "utf8").split("\n")) {
+      const t = line.trim();
+      if (!t) continue;
+      try {
+        const parsed = EventEntrySchema.safeParse(JSON.parse(t));
+        if (parsed.success) out.push(parsed.data);
+      } catch {
+        // 손상 줄 무시
+      }
+    }
+    return out;
   }
 
   // ---- 세션 lockfile (M2.6-7, 프로세스 간 advisory lock) ----

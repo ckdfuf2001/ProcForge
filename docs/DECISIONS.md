@@ -206,6 +206,8 @@
 - pfUpdateCatalog(sessionId, entries) — 수집은 local, 저장만 core. 세션
   toolCatalog 전체 교체 (가이드 표의 sessionId 생략은 표기 간소화로 보고
   세션 기준으로 구현).
+- getEvents + Store.readEvents — 메모리·파일 구현, sinceSeq 지원. Tx는 base
+  위임 (미확정분 제외).
 
 ## M3.2
 

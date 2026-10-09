@@ -11,4 +11,6 @@ export type Store = {
   saveNode(sessionId: string, n: Node): void;
   /** 상태 이벤트 append (R6 트랜잭션: 상태 저장 전 호출, 실패 시 전체 실패) */
   appendEvents(sessionId: string, events: EventEntry[]): void;
+  /** 상태 이벤트 조회 (R7 히스토리 원천) */
+  readEvents(sessionId: string): EventEntry[];
 };

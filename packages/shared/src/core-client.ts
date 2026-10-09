@@ -1,5 +1,5 @@
 import type { Constraint, Node, Session, ArgSpec, SideEffect } from "./schema.js";
-import type { Actor } from "./dto.js";
+import type { Actor, EventEntry } from "./dto.js";
 import type { ProcedureDoc } from "./procedure.js";
 
 // local → core 호출은 반드시 이 인터페이스를 통해서만 한다. (가이드 §3, §8)
@@ -172,6 +172,8 @@ export interface CoreClient {
   pfEditArgs(input: PfEditArgsInput): Promise<{ node: Node; instruction: string }>;
   /** 목표·검사 조건 직접 수정 (M4.2-2) */
   pfEditNode(input: PfEditNodeInput): Promise<{ node: Node; instruction: string }>;
+  /** 상태 이벤트 조회 (M4.2-2, R7 히스토리 원천) */
+  getEvents(sessionId: string, sinceSeq?: number): Promise<EventEntry[]>;
   /** 절차서 문서 조립 (M4.2-1, 검증·params 경고 포함. 파일 쓰기는 local) */
   pfBuildProcedure(sessionId: string, name: string): Promise<{ doc: ProcedureDoc; warnings: string[] }>;
   /** external dry-run 계획 승인/거부 (M2.6-4) */

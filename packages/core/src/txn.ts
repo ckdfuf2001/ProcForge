@@ -54,6 +54,11 @@ export class TxStore implements Store {
     this.bufferedEvents.push({ sessionId, events: [...events] });
   }
 
+  /** 읽기는 base 위임 (미확정분 제외) */
+  readEvents(sessionId: string): EventEntry[] {
+    return this.base.readEvents(sessionId);
+  }
+
   writtenNodeIds(sessionId: string): string[] {
     return [...(this.touchedNodes.get(sessionId) ?? [])];
   }
