@@ -29,5 +29,6 @@ export function createMemoryStore(): Store {
     touchSession: (sid) => {
       lastUsed.set(sid, Date.now());
     },
+    withLock: (_sid, fn) => fn(),
   };
 }

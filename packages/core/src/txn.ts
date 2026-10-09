@@ -67,6 +67,10 @@ export class TxStore implements Store {
     this.base.touchSession(sessionId);
   }
 
+  withLock<T>(sessionId: string, fn: () => T): T {
+    return this.base.withLock(sessionId, fn);
+  }
+
   writtenNodeIds(sessionId: string): string[] {
     return [...(this.touchedNodes.get(sessionId) ?? [])];
   }

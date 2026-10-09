@@ -17,4 +17,6 @@ export type Store = {
   getLastUsed(sessionId: string): number | undefined;
   /** 최종 사용 시각 갱신 */
   touchSession(sessionId: string): void;
+  /** 세션 잠금 안에서 실행 (M4.2-2.5, core change 트랜잭션용) */
+  withLock<T>(sessionId: string, fn: () => T): T;
 };

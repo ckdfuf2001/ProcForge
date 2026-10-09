@@ -708,6 +708,10 @@ function recordingStore(inner = createMemoryStore(), opts: { failAppend?: boolea
     readEvents: (sid) => inner.readEvents(sid),
     getLastUsed: (sid) => inner.getLastUsed(sid),
     touchSession: (sid) => inner.touchSession(sid),
+    withLock: (sid, fn) => {
+      calls.push("withLock");
+      return inner.withLock(sid, fn);
+    },
   };
   return { store, calls, appended };
 }
@@ -763,6 +767,14 @@ describe("M4.2-0.5 revision·이벤트 트랜잭션", () => {
     const s = await svc.pfStart({ request: "r", toolCatalog: catalog });
     await svc.pfNext(s.session.id);
     expect((await svc.pfTree(s.session.id)).session.revision).toBe(0);
+  });
+
+  it("M4.2-2.5-2 변경은 withLock 안에서 실행", async () => {
+    const { store, calls } = recordingStore();
+    const svc = new CoreService(store, passEval);
+    const s = await svc.pfStart({ request: "r", toolCatalog: catalog });
+    await svc.pfReport({ ...rep(), sessionId: s.session.id });
+    expect(calls).toContain("withLock");
   });
 
   it("amendAttemptArtifacts: 교체 + revision +1", async () => {

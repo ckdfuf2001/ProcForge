@@ -154,6 +154,16 @@ export class FileStore implements Store {
     this.writeAtomic(this.metaPath(sid), JSON.stringify({ lastUsedAt: new Date().toISOString() }));
   }
 
+  /** 세션 lockfile 안에서 실행 (M4.2-2.5, core change 트랜잭션용) */
+  withLock<T>(sid: string, fn: () => T): T {
+    const release = this.acquireLock(sid);
+    try {
+      return fn();
+    } finally {
+      release();
+    }
+  }
+
   getLastUsed(sid: string): number | undefined {
     assertSessionId(sid);
     const p = this.metaPath(sid);

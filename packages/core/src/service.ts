@@ -201,6 +201,7 @@ export class CoreService implements CoreClient {
     op: { method: string; expectedRevision?: number; actor?: Actor },
     body: () => { result: R; summary: string },
   ): R {
+    return this.base.withLock(sessionId, () => {
     const pre = this.checkFresh(sessionId);
     if (op.expectedRevision !== undefined && pre.revision !== op.expectedRevision) {
       throw err("conflict", `revision mismatch: expected ${op.expectedRevision}, actual ${pre.revision}`);
@@ -237,6 +238,7 @@ export class CoreService implements CoreClient {
     } finally {
       this.tx = prev;
     }
+    });
   }
 
   private sess(sid: string): Session {
