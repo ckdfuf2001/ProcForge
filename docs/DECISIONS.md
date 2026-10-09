@@ -182,6 +182,18 @@
 - [M3.4.1-7] CI 매트릭스에 windows-latest 추가. Windows 실패는 skip 없이 수정
   (자식 프로세스 경로 fileURL·구분자·대소문자 이슈 해결).
 
+## M3.4.4 (실효 의존 통일 + 교착 종결)
+
+- [M3.4.4-1] shared/deps에 effectiveDeps(raw own+조상+var 펼침, 자기·자손 제외) 신설.
+  pfNext ready·runner 순서·hashFor·propagateStale·hasCycle이 이것만 사용.
+  정정: M3.4.3-3 기대값 '1.3.2 leaf 유지'는 상속 미반영 가정이었다. 1.3.2는 조상
+  1.3의 dependsOn ["1.2"]를 상속하므로 1.2.1 변경 시 함께 open이 맞다.
+- [M3.4.4-2] computeDeadlock 원인 하강 + 승격 폴백. 원인 0개면 stuck 자신 승격,
+  승격 불가 원인만 있으면 첫 stuck 승격. seed 고정 50 그래프 불변식
+  (needs_human 종결·blocked 2회 연속 금지). descendantLeafs corrupt 순환 가드.
+- [M3.4.4-3] pf_split 자식 dependsOn 검증 (기존·형제 외 bad_request dep_missing).
+  tentative 순환 + hasLineageDep(자식 parentId 포함) 이중 검사.
+
 ## M3.4.3 (그래프 교착)
 
 - [M3.4.3-1] pfNext 교착 응답 — ready 0 + pending + needs_human 없음이면
