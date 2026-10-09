@@ -166,6 +166,8 @@
   out은 attempt 증거로 ingest하되 확정 시 golden에서 제외 (run fs 미복사).
   명시 path(확정 시)는 스냅샷보다 우선. 스냅샷 없으면 기존 로직 폴백 +
   pf_report warnings. 스냅샷은 sandbox만 (strict=false는 폴백).
+- [M4.1-8] SKILL.md/command.md는 "검증(replay)만 가능, 새 데이터 실행은
+  미지원(M5)"으로 표기 (params 변경분은 drift 검출).
 
 ## M3.2
 

@@ -224,4 +224,16 @@ describe("pf_finalize", () => {
     }
     expect(() => finalizeSession(pfdir, sid, "ok-name-1", { projectRoot: root })).not.toThrow();
   }, 30000);
+
+  it("M4.1-8 SKILL/command 문구는 검증(replay) 한정", async () => {
+    const sid = await scripted();
+    const out = finalizeSession(pfdir, sid, "honest-test", { projectRoot: root });
+    const skill = readFileSync(join(out.dir, "SKILL.md"), "utf8");
+    expect(skill).toContain("검증(replay)만 가능");
+    expect(skill).toContain("미지원(M5)");
+    const cmd = readFileSync(join(out.dir, "command.md"), "utf8");
+    expect(cmd).toContain("검증(replay)");
+    expect(cmd).toContain("미지원(M5");
+    expect(skill).not.toContain("그대로 실행");
+  }, 30000);
 });

@@ -284,15 +284,16 @@ function renderSkillMd(doc: ProcedureDoc): string {
   return [
     "---",
     `name: ${doc.name}`,
-    `description: ProcForge 확정 절차 (${steps}단계). params로 재실행 가능.`,
+    `description: ProcForge 확정 절차 (${steps}단계). 검증(replay)만 가능, 새 데이터 실행은 미지원(M5).`,
     "---",
     ``,
     `# ${doc.name}`,
     ``,
-    `이 skill은 확정된 절차를 그대로 실행한다. 탐색 금지.`,
+    `이 skill은 확정된 절차를 검증(replay)한다. 탐색 금지.`,
+    `새 데이터 실행(live)은 미지원(M5 예정). params 변경 시 passthrough drift로 검출된다.`,
     `파라미터: ${Object.keys(doc.params).map((k) => `\`${k}\``).join(", ") || "없음"}`,
     ``,
-    `실행: \`procforge test procedures/${doc.name} --param k=v ...\``,
+    `검증: \`procforge test procedures/${doc.name} --param k=v ...\``,
     `상세 단계는 PROCEDURE.md 참조. 실패 시 단계 번호와 constraint를 보고하라.`,
     ``,
   ].join("\n");
@@ -302,10 +303,11 @@ function renderCommandMd(doc: ProcedureDoc): string {
   return [
     `# /${doc.name}`,
     ``,
-    `이 절차를 그대로 실행, 탐색 금지, 실패 시 단계 번호 보고.`,
+    `이 절차를 검증(replay)한다. 탐색 금지, 실패 시 단계 번호 보고.`,
+    `새 데이터 실행(live)은 미지원(M5 예정).`,
     ``,
     `파라미터: ${Object.entries(doc.params).map(([k, v]) => `${k}="${v.default}"`).join(" ") || "없음"}`,
-    `실행: \`procforge test procedures/${doc.name}\` + --param 전달.`,
+    `검증: \`procforge test procedures/${doc.name}\` + --param 전달.`,
     ``,
   ].join("\n");
 }
