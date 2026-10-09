@@ -22,7 +22,7 @@ describe("FileStore ID 이중 검증 (M2.6-2)", () => {
     expect(() => store.getNodes("../escape")).toThrow();
   });
 
-  it("M4.2-0 구 세션 로드 시 revision 0 마이그레이션", () => {
+  it("M4.2-0.5-2 구 세션 읽기: revision 0 반환 + 파일 바이트 불변", () => {
     const legacy = {
       id: sid,
       request: "r",
@@ -34,10 +34,10 @@ describe("FileStore ID 이중 검증 (M2.6-2)", () => {
     };
     mkdirSync(join(dir, "sessions", sid), { recursive: true });
     writeFileSync(join(dir, "sessions", sid, "session.json"), JSON.stringify(legacy));
+    const before = readFileSync(join(dir, "sessions", sid, "session.json"), "utf8");
     expect(store.getSession(sid)?.revision).toBe(0);
-    // 파일에도 기록됨
-    const raw = JSON.parse(readFileSync(join(dir, "sessions", sid, "session.json"), "utf8")) as Record<string, unknown>;
-    expect(raw["revision"]).toBe(0);
+    // 읽기 중 쓰기 없음
+    expect(readFileSync(join(dir, "sessions", sid, "session.json"), "utf8")).toBe(before);
   });
 
   it("M4.2-0.5 appendEvents는 events.jsonl에 누적", () => {

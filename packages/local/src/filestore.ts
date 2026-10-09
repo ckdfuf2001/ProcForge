@@ -35,17 +35,9 @@ export class FileStore implements Store {
     assertSessionId(id);
     const p = join(this.sessionDir(id), "session.json");
     if (!existsSync(p)) return undefined;
+    // M4.2-0.5-2: 읽기는 순수 조회 (구 세션 revision 기본값은 파서가 적용)
     const raw = JSON.parse(readFileSync(p, "utf8")) as Record<string, unknown>;
-    const parsed = SessionSchema.parse(raw);
-    if (typeof raw["revision"] !== "number") {
-      // M4.2-0: 구 세션 로드 시 revision 0으로 마이그레이션
-      try {
-        this.writeAtomic(p, JSON.stringify({ ...raw, revision: 0 }, null, 2));
-      } catch {
-        // 마이그레이션 실패 무시 (읽기는 성공분 반환)
-      }
-    }
-    return parsed;
+    return SessionSchema.parse(raw);
   }
 
   saveSession(s: Session): void {
