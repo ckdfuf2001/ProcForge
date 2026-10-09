@@ -372,7 +372,7 @@ export function buildServer(deps: ServerDeps): McpServer {
     },
   );
 
-  W(
+  R(
     "pf_approve",
     {
       title: "계획 승인",
@@ -393,11 +393,7 @@ export function buildServer(deps: ServerDeps): McpServer {
     },
     async (a: any) => {
       try {
-        const sid = a.sessionId as string;
-        const s = requireFresh(deps, sid);
-        const n = await client.pfApprove(sid, a.nodeId as string, a.approved as boolean, a.note as string | undefined);
-        deps.store.touch(sid);
-        return ok({ node: nodeSummary(n, s.limits) });
+        return ok(await app.approve(a));
       } catch (e) {
         return errResult(e);
       }

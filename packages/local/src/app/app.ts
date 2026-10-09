@@ -279,4 +279,14 @@ export class ProcForgeApp {
       return { node: nodeSummary(out.node, s.limits), instruction: out.instruction };
     });
   }
+
+  async approve(a: any): Promise<Record<string, unknown>> {
+    const sid = a.sessionId as string;
+    return this.locked(sid, async () => {
+      const s = this.fresh(sid);
+      const n = await this.core.pfApprove(sid, a.nodeId as string, a.approved as boolean, a.note as string | undefined);
+      this.store.touch(sid);
+      return { node: nodeSummary(n, s.limits) };
+    });
+  }
 }
