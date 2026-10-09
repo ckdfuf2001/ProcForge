@@ -330,4 +330,14 @@ export class ProcForgeApp {
       nextCursor: cursor + limit < set.length ? cursor + limit : null,
     };
   }
+
+  async getNode(a: any): Promise<Record<string, unknown>> {
+    const sid = a.sessionId as string;
+    this.fresh(sid);
+    const { nodes } = await this.core.pfTree(sid);
+    this.store.touch(sid);
+    const n = nodes.find((x) => x.id === (a.nodeId as string));
+    if (!n) throw pfError("not_found", `노드 없음: ${a.nodeId}`, "pf_tree로 id를 확인하라.");
+    return { node: n };
+  }
 }

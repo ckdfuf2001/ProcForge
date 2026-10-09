@@ -499,13 +499,7 @@ export function buildServer(deps: ServerDeps): McpServer {
     },
     async (a: any) => {
       try {
-        const sid = a.sessionId as string;
-        requireFresh(deps, sid);
-        const { nodes } = await client.pfTree(sid);
-        deps.store.touch(sid);
-        const n = nodes.find((x) => x.id === (a.nodeId as string));
-        if (!n) throw err("not_found", `노드 없음: ${a.nodeId}`, "pf_tree로 id를 확인하라.");
-        return ok({ node: n });
+        return ok(await app.getNode(a));
       } catch (e) {
         return errResult(e);
       }
