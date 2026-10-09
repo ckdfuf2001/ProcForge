@@ -7,7 +7,7 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { buildServer } from "../src/server.js";
 import { createLocalStack } from "../src/core-inprocess.js";
 import { FileStore } from "../src/filestore.js";
-import { readCaptureRecord } from "../src/capture.js";
+import { readCaptureRecord } from "../src/services/snapshot.js";
 import { runSession } from "../src/runner/index.js";
 import { setupRunFs } from "../src/runner/workdir.js";
 

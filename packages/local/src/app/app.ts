@@ -6,6 +6,7 @@ import type { FileStore } from "../filestore.js";
 import { collectCatalog } from "../catalog.js";
 import { nodeSummary } from "../views.js";
 import { seedSandbox } from "../services/workspace.js";
+import { takeSandboxSnapshot, writePreSnapshot } from "../services/snapshot.js";
 
 // ProcForge 유스케이스층 (M4.2-1). 사용자 행동 1개 = 메서드 1개.
 // 어댑터(server/cli/ui)는 입력 검증·호출·응답 포맷만 하고 정책·파일 작업은 여기에 위임한다.
@@ -76,8 +77,7 @@ export class ProcForgeApp {
     }
   }
 
-  async start(a: any): Promise<Record<string, unknown>> {
-    const collected = a.toolCatalog
+  async start(a: any): Promise<Record<string, unknown>> {    const collected = a.toolCatalog
       ? undefined
       : await collectCatalog(this.projectRoot, { cacheDir: join(this.procforgeDir, "cache") });
     const catalog = a.toolCatalog ?? collected!.entries;
@@ -97,6 +97,29 @@ export class ProcForgeApp {
       warnings,
       sessionExpiresInDays: Math.round((this.sessionTtlMs ?? DEFAULT_SESSION_TTL_MS) / 86400000),
       opencodeVersion: out.session.opencodeVersion ?? "unknown",
+    };
+  }
+
+  async next(a: any): Promise<Record<string, unknown>> {
+    const sid = a.sessionId as string;
+    const s = this.fresh(sid);
+    const out = await this.core.pfNext(sid);
+    this.store.touch(sid);
+    if (out.done) return { done: true };
+    // M4.1-7: 노드 분기 직전 sandbox 스냅샷 (pf_report 입출력 판정용)
+    try {
+      writePreSnapshot(
+        this.procforgeDir, sid, out.node.id,
+        takeSandboxSnapshot(join(this.procforgeDir, "sandbox", sid)),
+      );
+    } catch {
+      // 추적 실패 무시
+    }
+    return {
+      done: false,
+      node: nodeSummary(out.node, s.limits),
+      ...(out.blocked ? { blocked: out.blocked } : {}),
+      instruction: out.instruction,
     };
   }
 }

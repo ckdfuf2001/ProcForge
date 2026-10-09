@@ -14,11 +14,9 @@ import {
   diffSnapshot,
   readCaptureRecord,
   readPreSnapshot,
-  takeSandboxSnapshot,
   toBaseRel,
   writeCaptureRecord,
-  writePreSnapshot,
-} from "./capture.js";
+} from "./services/snapshot.js";
 import { collectCatalog } from "./catalog.js";
 import { logger } from "./logger.js";
 import type { FileStore } from "./filestore.js";
@@ -234,25 +232,7 @@ export function buildServer(deps: ServerDeps): McpServer {
     },
     async (a: any) => {
       try {
-        const s = requireFresh(deps, a.sessionId as string);
-        const out = await client.pfNext(a.sessionId as string);
-        deps.store.touch(a.sessionId as string);
-        if (out.done) return ok({ done: true });
-        // M4.1-7: 노드 분기 직전 sandbox 스냅샷 (pf_report 입출력 판정용)
-        try {
-          writePreSnapshot(
-            deps.procforgeDir, a.sessionId as string, out.node.id,
-            takeSandboxSnapshot(join(deps.procforgeDir, "sandbox", a.sessionId as string)),
-          );
-        } catch {
-          // 추적 실패 무시
-        }
-        return ok({
-          done: false,
-          node: nodeSummary(out.node, s.limits),
-          ...(out.blocked ? { blocked: out.blocked } : {}),
-          instruction: out.instruction,
-        });
+        return ok(await app.next(a));
       } catch (e) {
         return errResult(e);
       }

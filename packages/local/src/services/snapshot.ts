@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
-import { isEscapeRel } from "./artifacts.js";
-import { inferPathRole, looksLikePath } from "./runner/paths.js";
+import { isEscapeRel } from "../artifacts.js";
+import { inferPathRole, looksLikePath } from "../runner/paths.js";
 import type { ArgSpec, PathRole, ToolCatalogEntry } from "@procforge/shared/schema.js";
 
 // 산출물 자동 캡처 (M3.6-2 입력, M3.6-3 출력). local이 수행, 호스트 제출 불필요.
