@@ -23,6 +23,7 @@
 - 가이드 내용을 임의로 생략하거나 바꾸지 않는다. 바꿔야 하면 본문을 고치고 9절에 "무엇을, 왜"를 남긴다.
 - 진행 현황 표는 실제 상태만 적는다. CI가 green이 아니면 체크하지 않는다.
 - 막힌 항목은 `[!]`로 표시하고 원인과 필요한 결정을 적은 뒤 다음 항목으로 넘어가지 말고 보고한다.
+- CI run URL은 푸시 후에만 생기므로, 진행표의 커밋 SHA와 run URL 기록은 "다음 커밋에 포함" 또는 "문서 전용 커밋"을 허용한다. 문서 전용 커밋은 `docs:` 접두어.
 
 ### 0.2 작업 규칙
 
@@ -55,7 +56,14 @@
 - **R4. MCP 도구와 App 메서드는 1:1.** 나중에 UI 버튼도 같은 App 메서드를 호출한다. 새 기능은 CoreClient → App → 어댑터 순서로 만든다.
 - **R5. CoreClient는 원격 가능해야 한다.** 모든 메서드 async, 입출력 JSON 직렬화 가능(Date, Map, Buffer, 함수 금지). DTO는 `shared/dto.ts` zod 스키마로 정의하고 MCP outputSchema와 UI API가 공유한다.
 - **R6. 동시 수정 방지.** 세션에 `revision`(정수). 변경 메서드는 `expectedRevision?`을 받고 불일치 시 `conflict`. MCP 호스트는 생략 가능, UI는 항상 보낸다.
-- **R7. 모든 변경은 이벤트로 남긴다.** `sessions/<sid>/events.jsonl`에 `{seq, at, actor: "host"|"human"|"runner", method, nodeIds, beforeHash, afterHash, summary}`. 히스토리, trace, UI 갱신의 단일 원천.
+  - revision 비교·증가는 core의 모든 변경 메서드가 수행한다. App·어댑터는 값을 전달만 한다.
+  - 순서(한 트랜잭션, 세션 잠금 안): expectedRevision 비교 → 상태 변경 → revision+1 → 이벤트 기록 → 저장. 중간 실패 시 전체 실패, 부분 저장 금지.
+  - `Store` 인터페이스에 `appendEvents(sid, events)` 추가. 파일 기록은 FileStore가 맡는다. (R8은 "고객 파일 내용·절대경로를 core가 모른다"는 뜻이지, 저장 금지가 아니다.)
+- **R7. 모든 변경은 이벤트로 남긴다.** `sessions/<sid>/events.jsonl`에 `{seq, revision, at, actor: "host"|"human"|"runner", method, nodeIds, beforeHash, afterHash, summary}`. 히스토리, trace, UI 갱신의 단일 원천.
+  - `events.jsonl`은 상태 이벤트 전용. 호출 기록은 `calls.jsonl`로 분리하고, 기존 혼합 파일은 로드 시 1회 분리 마이그레이션한다.
+  - `seq`는 세션 revision과 같다. EventEntry에 `revision` 필드 추가.
+  - `beforeHash`/`afterHash` = 변경 노드 해시들을 정렬해 다시 해시한 값.
+  - 상태 이벤트 기록 실패는 삼키지 않는다 (호출 기록 실패만 무시 허용).
 - **R8. core는 파일을 모른다.** 경로는 프로젝트 기준 상대 문자열과 `{sha256, size, mime}`으로만 주고받는다. 텍스트 미리보기만 4KB 이하 허용.
 
 ---
@@ -149,6 +157,15 @@ server.registerTool("pf_report", spec, async (a) => {
 - `shared/errors.ts`(ProcForgeError, 코드 목록), `shared/dto.ts` 신설, `validator`를 shared로 이동.
 - 세션에 `revision` 추가, `events.jsonl` 도입. 기존 세션은 로드 시 revision 0으로 마이그레이션.
 
+**0.5단계: revision·이벤트 core 이관 (1단계 앞, 먼저 수행)**
+1. revision·이벤트를 core로 이동 (위 R6/R7). 기존 변경 메서드 전부 적용.
+   테스트: expectedRevision 불일치 → conflict, 변경 1회당 revision +1과 이벤트 1건,
+   이벤트 쓰기 실패 주입 시 상태 미변경.
+2. `FileStore.getSession`의 읽기 중 쓰기 제거. 테스트: 읽기 후 파일 바이트 불변.
+3. `events.jsonl` / `calls.jsonl` 분리 + 마이그레이션 테스트.
+4. errors.ts의 옛 `ErrorCodes` 제거. 저장소에서 던지는 code가 전부
+   ERROR_CODE_LIST에 있는지 확인하는 정적 테스트.
+
 **1단계: server.ts 로직 이전** (도구 하나당 커밋 하나)
 
 | 현재 위치 | 옮길 곳 |
@@ -241,6 +258,7 @@ server.registerTool("pf_report", spec, async (a) => {
 |---|---|---|---|---|---|
 | M0~M4.1 | 기존 작업 | [x] | `ac97ac6` | run 20 | |
 | M4.2 | 0단계 공용 기반 | [x] | `93c71c1` | https://github.com/ckdfuf2001/ProcForge/actions/runs/37889763724 | errors/dto/validator/revision/events 완료 |
+| M4.2 | 0.5단계 revision·events core 이관 | [ ] | | | |
 | M4.2 | 1단계 server.ts 로직 이전 | [ ] | | | |
 | M4.2 | 2단계 신규 CoreClient 메서드 | [ ] | | | |
 | M4.2 | 3단계 M4.1.1 버그 1~7 | [ ] | | | |
@@ -260,3 +278,4 @@ server.registerTool("pf_report", spec, async (a) => {
 | 날짜 | 절 | 변경 내용 | 사유 |
 |---|---|---|---|
 | 2026-10-09 | 전체 | v2 작성 (CoreClient / App / LocalServices 계층, M4.2~M7 로드맵) | 상태 변경 경로 단일화, UI·원격 core 대비 |
+| 2026-10-09 | 0, 1, 6, 8 | 0.1 진행표 기록 규칙 보완(docs: 허용), R6 revision core 책임 명시, R7 events.jsonl 분리·seq=revision, 0.5단계 신설 | 1단계에서 옮기는 메서드마다 revision·이벤트를 자동 획득하도록 순서 조정 (전체 작업량 감소) |
