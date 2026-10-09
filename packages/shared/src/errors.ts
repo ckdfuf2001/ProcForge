@@ -18,14 +18,6 @@ export function toError(
   return { error: { code, message, hint } };
 }
 
-export const ErrorCodes = {
-  NOT_FOUND: "not_found",
-  BAD_REQUEST: "bad_request",
-  CONFLICT: "conflict",
-  DEGRADED: "degraded",
-  INTERNAL: "internal",
-} as const;
-
 /** 코드 목록 (M4.2-0, 가이드 2절 계약·봉투 공용) */
 export const ERROR_CODE_LIST = [
   "bad_request",
