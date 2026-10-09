@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import {
   computeNodeHash,
   ConstraintSchema,
+  type ArgSpec,
   type Constraint,
   type Node,
   type Session,
@@ -38,7 +39,9 @@ function err(code: ErrorCode, message: string): ProcForgeError {
 }
 
 import { checkUnknownKeys, selfAndAncestors, similarKey, varRefNodeId } from "@procforge/shared/args-schema.js";
-import { maskParamsValues } from "@procforge/shared/normalize.js";
+import { maskParamsValues, restoreParamsPlaceholders } from "@procforge/shared/normalize.js";
+import { PROCEDURE_NAME_RE, type ProcedureDoc } from "@procforge/shared/procedure.js";
+import { validateTree } from "@procforge/shared/validator.js";
 import { combineHashes } from "@procforge/shared/hash.js";
 import type { Actor } from "@procforge/shared/dto.js";
 import type { ChangeOpts } from "@procforge/shared/core-client.js";
@@ -805,6 +808,81 @@ export class CoreService implements CoreClient {
     });
     const s = this.base.getSession(input.sessionId);
     return { node, revision: s?.revision ?? 0 };
+  }
+
+  /** 절차서 문서 조립 (M4.2-1, 읽기 전용. 검증·params 경고 포함) */
+  async pfBuildProcedure(sessionId: string, name: string): Promise<{ doc: ProcedureDoc; warnings: string[] }> {
+    if (!PROCEDURE_NAME_RE.test(name)) {
+      throw err("bad_request", `bad procedure name: ${name} (소문자·숫자·하이픈, 1~64자)`);
+    }
+    const session = this.sess(sessionId);
+    const nodes = [...this.store.getNodes(sessionId).values()];
+    if (nodes.length === 0) throw err("bad_request", "빈 세션");
+    const byId = new Map(nodes.map((n) => [n.id, n]));
+    // 전 노드 resolved 확인
+    const unresolved = nodes.filter((n) => !isResolved(n, byId)).map((n) => n.id);
+    if (unresolved.length > 0) {
+      throw err("bad_request", `미해결 노드: ${unresolved.join(", ")}`);
+    }
+    // M4.1-4: 구조 검증 (10종). 오류 있으면 목록과 함께 거부.
+    const violations = validateTree(session, nodes);
+    if (violations.length > 0) {
+      throw err(
+        "bad_request",
+        `검증 오류 ${violations.length}건: ${violations.map((v) => `[${v.code}]${v.nodeId ? ` ${v.nodeId}` : ""} ${v.message}`).join("; ")}`,
+      );
+    }
+    // fixed == params 경고 (재사용 깨짐). M4.1-3: 부분 문자열 포함까지 확대
+    const warnings: string[] = [];
+    const paramEntries = Object.entries(session.params).filter(([, v]) => v.length >= 3);
+    for (const n of nodes) {
+      if (n.args) {
+        for (const [k, spec] of Object.entries(n.args)) {
+          const s = spec as ArgSpec;
+          if (s.kind !== "fixed" || typeof (s as { value: unknown }).value !== "string") continue;
+          const v = (s as { value: string }).value;
+          for (const [pk, pv] of paramEntries) {
+            if (v === pv) warnings.push(`${n.id}.${k}="${v}": params 값과 동일한 fixed (var 후보)`);
+            else if (v.includes(pv)) warnings.push(`${n.id}.${k}="${v}": params "${pk}" 값을 부분 포함 (var 후보)`);
+          }
+        }
+      }
+      if (n.golden) {
+        const restored = restoreParamsPlaceholders(n.golden.output, session.params);
+        for (const [pk, pv] of paramEntries) {
+          if (restored.includes(pv)) warnings.push(`${n.id}.golden.output: params "${pk}" 값을 포함 (재바인딩 확인)`);
+        }
+      }
+    }
+    const doc: ProcedureDoc = {
+      format: "procforge-procedure",
+      version: 1,
+      name,
+      sourceSession: sessionId,
+      createdAt: new Date().toISOString(),
+      params: Object.fromEntries(
+        Object.entries(session.params).map(([k, v]) => [k, { type: "string", default: v, description: "" }]),
+      ),
+      toolCatalog: session.toolCatalog as ProcedureDoc["toolCatalog"],
+      nodes: nodes.map((n) => {
+        const last = n.attempts[n.attempts.length - 1];
+        return {
+          id: n.id,
+          parentId: n.parentId,
+          goal: n.goal,
+          depth: n.depth,
+          dependsOn: n.dependsOn,
+          children: n.children,
+          tool: n.tool ? { ...n.tool } : undefined,
+          args: n.args as Record<string, unknown> | undefined,
+          sideEffect: n.sideEffect,
+          constraints: n.constraints as unknown[],
+          golden: n.golden ? { ...n.golden, ignore: n.golden.ignore ?? [] } : undefined,
+          goldenArgs: last ? { ...last.args } : undefined,
+        };
+      }),
+    };
+    return { doc, warnings };
   }
 
   async pfTree(sessionId: string): Promise<{ nodes: Node[]; session: Session }> {

@@ -27,7 +27,9 @@
     "./dto": "./dist/dto.js",
     "./dto.js": "./dist/dto.js",
     "./hash": "./dist/hash.js",
-    "./hash.js": "./dist/hash.js"
+    "./hash.js": "./dist/hash.js",
+    "./procedure": "./dist/procedure.js",
+    "./procedure.js": "./dist/procedure.js"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",

@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { ProcedureDocSchema, importProcedure, type ProcedureDoc } from "../procedure.js";
+import { ProcedureDocSchema, type ProcedureDoc } from "@procforge/shared/procedure.js";
+import { importProcedure } from "../procedure.js";
 import { runSession } from "./run.js";
 import type { RunReport } from "./types.js";
 import type { RunMode } from "./types.js";

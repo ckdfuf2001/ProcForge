@@ -1,15 +1,12 @@
-import { join } from "node:path";
-import { readFileSync } from "node:fs";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import type { CoreClient } from "@procforge/shared/core-client.js";
 import { NodeIdSchema, SessionIdSchema, ConstraintSchema } from "@procforge/shared/schema.js";
-import { errorCodeOf, pfError, type ErrorCode, type ProcForgeError } from "@procforge/shared/errors.js";
-import { collectCatalog } from "./catalog.js";
+import { errorCodeOf } from "@procforge/shared/errors.js";
 import { logger } from "./logger.js";
 import type { FileStore } from "./filestore.js";
-import { OUTPUT_SCHEMAS, nodeSummary } from "./views.js";
+import { OUTPUT_SCHEMAS } from "./views.js";
 import { logEvent } from "./trace.js";
 import { ProcForgeApp, PROMPT_TEXT, DEFAULT_SESSION_TTL_MS } from "./app/app.js";
 
@@ -49,10 +46,6 @@ export const TOOL_NAMES = [
 ] as const;
 
 export const READ_ONLY_TOOLS = ["pf_next", "pf_tree", "pf_get_node"] as const;
-
-function err(code: ErrorCode, message: string, hint?: string): ProcForgeError {
-  return pfError(code, message, hint);
-}
 
 const HINTS: Record<string, string> = {
   bad_request: "입력을 고쳐 재호출하라.",
@@ -105,22 +98,8 @@ const ArgSpecShape = z.discriminatedUnion("kind", [
   }),
 ]);
 
-function requireFresh(deps: ServerDeps, sessionId: string) {
-  const s = deps.store.getSession(sessionId);
-  if (!s) throw err("session_not_found", `세션 없음: ${sessionId}`, HINTS["session_not_found"]);
-  const ttl = deps.sessionTtlMs ?? DEFAULT_SESSION_TTL_MS;
-  const last = deps.store.getLastUsed(sessionId);
-  if (last === undefined) {
-    deps.store.touch(sessionId);
-    return s;
-  }
-  if (Date.now() - last > ttl) throw err("session_not_found", `세션 만료: ${sessionId}`, "pf_start로 새 세션을 시작하라.");
-  return s;
-}
-
 export function buildServer(deps: ServerDeps): McpServer {
   const server = new McpServer({ name: "procforge-local", version: "0.2.0" });
-  const { client } = deps;
   const app = new ProcForgeApp({
     core: deps.client,
     store: deps.store,
@@ -134,19 +113,6 @@ export function buildServer(deps: ServerDeps): McpServer {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const R = (name: string, config: any, cb: any) => {
     if (enabled(name)) server.registerTool(name, config, logged(name, cb) as never);
-  };
-  // 쓰기 도구는 세션 lockfile로 프로세스 간 보호 (M2.6-7)
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const W = (name: string, config: any, cb: any) => {
-    if (!enabled(name)) return;
-    server.registerTool(name, config as never, (async (a: any, extra: any) => {
-      const release = deps.store.acquireLock(a.sessionId);
-      try {
-        return await logged(name, cb)(a, extra);
-      } finally {
-        release();
-      }
-    }) as never);
   };
   // pf_* 호출 기록 (trace용, M3.5)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -168,8 +134,6 @@ export function buildServer(deps: ServerDeps): McpServer {
     }
     return r;
   };
-  const strictSandbox = deps.strictSandbox ?? true;
-  const maxArtifactBytes = deps.maxArtifactBytes ?? 5 * 1024 * 1024;
 
   R(
     "pf_start",

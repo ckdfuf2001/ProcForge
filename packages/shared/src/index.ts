@@ -3,6 +3,7 @@ export * from "./core-client.js";
 export * from "./errors.js";
 export * from "./dto.js";
 export * from "./hash.js";
+export * from "./procedure.js";
 export * from "./validator.js";
 export * from "./store.js";
 export * from "./ids.js";

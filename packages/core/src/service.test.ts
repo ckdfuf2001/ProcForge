@@ -1013,3 +1013,21 @@ describe("core 상태머신 회귀 (M1)", () => {
     ).rejects.toThrow();
   });
 });
+
+describe("M4.2-1 pfBuildProcedure", () => {
+  it("검증·경고·문서 조립", async () => {
+    const svc = new CoreService(createMemoryStore(), passEval);
+    const s = await svc.pfStart({ request: "r", params: { month: "2026-09" }, toolCatalog: catalog });
+    await svc.pfReport({ ...rep(), sessionId: s.session.id, args: { f: "report-2026-09.txt" } });
+    await svc.pfResolve({
+      sessionId: s.session.id, nodeId: "1", decision: "leaf",
+      tool: { server: "fs", name: "read" },
+      argSpecs: { f: { kind: "fixed", value: "report-2026-09.txt" } },
+    });
+    const { doc, warnings } = await svc.pfBuildProcedure(s.session.id, "ok-doc");
+    expect(doc.name).toBe("ok-doc");
+    expect(doc.nodes.length).toBe(1);
+    expect(warnings.some((w) => w.includes("부분 포함"))).toBe(true);
+    await expect(svc.pfBuildProcedure(s.session.id, "Bad_Name")).rejects.toThrow(/bad procedure name/);
+  });
+});

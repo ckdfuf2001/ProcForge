@@ -189,6 +189,15 @@
 - [M4.2-0.5-4] 옛 ErrorCodes 제거. 던지는 code 정적 테스트는 throw문 근처
   400자에서 수집 (반환용 validator 코드는 대상 아님).
 
+## M4.2-1 (server.ts 로직 이전)
+
+- App 1:1 (ProcForgeApp, local/src/app). 어댑터는 스키마 검증·호출·응답 포맷·에러
+  변환만. requireFresh·락은 App으로, logged() 호출 기록은 계측이라 서버 유지.
+- stage-2 overlap: confirm/finalize 이전에 필요해서 core.amendAttemptArtifacts·
+  pfBuildProcedure를 1단계에서 먼저 만듦 (2단계는 나머지만).
+- R1 예외 유지: procedure import·runner updateGolden 직접 저장 (core 경로 결정은
+  추후). PROMPT_TEXT·DEFAULT_SESSION_TTL_MS는 app 소유, server 재수출.
+
 ## M3.2
 
 - [M3.2-1] passthrough도 generated는 golden attempt 기록값. live 모드 추가(생성 재생성,

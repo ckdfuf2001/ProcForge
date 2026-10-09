@@ -4,7 +4,9 @@ import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { collectCatalog } from "../src/catalog.js";
 import { createLocalStack } from "../src/core-inprocess.js";
-import { finalizeSession, importProcedure, ProcedureDocSchema } from "../src/procedure.js";
+import { importProcedure } from "../src/procedure.js";
+import { ProcedureDocSchema } from "@procforge/shared/procedure.js";
+import { ProcForgeApp } from "../src/app/app.js";
 import { runProcedureTest, loadProcedureDoc } from "../src/runner/procedure-run.js";
 import { runSession } from "../src/runner/run.js";
 import { FileStore } from "../src/filestore.js";
@@ -42,6 +44,10 @@ function writeOpencodeConfig(cmd: string[]) {
   writeFileSync(join(root, "opencode.json"), JSON.stringify({ mcp: { "fake-ppt": { type: "local", command: cmd } } }));
 }
 
+function appFor() {
+  return new ProcForgeApp({ core: client, store: new FileStore(pfdir), procforgeDir: pfdir, projectRoot: root });
+}
+
 async function scripted(): Promise<string> {
   writeFileSync(join(root, "data.pptx"), "x");
   const collected = await collectCatalog(root);
@@ -73,7 +79,7 @@ describe("pf_finalize", () => {
     const sid = await scripted();
     const rec = await runSession({ procforgeDir: pfdir, projectRoot: root, allowProjectRead: true, sessionId: sid, mode: "record" });
     expect(rec.summary.fail).toBe(0);
-    const out = finalizeSession(pfdir, sid, "monthly-test");
+    const out = await appFor().finalize({ sessionId: sid, name: "monthly-test" });
     expect(out.warnings.some((w) => w.includes("2026-09"))).toBe(true);
     for (const f of ["procedure.json", "PROCEDURE.md", "SKILL.md", "command.md"]) {
       expect(existsSync(join(out.dir, f)), f).toBe(true);
@@ -94,7 +100,7 @@ describe("pf_finalize", () => {
     const sid = await scripted();
     // 1.2를 reopen하여 미해결 상태로
     await client.pfReopen(sid, "1.2", "test");
-    expect(() => finalizeSession(pfdir, sid, "bad")).toThrow(/미해결 노드: 1\.2/);
+    await expect(appFor().finalize({ sessionId: sid, name: "bad" })).rejects.toThrow(/미해결 노드: 1\.2/);
   }, 30000);
 
   it("M4.1-4 검증 오류 시 bad_request + 목록", async () => {
@@ -103,7 +109,7 @@ describe("pf_finalize", () => {
     const n = store.getNode(sid, "1.1")!;
     store.saveNode(sid, { ...n, tool: { server: "nope", name: "nope", schemaHash: "x" } });
     try {
-      finalizeSession(pfdir, sid, "invalid-test", { projectRoot: root });
+      await appFor().finalize({ sessionId: sid, name: "invalid-test" });
       expect.unreachable();
     } catch (e) {
       expect((e as { code?: string }).code).toBe("bad_request");
@@ -114,8 +120,8 @@ describe("pf_finalize", () => {
 
   it("M4.1-1 명령 파일: 프로젝트 출력 + 사본, force 규칙", async () => {
     const sid = await scripted();
-    const a = finalizeSession(pfdir, sid, "cmd-a", { projectRoot: root });
-    const b = finalizeSession(pfdir, sid, "cmd-b", { projectRoot: root });
+    const a = await appFor().finalize({ sessionId: sid, name: "cmd-a" });
+    const b = await appFor().finalize({ sessionId: sid, name: "cmd-b" });
     // 두 절차 → 파일 두 개, 이름 충돌 없음
     expect(a.commandFile).toBe(join(root, ".opencode", "command", "cmd-a.md"));
     expect(b.commandFile).toBe(join(root, ".opencode", "command", "cmd-b.md"));
@@ -126,15 +132,15 @@ describe("pf_finalize", () => {
     // procedures 안에는 사본만
     expect(readFileSync(join(pfdir, "procedures", "cmd-a", "command.md"), "utf8")).toContain("cmd-a");
     // 기존 파일 + force 없음 → 거부
-    expect(() => finalizeSession(pfdir, sid, "cmd-a", { projectRoot: root })).toThrow(/--force/);
+    await expect(appFor().finalize({ sessionId: sid, name: "cmd-a" })).rejects.toThrow(/--force/);
     // force면 덮어쓰기
-    const again = finalizeSession(pfdir, sid, "cmd-a", { projectRoot: root, force: true });
+    const again = await appFor().finalize({ sessionId: sid, name: "cmd-a", force: true });
     expect(existsSync(again.commandFile)).toBe(true);
   }, 30000);
 
   it("params 재바인딩: --param month=2026-10", async () => {
     const sid = await scripted();
-    finalizeSession(pfdir, sid, "rebind-test");
+    await appFor().finalize({ sessionId: sid, name: "rebind-test" });
     const { doc } = loadProcedureDoc(pfdir, "rebind-test");
     expect(doc.params["month"].default).toBe("2026-09");
     const { sessionId } = importProcedure(pfdir, doc, { month: "2026-10" });
@@ -168,7 +174,7 @@ describe("pf_finalize", () => {
         argSpecs: { file: { kind: "fixed", value: "data.pptx" } } as never,
       });
     }
-    const out = finalizeSession(pfdir, sid, "order-test", { projectRoot: root });
+    const out = await appFor().finalize({ sessionId: sid, name: "order-test" });
     const md = readFileSync(join(out.dir, "PROCEDURE.md"), "utf8");
     expect(md.indexOf("`1.2`")).toBeLessThan(md.indexOf("`1.10`"));
     expect(md.indexOf("`1.9`")).toBeLessThan(md.indexOf("`1.10`"));
@@ -196,20 +202,20 @@ describe("pf_finalize", () => {
       tool: { server: "fake-ppt", name: "list_slides" },
       argSpecs: { file: { kind: "fixed", value: "report-2026-09.pptx" } } as never,
     });
-    const out = finalizeSession(pfdir, sid, "substr-test", { projectRoot: root });
+    const out = await appFor().finalize({ sessionId: sid, name: "substr-test" });
     expect(out.warnings.some((w) => w.includes("부분 포함"))).toBe(true);
     expect(out.warnings.some((w) => w.includes("golden.output"))).toBe(true);
   }, 30000);
 
   it("M4.1-5 재-finalize: 원자 교체, 잔재 없음", async () => {
     const sid = await scripted();
-    const first = finalizeSession(pfdir, sid, "atomic-test", { projectRoot: root });
+    const first = await appFor().finalize({ sessionId: sid, name: "atomic-test" });
     expect(first.dir).toBe(join(pfdir, "procedures", "atomic-test"));
     // 세션 변경 후 재-finalize (force: 명령 파일 덮어쓰기)
     const store = new FileStore(pfdir);
     const n = store.getNode(sid, "1.1")!;
     store.saveNode(sid, { ...n, goal: `${n.goal} v2` });
-    const again = finalizeSession(pfdir, sid, "atomic-test", { projectRoot: root, force: true });
+    const again = await appFor().finalize({ sessionId: sid, name: "atomic-test", force: true });
     expect(again.dir).toBe(first.dir);
     // 내용이 교체됐고 tmp/.old 잔재가 없음
     expect(readFileSync(join(again.dir, "PROCEDURE.md"), "utf8")).toContain("v2");
@@ -220,14 +226,14 @@ describe("pf_finalize", () => {
   it("M4.1-6 절차 이름 규칙 (skill 호환)", async () => {
     const sid = await scripted();
     for (const bad of ["Monthly", "a_b", "-x", "x!", "a".repeat(65), ""]) {
-      expect(() => finalizeSession(pfdir, sid, bad, { projectRoot: root })).toThrow(/bad procedure name/);
+      await expect(appFor().finalize({ sessionId: sid, name: bad })).rejects.toThrow(/bad procedure name/);
     }
-    expect(() => finalizeSession(pfdir, sid, "ok-name-1", { projectRoot: root })).not.toThrow();
+    await expect(appFor().finalize({ sessionId: sid, name: "ok-name-1" })).resolves.toBeDefined();
   }, 30000);
 
   it("M4.1-8 SKILL/command 문구는 검증(replay) 한정", async () => {
     const sid = await scripted();
-    const out = finalizeSession(pfdir, sid, "honest-test", { projectRoot: root });
+    const out = await appFor().finalize({ sessionId: sid, name: "honest-test" });
     const skill = readFileSync(join(out.dir, "SKILL.md"), "utf8");
     expect(skill).toContain("검증(replay)만 가능");
     expect(skill).toContain("미지원(M5)");
