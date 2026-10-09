@@ -216,4 +216,12 @@ describe("pf_finalize", () => {
     const leftovers = readdirSync(join(pfdir, "procedures")).filter((e) => e.includes(".tmp-") || e.endsWith(".old"));
     expect(leftovers).toEqual([]);
   }, 30000);
+
+  it("M4.1-6 절차 이름 규칙 (skill 호환)", async () => {
+    const sid = await scripted();
+    for (const bad of ["Monthly", "a_b", "-x", "x!", "a".repeat(65), ""]) {
+      expect(() => finalizeSession(pfdir, sid, bad, { projectRoot: root })).toThrow(/bad procedure name/);
+    }
+    expect(() => finalizeSession(pfdir, sid, "ok-name-1", { projectRoot: root })).not.toThrow();
+  }, 30000);
 });

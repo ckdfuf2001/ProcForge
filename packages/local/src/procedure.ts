@@ -86,6 +86,9 @@ export function swapDir(tmpDir: string, finalDir: string): void {
   rmSync(oldDir, { recursive: true, force: true });
 }
 
+/** 절차 이름 규칙 (M4.1-6, skill 호환): 소문자·숫자·하이픈, 1~64자 */
+export const PROCEDURE_NAME_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
+
 export type FinalizeOptions = {
   /** 명령 파일 출력 루트 (기본: procforgeDir의 부모 = projectRoot 가정) */
   projectRoot?: string;
@@ -99,8 +102,8 @@ export function finalizeSession(
   name: string,
   opts: FinalizeOptions = {},
 ): FinalizeResult {
-  if (!/^[A-Za-z0-9_-]+$/.test(name)) {
-    throw Object.assign(new Error(`bad procedure name: ${name}`), { code: "bad_request" });
+  if (!PROCEDURE_NAME_RE.test(name)) {
+    throw Object.assign(new Error(`bad procedure name: ${name} (소문자·숫자·하이픈, 1~64자)`), { code: "bad_request" });
   }
   const store = new FileStore(procforgeDir);
   const session = store.getSession(sessionId);

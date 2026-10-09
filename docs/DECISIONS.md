@@ -156,8 +156,10 @@
 - [M4.1-4] finalize 전 validateTree 실행. 오류 있으면 bad_request + 목록
   (resolved 검사 이후).
 - [M4.1-5] 재-finalize는 `procedures/<name>.tmp-<uuid>`에 생성 후 원자 교체.
-  Windows rename 덮어쓰기 불가 → 기존 폴더를 `.old`로 이동 후 교체·삭제,
+  Windows rename 덮어쓰기 불가 →   기존 폴더를 `.old`로 이동 후 교체·삭제,
   실패 시 롤백 시도.
+- [M4.1-6] 절차 이름 규칙 `^[a-z0-9][a-z0-9-]{0,63}$` (skill 호환). 위반은
+  bad_request. 기존 대문자·언더스코어 이름은 거부된다.
 
 ## M3.2
 
