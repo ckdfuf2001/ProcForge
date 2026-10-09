@@ -223,6 +223,9 @@
 - 2.5-3: pending-<rev>.json 원자 커밋 (기록 → 노드 → 세션 → 이벤트 →
   삭제). getSession·commitChange 진입 시 재반영 (이벤트 seq 중복 방지).
   getNodes/getNode는 미적용 (세션 열기가 선행되는 흐름 전제).
+- 2.5-4: pf_next 쓰기 전환 (READ_ONLY 제외·WRITE_ANN·잠금은 change 내장).
+  confirmLeaf 결과물 수정+확정을 leaf 입력 artifacts로 통합 (amend 2회차
+  제거). guide-3단계-6(pf_next annotation) 선행 해소.
 
 ## M3.2
 

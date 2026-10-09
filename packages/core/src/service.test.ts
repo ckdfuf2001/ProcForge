@@ -1189,6 +1189,32 @@ describe("M4.2-2.5-1 getSession/getNode + TTL", () => {
   });
 });
 
+describe("M4.2-2.5-4 leaf artifacts 통합", () => {
+  it("확정 실패 시 revision·attempt 불변, 성공 시 반영", async () => {
+    const svc = new CoreService(createMemoryStore(), passEval);
+    const s = await svc.pfStart({ request: "r", toolCatalog: catalog });
+    await svc.pfReport({ ...rep(), sessionId: s.session.id, args: { path: "a" } });
+    const before = await svc.pfTree(s.session.id);
+    await expect(svc.pfResolve({
+      sessionId: s.session.id, nodeId: "1", decision: "leaf",
+      tool: { server: "nope", name: "nope" },
+      argSpecs: { path: { kind: "fixed", value: "a" } },
+      artifacts: ["fx/new.txt"],
+    })).rejects.toThrow();
+    const after = await svc.pfTree(s.session.id);
+    expect(after.session.revision).toBe(before.session.revision);
+    expect(after.nodes[0].attempts).toEqual(before.nodes[0].attempts);
+    const ok = await svc.pfResolve({
+      sessionId: s.session.id, nodeId: "1", decision: "leaf",
+      tool: { server: "fs", name: "read" },
+      argSpecs: { path: { kind: "fixed", value: "a" } },
+      artifacts: ["fx/new.txt"],
+    });
+    expect(ok.node.golden?.fixtures).toEqual(["fx/new.txt"]);
+    expect(ok.node.attempts[ok.node.attempts.length - 1].artifacts).toEqual(["fx/new.txt"]);
+  });
+});
+
 describe("M4.2-1 pfBuildProcedure", () => {
   it("검증·경고·문서 조립", async () => {
     const svc = new CoreService(createMemoryStore(), passEval);

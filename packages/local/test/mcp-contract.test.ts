@@ -47,7 +47,7 @@ const EXPECTED_ORDER = [...TOOL_NAMES];
 
 const EXPECTED_ANNOTATIONS: Record<string, Record<string, boolean>> = {
   pf_start: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
-  pf_next: { readOnlyHint: true, idempotentHint: true, openWorldHint: false },
+  pf_next: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
   pf_report: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
   pf_split: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
   pf_confirm_leaf: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
@@ -83,7 +83,7 @@ describe("tools/list 스냅샷 (결정적 순서·annotations)", () => {
     }
   });
 
-  it("READ_ONLY 모드: 읽기 3종만", async () => {
+  it("READ_ONLY 모드: 읽기 2종만", async () => {
     const { client } = createLocalStack(pfdir);
     const app = new ProcForgeApp({ core: client, procforgeDir: pfdir, projectRoot: root });
     const server = buildServer({ app, procforgeDir: pfdir, readOnly: true });

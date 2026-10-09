@@ -157,10 +157,12 @@ export class ProcForgeApp {
       sandboxDir: join(this.procforgeDir, "sandbox", sid),
       projectRoot: this.projectRoot,
     });
-    // M3.6-2 확정 시 추캡처: 명시 in/inout fixed 경로 중 미수집분
+    // M3.6-2 확정 시 추캡처: 명시 in/inout fixed 경로 중 미수집분.
+    // M4.2-2.5-4: 결과물 수정과 leaf 확정을 core 변경 1회로 통합 (artifacts 전달)
     const nodeId = a.nodeId as string;
     const cur = await this.core.getNode(sid, nodeId);
     const last = cur?.attempts[cur.attempts.length - 1];
+    let merged = last?.artifacts ?? [];
     if (cur && last) {
       // M4.1-7: 보고 시 out 판정분은 attempt에서 제외 (golden 입력 순수 유지, 증거 파일은 보존)
       const sidecar = readCaptureRecord(this.procforgeDir, sid, nodeId, last.id);
@@ -181,16 +183,13 @@ export class ProcForgeApp {
       const fresh = collectExistingPaths({
         baseDir, tool: toolRef, args: fixedArgs, specs: norm.specs, catalogEntry: cat, roles: ["in", "inout"],
       }).filter((p) => !covered.has(relOf(p)));
-      const merged = [...kept];
+      merged = [...kept];
       if (fresh.length > 0) {
         const ing = ingestArtifacts({
           procforgeDir: this.procforgeDir, sessionId: sid, nodeId, attemptId: last.id,
           baseDir, paths: fresh, maxBytes: this.maxArtifactBytes, startIndex: last.artifacts.length,
         });
         merged.push(...ing.stored);
-      }
-      if (merged.length !== last.artifacts.length) {
-        await this.core.amendAttemptArtifacts({ sessionId: sid, nodeId, attemptId: last.id, artifacts: merged });
       }
     }
     const out = await this.core.pfResolve({
@@ -201,6 +200,7 @@ export class ProcForgeApp {
       argSpecs: norm.specs as never,
       sideEffect: a.sideEffect as "none" | "local_write" | "external" | undefined,
       goldenIgnore: a.ignore as string[] | undefined,
+      artifacts: merged,
     });
     return { node: nodeSummary(out.node, s.limits), instruction: out.instruction, warnings: norm.warnings };
   }

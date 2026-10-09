@@ -83,6 +83,8 @@ export type PfResolveInput = {
   note?: string;
   /** leaf 확정 시 golden.ignore로 기록할 JSON 경로 (M3.1-2) */
   goldenIgnore?: string[];
+  /** leaf 확정 시 attempt 결과물로 확정할 목록 (M4.2-2.5-4, 생략 시 마지막 attempt 유지) */
+  artifacts?: string[];
   expectedRevision?: number;
   actor?: Actor;
 };

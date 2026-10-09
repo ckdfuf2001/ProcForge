@@ -39,7 +39,7 @@ export const TOOL_NAMES = [
   "pf_finalize",
 ] as const;
 
-export const READ_ONLY_TOOLS = ["pf_next", "pf_tree", "pf_get_node"] as const;
+export const READ_ONLY_TOOLS = ["pf_tree", "pf_get_node"] as const;
 
 const HINTS: Record<string, string> = {
   bad_request: "입력을 고쳐 재호출하라.",
@@ -163,7 +163,7 @@ export function buildServer(deps: ServerDeps): McpServer {
       ].join("\n"),
       inputSchema: { sessionId: SessionIdSchema },
       outputSchema: OUTPUT_SCHEMAS["pf_next"] as never,
-      annotations: READ_ONLY_ANN,
+      annotations: WRITE_ANN,
     },
     async (a: any) => {
       try {

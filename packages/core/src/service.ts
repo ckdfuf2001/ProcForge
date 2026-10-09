@@ -718,13 +718,19 @@ export class CoreService implements CoreClient {
             if (!referenced.has(d)) warnings.push(`dep_without_dataflow: ${d} (어느 var/generated 인자에서도 참조되지 않음)`);
           }
         }
+        // M4.2-2.5-4: artifacts 지정 시 같은 트랜잭션에서 attempt 결과물 확정
+        const finalArtifacts = input.artifacts ?? last!.artifacts;
+        const attempts = n.attempts.map((a) =>
+          a.id === last!.id ? { ...a, artifacts: [...finalArtifacts] } : a,
+        );
         const next: Node = {
           ...n,
           status: "leaf",
           tool: { server: input.tool.server, name: input.tool.name, schemaHash: cat.schemaHash },
           args: input.argSpecs,
+          attempts,
           // M3.6-4: golden 출력 안의 params 값은 자리표시자로 저장 (재바인딩 대비)
-          golden: { fixtures: [...last!.artifacts], output: maskParamsValues(last!.resultSummary, s.params), attemptId: last!.id, ignore: input.goldenIgnore ?? [] },
+          golden: { fixtures: [...finalArtifacts], output: maskParamsValues(last!.resultSummary, s.params), attemptId: last!.id, ignore: input.goldenIgnore ?? [] },
         };
         if (input.sideEffect) next.sideEffect = input.sideEffect;
         next.hash = this.hashFor(s.id, next);
