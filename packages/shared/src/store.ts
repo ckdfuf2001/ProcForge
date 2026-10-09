@@ -13,4 +13,8 @@ export type Store = {
   appendEvents(sessionId: string, events: EventEntry[]): void;
   /** 상태 이벤트 조회 (R7 히스토리 원천) */
   readEvents(sessionId: string): EventEntry[];
+  /** 세션 TTL용 최종 사용 시각 (없으면 undefined) */
+  getLastUsed(sessionId: string): number | undefined;
+  /** 최종 사용 시각 갱신 */
+  touchSession(sessionId: string): void;
 };

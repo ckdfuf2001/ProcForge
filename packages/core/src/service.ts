@@ -167,11 +167,29 @@ export class CoreService implements CoreClient {
   constructor(
     private base: Store = createMemoryStore(),
     private evaluate: EvaluateFn = defaultEvaluate,
+    private opts: { sessionTtlMs?: number } = {},
   ) {}
+
+  private get sessionTtlMs(): number {
+    return this.opts.sessionTtlMs ?? 30 * 24 * 3600 * 1000;
+  }
 
   /** 변경 메서드 안에서는 tx 오버레이 경유. NOTE: 본문은 await 없이 동기 실행 */
   private get store(): Store {
     return this.tx ?? this.base;
+  }
+
+  /** 세션 신선도 확인 + touch (M4.2-2.5, App fresh 이동). 없으면 session_not_found */
+  private checkFresh(sessionId: string): Session {
+    const s = this.store.getSession(sessionId);
+    if (!s) throw err("session_not_found", `세션 없음: ${sessionId}`);
+    const last = this.store.getLastUsed(sessionId);
+    if (last === undefined) {
+      this.store.touchSession(sessionId);
+      return s;
+    }
+    if (Date.now() - last > this.sessionTtlMs) throw err("session_not_found", `세션 만료: ${sessionId}`);
+    return s;
   }
 
   /**
@@ -183,8 +201,7 @@ export class CoreService implements CoreClient {
     op: { method: string; expectedRevision?: number; actor?: Actor },
     body: () => { result: R; summary: string },
   ): R {
-    const pre = this.base.getSession(sessionId);
-    if (!pre) throw err("not_found", `session ${sessionId} not found`);
+    const pre = this.checkFresh(sessionId);
     if (op.expectedRevision !== undefined && pre.revision !== op.expectedRevision) {
       throw err("conflict", `revision mismatch: expected ${op.expectedRevision}, actual ${pre.revision}`);
     }
@@ -989,6 +1006,19 @@ export class CoreService implements CoreClient {
     this.sess(sessionId);
     const all = this.store.readEvents(sessionId);
     return sinceSeq === undefined ? all : all.filter((e) => e.seq > sinceSeq);
+  }
+
+  /** 세션 조회 (M4.2-2.5, 읽기 전용. TTL 판정 + touch 포함) */
+  async getSession(sessionId: string): Promise<Session> {
+    return this.checkFresh(sessionId);
+  }
+
+  /** 노드 조회 (M4.2-2.5, 읽기 전용) */
+  async getNode(sessionId: string, nodeId: string): Promise<Node> {
+    this.checkFresh(sessionId);
+    const n = this.store.getNode(sessionId, nodeId);
+    if (!n) throw err("not_found", `node ${nodeId} not found`);
+    return n;
   }
 
   async pfTree(sessionId: string): Promise<{ nodes: Node[]; session: Session }> {

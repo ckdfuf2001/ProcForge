@@ -143,13 +143,13 @@ export class FileStore implements Store {
     };
   }
 
-  // ---- 세션 TTL용 메타 (M2.5-6, Store 인터페이스 외 local 확장) ----
+  // ---- 세션 TTL용 메타 (M2.5-6) ----
 
   private metaPath(sid: string): string {
     return join(this.sessionDir(sid), "meta.json");
   }
 
-  touch(sid: string): void {
+  touchSession(sid: string): void {
     assertSessionId(sid);
     this.writeAtomic(this.metaPath(sid), JSON.stringify({ lastUsedAt: new Date().toISOString() }));
   }

@@ -8,6 +8,7 @@ export function createMemoryStore(): Store {
   const sessions = new Map<string, Session>();
   const nodes = new Map<string, Map<string, Node>>();
   const events = new Map<string, EventEntry[]>();
+  const lastUsed = new Map<string, number>();
   return {
     getSession: (id) => sessions.get(id),
     saveSession: (s) => {
@@ -24,5 +25,9 @@ export function createMemoryStore(): Store {
       events.set(sid, [...(events.get(sid) ?? []), ...evts]);
     },
     readEvents: (sid) => [...(events.get(sid) ?? [])],
+    getLastUsed: (sid) => lastUsed.get(sid),
+    touchSession: (sid) => {
+      lastUsed.set(sid, Date.now());
+    },
   };
 }

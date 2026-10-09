@@ -174,6 +174,10 @@ export interface CoreClient {
   pfEditNode(input: PfEditNodeInput): Promise<{ node: Node; instruction: string }>;
   /** 상태 이벤트 조회 (M4.2-2, R7 히스토리 원천) */
   getEvents(sessionId: string, sinceSeq?: number): Promise<EventEntry[]>;
+  /** 세션 조회 (M4.2-2.5, TTL 판정 포함) */
+  getSession(sessionId: string): Promise<Session>;
+  /** 노드 조회 (M4.2-2.5) */
+  getNode(sessionId: string, nodeId: string): Promise<Node>;
   /** 절차서 문서 조립 (M4.2-1, 검증·params 경고 포함. 파일 쓰기는 local) */
   pfBuildProcedure(sessionId: string, name: string): Promise<{ doc: ProcedureDoc; warnings: string[] }>;
   /** external dry-run 계획 승인/거부 (M2.6-4) */

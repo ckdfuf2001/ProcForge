@@ -706,6 +706,8 @@ function recordingStore(inner = createMemoryStore(), opts: { failAppend?: boolea
       inner.appendEvents(sid, evts);
     },
     readEvents: (sid) => inner.readEvents(sid),
+    getLastUsed: (sid) => inner.getLastUsed(sid),
+    touchSession: (sid) => inner.touchSession(sid),
   };
   return { store, calls, appended };
 }
@@ -1153,6 +1155,22 @@ describe("M4.2-2 getEvents", () => {
   it("없는 세션 조회 거부", async () => {
     const svc = new CoreService(createMemoryStore(), passEval);
     await expect(svc.getEvents("123e4567-e89b-42d3-a456-426614174000")).rejects.toThrow(/not found/);
+  });
+});
+
+describe("M4.2-2.5-1 getSession/getNode + TTL", () => {
+  it("조회 + 만료 세션 거부", async () => {
+    const svc = new CoreService(createMemoryStore(), passEval);
+    const s = await svc.pfStart({ request: "r", toolCatalog: catalog });
+    expect((await svc.getSession(s.session.id)).request).toBe("r");
+    expect((await svc.getNode(s.session.id, "1")).goal).toBe("r");
+    await expect(svc.getNode(s.session.id, "9")).rejects.toThrow(/node .* not found/);
+    await expect(svc.getSession("123e4567-e89b-42d3-a456-426614174000")).rejects.toThrow(/세션 없음/);
+    // TTL 만료: 최초 접근은 touch 후 통과, 이후는 만료
+    const svc2 = new CoreService(createMemoryStore(), passEval, { sessionTtlMs: -1 });
+    const s2 = await svc2.pfStart({ request: "r", toolCatalog: catalog });
+    await svc2.getSession(s2.session.id);
+    await expect(svc2.getSession(s2.session.id)).rejects.toThrow(/세션 만료/);
   });
 });
 

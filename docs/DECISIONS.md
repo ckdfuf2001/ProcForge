@@ -211,6 +211,12 @@
 - MCP pf_edit_args/pf_edit_node — App 1:1 + tools/list 등록 (순서 고정).
   빈 patch도 변경 없음으로 거부.
 
+## M4.2-2.5 (App 직접 접근 제거)
+
+- 2.5-1a: core.getSession/getNode + TTL/touch core 이관. Store에
+  touchSession/getLastUsed 추가. errResult 정규식 분기 제거 (core가 직접
+  session_not_found).
+
 ## M3.2
 
 - [M3.2-1] passthrough도 generated는 golden attempt 기록값. live 모드 추가(생성 재생성,

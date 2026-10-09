@@ -59,6 +59,14 @@ export class TxStore implements Store {
     return this.base.readEvents(sessionId);
   }
 
+  getLastUsed(sessionId: string): number | undefined {
+    return this.base.getLastUsed(sessionId);
+  }
+
+  touchSession(sessionId: string): void {
+    this.base.touchSession(sessionId);
+  }
+
   writtenNodeIds(sessionId: string): string[] {
     return [...(this.touchedNodes.get(sessionId) ?? [])];
   }

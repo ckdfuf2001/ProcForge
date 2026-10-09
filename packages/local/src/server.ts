@@ -60,8 +60,7 @@ const HINTS: Record<string, string> = {
 };
 
 function errResult(e: unknown) {
-  const rawCode = errorCodeOf(e);
-  const code = rawCode === "not_found" && /session/i.test(e instanceof Error ? e.message : "") ? "session_not_found" : rawCode;
+  const code = errorCodeOf(e);
   const hint = (e as { hint?: string } | null)?.hint ?? HINTS[code] ?? HINTS["internal"];
   const message = code === "internal" ? "내부 오류가 발생했다." : e instanceof Error ? e.message : String(e);
   if (code === "internal") logger.error("internal", e instanceof Error ? (e.stack ?? e.message) : String(e));
