@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { mkdtempSync, existsSync, readFileSync } from "node:fs";
+import { mkdtempSync, existsSync, readFileSync, appendFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createLocalStack } from "../src/core-inprocess.js";
-import { buildTrace, formatTraceMarkdown, logEvent, readEvents, appendStateEvent, readStateEvents } from "../src/trace.js";
+import { buildTrace, formatTraceMarkdown, logEvent, readEvents, appendStateEvent, readStateEvents, migrateCallLog } from "../src/trace.js";
 import { exportSession, listZip, readZipEntry, writeZip } from "../src/export.js";
 import type { CoreClient } from "@procforge/shared/core-client.js";
 
@@ -126,5 +126,27 @@ describe("trace/export", () => {
     // 호출 추적에는 상태 이벤트가 섞이지 않음
     expect(readEvents(pfdir, sid).length).toBe(1);
     expect(buildTrace(pfdir, sid).callsTotal).toBe(1);
+  });
+
+  it("M4.2-0.5-3 calls.jsonl 분리 + 마이그레이션", async () => {
+    const sid = await scripted();
+    // 신규 기록은 calls.jsonl로
+    expect(existsSync(join(pfdir, "sessions", sid, "calls.jsonl"))).toBe(true);
+    // 구 혼합 파일 시뮬레이션: events.jsonl에 TraceEvent행 직접 추가
+    appendFileSync(
+      join(pfdir, "sessions", sid, "events.jsonl"),
+      JSON.stringify({ at: new Date().toISOString(), tool: "pf_legacy", sessionId: sid, ok: true }) + "\n",
+    );
+    migrateCallLog(pfdir, sid);
+    expect(readEvents(pfdir, sid).length).toBe(2);
+    // 상태 이벤트(split+report 실제분)는 events.jsonl에 유지
+    expect(readStateEvents(pfdir, sid).map((e) => e.method)).toEqual(["pfResolve", "pfReport"]);
+    const raw = readFileSync(join(pfdir, "sessions", sid, "events.jsonl"), "utf8");
+    expect(raw).not.toContain("pf_legacy");
+    // 멱등: 재실행해도 calls.jsonl 불변
+    const callsBefore = readFileSync(join(pfdir, "sessions", sid, "calls.jsonl"), "utf8");
+    migrateCallLog(pfdir, sid);
+    expect(readFileSync(join(pfdir, "sessions", sid, "calls.jsonl"), "utf8")).toBe(callsBefore);
+    expect(readEvents(pfdir, sid).length).toBe(2);
   });
 });

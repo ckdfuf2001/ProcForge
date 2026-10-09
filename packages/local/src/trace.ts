@@ -1,4 +1,4 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Session } from "@procforge/shared/schema.js";
 import { EventEntrySchema, type EventEntry } from "@procforge/shared/dto.js";
@@ -18,9 +18,43 @@ export function eventsFile(procforgeDir: string, sessionId: string): string {
   return join(procforgeDir, "sessions", sessionId, "events.jsonl");
 }
 
+/** 호출 기록 파일 (M4.2-0.5-3, R7: events.jsonl은 상태 이벤트 전용) */
+export function callsFile(procforgeDir: string, sessionId: string): string {
+  return join(procforgeDir, "sessions", sessionId, "calls.jsonl");
+}
+
+/**
+ * 구 혼합 events.jsonl 1회 분리 마이그레이션 (M4.2-0.5-3).
+ * TraceEvent형 줄은 calls.jsonl로 옮기고 events.jsonl에는 나머지만 둔다.
+ * 멱등 (이미 분리됐으면 쓰기 없음).
+ */
+export function migrateCallLog(procforgeDir: string, sessionId: string): void {
+  const ep = eventsFile(procforgeDir, sessionId);
+  if (!existsSync(ep)) return;
+  const keep: string[] = [];
+  const move: string[] = [];
+  for (const line of readFileSync(ep, "utf8").split("\n")) {
+    const t = line.trim();
+    if (!t) continue;
+    try {
+      const parsed = JSON.parse(t) as { tool?: unknown };
+      if (parsed && typeof parsed.tool === "string") move.push(t);
+      else keep.push(t);
+    } catch {
+      keep.push(t);
+    }
+  }
+  if (move.length === 0) return;
+  const cp = callsFile(procforgeDir, sessionId);
+  mkdirSync(dirname(cp), { recursive: true });
+  appendFileSync(cp, move.join("\n") + "\n");
+  writeFileSync(ep, keep.length > 0 ? keep.join("\n") + "\n" : "");
+}
+
 export function logEvent(procforgeDir: string, e: TraceEvent): void {
   try {
-    const p = eventsFile(procforgeDir, e.sessionId);
+    migrateCallLog(procforgeDir, e.sessionId);
+    const p = callsFile(procforgeDir, e.sessionId);
     mkdirSync(dirname(p), { recursive: true });
     appendFileSync(p, JSON.stringify(e) + "\n");
   } catch {
@@ -29,7 +63,8 @@ export function logEvent(procforgeDir: string, e: TraceEvent): void {
 }
 
 export function readEvents(procforgeDir: string, sessionId: string): TraceEvent[] {
-  const p = eventsFile(procforgeDir, sessionId);
+  migrateCallLog(procforgeDir, sessionId);
+  const p = callsFile(procforgeDir, sessionId);
   if (!existsSync(p)) return [];
   const out: TraceEvent[] = [];
   for (const line of readFileSync(p, "utf8").split("\n")) {
@@ -58,6 +93,7 @@ export function appendStateEvent(
   entry: Omit<EventEntry, "seq" | "at"> & { at?: string },
 ): EventEntry {
   const full = EventEntrySchema.parse({ ...entry, seq: entry.revision, at: entry.at ?? new Date().toISOString() });
+  migrateCallLog(procforgeDir, sessionId);
   const p = eventsFile(procforgeDir, sessionId);
   mkdirSync(dirname(p), { recursive: true });
   appendFileSync(p, JSON.stringify(full) + "\n");
@@ -66,6 +102,7 @@ export function appendStateEvent(
 
 /** R7 상태 이벤트만 읽기 */
 export function readStateEvents(procforgeDir: string, sessionId: string): EventEntry[] {
+  migrateCallLog(procforgeDir, sessionId);
   const p = eventsFile(procforgeDir, sessionId);
   if (!existsSync(p)) return [];
   const out: EventEntry[] = [];
