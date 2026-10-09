@@ -477,44 +477,7 @@ export function buildServer(deps: ServerDeps): McpServer {
     },
     async (a: any) => {
       try {
-        const sid = a.sessionId as string;
-        requireFresh(deps, sid);
-        const { nodes } = await client.pfTree(sid);
-        deps.store.touch(sid);
-        const detail = (a.detail as string | undefined) ?? "summary";
-        const limit = (a.limit as number | undefined) ?? 50;
-        const cursor = (a.cursor as number | undefined) ?? 0;
-        const root = a.nodeId as string | undefined;
-        let set = nodes;
-        if (root) {
-          const keep = new Set<string>([root]);
-          let grew = true;
-          while (grew) {
-            grew = false;
-            for (const n of nodes) {
-              if (n.parentId && keep.has(n.parentId) && !keep.has(n.id)) {
-                keep.add(n.id);
-                grew = true;
-              }
-            }
-          }
-          set = nodes.filter((n) => keep.has(n.id));
-        }
-        const counts: Record<string, number> = {};
-        for (const n of set) counts[n.status] = (counts[n.status] ?? 0) + 1;
-        const page = set.slice(cursor, cursor + limit);
-        return ok({
-          entries: page.map((n) => ({
-            id: n.id,
-            parentId: n.parentId,
-            goal: detail === "full" ? n.goal : n.goal.slice(0, 80),
-            status: n.status,
-            ...(detail === "full" ? { node: n } : {}),
-          })),
-          counts,
-          hasMore: cursor + limit < set.length,
-          nextCursor: cursor + limit < set.length ? cursor + limit : null,
-        });
+        return ok(await app.tree(a));
       } catch (e) {
         return errResult(e);
       }

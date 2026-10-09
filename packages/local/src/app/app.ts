@@ -289,4 +289,45 @@ export class ProcForgeApp {
       return { node: nodeSummary(n, s.limits) };
     });
   }
+
+  async tree(a: any): Promise<Record<string, unknown>> {
+    const sid = a.sessionId as string;
+    const s = this.fresh(sid);
+    const { nodes } = await this.core.pfTree(sid);
+    this.store.touch(sid);
+    const detail = (a.detail as string | undefined) ?? "summary";
+    const limit = (a.limit as number | undefined) ?? 50;
+    const cursor = (a.cursor as number | undefined) ?? 0;
+    const root = a.nodeId as string | undefined;
+    let set = nodes;
+    if (root) {
+      const keep = new Set<string>([root]);
+      let grew = true;
+      while (grew) {
+        grew = false;
+        for (const n of nodes) {
+          if (n.parentId && keep.has(n.parentId) && !keep.has(n.id)) {
+            keep.add(n.id);
+            grew = true;
+          }
+        }
+      }
+      set = nodes.filter((n) => keep.has(n.id));
+    }
+    const counts: Record<string, number> = {};
+    for (const n of set) counts[n.status] = (counts[n.status] ?? 0) + 1;
+    const page = set.slice(cursor, cursor + limit);
+    return {
+      entries: page.map((n) => ({
+        id: n.id,
+        parentId: n.parentId,
+        goal: detail === "full" ? n.goal : n.goal.slice(0, 80),
+        status: n.status,
+        ...(detail === "full" ? { node: n } : {}),
+      })),
+      counts,
+      hasMore: cursor + limit < set.length,
+      nextCursor: cursor + limit < set.length ? cursor + limit : null,
+    };
+  }
 }
