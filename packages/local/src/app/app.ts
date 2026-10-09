@@ -7,6 +7,7 @@ import type { FileStore } from "../filestore.js";
 import { collectCatalog } from "../catalog.js";
 import { nodeSummary } from "../views.js";
 import { seedSandbox } from "../services/workspace.js";
+import { logger } from "../logger.js";
 import { diffSnapshot, readCaptureRecord, readPreSnapshot, takeSandboxSnapshot, toBaseRel, writePreSnapshot } from "../services/snapshot.js";
 import { classifyReportPaths, collectExistingPaths, ingestReportJobs } from "../services/artifacts.js";
 import { ingestArtifacts, normalizeArgSpecs, readManifest } from "../artifacts.js";
@@ -232,6 +233,17 @@ export class ProcForgeApp {
       });
       this.store.touch(sid);
       return { node: nodeSummary(out.node, s.limits), instruction: out.instruction, warnings: norm.warnings };
+    });
+  }
+
+  async retry(a: any): Promise<Record<string, unknown>> {
+    const sid = a.sessionId as string;
+    return this.locked(sid, async () => {
+      const s = this.fresh(sid);
+      logger.info("pf_retry", { sessionId: sid, nodeId: a.nodeId, reason: a.reason });
+      const out = await this.core.pfResolve({ sessionId: sid, nodeId: a.nodeId as string, decision: "retry" });
+      this.store.touch(sid);
+      return { node: nodeSummary(out.node, s.limits), instruction: out.instruction };
     });
   }
 
