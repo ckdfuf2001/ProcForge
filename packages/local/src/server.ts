@@ -566,12 +566,7 @@ export function buildServer(deps: ServerDeps): McpServer {
     },
     async () => {
       try {
-        const c = await collectCatalog(deps.projectRoot, { cacheDir: join(deps.procforgeDir, "cache"), refresh: true });
-        return ok({
-          entries: c.entries.map((e) => ({ server: e.server, name: e.name, schemaHash: e.schemaHash })),
-          warnings: c.warnings,
-          cached: c.cached,
-        });
+        return ok(await app.refreshCatalog());
       } catch (e) {
         return errResult(e);
       }

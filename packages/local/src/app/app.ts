@@ -360,4 +360,13 @@ export class ProcForgeApp {
       return { node: nodeSummary(n, s.limits) };
     });
   }
+
+  async refreshCatalog(): Promise<Record<string, unknown>> {
+    const c = await collectCatalog(this.projectRoot, { cacheDir: join(this.procforgeDir, "cache"), refresh: true });
+    return {
+      entries: c.entries.map((e) => ({ server: e.server, name: e.name, schemaHash: e.schemaHash })),
+      warnings: c.warnings,
+      cached: c.cached,
+    };
+  }
 }
