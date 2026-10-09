@@ -1,7 +1,21 @@
-import { describe, it, expect } from "vitest";
-import { normalizeResponseForStore, restoreResponseForRun } from "./recordings.js";
+import { describe, it, expect, beforeEach } from "vitest";
+import { mkdtempSync, writeFileSync, existsSync, mkdirSync, readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import {
+  normalizeResponseForStore,
+  restoreResponseForRun,
+  loadCassette,
+  saveRecording,
+} from "./recordings.js";
+import { replacePathForms } from "./pathnorm.js";
 
-describe("recordings normalize/restore (M3.4-6)", () => {
+let dir: string;
+beforeEach(() => {
+  dir = mkdtempSync(join(tmpdir(), "pf-rec-"));
+});
+
+describe("recordings normalize/restore (M3.4-6/M3.4.1-2)", () => {
   it("runFs 절대경로 왕복 (posix + windows)", () => {
     const fsDir = "/tmp/x/runs/r1/fs";
     const resp = { summary: `wrote ${fsDir}/a.txt`, json: { p: `${fsDir}/b.txt` } };
@@ -19,14 +33,72 @@ describe("recordings normalize/restore (M3.4-6)", () => {
     expect(wback.summary).toContain("D:\\n\\runs\\r9\\fs");
   });
 
-  it("옛 runs/<id>/fs 패턴 마이그레이션", () => {
-    const old = {
-      summary: 'out /tmp/old/runs/abc123/fs/data.json and C:\\w\\runs\\z9\\fs\\x.txt',
-      json: undefined,
+  it("JSON 이스케이프 형태도 정규화·복원", () => {
+    const winFs = "C:\\w\\runs\\r1\\fs";
+    const summary = JSON.stringify({ path: `${winFs}\\out.pptx` });
+    expect(summary).toContain("\\\\");
+    const stored = normalizeResponseForStore({ summary }, winFs);
+    expect(stored.summary).toContain("{RUNFS}");
+    expect(stored.summary).not.toContain("C:");
+    const back = restoreResponseForRun(stored, "D:\\n\\runs\\r9\\fs");
+    expect(back.summary).toContain("D:");
+    expect(back.summary).toContain("out.pptx");
+  });
+
+  it("드라이브 대소문자 무시", () => {
+    const out = replacePathForms("open c:\\w\\runs\\r1\\fs\\a", "C:\\w\\runs\\r1\\fs", "{RUNFS}");
+    expect(out).toBe("open {RUNFS}\\a");
+  });
+
+  it("공백 포함 win32 경로 녹화→다른 runId replay 복원", () => {
+    const fsA = "C:\\Users\\홍 길동\\p\\.procforge\\runs\\aaa\\fs";
+    const fsB = "C:\\Users\\홍 길동\\p\\.procforge\\runs\\bbb\\fs";
+    const resp = { summary: `saved ${fsA}\\out.pptx`, json: { p: `${fsA}/out.pptx` } };
+    const stored = normalizeResponseForStore(resp, fsA);
+    expect(stored.summary).not.toContain("홍 길동");
+    const back = restoreResponseForRun(stored, fsB);
+    expect(back.summary).toBe(`saved ${fsB}\\out.pptx`);
+    expect((back.json as { p: string }).p).toBe(`${fsB}/out.pptx`);
+  });
+
+  it("v1 cassette는 로드 시 v2로 마이그레이션 저장", () => {
+    const p = join(dir, "sessions", "s", "cassettes", "1.1.json");
+    // 직접 기록 (v1 형식, version 없음)
+    mkdirSync(join(dir, "sessions", "s", "cassettes"), { recursive: true });
+    writeFileSync(p, JSON.stringify({ entries: [{ key: "k", server: "s", tool: "t", args: {}, response: { summary: "ok" }, at: "t" }] }));
+    const entries = loadCassette(dir, "s", "1.1");
+    expect(entries).toHaveLength(1);
+    const saved = JSON.parse(readFileSync(p, "utf8")) as { version: number };
+    expect(saved.version).toBe(2);
+  });
+
+  it("파싱 실패 → .corrupt 이동 + bad_request", () => {
+    const cdir = join(dir, "sessions", "s2", "cassettes");
+    mkdirSync(cdir, { recursive: true });
+    const p = join(cdir, "9.9.json");
+    writeFileSync(p, "{ broken json");
+    try {
+      loadCassette(dir, "s2", "9.9");
+      expect.unreachable();
+    } catch (e) {
+      expect((e as { code?: string }).code).toBe("bad_request");
+      expect((e as Error).message).toMatch(/cassette 손상/);
+    }
+    expect(existsSync(p)).toBe(false);
+    const leftovers = readdirSync(cdir).filter((f) => f.startsWith("9.9.json.corrupt-"));
+    expect(leftovers).toHaveLength(1);
+  });
+
+  it("saveRecording은 version 2 + runId/fsDir 기록", () => {
+    saveRecording(dir, "s3", "2.1", {
+      key: "k", server: "sv", tool: "t", args: {}, response: { summary: "ok" }, at: "t",
+    }, "/tmp/fs", "run-1");
+    const saved = JSON.parse(readFileSync(join(dir, "sessions", "s3", "cassettes", "2.1.json"), "utf8")) as {
+      version: number;
+      entries: { runId: string; fsDir: string }[];
     };
-    const back = restoreResponseForRun(old, "/tmp/new/runs/r2/fs");
-    expect(back.summary).toContain("/tmp/new/runs/r2/fs/data.json");
-    expect(back.summary).toContain("/tmp/new/runs/r2/fs");
-    expect(back.summary).not.toContain("abc123");
+    expect(saved.version).toBe(2);
+    expect(saved.entries[0].runId).toBe("run-1");
+    expect(saved.entries[0].fsDir).toBe("/tmp/fs");
   });
 });
