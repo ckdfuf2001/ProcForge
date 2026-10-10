@@ -457,6 +457,7 @@ async function execNode(
     artifacts: {},
     fileExists,
     nodeOutputs,
+    params,
   });
   const durationMs = Date.now() - start;
   if (r.failedConstraints.length > 0) {

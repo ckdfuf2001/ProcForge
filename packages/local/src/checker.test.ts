@@ -190,4 +190,49 @@ describe("checker kinds", () => {
     expect(all.verdict).toBe("pass");
     expect(all.unverified).toEqual(["b"]);
   });
+
+  it("M5.1-B2 expected에 ref 허용", () => {
+    // $노드.필드 약식
+    const shorthand = {
+      id: "n", kind: "numeric_match", spec: { path: "total", expected: "$1.1.total_ex_vat" }, source: "human",
+    } as never;
+    expect(
+      evaluateConstraint(shorthand, { resultJson: { total: 100 }, nodeOutputs: { "1.1": { total_ex_vat: 100 } } }).pass,
+    ).toBe(true);
+    expect(
+      evaluateConstraint(shorthand, { resultJson: { total: 200 }, nodeOutputs: { "1.1": { total_ex_vat: 100 } } }).pass,
+    ).toBe(false);
+    // 구 형태 ($노드.output.필드) 그대로 동작
+    const legacy = {
+      id: "n", kind: "numeric_match", spec: { path: "total", expected: "$1.output.gross" }, source: "human",
+    } as never;
+    expect(
+      evaluateConstraint(legacy, { resultJson: { total: 100 }, nodeOutputs: { "1": { gross: 100 } } }).pass,
+    ).toBe(true);
+    // ${params.x}
+    const pref = {
+      id: "n", kind: "numeric_match", spec: { path: "total", expected: "${params.limit}" }, source: "human",
+    } as never;
+    expect(
+      evaluateConstraint(pref, { resultJson: { total: 100 }, params: { limit: "100" } }).pass,
+    ).toBe(true);
+    expect(
+      evaluateConstraint(pref, { resultJson: { total: 101 }, params: { limit: "100" } }).pass,
+    ).toBe(false);
+    // params 없음 → deferred (core는 unverified)
+    const d = evaluateConstraint(pref, { resultJson: { total: 100 } });
+    expect(d.pass).toBe(false);
+    expect(d.deferred).toBe(true);
+    // params 값이 숫자가 아니면 fail (지연 아님)
+    const nan = evaluateConstraint(pref, { resultJson: { total: 100 }, params: { limit: "x" } });
+    expect(nan.pass).toBe(false);
+    expect(nan.deferred).toBeFalsy();
+  });
+
+  it("M5.1-B2 resolveNodeRef 약식", async () => {
+    const { resolveNodeRef } = await import("../src/checker.js");
+    expect(resolveNodeRef("$1.1.total", { "1.1": { total: 5 } })).toEqual({ found: true, value: 5 });
+    expect(resolveNodeRef("$1.output.gross", { "1": { gross: 5 } })).toEqual({ found: true, value: 5 });
+    expect(resolveNodeRef("$9.x", {}).found).toBe(false);
+  });
 });

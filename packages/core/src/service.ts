@@ -828,7 +828,7 @@ export class CoreService implements CoreClient {
       constraints = adviceToConstraints(input.text);
       if (suggestsNumericRef(input.text)) {
         suggestNote =
-          ` 금액 비교가 필요하면 numeric_match(expectedRef=$<노드>.output.<필드>, tolerance)를 ` +
+          ` 금액 비교가 필요하면 numeric_match(expected=$<노드>.<필드> 또는 \${params.x}, tolerance)를 ` +
           `proposedConstraints로 제안하라 (runner에서 판정).`;
       }
     }

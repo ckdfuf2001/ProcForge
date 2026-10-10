@@ -8,6 +8,8 @@ export type CheckContext = {
   fileExists?: (path: string) => boolean;
   /** 다른 노드 출력 (numeric expectedRef 해결용, M4. runner만 제공) */
   nodeOutputs?: Record<string, unknown>;
+  /** params 참조 해결용 (M5.1-B2. runner만 제공) */
+  params?: Record<string, string>;
 };
 
 export type CheckResult = {
@@ -18,14 +20,21 @@ export type CheckResult = {
   deferred?: boolean;
 };
 
-/** "$<id>.output[.path]" 참조 해결 */
+/** "$<id>.output[.path]" 참조 해결. ".output" 생략 약식도 허용 (M5.1-B2) */
 export function resolveNodeRef(ref: string, outputs: Record<string, unknown>): { found: boolean; value: unknown } {
-  const m = /^\$(\d+(?:\.\d+)*)\.output\.?(.*)$/.exec(ref);
+  const m = /^\$(\d+(?:\.\d+)*)(?:\.output)?\.?(.*)$/.exec(ref);
   if (!m) return { found: false, value: undefined };
   if (!(m[1] in outputs)) return { found: false, value: undefined };
   const base = outputs[m[1]];
   if (!m[2]) return { found: true, value: base };
   return getByDotPath(base, m[2]);
+}
+
+/** "${params.x}" 참조 해결 (M5.1-B2) */
+export function resolveParamsRef(ref: string, params: Record<string, string>): { found: boolean; value: unknown } {
+  const m = /^\$\{params\.([A-Za-z0-9_.-]+)\}$/.exec(ref);
+  if (!m || !(m[1] in params)) return { found: false, value: undefined };
+  return { found: true, value: params[m[1]] };
 }
 
 export function getByDotPath(root: unknown, path: string): { found: boolean; value: unknown } {
@@ -258,8 +267,30 @@ export function evaluateConstraint(c: Constraint, ctx: CheckContext): CheckResul
       }
       if (typeof v !== "number" || Number.isNaN(v)) return { pass: false, reason: "target is not a number" };
       // expectedRef는 runner에서만 판정 (M4). core에는 nodeOutputs이 없어 deferred.
-      let expected = c.spec.expected;
-      if (c.spec.expectedRef !== undefined) {
+      let expected: number | undefined = typeof c.spec.expected === "number" ? c.spec.expected : undefined;
+      if (typeof c.spec.expected === "string") {
+        // M5.1-B2: expected에 ref 허용 ("$노드[.경로]", "${params.x}")
+        const ref = c.spec.expected as string;
+        const pm = /^\$\{params\.([A-Za-z0-9_.-]+)\}$/.exec(ref);
+        if (pm) {
+          if (ctx.params === undefined || !(pm[1] in ctx.params)) {
+            return { pass: false, reason: `deferred to runner (params ref): ${ref}`, deferred: true };
+          }
+          const pv = Number(ctx.params[pm[1]]);
+          if (!Number.isFinite(pv)) return { pass: false, reason: `params ref is not a number: ${ref}` };
+          expected = pv;
+        } else {
+          if (ctx.nodeOutputs === undefined) {
+            return { pass: false, reason: `deferred to runner (expected ref): ${ref}`, deferred: true };
+          }
+          const r = resolveNodeRef(ref, ctx.nodeOutputs);
+          if (!r.found) return { pass: false, reason: `ref not found: ${ref}`, deferred: true };
+          if (typeof r.value !== "number" || Number.isNaN(r.value as number)) {
+            return { pass: false, reason: `ref is not a number: ${ref}` };
+          }
+          expected = r.value as number;
+        }
+      } else if (c.spec.expectedRef !== undefined) {
         if (ctx.nodeOutputs === undefined) {
           return { pass: false, reason: "deferred to runner (expectedRef)", deferred: true };
         }

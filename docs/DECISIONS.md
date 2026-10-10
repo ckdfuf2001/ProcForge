@@ -318,6 +318,8 @@
 - M5.1-B1: finalize 고정값 감사 (params 부분 일치=core 담당과 중복 방지로
   constraint만·날짜 4종·녹화 수치 4자리+). warnings + PROCEDURE.md 절,
   strict 시 bad_request. 역치 근거: 인덱스·개수·tolerance 오탐 방지.
+- M5.1-B2: numeric_match.expected에 ref 허용 ("$노드.필드" 약식,
+  "${params.x}"). core는 deferred, runner에서 판정. advise 안내 문구 갱신.
 - M5-1: `procforge run <procedure> --param k=v [--out dir] [--force]` 신설
   (App.runProcedure 경유). 출력은 runs/<runId>/fs, --out 지정 시에만 완료 후
   프로젝트 안으로 복사 (기존 파일은 --force 없이 거부).

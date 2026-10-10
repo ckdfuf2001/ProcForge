@@ -288,6 +288,7 @@ export function buildServer(deps: ServerDeps): McpServer {
         "선수: needs_human 노드.",
         "text(필수, 예: \"매출은 세전 기준\"), proposedConstraints(선택, 호스트 제안 조건 배열).",
         "제안은 최신 fixture로 평가해 채택/거부. needs_human이면 open 복귀. 다음: pf_next.",
+        "금액 비교 제안 시 expected에 참조 허용 (\"$노드.필드\" 약식, \"${params.x}\").",
       ].join("\n"),
       inputSchema: AdviseInputSchema,
       outputSchema: OUTPUT_SCHEMAS["pf_advise"] as never,
