@@ -244,6 +244,8 @@
 - 2.5.1-3: pfNext 분기 시 open→probing 전환 저장, 처음 전환만
   enteredProbing. App은 true일 때만 스냅샷 (실패는 응답 경고),
   pf_retry 성공 시도 기록. guide-3단계-6 잔여분 해소.
+- 2.5.1-4: report/confirmLeaf/advise는 expectedRevision 생략 시 읽은
+  revision 전달. App 호출-읽기 사이 끼어든 변경은 conflict (호스트 재시도).
 
 ## M3.2
 

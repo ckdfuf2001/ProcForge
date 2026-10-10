@@ -180,8 +180,9 @@ export class ProcForgeApp {
       selfReason: a.selfReason as string,
       rubricReasons: a.rubricReasons as Record<string, string> | undefined,
       attemptId,
-      expectedRevision: a.expectedRevision as number | undefined,
-      actor: (a.actor as Actor | undefined) ?? "host",
+      // M4.2-2.5.1-4: 생략 시 읽은 revision 전달 (도중 변경은 conflict)
+      expectedRevision: a.expectedRevision ?? sess.revision,
+      actor: a.actor ?? "host",
     });
     return { ...(out as unknown as Record<string, unknown>), warnings: reportWarnings };
   }
@@ -238,8 +239,9 @@ export class ProcForgeApp {
       sideEffect: a.sideEffect as "none" | "local_write" | "external" | undefined,
       goldenIgnore: a.ignore as string[] | undefined,
       artifacts: merged,
-      expectedRevision: a.expectedRevision as number | undefined,
-      actor: (a.actor as Actor | undefined) ?? "host",
+      // M4.2-2.5.1-4: 생략 시 읽은 revision 전달 (도중 변경은 conflict)
+      expectedRevision: a.expectedRevision ?? s.revision,
+      actor: a.actor ?? "host",
     });
     return {
       node: nodeSummary(out.node, s.limits),
@@ -348,8 +350,9 @@ export class ProcForgeApp {
         text: a.text as string,
         proposedConstraints: a.proposedConstraints as unknown[] | undefined,
         fixtureContents,
-        expectedRevision: a.expectedRevision as number | undefined,
-        actor: (a.actor as Actor | undefined) ?? "host",
+        // M4.2-2.5.1-4: 생략 시 읽은 revision 전달 (도중 변경은 conflict)
+        expectedRevision: a.expectedRevision ?? s.revision,
+        actor: a.actor ?? "host",
       });
       return {
         constraints: out.constraints.map((c) => ({ id: c.id, kind: c.kind, summary: `${c.kind}` })),

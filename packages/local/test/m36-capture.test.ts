@@ -205,6 +205,42 @@ describe("M3.6-3 출력 자동 캡처", () => {
     }
   }, 60000);
 
+  it("M4.2-2.5.1-4 confirmLeaf 도중 변경 끼면 conflict + 결과물 불변", async () => {
+    const { client } = createLocalStack(pfdir);
+    const app = new ProcForgeApp({ core: client, procforgeDir: pfdir, projectRoot: root });
+    const started = await client.pfStart({
+      request: "경쟁",
+      toolCatalog: [{ server: "opencode", name: "read", inputSchema: {}, schemaHash: "h" }],
+    });
+    const sid = started.session.id;
+    await client.pfResolve({ sessionId: sid, nodeId: "1", decision: "split", children: [{ goal: "a" }] });
+    await app.report({
+      sessionId: sid, nodeId: "1.1",
+      tool: { server: "opencode", name: "read" }, args: { path: "x" },
+      resultSummary: "done", resultJson: { ok: true },
+      selfVerdict: "pass", selfReason: "ok",
+    });
+    const revBefore = (await client.pfTree(sid)).session.revision;
+    // 확정 호출 시작 후 (읽은 revision 고정) 다른 변경 끼어들기
+    const p = app.confirmLeaf({
+      sessionId: sid, nodeId: "1.1",
+      tool: { server: "opencode", name: "read" },
+      argSpecs: { path: { kind: "fixed", value: "x" } },
+    });
+    await client.pfAdvise({ sessionId: sid, nodeId: "1.1", text: "끼어들기" });
+    try {
+      await p;
+      expect.unreachable();
+    } catch (e) {
+      expect((e as { code?: string }).code).toBe("conflict");
+    }
+    // 조언 1건만 반영, attempt 결과물 불변, leaf 아님
+    const tree = await client.pfTree(sid);
+    expect(tree.session.revision).toBe(revBefore + 1);
+    expect(tree.nodes.find((n) => n.id === "1.1")!.attempts[0].artifacts).toEqual([]);
+    expect(tree.nodes.find((n) => n.id === "1.1")!.status).toBe("probing");
+  });
+
   it("fixtureFileExists: 바이너리는 존재+크기>0", () => {
     const dir = mkdtempSync(join(tmpdir(), "pf-m36fx-"));
     writeFileSync(join(dir, "a.pptx"), "x");
