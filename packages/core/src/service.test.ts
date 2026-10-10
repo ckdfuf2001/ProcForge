@@ -713,7 +713,7 @@ function recordingStore(inner = createMemoryStore(), opts: { failCommit?: boolea
     readEvents: (sid) => inner.readEvents(sid),
     getLastUsed: (sid) => inner.getLastUsed(sid),
     touchSession: (sid) => inner.touchSession(sid),
-    withLock: (sid, fn) => {
+    withLock: async (sid, fn) => {
       calls.push("withLock");
       return inner.withLock(sid, fn);
     },
@@ -790,16 +790,13 @@ describe("M4.2-0.5 revision·이벤트 트랜잭션", () => {
   it("M4.2-2.5-7 change 본문이 Promise면 internal + tx 복구", async () => {
     const svc = new CoreService(createMemoryStore(), passEval);
     const s = await svc.pfStart({ request: "r", toolCatalog: catalog });
-    try {
-      (svc as unknown as { change: (sid: string, op: object, body: () => unknown) => unknown }).change(
+    await expect(
+      (svc as unknown as { change: (sid: string, op: object, body: () => unknown) => Promise<unknown> }).change(
         s.session.id,
         { method: "t" },
         async () => ({ result: 1, summary: "x" }),
-      );
-      expect.unreachable();
-    } catch (e) {
-      expect((e as { code?: string }).code).toBe("internal");
-    }
+      ),
+    ).rejects.toMatchObject({ code: "internal" });
     // tx 복구: 이후 정상 호출 가능
     await svc.pfReport({ ...rep(), sessionId: s.session.id });
     expect((await svc.pfTree(s.session.id)).session.revision).toBe(1);

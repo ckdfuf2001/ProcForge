@@ -181,6 +181,25 @@ describe("FileStore ID 이중 검증 (M2.6-2)", () => {
     expect(snapTree(sessDir)).toEqual(before);
   });
 
+  it("M4.2-2.5.1-5 withLock: 잠금 중 대기 후 성공", async () => {
+    const release = store.acquireLock(sid);
+    setTimeout(() => release(), 60);
+    await expect(store.withLock(sid, () => "ok")).resolves.toBe("ok");
+    release();
+  });
+
+  it("M4.2-2.5.1-5 withLock: 20회 초과 시 conflict", async () => {
+    const release = store.acquireLock(sid);
+    try {
+      await store.withLock(sid, () => 1);
+      expect.unreachable();
+    } catch (e) {
+      expect((e as { code?: string }).code).toBe("conflict");
+    } finally {
+      release();
+    }
+  }, 10000);
+
   it("M4.2-2.5-3 저장 실패해도 재로드 시 일관성", () => {
     store.saveSession(testSession());
     store.saveNode(sid, testNode("1.1", "old1"));

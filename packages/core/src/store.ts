@@ -41,7 +41,7 @@ export function createMemoryStore(): Store {
     touchSession: (sid) => {
       lastUsed.set(sid, Date.now());
     },
-    withLock: (_sid, fn) => fn(),
+    withLock: async (_sid, fn) => await fn(),
     commitChange: (sid, c) => apply(sid, c),
   };
 }

@@ -246,6 +246,8 @@
   pf_retry 성공 시도 기록. guide-3단계-6 잔여분 해소.
 - 2.5.1-4: report/confirmLeaf/advise는 expectedRevision 생략 시 읽은
   revision 전달. App 호출-읽기 사이 끼어든 변경은 conflict (호스트 재시도).
+- 2.5.1-5: filestore withLock은 잠금 중이면 25ms×20회 재시도 후
+  conflict. Store.withLock/service.change 비동기로 전환.
 
 ## M3.2
 

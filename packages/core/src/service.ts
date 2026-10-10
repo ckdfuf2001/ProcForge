@@ -201,11 +201,11 @@ export class CoreService implements CoreClient {
    * R6 변경 트랜잭션 (M4.2-0.5): expectedRevision 비교 → 본문(버퍼링) →
    * revision+1 → 이벤트 기록 → 저장. 쓰기 없으면 그대로 반환.
    */
-  private change<R>(
+  private async change<R>(
     sessionId: string,
     op: { method: string; expectedRevision?: number; actor?: Actor },
     body: () => { result: R; summary: string },
-  ): { result: R; revision: number; changedNodeIds: string[] } {
+  ): Promise<{ result: R; revision: number; changedNodeIds: string[] }> {
     return this.base.withLock(sessionId, () => {
     const pre = this.checkFresh(sessionId);
     if (op.expectedRevision !== undefined && pre.revision !== op.expectedRevision) {
@@ -347,7 +347,7 @@ export class CoreService implements CoreClient {
 
   async pfNext(input: PfNextInput): Promise<PfNextOutput> {
   const sessionId = input.sessionId;
-  const c = this.change<PfNextPayload>(sessionId, { method: "pfNext", expectedRevision: input.expectedRevision, actor: input.actor }, () => {
+  const c = await this.change<PfNextPayload>(sessionId, { method: "pfNext", expectedRevision: input.expectedRevision, actor: input.actor }, () => {
     this.sess(sessionId);
     const nodes = [...this.store.getNodes(sessionId).values()];
     if (nodes.length === 0) return { result: { done: true }, summary: "next done" };
@@ -434,7 +434,7 @@ export class CoreService implements CoreClient {
   }
 
   async pfReport(input: PfReportInput): Promise<PfReportOutput> {
-  const c = this.change<Omit<PfReportOutput, "revision" | "changedNodeIds">>(input.sessionId, { method: "pfReport", expectedRevision: input.expectedRevision, actor: input.actor }, () => {
+  const c = await this.change<Omit<PfReportOutput, "revision" | "changedNodeIds">>(input.sessionId, { method: "pfReport", expectedRevision: input.expectedRevision, actor: input.actor }, () => {
     const s = this.sess(input.sessionId);
     const n = this.node(input.sessionId, input.nodeId);
     if (!input.selfVerdict || !input.selfReason)
@@ -574,7 +574,7 @@ export class CoreService implements CoreClient {
   }
 
   async pfResolve(input: PfResolveInput): Promise<PfResolveOutput> {
-  const c = this.change<Omit<PfResolveOutput, "revision" | "changedNodeIds">>(input.sessionId, { method: "pfResolve", expectedRevision: input.expectedRevision, actor: input.actor }, () => {
+  const c = await this.change<Omit<PfResolveOutput, "revision" | "changedNodeIds">>(input.sessionId, { method: "pfResolve", expectedRevision: input.expectedRevision, actor: input.actor }, () => {
     const s = this.sess(input.sessionId);
     const n = this.node(input.sessionId, input.nodeId);
 
@@ -768,7 +768,7 @@ export class CoreService implements CoreClient {
   }
 
   async pfAdvise(input: PfAdviseInput): Promise<PfAdviseOutput> {
-  const c = this.change<Omit<PfAdviseOutput, "revision" | "changedNodeIds">>(input.sessionId, { method: "pfAdvise", expectedRevision: input.expectedRevision, actor: input.actor }, () => {
+  const c = await this.change<Omit<PfAdviseOutput, "revision" | "changedNodeIds">>(input.sessionId, { method: "pfAdvise", expectedRevision: input.expectedRevision, actor: input.actor }, () => {
     const s = this.sess(input.sessionId);
     const n = this.node(input.sessionId, input.nodeId);
     let constraints: Constraint[];
@@ -844,7 +844,7 @@ export class CoreService implements CoreClient {
 
   /** 확정 인자 수정 (M4.2-2). leaf는 open으로, 수정분을 suggestedArgs에 저장 */
   async pfEditArgs(input: PfEditArgsInput): Promise<{ node: Node; instruction: string } & ChangeMeta> {
-    const c = this.change(input.sessionId, { method: "pfEditArgs", expectedRevision: input.expectedRevision, actor: input.actor }, () => {
+    const c = await this.change(input.sessionId, { method: "pfEditArgs", expectedRevision: input.expectedRevision, actor: input.actor }, () => {
       const s = this.sess(input.sessionId);
       const n = this.node(input.sessionId, input.nodeId);
       if (n.locked) throw err("conflict", `node ${n.id} is locked`);
@@ -880,7 +880,7 @@ export class CoreService implements CoreClient {
 
   /** 목표·검사 조건 직접 수정 (M4.2-2) */
   async pfEditNode(input: PfEditNodeInput): Promise<{ node: Node; instruction: string } & ChangeMeta> {
-    const c = this.change(input.sessionId, { method: "pfEditNode", expectedRevision: input.expectedRevision, actor: input.actor }, () => {
+    const c = await this.change(input.sessionId, { method: "pfEditNode", expectedRevision: input.expectedRevision, actor: input.actor }, () => {
       const s = this.sess(input.sessionId);
       const n = this.node(input.sessionId, input.nodeId);
       if (n.locked) throw err("conflict", `node ${n.id} is locked`);
@@ -921,7 +921,7 @@ export class CoreService implements CoreClient {
 
   /** 카탈로그 저장 (M4.2-2, 수집은 local이 하고 core는 저장만) */
   async pfUpdateCatalog(input: { sessionId: string; entries: unknown[]; expectedRevision?: number; actor?: Actor }): Promise<ChangeMeta> {
-    const c = this.change(input.sessionId, { method: "pfUpdateCatalog", expectedRevision: input.expectedRevision, actor: input.actor }, () => {
+    const c = await this.change(input.sessionId, { method: "pfUpdateCatalog", expectedRevision: input.expectedRevision, actor: input.actor }, () => {
       const s = this.sess(input.sessionId);
       if (!Array.isArray(input.entries)) throw err("bad_request", "entries 배열 필요.");
       const parsed: Session["toolCatalog"] = [];
@@ -938,7 +938,7 @@ export class CoreService implements CoreClient {
 
   /** attempt artifacts 교체 (M4.2-1, server 직접 저장 대체) */
   async amendAttemptArtifacts(input: AmendAttemptArtifactsInput): Promise<{ node: Node } & ChangeMeta> {
-    const c = this.change(input.sessionId, { method: "amendAttemptArtifacts", expectedRevision: input.expectedRevision, actor: input.actor }, () => {
+    const c = await this.change(input.sessionId, { method: "amendAttemptArtifacts", expectedRevision: input.expectedRevision, actor: input.actor }, () => {
       const n = this.node(input.sessionId, input.nodeId);
       if (n.locked) throw err("conflict", `node ${n.id} is locked`);
       const idx = n.attempts.findIndex((a) => a.id === input.attemptId);
@@ -1054,7 +1054,7 @@ export class CoreService implements CoreClient {
   }
 
   async pfApprove(input: PfApproveInput): Promise<{ node: Node } & ChangeMeta> {
-  const c = this.change(input.sessionId, { method: "pfApprove", expectedRevision: input.expectedRevision, actor: input.actor }, () => {
+  const c = await this.change(input.sessionId, { method: "pfApprove", expectedRevision: input.expectedRevision, actor: input.actor }, () => {
     const s = this.sess(input.sessionId);
     const n = this.node(input.sessionId, input.nodeId);
     if (n.locked) throw err("conflict", `node ${n.id} is locked`);
@@ -1080,7 +1080,7 @@ export class CoreService implements CoreClient {
   }
 
   async pfLock(input: PfLockInput): Promise<{ node: Node } & ChangeMeta> {
-  const c = this.change(input.sessionId, { method: "pfLock", expectedRevision: input.expectedRevision, actor: input.actor }, () => {
+  const c = await this.change(input.sessionId, { method: "pfLock", expectedRevision: input.expectedRevision, actor: input.actor }, () => {
     const n = this.node(input.sessionId, input.nodeId);
     const next = { ...n, locked: true };
     this.store.saveNode(input.sessionId, next);
@@ -1090,7 +1090,7 @@ export class CoreService implements CoreClient {
   }
 
   async pfReopen(input: PfReopenInput): Promise<{ node: Node } & ChangeMeta> {
-  const c = this.change(input.sessionId, { method: "pfReopen", expectedRevision: input.expectedRevision, actor: input.actor }, () => {
+  const c = await this.change(input.sessionId, { method: "pfReopen", expectedRevision: input.expectedRevision, actor: input.actor }, () => {
     const n = this.node(input.sessionId, input.nodeId);
     const next = { ...n, locked: false, status: "open" as const };
     this.store.saveNode(input.sessionId, next);

@@ -68,7 +68,7 @@ export class TxStore implements Store {
     this.base.touchSession(sessionId);
   }
 
-  withLock<T>(sessionId: string, fn: () => T): T {
+  async withLock<T>(sessionId: string, fn: () => T | Promise<T>): Promise<T> {
     return this.base.withLock(sessionId, fn);
   }
 

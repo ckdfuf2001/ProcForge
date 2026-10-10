@@ -289,14 +289,27 @@ export class FileStore implements Store {
     this.writeAtomic(this.metaPath(sid), JSON.stringify({ lastUsedAt: new Date().toISOString() }));
   }
 
-  /** 세션 lockfile 안에서 실행 (M4.2-2.5, core change 트랜잭션용) */
-  withLock<T>(sid: string, fn: () => T): T {
-    const release = this.acquireLock(sid);
-    try {
-      return fn();
-    } finally {
-      release();
+  /**
+   * 세션 lockfile 안에서 실행 (M4.2-2.5, core change 트랜잭션용).
+   * M4.2-2.5.1-5: 잠금 중이면 25ms 간격 최대 20회 재시도 후 conflict.
+   */
+  async withLock<T>(sid: string, fn: () => T | Promise<T>): Promise<T> {
+    for (let i = 0; i < 20; i++) {
+      let release: (() => void) | undefined;
+      try {
+        release = this.acquireLock(sid);
+      } catch (e) {
+        if ((e as { code?: string }).code !== "conflict" || i === 19) throw e;
+        await new Promise((r) => setTimeout(r, 25));
+        continue;
+      }
+      try {
+        return await fn();
+      } finally {
+        release();
+      }
     }
+    throw Object.assign(new Error(`session locked: ${sid}`), { code: "conflict" });
   }
 
   getLastUsed(sid: string): number | undefined {
