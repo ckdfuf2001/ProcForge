@@ -96,6 +96,65 @@ describe("FileStore ID 이중 검증 (M2.6-2)", () => {
     expect(new FileStore(dir).getSession(sid)?.revision).toBe(1);
   });
 
+  it("M4.2-2.5.1-2 pending 숫자 순 적용 (9→10)", () => {
+    store.saveSession(testSession());
+    store.saveNode(sid, testNode("1.1", "old"));
+    const sessDir = join(dir, "sessions", sid);
+    const mk = (rev: number, goal: string) => writeFileSync(join(sessDir, `pending-${rev}.json`), JSON.stringify({
+      revision: rev, session: { ...testSession(), revision: rev }, nodes: [testNode("1.1", goal)], events: [],
+    }));
+    mk(10, "ten");
+    mk(9, "nine");
+    const reread = new FileStore(dir);
+    // 읽기 뷰: 9→10 숫자 순 (문자열 순이면 nine이 이김)
+    expect(reread.getNode(sid, "1.1")?.goal).toBe("ten");
+    // 커밋 시 적용 후 정리, 최종 = 10 이후 rev 11
+    reread.commitChange(sid, { session: { ...testSession(), revision: 11 }, nodes: [], events: [] });
+    expect(new FileStore(dir).getNode(sid, "1.1")?.goal).toBe("ten");
+    expect(new FileStore(dir).getSession(sid)?.revision).toBe(11);
+    expect(readdirSync(sessDir).filter((f) => f.startsWith("pending-"))).toEqual([]);
+  });
+
+  it("M4.2-2.5.1-2 손상 pending은 .corrupt로 이동 (삭제 금지)", () => {
+    store.saveSession(testSession());
+    const sessDir = join(dir, "sessions", sid);
+    writeFileSync(join(sessDir, "pending-5.json"), "not-json{{{");
+    const reread = new FileStore(dir);
+    // 읽기: 건너뜀, 파일 유지
+    expect(reread.getSession(sid)?.revision).toBe(0);
+    expect(existsSync(join(sessDir, "pending-5.json"))).toBe(true);
+    // 커밋: .corrupt로 이동 후 진행
+    reread.commitChange(sid, { session: { ...testSession(), revision: 1 }, nodes: [], events: [] });
+    const files = readdirSync(sessDir);
+    expect(files.some((f) => f.startsWith("pending-"))).toBe(false);
+    expect(files.some((f) => f.startsWith(".corrupt-"))).toBe(true);
+    expect(new FileStore(dir).getSession(sid)?.revision).toBe(1);
+  });
+
+  it("M4.2-2.5.1-2 복구 실패 시 새 커밋 거부", () => {
+    store.saveSession(testSession());
+    store.saveNode(sid, testNode("1.1", "old"));
+    const sessDir = join(dir, "sessions", sid);
+    writeFileSync(join(sessDir, "pending-1.json"), JSON.stringify({
+      revision: 1, session: { ...testSession(), revision: 1 }, nodes: [testNode("1.1", "new")], events: [],
+    }));
+    class AlwaysFail extends FileStore {
+      override saveNode(): void {
+        throw new Error("disk full");
+      }
+    }
+    const failing = new AlwaysFail(dir);
+    try {
+      failing.commitChange(sid, { session: { ...testSession(), revision: 2 }, nodes: [], events: [] });
+      expect.unreachable();
+    } catch (e) {
+      expect((e as { code?: string }).code).toBe("internal");
+      expect((e as { hint?: string }).hint).toBe("복구 필요");
+    }
+    // 실패한 pending은 유지 (다음 재시도용)
+    expect(existsSync(join(sessDir, "pending-1.json"))).toBe(true);
+  });
+
   it("M4.2-2.5.1-1 pending 조회: 파일 불변 + 메모리 뷰 반영", () => {
     store.saveSession(testSession());
     store.saveNode(sid, testNode("1.1", "old"));

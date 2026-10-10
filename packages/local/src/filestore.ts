@@ -1,8 +1,9 @@
-import { mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync, unlinkSync, statSync, appendFileSync } from "node:fs";
+import { mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync, unlinkSync, statSync, appendFileSync, renameSync } from "node:fs";
 import { join, dirname } from "node:path";
 import type { Store } from "@procforge/shared/store.js";
 import type { CommitChange } from "@procforge/shared/store.js";
 import type { Node, Session } from "@procforge/shared/schema.js";
+import { pfError } from "@procforge/shared/errors.js";
 import type { EventEntry } from "@procforge/shared/dto.js";
 import { EventEntrySchema } from "@procforge/shared/dto.js";
 import { NodeIdSchema, NodeSchema, SessionIdSchema, SessionSchema } from "@procforge/shared/schema.js";
@@ -157,26 +158,34 @@ export class FileStore implements Store {
   }
 
   /**
-   * 남은 pending 재반영 (M4.2-2.5-3). true면 복구 수행.
-   * 이벤트는 seq 중복 방지 후 append.
+   * 남은 pending 재반영 (M4.2-2.5-3, 2.5.1-2). 숫자 revision 순 적용.
+   * 손상 파일은 .corrupt-<ts>로 이동 (삭제 금지). 적용 실패분은 failed에 기록.
    */
-  recoverSession(sid: string): boolean {
-    const files = this.pendingFiles(sid);
-    if (files.length === 0) return false;
-    for (const f of files) {
+  recoverSession(sid: string): { applied: string[]; failed: string[] } {
+    const applied: string[] = [];
+    const failed: string[] = [];
+    for (const f of this.pendingFiles(sid)) {
       let change: CommitChange | undefined;
       try {
         const parsed = JSON.parse(readFileSync(f, "utf8")) as CommitChange | null;
         if (parsed && typeof parsed === "object") change = parsed;
       } catch {
-        // 손상 pending은 삭제하고 계속
+        // 손상 pending은 .corrupt로 이동 (삭제 금지)
       }
-      if (change) {
+      if (!change) {
         try {
-          this.applyPending(sid, change);
+          renameSync(f, join(this.sessionDir(sid), `.corrupt-${Date.now()}.json`));
         } catch {
-          continue;
+          // 무시
         }
+        continue;
+      }
+      try {
+        this.applyPending(sid, change);
+        applied.push(f);
+      } catch {
+        failed.push(f);
+        continue;
       }
       try {
         unlinkSync(f);
@@ -184,7 +193,7 @@ export class FileStore implements Store {
         // 무시
       }
     }
-    return true;
+    return { applied, failed };
   }
 
   private applyPending(sid: string, c: CommitChange): void {
@@ -201,10 +210,10 @@ export class FileStore implements Store {
    */
   commitChange(sid: string, c: CommitChange): void {
     assertSessionId(sid);
-    try {
-      this.recoverSession(sid);
-    } catch {
-      // best-effort 후 계속
+    // M4.2-2.5.1-2: 복구 실패 시 새 커밋 거부
+    const rec = this.recoverSession(sid);
+    if (rec.failed.length > 0) {
+      throw pfError("internal", `복구 실패(${rec.failed.length}건), 수동 확인 필요`, "복구 필요");
     }
     const rev = c.session?.revision ?? this.readSessionRaw(sid)?.revision ?? 0;
     mkdirSync(this.sessionDir(sid), { recursive: true });
