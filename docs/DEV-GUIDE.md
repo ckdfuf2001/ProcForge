@@ -237,6 +237,18 @@ server.registerTool("pf_report", spec, async (a) => {
 - 에이전트는 여기서 나온 문제만 `M3.5.x`로 수정. 새 기능 금지.
 - `pf_edit_args`로 중간 인자 수정 → 해당 노드만 재실행되는 흐름도 확인.
 
+### M3.5.1 dogfood 후속 수정 (M5 전)
+1. file_exists pin 수정: auto 제약은 attempt fixture 키가 아니라 sandbox 기준 논리
+   경로를 저장하고, 판정 시 현재 attempt의 ingest manifest로 해석. reopen/retry/
+   edit_args 후 새 pass에서 source:auto 제약은 재생성(human 제약은 유지).
+2. drift 기준: golden/passthrough 비교에서 호스트 resultSummary 제외, 정규화된
+   도구 응답 + constraint만 비교. 바이너리는 sha256/size만.
+3. pf_report 시 resultJson 키를 녹화된 도구 응답과 대조해 불일치 경고(warnings),
+   auto 제약은 확인된 키에서만 생성.
+4. 카탈로그 수집 타임아웃 설정화(기본 15s) + 1회 재시도.
+5. DECISIONS에 "도구 없는 단계(호스트 스크립트) 처리" 결정 기록 (형식 제안만, 구현은 M5).
+6. M3.5-dogfood.md 보정.
+
 ### M5 검증과 실행 분리
 - `procforge test <proc>`: replay 전용, drift 검출만.
 - `procforge run <proc> --param k=v [--from 2.1]`: OpenCode 없이 단독 live 실행. constraints로만 판정, golden 비교는 경고.
@@ -302,6 +314,7 @@ server.registerTool("pf_report", spec, async (a) => {
 | M4.2 | 4-0 (3-0 잔여) | [x] | `49a649b` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38033626665 | corrupt 잔류 거부·CLI repair·planPendings 공용·무세션 pending 뷰 |
 | M4.2 | 4단계 강제 장치 1~6 | [x] | `3f66861` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38033626665 | 1~6 전부 구현·테스트 |
 | M3.5 | PPT 실사용 테스트 | [~] | `19c3c6d` | (진행 중) | 단일 모델 1차 완료, 2종 비교·토큰 통계는 사람 보완 필요 |
+| M3.5.1 | dogfood 후속 수정 (M5 전) | [ ] | | | file_exists pin·drift 기준·resultJson 대조·카탈로그 타임아웃·스크립트 leaf 결정·dogfood 보정 |
 | M5 | 검증/실행 분리 | [ ] | | | |
 | M5.5 | 반복 노드 | [ ] | | | |
 | M5.6 | 상태 / sideEffect | [ ] | | | |
@@ -323,3 +336,4 @@ server.registerTool("pf_report", spec, async (a) => {
 | 2026-10-10 | 3, 4, 8 | 3단계 1·2·3·4·5·7 완료 (6번은 2.5-4 해소): inout 분류+pre-copy/seed 원본·junit 경로·procedure 이름·pf_test nodeId·golden 원문 경고·advise summary | 확정·실행의 입력 완전성(원본)·출력 위치·재실행 범위를 4단계 강제 장치 전에 고정 |
 | 2026-10-10 | 6, 8 | 4-0 (3-0 잔여) 신설: corrupt 잔류 시 커밋 거부·CLI repair --discard·planPendings 읽기/복구 공용·연속 revision만 적용·무세션 pending 뷰 | 손상·불연속 pending이 읽기와 복구에서 다르게 보이면 4단계 강제 장치의 전제가 무너짐 — 4단계 진입 전 해소 |
 | 2026-10-10 | 5, 8 | 4단계 1~6 완료: 어댑터 import/fs/save 검사·1:1 매핑·loopback+매트릭스·parity·인자-스키마 | 계층 위반·직렬화 불가·표면 드리프트를 CI에서 강제 |
+| 2026-10-10 | 6, 8 | M3.5.1 신설 (M5 전): file_exists pin 해소·drift 기준·resultJson 대조·카탈로그 타임아웃·스크립트 leaf 결정·dogfood 보정 | dogfood에서 발견한 검사 기준 결함을 M5 전에 해소 (재보고·재바인딩 전제 복구) |
