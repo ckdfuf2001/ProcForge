@@ -149,23 +149,46 @@ describe("M3 runner", () => {
     expect(rep.summary.fail).toBe(0);
   }, 30000);
 
-  it("passthrough drift: golden 변조 → fail+diff, record+update로만 갱신", async () => {
+  it("M3.5.1-2 drift: 도구 응답 변경만 fail", async () => {
+    writeFileSync(join(root, "data.txt"), "v1");
+    const started = await client.pfStart({ request: "drift", toolCatalog: (await collectCatalog(root)).entries });
+    const sid = started.session.id;
+    await client.pfResolve({ sessionId: sid, nodeId: "1", decision: "split", children: [{ goal: "read" }] });
+    const attemptId = randomUUID();
+    const ing = ingestArtifacts({ procforgeDir: pfdir, sessionId: sid, nodeId: "1.1", attemptId, baseDir: root, paths: ["data.txt"] });
+    await client.pfReport({
+      sessionId: sid, nodeId: "1.1", tool: { server: "opencode", name: "read" }, args: { path: "data.txt" },
+      resultSummary: "v1", resultJson: { text: "v1" },
+      artifacts: ing.stored, artifactContents: ing.contents,
+      selfVerdict: "pass", selfReason: "ok", attemptId,
+    });
+    await client.pfResolve({
+      sessionId: sid, nodeId: "1.1", decision: "leaf",
+      tool: { server: "opencode", name: "read" }, argSpecs: { path: { kind: "fixed", value: "data.txt" } } as never,
+    });
+    await runSession({ procforgeDir: pfdir, projectRoot: root, allowProjectRead: true, sessionId: sid, mode: "record" });
+    // 도구 응답 변경 (fixture 내용 수정) → drift 1
+    writeFileSync(join(pfdir, "sessions", sid, ing.stored[0]), "v2");
+    const drifted = await runSession({ procforgeDir: pfdir, projectRoot: root, allowProjectRead: true, sessionId: sid, mode: "passthrough", nodeId: "1.1" });
+    expect(drifted.summary.fail).toBe(1);
+    expect(drifted.results[0].detail).toMatch(/response drift/);
+    // record+update-golden으로 재기준 → replay 통과
+    await runSession({ procforgeDir: pfdir, projectRoot: root, allowProjectRead: true, sessionId: sid, mode: "record", nodeId: "1.1", updateGolden: true });
+    const again = await runSession({ procforgeDir: pfdir, projectRoot: root, allowProjectRead: true, sessionId: sid, mode: "replay" });
+    expect(again.summary.fail).toBe(0);
+  }, 30000);
+  it("passthrough drift: 요약 변조는 무시", async () => {
     const sid = await scriptedSession();
     await runSession({ procforgeDir: pfdir, projectRoot: root, allowProjectRead: true, sessionId: sid, mode: "record" });
-    // golden 변조
+    // golden 요약 변조 → drift 0 (호스트 요약 제외)
     const store = new FileStore(pfdir);
     const n = store.getNode(sid, "1.1")!;
-    store.saveNode(sid, { ...n, golden: { fixtures: [], output: "tampered", attemptId: n.golden?.attemptId, ignore: [] } });
-    // passthrough는 실제 호출 → drift 검출 fail
-    const drift = await runSession({ procforgeDir: pfdir, projectRoot: root, allowProjectRead: true, sessionId: sid, mode: "passthrough", nodeId: "1.1" });
-    expect(drift.summary.fail).toBe(1);
-    expect(drift.results[0].detail).toMatch(/golden drift/);
-    // 갱신 없음 확인
-    expect(store.getNode(sid, "1.1")!.golden?.output).toBe("tampered");
+    store.saveNode(sid, { ...n, golden: { fixtures: n.golden?.fixtures ?? [], output: "tampered", attemptId: n.golden?.attemptId, ignore: [] } });
+    const same = await runSession({ procforgeDir: pfdir, projectRoot: root, allowProjectRead: true, sessionId: sid, mode: "passthrough", nodeId: "1.1" });
+    expect(same.summary.fail).toBe(0);
     // record+update-golden으로 갱신 → replay 통과
     const upd = await runSession({ procforgeDir: pfdir, projectRoot: root, allowProjectRead: true, sessionId: sid, mode: "record", nodeId: "1.1", updateGolden: true });
     expect(upd.summary.fail).toBe(0);
-    expect(store.getNode(sid, "1.1")!.golden?.output).not.toBe("tampered");
     writeOpencodeConfig(BROKEN_CMD);
     const again = await runSession({ procforgeDir: pfdir, projectRoot: root, allowProjectRead: true, sessionId: sid, mode: "replay" });
     expect(again.summary.fail).toBe(0);

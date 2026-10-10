@@ -7,6 +7,8 @@ import {
   restoreResponseForRun,
   loadCassette,
   saveRecording,
+  fingerprintResponse,
+  compareToolResponses,
 } from "./recordings.js";
 import { replacePathForms } from "./pathnorm.js";
 
@@ -89,8 +91,7 @@ describe("recordings normalize/restore (M3.4-6/M3.4.1-2)", () => {
     expect(leftovers).toHaveLength(1);
   });
 
-  it("saveRecording은 version 2 + runId/fsDir 기록", () => {
-    saveRecording(dir, "s3", "2.1", {
+  it("saveRecording은 version 2 + runId/fsDir 기록", () => {    saveRecording(dir, "s3", "2.1", {
       key: "k", server: "sv", tool: "t", args: {}, response: { summary: "ok" }, at: "t",
     }, "/tmp/fs", "run-1");
     const saved = JSON.parse(readFileSync(join(dir, "sessions", "s3", "cassettes", "2.1.json"), "utf8")) as {
@@ -100,5 +101,46 @@ describe("recordings normalize/restore (M3.4-6/M3.4.1-2)", () => {
     expect(saved.version).toBe(2);
     expect(saved.entries[0].runId).toBe("run-1");
     expect(saved.entries[0].fsDir).toBe("/tmp/fs");
+  });
+});
+
+describe("M3.5.1-2 도구 응답 비교", () => {
+  it("동일 응답은 equal", () => {
+    const base = { summary: "out", json: { ok: true, n: 1 } };
+    expect(compareToolResponses(base, { summary: "out", json: { ok: true, n: 1 } }).equal).toBe(true);
+  });
+
+  it("json 변경은 drift", () => {
+    const d = compareToolResponses({ summary: "out", json: { ok: true } }, { summary: "out", json: { ok: false } });
+    expect(d.equal).toBe(false);
+  });
+
+  it("params 값 차이는 마스킹되어 equal", () => {
+    const d = compareToolResponses(
+      { summary: "report-2026-09", json: undefined },
+      { summary: "report-2026-10", json: undefined },
+      { params: { month: "2026-10" } },
+    );
+    // expected 원문 vs actual 복원 — 값 자체가 다르면 drift
+    expect(d.equal).toBe(false);
+    const rebound = compareToolResponses(
+      { summary: "report-2026-09", json: undefined },
+      { summary: "report-2026-10", json: undefined },
+      { params: { month: "2026-10" }, expectedParams: { month: "2026-09" } },
+    );
+    expect(rebound.equal).toBe(true);
+  });
+
+  it("바이너리는 sha/size 지문으로만 비교 (원문 유출 없음)", () => {
+    expect(fingerprintResponse("plain")).toBe("plain");
+    expect(fingerprintResponse("ab\0cd")).toMatch(/^bin:[0-9a-f]{64}:5$/);
+    const same = compareToolResponses({ summary: "a\0b" }, { summary: "a\0b" });
+    expect(same.equal).toBe(true);
+    const diff = compareToolResponses({ summary: "a\0b" }, { summary: "a\0c" });
+    expect(diff.equal).toBe(false);
+    if (!diff.equal) {
+      expect(diff.actualExcerpt).not.toContain("\0");
+      expect(diff.actualExcerpt).toMatch(/bin:[0-9a-f]{64}:\d+/);
+    }
   });
 });

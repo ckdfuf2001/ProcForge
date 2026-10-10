@@ -288,6 +288,9 @@
 - M3.5.1-1: auto file_exists는 fixture 키 대신 sandbox 논리 경로 저장
   (artifactSources 전달). 매 pass마다 source:auto 재생성(human 유지) 후
   평가·저장. runner fileExists는 manifest 역조회. 재보고 pin 해소.
+- M3.5.1-2: passthrough drift는 녹화 응답과 정규화 비교 (호스트 요약 제외).
+  재바인딩 대비 녹화에 params 저장·양측 마스킹. 바이너리는 sha/size 지문.
+  updateGolden 시 카세트도 재기준.
 - 4-1/4-2 수정: check-deps가 Windows에서 빈 스캔(항상 통과)이던 결함
   수정 (fileURLToPath). 멀티라인 import 여는 행 제외, *.test.ts는
   저장 범위 검사에서 제외 (저장소 직접 검증 목적).

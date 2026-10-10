@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { compareNormalized, maskParamsValues } from "@procforge/shared/normalize.js";
+import { maskParamsValues } from "@procforge/shared/normalize.js";
 import { compareNodeIds } from "@procforge/shared/ids.js";
 import { effectiveDeps, expandDepLeafs, rawDepSources } from "@procforge/shared/deps.js";
 import type { Node } from "@procforge/shared/schema.js";
@@ -11,7 +11,7 @@ import { logger } from "../logger.js";
 import { writeAtomicFile } from "../fsutil.js";
 import { normalizeArgSpecs, fixtureFileExists, readManifest } from "../artifacts.js";
 import { ConnectionPool } from "./connections.js";
-import { findRecording, loadCassette, recordKey, saveRecording, toToolResponse } from "./recordings.js";
+import { findRecording, loadCassette, recordKey, saveRecording, toToolResponse, compareToolResponses } from "./recordings.js";
 import { resolveArgs } from "./resolve.js";
 import { inferPathRole, rewritePaths, type InferredRole, type PathRole } from "./paths.js";
 import { setupRunFs } from "./workdir.js";
@@ -325,26 +325,42 @@ async function execNode(
         args,
         response: { summary: resp.resultText, json: resp.resultJson },
         at: new Date().toISOString(),
+        params,
       }, fsDir, runId);
     }
   }
 
   outputs.set(n.id, resp.resultJson ?? resp.resultText);
 
-  // drift 검출: passthrough에서만 golden 정규화 비교 (M3.1-1/2, M3.6-4 자리표시자 복원)
-  if (mode === "passthrough" && n.golden) {
-    const d = compareNormalized(n.golden.output, resp.resultText, n.golden.ignore ?? [], fsDir, params);
-    if (!d.equal) {
-      if (opts.updateGolden) {
-        updateNodeGolden(opts, n, resp);
-      } else {
-        return {
-          nodeId: n.id,
-          status: "fail",
-          failedConstraints: [],
-          detail: `golden drift @${d.path}. expected=${d.expectedExcerpt} actual=${d.actualExcerpt}`,
-          durationMs: Date.now() - start,
-        };
+  // drift 검출 (M3.5.1-2): passthrough에서 녹화 응답과 정규화 비교.
+  // 호스트 resultSummary(golden)는 비교하지 않는다. 녹화 없으면 기준 없음 → 통과.
+  if (mode === "passthrough") {
+    const rec = findRecording(loadCassette(opts.procforgeDir, opts.sessionId, n.id), key);
+    if (rec) {
+      const base = toToolResponse(rec, fsDir);
+      const d = compareToolResponses(
+        { summary: base.resultText, json: base.resultJson },
+        { summary: resp.resultText, json: resp.resultJson },
+        { ignore: n.golden?.ignore ?? [], fsDir, params, expectedParams: rec.params },
+      );
+      if (!d.equal) {
+        if (opts.updateGolden) {
+          updateNodeGolden(opts, n, resp);
+          saveRecording(opts.procforgeDir, opts.sessionId, n.id, {
+            key, server, tool, args,
+            response: { summary: resp.resultText, json: resp.resultJson },
+            at: new Date().toISOString(),
+            params,
+          }, fsDir, opts.runId);
+        } else {
+          return {
+            nodeId: n.id,
+            status: "fail",
+            failedConstraints: [],
+            detail: `response drift @${d.path}. expected=${d.expectedExcerpt} actual=${d.actualExcerpt}`,
+            durationMs: Date.now() - start,
+          };
+        }
       }
     }
   }
