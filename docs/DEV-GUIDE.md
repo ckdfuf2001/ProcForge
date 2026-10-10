@@ -249,11 +249,30 @@ server.registerTool("pf_report", spec, async (a) => {
 5. DECISIONS에 "도구 없는 단계(호스트 스크립트) 처리" 결정 기록 (형식 제안만, 구현은 M5).
 6. M3.5-dogfood.md 보정.
 
+### M3.5.2 잠금 원자화 (M5 전)
+1. lockfile 획득을 openSync(path,"wx") 원자 생성으로 교체 (존재확인→쓰기 금지).
+   내용은 {pid, token(UUID), at}. stale 회수는 rename(lock → lock.stale-<uuid>)
+   성공한 쪽만 재시도, release는 token 일치 시에만 삭제.
+2. 테스트: 자식 프로세스 8개 × 50회 동시 커밋 → events seq 중복 0, revision 연속,
+   실패는 conflict만. 부하 테스트를 CI 양 OS에 포함,
+   m25 동시성 테스트 전체 실행 20회 연속 통과 확인.
+3. 보고 전 클린 클론 install→build→test 필수.
+
 ### M5 검증과 실행 분리
 - `procforge test <proc>`: replay 전용, drift 검출만.
-- `procforge run <proc> --param k=v [--from 2.1]`: OpenCode 없이 단독 live 실행. constraints로만 판정, golden 비교는 경고.
-- generated 인자 노드만 `opencode run`으로 인자 생성, 절차서에 "LLM 필요 지점"으로 표시. generated 없는 절차서는 완전 결정적.
-- App에 `runProcedure`, `testProcedure`. 실행 기록은 `runs/`와 이벤트에.
+- `procforge run <procedure> --param k=v ... [--out <dir>]`: live 실행 전용.
+  출력은 `.procforge/runs/<runId>/fs`, `--out` 지정 시에만 완료 후 프로젝트 안으로
+  복사 (기존 파일은 `--force` 없으면 거부).
+- 인자 해석: fixed 그대로, var는 params/의존 출력, generated는 runner가 만들지 않음.
+  generated 노드에서 실행을 suspended로 멈추고 `runs/<runId>/state.json`에 저장.
+- MCP: `pf_run_start(procedure, params)` / `pf_run_next(runId)` →
+  `{kind:"need_generated", nodeId, instruction, inputs}` 또는 `{kind:"done"|"failed"}` /
+  `pf_run_supply(runId, nodeId, value)` → 값 저장 후 다음 결정적 노드까지 자동 진행.
+  전부 App 메서드 1:1, 상태 변경은 CoreClient 경유 (R1~R8).
+- 판정: golden 비교 없음, constraint만. 실패 시 해당 노드에서 failed + 원인, 하류 실행 안 함.
+  CLI exit 1. `pf_run_next`는 실패 노드로 수정 세션을 여는 힌트 제공 (구현은 힌트까지).
+- external 노드는 live에서도 사람 승인 없이는 실행 금지 (`pf_run_next`가 need_approval 반환,
+  승인은 CLI 또는 pf_approve).
 - SKILL.md, command.md 문구를 실제 동작에 맞게 갱신.
 - 완료 기준: fake MCP E2E에서 9월 절차서를 `--param month=2026-10`으로 실행해 10월 산출물 생성 + constraints 통과.
 
@@ -314,7 +333,9 @@ server.registerTool("pf_report", spec, async (a) => {
 | M4.2 | 4-0 (3-0 잔여) | [x] | `49a649b` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38033626665 | corrupt 잔류 거부·CLI repair·planPendings 공용·무세션 pending 뷰 |
 | M4.2 | 4단계 강제 장치 1~6 | [x] | `3f66861` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38033626665 | 1~6 전부 구현·테스트 |
 | M3.5 | PPT 실사용 테스트 | [~] | `19c3c6d` | (진행 중) | 단일 모델 1차 완료, 2종 비교·토큰 통계는 사람 보완 필요 |
-| M3.5.1 | dogfood 후속 수정 (M5 전) | [x] | `98e99d5` | (아래 run) | file_exists pin·drift 기준·resultJson 대조·카탈로그 타임아웃·스크립트 leaf 결정·dogfood 보정 |
+| M3.5.1 | dogfood 후속 수정 (M5 전) | [x] | `98e99d5` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38055900040 | file_exists pin·drift 기준·resultJson 대조·카탈로그 타임아웃·스크립트 leaf 결정·dogfood 보정 |
+| M3.5.2 | 잠금 원자화 (M5 전) | [ ] | | | openSync wx·token release·부하 테스트·클린 클론 |
+| M5 | 검증/실행 분리 | [ ] | | | CLI run·suspended·pf_run_*·판정·승인·문구·E2E·실측 |
 | M5 | 검증/실행 분리 | [ ] | | | |
 | M5.5 | 반복 노드 | [ ] | | | |
 | M5.6 | 상태 / sideEffect | [ ] | | | |
@@ -337,3 +358,4 @@ server.registerTool("pf_report", spec, async (a) => {
 | 2026-10-10 | 6, 8 | 4-0 (3-0 잔여) 신설: corrupt 잔류 시 커밋 거부·CLI repair --discard·planPendings 읽기/복구 공용·연속 revision만 적용·무세션 pending 뷰 | 손상·불연속 pending이 읽기와 복구에서 다르게 보이면 4단계 강제 장치의 전제가 무너짐 — 4단계 진입 전 해소 |
 | 2026-10-10 | 5, 8 | 4단계 1~6 완료: 어댑터 import/fs/save 검사·1:1 매핑·loopback+매트릭스·parity·인자-스키마 | 계층 위반·직렬화 불가·표면 드리프트를 CI에서 강제 |
 | 2026-10-10 | 6, 8 | M3.5.1 신설 (M5 전): file_exists pin 해소·drift 기준·resultJson 대조·카탈로그 타임아웃·스크립트 leaf 결정·dogfood 보정 | dogfood에서 발견한 검사 기준 결함을 M5 전에 해소 (재보고·재바인딩 전제 복구) |
+| 2026-10-10 | 6, 8 | M3.5.2·M5 신설: 잠금 원자화 후 live 실행 분리 (CLI run·suspended·pf_run_*·판정·승인·문구·E2E·실측) | M5 live 실행 전에 프로세스 간 잠금 경합을 먼저 제거, 검증/실행 분리로 재바인딩·신규 데이터 실행 지원 |
