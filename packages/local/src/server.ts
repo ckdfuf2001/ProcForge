@@ -86,11 +86,13 @@ function errResult(e: unknown) {
   if (code === "internal") logger.error("internal", e instanceof Error ? (e.stack ?? e.message) : String(e));
   // 에러에는 structuredContent를 붙이지 않는다. SDK 출력 검증이 object 스키마만
   // 지원하고, 엄격한 클라이언트는 에러 봉투를 성공 스키마로 검증해 실제 에러를
-  // -32602로 가린다. 코드는 텍스트 맨 앞에 둔다 ("code: message (힌트: ...)").
+  // -32602로 가린다. 형식 고정 (M5.3-0-3): 첫 줄 "<code>: <message>",
+  // 선택 둘째 줄 "hint: <hint>".
   const hintText = `${hint}`.trim();
+  const text = hintText.length > 0 ? `${code}: ${message}\nhint: ${hintText}` : `${code}: ${message}`;
   return {
     isError: true as const,
-    content: [{ type: "text" as const, text: `${code}: ${message} (힌트: ${hintText})` }],
+    content: [{ type: "text" as const, text }],
   };
 }
 

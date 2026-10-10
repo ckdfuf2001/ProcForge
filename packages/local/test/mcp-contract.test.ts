@@ -6,7 +6,8 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { buildServer, TOOL_NAMES, READ_ONLY_TOOLS, PROMPT_TEXT } from "../src/server.js";
 import { ProcForgeApp } from "../src/app/app.js";
-import { OUTPUT_SCHEMAS, ErrorEnvelopeShape } from "../src/views.js";
+import { OUTPUT_SCHEMAS } from "../src/views.js";
+import { parseErrorText, ERROR_CODE_LIST } from "@procforge/shared/errors.js";
 import { testStack } from "./client-mode.js";
 
 let root: string;
@@ -45,7 +46,7 @@ async function linked() {
 
 const EXPECTED_ORDER = [...TOOL_NAMES];
 
-/** 에러 텍스트 추출 (코드가 맨 앞에 오는 형식: "code: message (힌트: ...)") */
+/** 에러 텍스트 추출 (M5.3-0-3 고정 형식: 첫 줄 "code: message", 둘째 줄 "hint: ...") */
 function errText(r: unknown): string {
   return ((r as { content: { type: string; text: string }[] }).content[0] as { text: string }).text;
 }
@@ -110,6 +111,45 @@ describe("tools/list 스냅샷 (결정적 순서·annotations)", () => {
 });
 
 describe("도구 응답 계약 (outputSchema 통과)", () => {
+  it("전 도구 에러 형식 검증 (M5.3-0-3)", async () => {
+    const { mcp, close } = await linked();
+    // pf_start(성공 전용)·pf_refresh_catalog(성공 전용) 제외. 나머지는 존재하지
+    // 않는 세션/run으로 호출해 의미 오류를 유도한다 (입력 스키마는 통과形).
+    const DEAD = "123e4567-e89b-42d3-a456-426614174000";
+    const cases: Record<string, Record<string, unknown>> = {
+      pf_next: { sessionId: DEAD },
+      pf_report: { sessionId: DEAD, nodeId: "1", tool: { server: "s", name: "n" }, args: {}, resultSummary: "x", selfVerdict: "pass", selfReason: "x" },
+      pf_split: { sessionId: DEAD, nodeId: "1", children: [{ goal: "x" }] },
+      pf_confirm_leaf: { sessionId: DEAD, nodeId: "1", tool: { server: "s", name: "n" }, argSpecs: {} },
+      pf_retry: { sessionId: DEAD, nodeId: "1", reason: "x" },
+      pf_ask_human: { sessionId: DEAD, nodeId: "1", question: "x" },
+      pf_approve: { sessionId: DEAD, nodeId: "1", approved: true },
+      pf_advise: { sessionId: DEAD, nodeId: "1", text: "x" },
+      pf_tree: { sessionId: DEAD },
+      pf_get_node: { sessionId: DEAD, nodeId: "1" },
+      pf_lock: { sessionId: DEAD, nodeId: "1" },
+      pf_reopen: { sessionId: DEAD, nodeId: "1", reason: "x" },
+      pf_edit_args: { sessionId: DEAD, nodeId: "1", patch: { remove: ["x"] } },
+      pf_edit_node: { sessionId: DEAD, nodeId: "1" },
+      pf_test: { sessionId: DEAD, mode: "replay" },
+      pf_finalize: { sessionId: DEAD, name: "x" },
+      pf_run_start: { procedure: "no-such-procedure" },
+      pf_run_next: { runId: DEAD },
+      pf_run_supply: { runId: DEAD, nodeId: "1", value: 1 },
+    };
+    try {
+      for (const [name, args] of Object.entries(cases)) {
+        const r = await mcp.callTool({ name, arguments: args });
+        expect(r.isError, `${name} should fail`).toBe(true);
+        const text = errText(r);
+        const parsed = parseErrorText(text);
+        expect(parsed !== null, `${name} error format: ${text.slice(0, 80)}`).toBe(true);
+        expect((ERROR_CODE_LIST as readonly string[]).includes(parsed!.code), `${name} code`).toBe(true);
+      }
+    } finally {
+      await close();
+    }
+  });
   it("에러는 structuredContent 없음 (엄격 클라이언트 -32602 방지)", async () => {
     const { mcp, close } = await linked();
     try {
@@ -300,7 +340,7 @@ describe("도구 응답 계약 (outputSchema 통과)", () => {
       const r = await mcp.callTool({ name: "pf_next", arguments: { sessionId: "123e4567-e89b-42d3-a456-426614174000" } });
       expect(r.isError).toBe(true);
       expect(errText(r)).toMatch(/^session_not_found:/);
-      expect(errText(r)).toMatch(/힌트:/);
+      expect(errText(r).split("\n")[1]).toMatch(/^hint: /);
     } finally {
       await close();
     }
@@ -320,7 +360,7 @@ describe("도구 응답 계약 (outputSchema 통과)", () => {
     }
   });
 
-  it("에러 봉투: bad_request 힌트 (빈 children)", async () => {
+  it("에러 텍스트: bad_request 힌트 (빈 children)", async () => {
     const { mcp, close } = await linked();
     try {
       const started = (await mcp.callTool({ name: "pf_start", arguments: { request: "x" } })).structuredContent as { sessionId: string };

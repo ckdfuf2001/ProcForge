@@ -1,29 +1,25 @@
 import { describe, it, expect } from "vitest";
-import { ProcForgeError, pfError, errorCodeOf, ERROR_CODE_LIST } from "../src/errors.js";
+import { parseErrorText } from "./errors.js";
 
-describe("errors", () => {
-  it("M4.2-0 코드 목록", () => {
-    for (const c of ["bad_request", "bad_args", "conflict", "not_found", "session_not_found", "unimplemented", "internal"]) {
-      expect(ERROR_CODE_LIST).toContain(c);
-    }
+// M5.3-0-3: 에러 텍스트 파서 단위 테스트.
+
+describe("parseErrorText", () => {
+  it("두 줄 형식", () => {
+    expect(parseErrorText("bad_request: 검증 오류 2건\nhint: 입력을 고쳐라")).toEqual({
+      code: "bad_request",
+      message: "검증 오류 2건",
+      hint: "입력을 고쳐라",
+    });
   });
 
-  it("ProcForgeError 필드", () => {
-    const e = pfError("bad_request", "msg", "hint");
-    expect(e).toBeInstanceOf(ProcForgeError);
-    expect(e).toBeInstanceOf(Error);
-    expect(e.code).toBe("bad_request");
-    expect(e.message).toBe("msg");
-    expect(e.hint).toBe("hint");
-    expect(pfError("conflict", "m").hint).toBeUndefined();
+  it("한 줄 형식 (hint 없음)", () => {
+    expect(parseErrorText("conflict: 잠김")).toEqual({ code: "conflict", message: "잠김" });
   });
 
-  it("errorCodeOf 추출/폴백", () => {
-    expect(errorCodeOf(pfError("conflict", "x"))).toBe("conflict");
-    expect(errorCodeOf(Object.assign(new Error("x"), { code: "bad_args" }))).toBe("bad_args");
-    expect(errorCodeOf(Object.assign(new Error("x"), { code: "typo" }))).toBe("internal");
-    expect(errorCodeOf(new Error("x"))).toBe("internal");
-    expect(errorCodeOf(null)).toBe("internal");
-    expect(errorCodeOf("bad_request")).toBe("internal");
+  it("외부 형식은 null", () => {
+    expect(parseErrorText("MCP error -32602: Input validation error")).toBe(null);
+    expect(parseErrorText("plain text")).toBe(null);
+    expect(parseErrorText("")).toBe(null);
+    expect(parseErrorText("a: b\nc")).toBe(null);
   });
 });

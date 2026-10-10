@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { buildServer, TOOL_NAMES } from "../src/server.js";
+import { parseErrorText } from "@procforge/shared/errors.js";
 import { ProcForgeApp } from "../src/app/app.js";
 import { testStack } from "./client-mode.js";
 
@@ -67,7 +68,11 @@ describe("instruction-following host E2E", () => {
     try {
       const call = async (name: string, args: Record<string, unknown>) => {
         const r = await mcp.callTool({ name, arguments: args });
-        if (r.isError) throw new Error(`${name}: ${(r.content as { text: string }[])[0].text}`);
+        if (r.isError) {
+          // M5.3-0-3: 파서로 code 판별 후 전달
+          const parsed = parseErrorText((r.content as { text: string }[])[0].text);
+          throw new Error(`${name}[${parsed?.code ?? "unparseable"}]: ${parsed?.message ?? "unknown"}`);
+        }
         return r.structuredContent as Record<string, unknown>;
       };
       const firstOf = (instr: string) => {
