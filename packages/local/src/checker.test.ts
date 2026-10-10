@@ -191,6 +191,19 @@ describe("checker kinds", () => {
     expect(all.unverified).toEqual(["b"]);
   });
 
+  it("M5.2-4 equals expected의 ${params.k} 해결", () => {
+    const c = { id: "p", kind: "equals", spec: { path: "period", expected: "${params.month}" }, source: "human" } as never;
+    expect(evaluateConstraint(c, { resultJson: { period: "2026-10" }, params: { month: "2026-10" } }).pass).toBe(true);
+    expect(evaluateConstraint(c, { resultJson: { period: "2026-09" }, params: { month: "2026-10" } }).pass).toBe(false);
+    // params 없으면 deferred (advise 거부 경로, B2와 동일)
+    const d = evaluateConstraint(c, { resultJson: { period: "2026-10" } });
+    expect(d.pass).toBe(false);
+    expect(d.deferred).toBe(true);
+    // 등록되지 않은 키는 hard fail
+    const bad = evaluateConstraint(c, { resultJson: { period: "2026-10" }, params: { other: "x" } });
+    expect(bad.pass).toBe(false);
+    expect(bad.deferred ?? false).toBe(false);
+  });
   it("M5.1-B2 expected에 ref 허용", () => {
     // $노드.필드 약식
     const shorthand = {

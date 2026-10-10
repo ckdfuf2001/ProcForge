@@ -336,6 +336,10 @@
 - M5.2-3: 값 흐름. PROMPT 8항·SKILL에 "앞 노드 출력과 같은 값은 ref" 명시.
   감사 변경: fixed가 다른 노드 녹화 출력과 일치하면 미러 여부 무관 경고
   (ref 후보). R1(검사값 면제)·R2(자기 노드 미러 면제)는 유지.
+- M5.2-4: constraint. numeric expected 고정 숫자는 감사 대상에서 제외하지
+  않음 (R1 축소: expectedRef/min/max만 면제). equals expected의
+  ${params.k} 해결 (params 없으면 deferred, 미등록 키는 hard fail).
+  R1 변경 사유: 검사값 자체가 녹화 수치와 같으면 하드코딩이므로 ref 강제.
 - M5-1: `procforge run <procedure> --param k=v [--out dir] [--force]` 신설
   (App.runProcedure 경유). 출력은 runs/<runId>/fs, --out 지정 시에만 완료 후
   프로젝트 안으로 복사 (기존 파일은 --force 없이 거부).

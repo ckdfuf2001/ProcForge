@@ -62,16 +62,36 @@ describe("auditFixedValues", () => {
     expect(auditFixedValues({ params: P, nodes: ns, cassettes: noCass })).toEqual([]);
   });
 
-  it("R1 numeric 검사값은 녹화 수치 일치에서 면제 (params·날짜는 유지)", () => {
+  it("R1min/max는 녹화 수치 일치에서 면제 (M5.2-4: expected는 감사 대상)", () => {
     const cas = new Map([["1.1", [{ response: { summary: "total 1500000", json: { total: 1500000 } } }]]]);
-    const ns = [
+    const bounds = [
+      node("1.1", {
+        constraints: [
+          { id: "c-r", kind: "numeric_match", spec: { path: "total", min: 1500000, max: 1600000 }, source: "human" },
+        ],
+      }),
+    ];
+    expect(auditFixedValues({ params: {}, nodes: bounds, cassettes: cas })).toEqual([]);
+    // numeric expected 고정 숫자 + 녹화 일치 → 경고 (ref 권장)
+    const fixedExp = [
       node("1.1", {
         constraints: [
           { id: "c-total", kind: "numeric_match", spec: { path: "total", expected: 1500000 }, source: "human" },
         ],
       }),
     ];
-    expect(auditFixedValues({ params: {}, nodes: ns, cassettes: cas })).toEqual([]);
+    expect(
+      auditFixedValues({ params: {}, nodes: fixedExp, cassettes: cas }).some((w) => w.includes("녹화 응답 수치")),
+    ).toBe(true);
+    // expected가 ref면 경고 없음
+    const refExp = [
+      node("1.1", {
+        constraints: [
+          { id: "c-total", kind: "numeric_match", spec: { path: "total", expected: "$1.1.total" }, source: "human" },
+        ],
+      }),
+    ];
+    expect(auditFixedValues({ params: {}, nodes: refExp, cassettes: cas })).toEqual([]);
     // 날짜 문자열 expected는 여전히 경고
     const ns2 = [
       node("1.1", {

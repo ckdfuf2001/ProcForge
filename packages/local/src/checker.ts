@@ -218,14 +218,35 @@ export function evaluateConstraint(c: Constraint, ctx: CheckContext): CheckResul
       return r.found ? { pass: true } : { pass: false, reason: `path not found: ${c.spec.path}` };
     }
     case "equals": {
+      // M5.2-4: expected의 ${params.k} 참조 해결 (전체·임베디드).
+      const resolveExpected = (e: unknown): { ok: boolean; value: unknown; reason?: string; deferred?: boolean } => {
+        if (typeof e !== "string" || !e.includes("${params.")) return { ok: true, value: e };
+        if (!ctx.params) return { ok: false, value: undefined, reason: "deferred to runner (params ref)", deferred: true };
+        const params = ctx.params;
+        const missing: string[] = [];
+        const out = e.replace(/\$\{params\.([A-Za-z0-9_.-]+)\}/g, (_, k: string) => {
+          if (!(k in params)) {
+            missing.push(k);
+            return "";
+          }
+          return params[k];
+        });
+        if (missing.length > 0) return { ok: false, value: undefined, reason: `unknown params: ${missing.join(",")}` };
+        return { ok: true, value: out };
+      };
+      const ex = resolveExpected(c.spec.expected);
+      if (!ex.ok) {
+        if (ex.deferred) return { pass: false, reason: ex.reason, deferred: true };
+        return { pass: false, reason: ex.reason };
+      }
       if (c.spec.path) {
         const r = resolvePath(ctx, c.spec.path);
         if (!r.found) return { pass: false, reason: `path not found: ${c.spec.path}` };
-        return deepEqual(r.value, c.spec.expected)
+        return deepEqual(r.value, ex.value)
           ? { pass: true }
           : { pass: false, reason: `not equal at ${c.spec.path}` };
       }
-      return deepEqual(c.spec.actual, c.spec.expected)
+      return deepEqual(c.spec.actual, ex.value)
         ? { pass: true }
         : { pass: false, reason: "not equal" };
     }

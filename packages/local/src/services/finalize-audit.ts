@@ -146,7 +146,9 @@ export function auditFixedValues(input: {
       }
     }
   };
-  const NUMERIC_BOUND_FIELDS = new Set(["expected", "expectedRef", "min", "max"]);
+  // M5.2-4: numeric expected 고정 숫자는 감사 대상 (ref 권장).
+  // 면제는 expectedRef/min/max만 유지 (R1 축소).
+  const NUMERIC_BOUND_FIELDS = new Set(["expectedRef", "min", "max"]);
   for (const n of input.nodes) {
     const mirror = mirrorOf(n);
     for (const [k, spec] of Object.entries(n.args ?? {})) {
