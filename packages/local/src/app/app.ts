@@ -32,9 +32,10 @@ type OutputOf<K extends keyof typeof OUTPUT_SCHEMAS> = import("zod").infer<(type
 import { seedSandbox } from "../services/workspace.js";
 import { logger } from "../logger.js";
 import { diffSnapshot, readCaptureRecord, readPreSnapshot, takeSandboxSnapshot, toBaseRel, writePreCopies, writePreSnapshot } from "../services/snapshot.js";
-import { appendCaptureRecord, classifyReportPaths, collectExistingPaths, collectResultFiles, ingestOriginalFixture, ingestReportJobs, readFixtureContents, resolveOriginal, roleForCapture } from "../services/artifacts.js";
+import { appendCaptureRecord, absolutizePathArgs, classifyReportPaths, collectExistingPaths, collectResultFiles, ingestOriginalFixture, ingestReportJobs, readFixtureContents, resolveOriginal, roleForCapture } from "../services/artifacts.js";
 import { ingestArtifacts, normalizeArgSpecs, readManifest } from "../artifacts.js";
 import { runSession } from "../runner/index.js";
+import { loadCassette, recordKey } from "../runner/index.js";
 import { runProcedureTest } from "../runner/procedure-run.js";
 import { writeJUnitFile, resolveJUnitPath } from "../services/runner.js";
 import { repairDiscard } from "../services/repair.js";
@@ -206,6 +207,31 @@ export class ProcForgeApp {
       createdRels, modifiedRels,
     });
     if (jobs.some((j) => j.kind === "inout")) await getTreeNodes();
+    // M3.5.1-3: resultJson 키를 녹화된 도구 응답과 대조. 미확인 키는 경고,
+    // auto json 제약은 확인된 키에서만 생성.
+    let verifiedJsonKeys: string[] | undefined;
+    if (a.resultJson !== undefined && a.resultJson !== null && typeof a.resultJson === "object" && !Array.isArray(a.resultJson)) {
+      let cassette: ReturnType<typeof loadCassette> = [];
+      try {
+        cassette = loadCassette(this.procforgeDir, sid, nid);
+      } catch {
+        // 손상 카세트는 대조 생략 (record 경로에서 처리)
+      }
+      if (cassette.length > 0) {
+        const liveKey = recordKey(baseDir, this.projectRoot, toolRef.server, toolRef.name, absolutizePathArgs(baseDir, args));
+        const entry = cassette.find((e) => e.server === toolRef.server && e.key === liveKey);
+        const recorded = entry?.response.json;
+        if (recorded !== undefined && recorded !== null && typeof recorded === "object" && !Array.isArray(recorded)) {
+          const recordedKeys = new Set(Object.keys(recorded as Record<string, unknown>));
+          const reportedKeys = Object.keys(a.resultJson as Record<string, unknown>);
+          const unconfirmed = reportedKeys.filter((k) => !recordedKeys.has(k));
+          if (unconfirmed.length > 0) {
+            reportWarnings.push(`resultJson 미확인 키: ${unconfirmed.join(", ")} (녹화 응답과 불일치)`);
+          }
+          verifiedJsonKeys = reportedKeys.filter((k) => recordedKeys.has(k));
+        }
+      }
+    }
     const { stored, contents } = await ingestReportJobs({
       procforgeDir: this.procforgeDir, sessionId: sid, nodeId: nid,
       attemptId, baseDir, jobs, maxBytes: this.maxArtifactBytes,
@@ -230,6 +256,7 @@ export class ProcForgeApp {
       artifacts: stored,
       artifactContents: contents,
       artifactSources: sources,
+      verifiedJsonKeys,
       selfVerdict: a.selfVerdict as "pass" | "fail",
       selfReason: a.selfReason as string,
       rubricReasons: a.rubricReasons as Record<string, string> | undefined,

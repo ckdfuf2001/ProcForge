@@ -78,6 +78,7 @@ const Methods = {
       artifacts: z.array(z.string()).optional(),
       artifactContents: z.record(z.string()).optional(),
       artifactSources: z.record(z.string()).optional(),
+      verifiedJsonKeys: z.array(z.string()).optional(),
       selfVerdict: z.enum(["pass", "fail"]),
       selfReason: z.string(),
       rubricReasons: z.record(z.string()).optional(),

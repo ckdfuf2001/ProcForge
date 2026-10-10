@@ -88,6 +88,7 @@ export function autoConstraints(
   resultJson: unknown,
   artifacts: string[],
   sources?: Record<string, string>,
+  verifiedKeys?: string[],
 ): Constraint[] {
   const out: Constraint[] = [];
   let i = 0;
@@ -100,6 +101,8 @@ export function autoConstraints(
     for (const k of Object.keys(resultJson as Record<string, unknown>)) {
       if (out.length >= 10) break;
       if (!/^[A-Za-z0-9_.-]+$/.test(k)) continue;
+      // M3.5.1-3: 확인된 키에서만 생성 (날조 키 auto 금지)
+      if (verifiedKeys !== undefined && !verifiedKeys.includes(k)) continue;
       out.push({
         id: id(),
         kind: "json_path_exists",
@@ -510,7 +513,7 @@ export class CoreService implements CoreClient {
     // human + 재생성분으로 (낡은 attempt 키 pin 제거).
     const artifactsMap: Record<string, string> = { ...(input.artifactContents ?? {}) };
     const human = n.constraints.filter((c) => c.source !== "auto");
-    const freshAuto = autoConstraints(input.resultJson, input.artifacts ?? [], input.artifactSources);
+    const freshAuto = autoConstraints(input.resultJson, input.artifacts ?? [], input.artifactSources, input.verifiedJsonKeys);
     let verdict: "pass" | "fail";
     let failedConstraints: string[];
     let unverified: string[] | undefined;

@@ -51,6 +51,22 @@ function isFile(abs: string): boolean {
 }
 
 /**
+ * 인자 중 경로형 문자열을 baseDir 기준 절대경로로 (M3.5.1-3, 카세트 키 대조용).
+ * URL·탈출·비경로는 원문 유지.
+ */
+export function absolutizePathArgs(baseDir: string, args: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(args)) {
+    if (typeof v !== "string") {
+      out[k] = v;
+      continue;
+    }
+    out[k] = toAbs(baseDir, v) ?? v;
+  }
+  return out;
+}
+
+/**
  * 인자 중 지정 역할(in/inout/out)의 기존 파일을 수집 (ingest용 원문 경로 목록).
  * - 명시 path가 있으면 looksLikePath 관문 생략 (호스트가 경로임을 확정한 것).
  * - 그 외는 경로처럼 보이는 문자열만.

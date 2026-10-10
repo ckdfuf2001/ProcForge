@@ -63,6 +63,8 @@ export type PfReportInput = {
   attemptId?: string;
   /** fixture → sandbox 논리 경로 매핑 (M3.5.1-1, auto file_exists 경로용) */
   artifactSources?: Record<string, string>;
+  /** 녹화 응답에서 확인된 resultJson 키 (M3.5.1-3, auto json 생성 범위) */
+  verifiedJsonKeys?: string[];
   expectedRevision?: number;
   actor?: Actor;
 };
