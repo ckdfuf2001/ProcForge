@@ -47,4 +47,19 @@ data = [
 for r in data:
     ws.append(list(r))
 wb.save(os.path.join(HERE, "sales-2026-09.xlsx"))
-print("samples written: a.pptx, sales-2026-09.xlsx")
+
+# 10월 실적 엑셀 (M5-8, 부가세 포함 금액, 세전 역산이 정수로 떨어지도록 단가 11000)
+wb10 = openpyxl.Workbook()
+ws10 = wb10.active
+ws10.title = "sales"
+ws10.append(["일자", "제품", "수량", "단가", "금액(부가세포함)"])
+data10 = [
+    ("2026-10-04", "A", 40, 11000, 440000),
+    ("2026-10-12", "A", 60, 11000, 660000),
+    ("2026-10-07", "B", 20, 11000, 220000),
+    ("2026-10-21", "B", 30, 11000, 330000),
+]
+for r in data10:
+    ws10.append(list(r))
+wb10.save(os.path.join(HERE, "sales-2026-10.xlsx"))
+print("samples written: a.pptx, sales-2026-09.xlsx, sales-2026-10.xlsx")
