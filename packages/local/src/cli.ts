@@ -116,8 +116,66 @@ async function cmdExport(): Promise<number> {
   }
 }
 
-async function cmdRepair(): Promise<number> {
-  const [sid] = positionals.slice(1);
+async function cmdRun(): Promise<number> {
+  const positional = positionals[1];
+  const procRef = (!values.session ? positional : undefined) ?? values.procedure;
+  if (!procRef) {
+    console.error("procedure 실행: procforge run procedures/<name> [--param k=v] [--out dir] [--force]");
+    return 2;
+  }
+  const params: Record<string, string> = {};
+  for (const p of values.param ?? []) {
+    const i = p.indexOf("=");
+    if (i === -1) {
+      console.error(`bad --param (k=v 필요): ${p}`);
+      return 2;
+    }
+    params[p.slice(0, i)] = p.slice(i + 1);
+  }
+  const { projectRoot, procforgeDir } = resolveDirs(values, process.env);
+  try {
+    const { app } = createApp({ procforgeDir, projectRoot });
+    const out = await app.runProcedure({
+      procedure: procRef,
+      params,
+      out: values.out,
+      force: values.force ?? false,
+      allowBash: values["allow-bash"] ?? false,
+      allowProjectRead: values["allow-project-read"] ?? false,
+    });
+    console.log(`run ${out.runId} (session ${out.sessionId}): pass=${out.passed} fail=${out.failed} unverified=${out.unverified} skipped=${out.skipped} blocked=${out.blocked} suspended=${out.suspended}`);
+    console.log(`report: ${out.reportPath}`);
+    if (out.outDir) console.log(`out: ${out.outDir}`);
+    if (out.suspended > 0) {
+      console.error("suspended: pf_run_next로 재개 (MCP) — 생성값·승인 필요");
+      return 1;
+    }
+    return out.failed > 0 ? 1 : 0;
+  } catch (e) {
+    console.error(`error: ${e instanceof Error ? e.message : String(e)}`);
+    return 1;
+  }
+}
+
+async function cmdApprove(): Promise<number> {
+  const [, runId, nodeId] = positionals;
+  if (!runId || !nodeId) {
+    console.error("usage: procforge approve <runId> <nodeId>");
+    return 2;
+  }
+  const { projectRoot, procforgeDir } = resolveDirs(values, process.env);
+  try {
+    const { app } = createApp({ procforgeDir, projectRoot });
+    const r = await app.runApprove({ runId, nodeId });
+    console.log(`approved: run ${r.runId} node ${r.nodeId}`);
+    return 0;
+  } catch (e) {
+    console.error(`error: ${e instanceof Error ? e.message : String(e)}`);
+    return 1;
+  }
+}
+
+async function cmdRepair(): Promise<number> {  const [sid] = positionals.slice(1);
   const discard = values.discard;
   if (!sid || discard === undefined) {
     console.error("usage: procforge repair <sessionId> --discard <rev>");
@@ -145,7 +203,9 @@ async function main(): Promise<number> {
   if (cmd === "trace") return cmdTrace();
   if (cmd === "export") return cmdExport();
   if (cmd === "repair") return cmdRepair();
-  console.error("usage: procforge <test|trace|export|repair> ...");
+  if (cmd === "run") return cmdRun();
+  if (cmd === "approve") return cmdApprove();
+  console.error("usage: procforge <test|trace|export|repair|run|approve> ...");
   return 2;
 }
 

@@ -20,6 +20,7 @@ export type CliValues = {
   out?: string;
   param?: string[];
   discard?: string;
+  force?: boolean;
 };
 
 export function parseCliArgs(argv: string[]): { values: CliValues; positionals: string[] } {
@@ -42,6 +43,7 @@ export function parseCliArgs(argv: string[]): { values: CliValues; positionals: 
       out: { type: "string" },
       param: { type: "string", multiple: true },
       discard: { type: "string" },
+      force: { type: "boolean", default: false },
     },
     allowPositionals: true,
   });

@@ -168,6 +168,7 @@
   pf_report warnings. 스냅샷은 sandbox만 (strict=false는 폴백).
 - [M4.1-8] SKILL.md/command.md는 "검증(replay)만 가능, 새 데이터 실행은
   미지원(M5)"으로 표기 (params 변경분은 drift 검출).
+  - [M5-6 철회] run 지원으로 위 표기 철회. SKILL/command에 replay+run 병기.
 
 ## M4.2 (계층 정리 + M4.1.1 보정)
 
@@ -309,6 +310,10 @@
   release는 token 일치 시에만 삭제. Windows 일시 오류는 conflict로 재시도.
 - M3.5.2-2: 8자식×50회 동시 보고 부하 테스트 (CI 양 OS 자동 포함).
   events seq 중복 0·revision 연속·실패는 conflict만.
+  m25 20회 연속 통과, 클린 클론 36+61+163 통과.
+- M5-1: `procforge run <procedure> --param k=v [--out dir] [--force]` 신설
+  (App.runProcedure 경유). 출력은 runs/<runId>/fs, --out 지정 시에만 완료 후
+  프로젝트 안으로 복사 (기존 파일은 --force 없이 거부).
 - 4-1/4-2 수정: check-deps가 Windows에서 빈 스캔(항상 통과)이던 결함
   수정 (fileURLToPath). 멀티라인 import 여는 행 제외, *.test.ts는
   저장 범위 검사에서 제외 (저장소 직접 검증 목적).

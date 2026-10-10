@@ -37,7 +37,10 @@ import { ingestArtifacts, normalizeArgSpecs, readManifest } from "../artifacts.j
 import { runSession } from "../runner/index.js";
 import { loadCassette, recordKey } from "../runner/index.js";
 import { runProcedureTest } from "../runner/procedure-run.js";
-import { writeJUnitFile, resolveJUnitPath } from "../services/runner.js";
+import { loadProcedureDoc } from "../runner/procedure-run.js";
+import { importProcedure } from "../procedure.js";
+import { readRunState, writeRunState } from "../services/run-state.js";
+import { writeJUnitFile, resolveJUnitPath, copyRunFsToOut } from "../services/runner.js";
 import { repairDiscard } from "../services/repair.js";
 import { buildTrace, formatTraceMarkdown } from "../trace.js";
 import { exportSession } from "../export.js";
@@ -732,7 +735,8 @@ export class ProcForgeApp {
     });
   }
 
-  async finalize(a: FinalizeInput): Promise<OutputOf<"pf_finalize">> {    const sid = a.sessionId as string;
+    async finalize(a: FinalizeInput): Promise<OutputOf<"pf_finalize">> {
+    const sid = a.sessionId as string;
     await this.core.getSession(sid);
     const { doc, warnings } = await this.core.pfBuildProcedure(sid, a.name as string);
     const written = writeProcedure({
@@ -743,5 +747,219 @@ export class ProcForgeApp {
       force: (a.force as boolean | undefined) ?? false,
     });
     return { name: doc.name, dir: written.dir, warnings, files: written.files, commandFile: written.commandFile };
+  }
+
+  /** 절차서 live 실행 시작 (M5). 실행은 pf_run_next/supply로 단계 진행. */
+  async runStart(a: { procedure: unknown; params?: unknown }): Promise<{ runId: string; sessionId: string; procedure: string; params: Record<string, string> }> {
+    const ref = a.procedure as string;
+    if (!ref) throw pfError("bad_request", "procedure가 필요하다.");
+    const params = (a.params ?? {}) as Record<string, string>;
+    const { doc } = loadProcedureDoc(this.procforgeDir, ref);
+    const { sessionId } = importProcedure(this.procforgeDir, doc, params);
+    const runId = randomUUID();
+    writeRunState(this.procforgeDir, {
+      version: 1, runId, sessionId, procedure: doc.name, params,
+      pending: [], done: [], supplied: {}, approved: [],
+      status: "ready", updatedAt: new Date().toISOString(),
+    });
+    return { runId, sessionId, procedure: doc.name, params };
+  }
+
+  /** run 1스텝 진행 (M5, pf_run_next/supply 공용). 결정적 구간 자동 진행. */
+  async runStep(runId: string): Promise<
+    | { kind: "need_generated"; runId: string; sessionId: string; nodeId: string; instruction: string; inputs: Record<string, unknown> }
+    | { kind: "need_approval"; runId: string; sessionId: string; nodeId: string; instruction: string; approvalHint: string }
+    | { kind: "done"; runId: string; sessionId: string; pass: number; fail: number; unverified: number; skipped: number; blocked: number; suspended: number }
+    | { kind: "failed"; runId: string; sessionId: string; nodeId: string; detail: string; hint: string }
+  > {
+    const st = readRunState(this.procforgeDir, runId);
+    if (!st) throw pfError("not_found", `run ${runId} not found`);
+    if (st.status === "done") {
+      return { kind: "done", runId, sessionId: st.sessionId, ...(st.summary ?? { pass: 0, fail: 0, unverified: 0, skipped: 0, blocked: 0, suspended: 0 }) };
+    }
+    if (st.status === "failed") {
+      return {
+        kind: "failed", runId, sessionId: st.sessionId, nodeId: st.failedNodeId ?? "",
+        detail: st.failedDetail ?? "", hint: this.repairHint(st.failedNodeId ?? ""),
+      };
+    }
+    const report = await runSession({
+      procforgeDir: this.procforgeDir,
+      projectRoot: this.projectRoot,
+      sessionId: st.sessionId,
+      mode: "live",
+      runId,
+      procedure: st.procedure,
+      skipNodeIds: st.done,
+      supplied: st.supplied,
+      approvedNodeIds: st.approved,
+    });
+    const doneNow = report.results.filter((r) => r.status === "pass").map((r) => r.nodeId);
+    const done = [...new Set([...st.done, ...doneNow])];
+    const susp = report.results.find((r) => r.status === "suspended");
+    const failed = report.results.find((r) => r.status === "fail");
+    if (susp) {
+      const m = /^need_generated:(.*)$/.exec(susp.detail ?? "");
+      const kind = m ? "need_generated" as const : "need_approval" as const;
+      const missing = m ? m[1].split(",").filter((s) => s.length > 0) : [];
+      const pending = report.results.filter((r) => r.status === "suspended" || (r.status === "skipped" && !done.includes(r.nodeId))).map((r) => r.nodeId);
+      writeRunState(this.procforgeDir, {
+        ...st, pending, done, status: "suspended",
+        suspended: { nodeId: susp.nodeId, kind, ...(missing.length > 0 ? { missing } : {}) },
+      });
+      const node = await this.core.getNode(st.sessionId, susp.nodeId);
+      if (kind === "need_generated") {
+        const inputs: Record<string, unknown> = {};
+        for (const k of missing) {
+          const spec = (node.args ?? {})[k] as { instruction?: string; inputs?: unknown; constraints?: unknown } | undefined;
+          inputs[k] = { ...(spec?.instruction !== undefined ? { instruction: spec.instruction } : {}) };
+        }
+        return {
+          kind, runId, sessionId: st.sessionId, nodeId: susp.nodeId,
+          instruction: `노드 ${susp.nodeId}에 생성값이 필요하다 (${missing.join(", ")}). pf_run_supply(runId, nodeId, value)로 제공하라.`,
+          inputs,
+        };
+      }
+      return {
+        kind, runId, sessionId: st.sessionId, nodeId: susp.nodeId,
+        instruction: `노드 ${susp.nodeId}는 external 부작용이라 승인이 필요하다.`,
+        approvalHint: `procforge approve ${runId} ${susp.nodeId} 또는 pf_run_supply(runId, nodeId, true) 후 pf_run_next(runId).`,
+      };
+    }
+    if (failed) {
+      const pending = report.results.filter((r) => r.status !== "pass" && !done.includes(r.nodeId)).map((r) => r.nodeId);
+      writeRunState(this.procforgeDir, {
+        ...st, pending, done, status: "failed",
+        failedNodeId: failed.nodeId, failedDetail: failed.detail ?? "",
+        summary: report.summary,
+      });
+      return {
+        kind: "failed", runId, sessionId: st.sessionId, nodeId: failed.nodeId,
+        detail: failed.detail ?? "", hint: this.repairHint(failed.nodeId),
+      };
+    }
+    writeRunState(this.procforgeDir, { ...st, pending: [], done, status: "done", summary: report.summary });
+    return { kind: "done", runId, sessionId: st.sessionId, ...report.summary };
+  }
+
+  private repairHint(nodeId: string): string {
+    return `노드 ${nodeId} 수정: pf_tree 확인 후 pf_reopen → pf_edit_args 등으로 수정 → pf_confirm_leaf로 재확정.`;
+  }
+
+  /** run 다음 단계 (M5, MCP pf_run_next) */
+  async runNext(a: { runId: unknown }): Promise<Awaited<ReturnType<ProcForgeApp["runStep"]>>> {
+    const runId = a.runId as string;
+    if (!runId) throw pfError("bad_request", "runId가 필요하다.");
+    const st = readRunState(this.procforgeDir, runId);
+    if (!st) throw pfError("not_found", `run ${runId} not found`);
+    if (st.status === "suspended" && st.suspended) {
+      // 대기 중이면 재실행 없이 현재 대기 반환
+      const node = await this.core.getNode(st.sessionId, st.suspended.nodeId);
+      if (st.suspended.kind === "need_generated") {
+        const missing = st.suspended.missing ?? [];
+        const inputs: Record<string, unknown> = {};
+        for (const k of missing) {
+          const spec = (node.args ?? {})[k] as { instruction?: string } | undefined;
+          inputs[k] = { ...(spec?.instruction !== undefined ? { instruction: spec.instruction } : {}) };
+        }
+        return {
+          kind: "need_generated", runId, sessionId: st.sessionId, nodeId: st.suspended.nodeId,
+          instruction: `노드 ${st.suspended.nodeId}에 생성값이 필요하다 (${missing.join(", ")}). pf_run_supply(runId, nodeId, value)로 제공하라.`,
+          inputs,
+        };
+      }
+      return {
+        kind: "need_approval", runId, sessionId: st.sessionId, nodeId: st.suspended.nodeId,
+        instruction: `노드 ${st.suspended.nodeId}는 external 부작용이라 승인이 필요하다.`,
+        approvalHint: `procforge approve ${runId} ${st.suspended.nodeId} 또는 pf_run_supply(runId, nodeId, true) 후 pf_run_next(runId).`,
+      };
+    }
+    return this.runStep(runId);
+  }
+
+  /** 생성값 공급·승인 후 자동 진행 (M5, MCP pf_run_supply) */
+  async runSupply(a: { runId: unknown; nodeId: unknown; value: unknown }): Promise<Awaited<ReturnType<ProcForgeApp["runStep"]>>> {
+    const runId = a.runId as string;
+    const nodeId = a.nodeId as string;
+    if (!runId || !nodeId) throw pfError("bad_request", "runId·nodeId가 필요하다.");
+    const st = readRunState(this.procforgeDir, runId);
+    if (!st) throw pfError("not_found", `run ${runId} not found`);
+    if (st.status === "done" || st.status === "failed") {
+      throw pfError("bad_request", `run 이미 종료: ${st.status}`);
+    }
+    if (!st.suspended || st.suspended.nodeId !== nodeId) {
+      throw pfError("bad_request", `대기 중인 노드가 아님: ${nodeId}. pf_run_next로 먼저 진행하라.`);
+    }
+    if (st.suspended.kind === "need_approval") {
+      if (a.value !== true) throw pfError("bad_request", "승인은 value=true로 한다.");
+      const approved = [...new Set([...st.approved, nodeId])];
+      writeRunState(this.procforgeDir, { ...st, approved, suspended: undefined, status: "ready" });
+      return this.runStep(runId);
+    }
+    const missing = st.suspended.missing ?? [];
+    let patch: Record<string, unknown>;
+    if (missing.length === 1 && (typeof a.value !== "object" || a.value === null)) {
+      patch = { [missing[0]]: a.value };
+    } else if (typeof a.value === "object" && a.value !== null) {
+      const given = a.value as Record<string, unknown>;
+      const absent = missing.filter((k) => !(k in given));
+      if (absent.length > 0) throw pfError("bad_request", `생성값 부족: ${absent.join(", ")}`);
+      patch = { ...given };
+    } else {
+      throw pfError("bad_request", `생성값 부족: ${missing.join(", ")} (객체로 제공)`);
+    }
+    const supplied = { ...st.supplied, [nodeId]: { ...(st.supplied[nodeId] ?? {}), ...patch } };
+    writeRunState(this.procforgeDir, { ...st, supplied, suspended: undefined, status: "ready" });
+    return this.runStep(runId);
+  }
+
+  /** run external 승인 (M5, CLI 전용) */
+  async runApprove(a: { runId: unknown; nodeId: unknown }): Promise<{ runId: string; nodeId: string; approved: boolean }> {
+    const runId = a.runId as string;
+    const nodeId = a.nodeId as string;
+    if (!runId || !nodeId) throw pfError("bad_request", "runId·nodeId가 필요하다.");
+    const st = readRunState(this.procforgeDir, runId);
+    if (!st) throw pfError("not_found", `run ${runId} not found`);
+    if (!st.pending.includes(nodeId)) throw pfError("bad_request", `대기 중인 노드가 아님: ${nodeId}`);
+    const approved = [...new Set([...st.approved, nodeId])];
+    writeRunState(this.procforgeDir, { ...st, approved });
+    return { runId, nodeId, approved: true };
+  }
+
+  /** 절차서 live 일괄 실행 (M5, CLI run용). 일시정지면 suspended 포함 반환. */
+  async runProcedure(a: {
+    procedure: unknown; params?: unknown; out?: unknown; force?: unknown;
+    allowBash?: unknown; allowProjectRead?: unknown;
+  }): Promise<{
+    runId: string; sessionId: string; mode: "live";
+    passed: number; failed: number; unverified: number; skipped: number; blocked: number; suspended: number;
+    reportPath: string; outDir?: string;
+  }> {
+    const procRef = a.procedure as string;
+    if (!procRef) throw pfError("bad_request", "procedure가 필요하다.");
+    const params = ((a.params ?? {}) as Record<string, string>);
+    const { report, sessionId } = await runProcedureTest(this.procforgeDir, this.projectRoot, procRef, {
+      procforgeDir: this.procforgeDir,
+      projectRoot: this.projectRoot,
+      mode: "live",
+      params,
+      updateGolden: false,
+      allowBash: a.allowBash === true,
+      allowProjectRead: a.allowProjectRead === true,
+    });
+    let outDir: string | undefined;
+    const outOpt = a.out as string | undefined;
+    if (outOpt !== undefined && outOpt !== "") {
+      outDir = assertProjectPath(this.projectRoot, outOpt);
+      copyRunFsToOut(this.procforgeDir, report.runId, outDir, a.force === true);
+    }
+    return {
+      runId: report.runId, sessionId, mode: "live",
+      passed: report.summary.pass, failed: report.summary.fail,
+      unverified: report.summary.unverified, skipped: report.summary.skipped,
+      blocked: report.summary.blocked, suspended: report.summary.suspended,
+      reportPath: join(this.procforgeDir, "runs", report.runId, "report.json"),
+      ...(outDir ? { outDir } : {}),
+    };
   }
 }
