@@ -191,11 +191,16 @@ server.registerTool("pf_report", spec, async (a) => {
 2. 세션 잠금을 core `change()` 안으로 이동. Store 인터페이스에 `withLock(sid, fn)` 추가,
    FileStore는 lockfile, MemoryStore는 no-op. App의 `locked()` 제거.
 3. 커밋 원자화: `pending-<rev>.json`에 전체 변경을 먼저 원자 저장 → 노드 → 세션 → 이벤트
-   반영 → pending 삭제. pending에는 커밋 revision을 함께 기록한다.
-   세션을 열 때 pending이 남아 있으면 숫자 revision 순으로 재반영하되,
-   `pending.revision <= 파일 session.revision`인 낡은 pending은 적용 없이
-   정리만 한다. 재반영은 첫 실패·손상에서 중단하고 손상도 실패로 처리
-   (새 커밋 거부). 손상 파일은 `.corrupt-<rev>-<ts>.json`으로 이동 (삭제 금지).
+   반영 → pending 삭제. pending에는 커밋 revision을 함께 기록한다 (필수, 없으면 손상 취급).
+   읽기·복구는 `planPendings` 단일 계획으로 공용한다. 적용은 파일 revision 직후부터
+   `revision === 직전+1`인 연속분만, 첫 손상·불연속에서 중단한다.
+   `pending.revision <= 파일 session.revision`인 낡은 pending은 적용 없이 정리만 한다.
+   재반영은 첫 실패·손상에서 중단하고 손상도 실패로 처리 (새 커밋 거부).
+   손상 파일은 `.corrupt-<rev>-<ts>.json`으로 이동 (삭제 금지).
+   `.corrupt-*`가 남아 있으면 새 커밋을 거부하고, 해제는 CLI
+   `procforge repair <sid> --discard <rev>`로만 한다 (human 이벤트 기록, MCP 도구 없음).
+   session.json이 없고 적용 가능한 pending이 있으면 읽기(getSession/getNodes)가
+   pending 뷰를 반환한다.
    테스트: 두 번째 노드 저장 실패 주입 → 재로드 시 전부 반영 또는 전부 미반영.
 4. `pf_next`: READ_ONLY_TOOLS에서 제거, WRITE_ANN, 잠금 적용. 읽기 전용 모드에서 비노출.
 5. `confirmLeaf`: 결과물 수정과 leaf 확정을 core 변경 1회로 통합 (pfResolve leaf 입력에
@@ -294,6 +299,7 @@ server.registerTool("pf_report", spec, async (a) => {
 | M4.2 | 2.5.1 보정 1~5 | [x] | `caf8b18` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38023996163 | 읽기 메모리뷰·pending 정렬/손상/거부·enteredProbing·revision 전달·잠금대기 |
 | M4.2 | 3-0 (2.5.1 잔여) | [x] | `2532523` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38027160130 | 낡은 pending 정리만·recover 중단/실패·commitChange session 필수·읽기 zod |
 | M4.2 | 3단계 M4.1.1 버그 1~7 | [x] | `307bcd6` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38027160130 | 6번은 2.5-4에서 해소됨 |
+| M4.2 | 4-0 (3-0 잔여) | [ ] | | | corrupt 잔류 거부·CLI repair·planPendings 공용·무세션 pending 뷰 |
 | M4.2 | 4단계 강제 장치 1~6 | [ ] | | | |
 | M3.5 | PPT 실사용 테스트 | [ ] | | | 사람 진행 |
 | M5 | 검증/실행 분리 | [ ] | | | |
@@ -315,3 +321,4 @@ server.registerTool("pf_report", spec, async (a) => {
 | 2026-10-10 | 8 | 2.5.1 보정 1~5 진행 (읽기 메모리뷰·pending 정렬/손상/복구/거부·enteredProbing 스냅샷·report 판정 메모리/호출경계·revision 전달·withLock 25ms×20회 대기; App isLocked 제거·getEvent 메모리뷰·주석 //→///) | 0.5~2.5 구현 중 발견된 예외 5종이 3단계 진입 전 해소 필요 (멈춤 없는 read·복구 순서·스냅샷 경합·revision 전달·잠금 대기) |
 | 2026-10-10 | 6, 8 | 3-0 (2.5.1 잔여) 신설: 낡은 pending 정리만·recover 첫 실패 중단/손상 실패·commitChange session 필수·읽기 경로 zod | pending 재반영이 낡은 변경을 되살리거나 손상을 넘기면 3단계 스냅샷·확정 로직의 전제가 무너짐 — 3단계 진입 전 해소 |
 | 2026-10-10 | 3, 4, 8 | 3단계 1·2·3·4·5·7 완료 (6번은 2.5-4 해소): inout 분류+pre-copy/seed 원본·junit 경로·procedure 이름·pf_test nodeId·golden 원문 경고·advise summary | 확정·실행의 입력 완전성(원본)·출력 위치·재실행 범위를 4단계 강제 장치 전에 고정 |
+| 2026-10-10 | 6, 8 | 4-0 (3-0 잔여) 신설: corrupt 잔류 시 커밋 거부·CLI repair --discard·planPendings 읽기/복구 공용·연속 revision만 적용·무세션 pending 뷰 | 손상·불연속 pending이 읽기와 복구에서 다르게 보이면 4단계 강제 장치의 전제가 무너짐 — 4단계 진입 전 해소 |
