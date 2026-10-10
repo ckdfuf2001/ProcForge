@@ -266,7 +266,7 @@ A2 회수: rename 후 token 불일치 시 즉시 원위치 후 conflict. 일치�
 A3 계측: 회수 시 stderr 로그 + 카운터. 부하 테스트에서 회수 0회 단언.
 A4 m25 전체 스위트 내 50회 연속 통과. "알려진 이슈" 문구 삭제.
 [B. 파라미터화 감사]
-B1 finalize 감사 확장 (아래 상세). --strict 시 bad_request.
+B1 finalize 감사 확장 (R1/R2 정밀화 포함). --strict 시 bad_request.
 B2 상대 constraint (아래 상세). instruction·pf_advise 변환 갱신.
 B3 SKILL/instruction 문구 + 템플릿 var (아래 상세).
 [C. 진짜 10월 검증]
@@ -352,8 +352,8 @@ C4 CI E2E에도 C2·C3를 fake 서버로 추가. M5-dogfood.md 3절을 실제 �
 | M3.5 | PPT 실사용 테스트 | [~] | `19c3c6d` | (진행 중) | 단일 모델 1차 완료, 2종 비교·토큰 통계는 사람 보완 필요 |
 | M3.5.1 | dogfood 후속 수정 (M5 전) | [x] | `98e99d5` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38055900040 | file_exists pin·drift 기준·resultJson 대조·카탈로그 타임아웃·스크립트 leaf 결정·dogfood 보정 |
 | M3.5.2 | 잠금 원자화 (M5 전) | [x] | `5eb43b8` | (아래 run) | openSync wx·token release·부하 테스트·클린 클론 |
-| M5.1 | 잠금 회수 정정·감사·진짜 10월 검증 | [ ] | | | A 회수 정정·B 감사·C 10월 검증 || M5 | 검증/실행 분리 | [~] | `78e6514` | (아래 run) | M5.1 완료 후 재확정 (사유: C2 한계 — month 바인딩 출력 인자 없음·수치 고정) |
-| M5 | 검증/실행 분리 | [ ] | | | |
+| M5.1 | 잠금 회수 정정·감사·진짜 10월 검증 | [x] | `00661cf` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38067485259 | A 회수 정정(9c0171b)·B 감사·상대조건·템플릿(c56a7c1·935df1b·725c9f3·75b7cc5)·C 10월 검증(00661cf) |
+| M5 | 검증/실행 분리 | [x] | `78e6514` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38067485259 | M5.1-C2/C4로 재확정 (fixture-sealed 규명·var 치환 실증) |
 | M5.5 | 반복 노드 | [ ] | | | |
 | M5.6 | 상태 / sideEffect | [ ] | | | |
 | - | 크롤링 테스트 | [ ] | | | 사람 진행 |
@@ -377,3 +377,4 @@ C4 CI E2E에도 C2·C3를 fake 서버로 추가. M5-dogfood.md 3절을 실제 �
 | 2026-10-10 | 6, 8 | M3.5.1 신설 (M5 전): file_exists pin 해소·drift 기준·resultJson 대조·카탈로그 타임아웃·스크립트 leaf 결정·dogfood 보정 | dogfood에서 발견한 검사 기준 결함을 M5 전에 해소 (재보고·재바인딩 전제 복구) |
 | 2026-10-10 | 6, 8 | M3.5.2·M5 신설: 잠금 원자화 후 live 실행 분리 (CLI run·suspended·pf_run_*·판정·승인·문구·E2E·실측) | M5 live 실행 전에 프로세스 간 잠금 경합을 먼저 제거, 검증/실행 분리로 재바인딩·신규 데이터 실행 지원 |
 | 2026-10-11 | 6, 8 | M5.1 신설 + M5 미완료로 환원: A 잠금 회수 정정 (pid 생존·하트비트·원위치·계측·50회) · B 파라미터화 감사·C 진짜 10월 검증 | dogfood에서 드러난 회수 경합 잔재·절차서 하드코딩·요약-비교 한계를 M5 확정 전에 해소 |
+| 2026-10-11 | 6, 8 | M5.1 완료 + M5 재확정: A 회수 정정·B1 감사(R1/R2 정밀화)·B2 상대조건·B3 템플릿var·C1 10월 분해(감사 0)·C2 live pass 3·C3 음성(c-total fail+blocked)·C4 CI E2E·A4 m25 50회·양 모드 37+61+183 | fixture-sealed 규명·MCP UTF-8 stdio·한계 문구 삭제 |
