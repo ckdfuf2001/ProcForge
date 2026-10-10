@@ -38,6 +38,9 @@ import { runSession } from "../runner/index.js";
 import { runProcedureTest } from "../runner/procedure-run.js";
 import { writeJUnitFile, resolveJUnitPath } from "../services/runner.js";
 import { repairDiscard } from "../services/repair.js";
+import { buildTrace, formatTraceMarkdown } from "../trace.js";
+import { exportSession } from "../export.js";
+import { assertProjectPath } from "../artifacts.js";
 import { writeProcedure } from "../services/procedureWriter.js";
 
 // ProcForge 유스케이스층 (M4.2-1). 사용자 행동 1개 = 메서드 1개.
@@ -635,6 +638,7 @@ export class ProcForgeApp {
       mode: (a.mode as "record" | "replay" | "passthrough" | "live" | undefined) ?? "replay",
       updateGolden: (a.updateGolden as boolean | undefined) ?? false,
       allowProjectRead: (a.allowProjectRead as boolean | undefined) ?? false,
+      changed: (a.changed as boolean | undefined) ?? false,
     });
     const reportPath = join(this.procforgeDir, "runs", report.runId, "report.json");
     const junitPath = resolveJUnitPath(this.projectRoot, this.procforgeDir, a.junitPath as string | undefined, report.runId);
@@ -661,6 +665,30 @@ export class ProcForgeApp {
     const rev = typeof a.discardRev === "number" ? a.discardRev : Number(a.discardRev);
     if (!Number.isInteger(rev) || rev < 0) throw pfError("bad_request", `bad revision: ${String(a.discardRev)}`);
     return repairDiscard(this.procforgeDir, sid, rev);
+  }
+
+    /** 호출 추적 마크다운 (M4.2-4-1, CLI trace용) */
+  async traceMarkdown(a: { sessionId: unknown }): Promise<{ markdown: string }> {
+    const sid = a.sessionId as string;
+    return { markdown: formatTraceMarkdown(buildTrace(this.procforgeDir, sid)) };
+  }
+
+  /** 세션 export (M4.2-4-1, CLI export용). outPath 지정 시 프로젝트 안만 허용. */
+  async exportSession(a: {
+    sessionId: unknown; outPath?: unknown; redact?: unknown; includeOriginals?: unknown;
+  }): Promise<{ outPath: string; files: number; redacted: boolean }> {
+    const sid = a.sessionId as string;
+    await this.core.getSession(sid);
+    const outPath = typeof a.outPath === "string" && a.outPath !== ""
+      ? assertProjectPath(this.projectRoot, a.outPath)
+      : join(this.procforgeDir, "exports", `${sid}.zip`);
+    return exportSession({
+      procforgeDir: this.procforgeDir,
+      sessionId: sid,
+      outPath,
+      redact: a.redact === true,
+      includeOriginals: a.includeOriginals === true,
+    });
   }
 
   async finalize(a: FinalizeInput): Promise<OutputOf<"pf_finalize">> {    const sid = a.sessionId as string;

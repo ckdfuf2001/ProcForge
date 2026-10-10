@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 import { resolve } from "node:path";
-import { createLocalStack } from "./core-inprocess.js";
-import { ProcForgeApp, DEFAULT_SESSION_TTL_MS } from "./app/app.js";
+import { createApp, DEFAULT_SESSION_TTL_MS } from "./app/bootstrap.js";
 import { runStdio } from "./server.js";
 
 const projectRoot = resolve(process.env.PROCFORGE_PROJECT_ROOT ?? process.argv[2] ?? process.cwd());
@@ -12,7 +11,6 @@ const sessionTtlMs = Number.isFinite(ttlDays) && ttlDays > 0 ? ttlDays * 8640000
 const strictSandbox = process.env.PROCFORGE_STRICT_SANDBOX !== "0";
 const maxArtifactBytes = Number(process.env.PROCFORGE_MAX_ARTIFACT_BYTES ?? `${5 * 1024 * 1024}`);
 
-// App 조립은 진입점에서 (M4.2-2.5). server는 완성된 App만 받는다.
-const { client } = createLocalStack(procforgeDir, { sessionTtlMs });
-const app = new ProcForgeApp({ core: client, procforgeDir, projectRoot, sessionTtlMs, strictSandbox, maxArtifactBytes });
+// App 조립은 app/bootstrap으로 (M4.2-4-1). server는 완성된 App만 받는다.
+const { app } = createApp({ procforgeDir, projectRoot, sessionTtlMs, strictSandbox, maxArtifactBytes });
 await runStdio({ app, procforgeDir, readOnly });

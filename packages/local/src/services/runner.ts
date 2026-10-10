@@ -1,7 +1,6 @@
 import { mkdirSync, writeFileSync } from "node:fs";
-import { dirname, join, relative, resolve } from "node:path";
-import { isEscapeRel } from "../artifacts.js";
-import { pfError } from "@procforge/shared/errors.js";
+import { dirname, join } from "node:path";
+import { assertProjectPath } from "../artifacts.js";
 import { toJUnit, type RunReport } from "../runner/index.js";
 
 // junit 산출물 기록 (M4.2-1, pf_test에서 이동). App 경유, 어댑터 직접 호출 금지.
@@ -20,11 +19,7 @@ export function resolveJUnitPath(
   if (junitPath === undefined || junitPath === "") {
     abs = join(procforgeDir, "runs", runId, "junit.xml");
   } else {
-    const root = resolve(projectRoot);
-    abs = resolve(root, junitPath);
-    if (isEscapeRel(relative(root, abs).split("\\").join("/"), "/")) {
-      throw pfError("bad_request", `path escapes project root: ${junitPath}`);
-    }
+    abs = assertProjectPath(projectRoot, junitPath);
   }
   mkdirSync(dirname(abs), { recursive: true });
   return abs;

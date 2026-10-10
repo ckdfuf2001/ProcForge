@@ -269,6 +269,10 @@
   CommitChangeSchema.revision 필수 (누락은 손상 취급).
 - 4-0-3: session.json 부재 시 적용 가능 pending에서 세션 뷰 구성
   (getSession/getNodes pending 뷰, 다음 커밋으로 파일 복구).
+- 4-1: 어댑터 import 허용 목록 (check-deps). App 합성은 app/bootstrap,
+  CLI 인자는 app/cli-args, 표면 값은 app/surface 경유. CLI test/trace/
+  export/repair 전부 App 메서드 경유. CLI --junit/--out은 프로젝트 안만
+  허용으로 통일. pf_test changed wire 추가.
 - 3-2: junitPath는 프로젝트 안만 허용(탈출 bad_request), 생략 시
   runs/<runId>/junit.xml 항상 기록. 응답에 junitPath 포함.
 - 3-3: pf_test.procedure에 PROCEDURE_NAME_RE zod 적용 (MCP 입력은

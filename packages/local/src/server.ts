@@ -24,8 +24,8 @@ import {
 } from "@procforge/shared/dto.js";
 import { errorCodeOf } from "@procforge/shared/errors.js";
 import { logger } from "./logger.js";
-import { OUTPUT_SCHEMAS } from "./views.js";
-import { logEvent } from "./trace.js";
+import { OUTPUT_SCHEMAS } from "./app/surface.js";
+import { logEvent } from "./app/surface.js";
 import type { ProcForgeApp } from "./app/app.js";
 import { PROMPT_TEXT, DEFAULT_SESSION_TTL_MS } from "./app/app.js";
 

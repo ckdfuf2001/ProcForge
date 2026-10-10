@@ -164,6 +164,7 @@ export const TestInputSchema = z.object({
   mode: z.enum(["record", "replay", "passthrough", "live"]).optional(),
   updateGolden: z.boolean().optional(),
   allowProjectRead: z.boolean().optional(),
+  changed: z.boolean().optional(),
   junitPath: z.string().optional(),
 });
 export type TestInput = z.infer<typeof TestInputSchema>;

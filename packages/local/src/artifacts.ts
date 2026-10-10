@@ -24,8 +24,21 @@ export function isEscapeRel(rel: string, pathSep: string = sep): boolean {
   return false;
 }
 
-export function assertSafePath(projectRoot: string, p: string): string {
+/**
+ * 프로젝트 안 경로 확인 (M4.2-4-1, 산출물 경로용. 존재 검사는 안 함).
+ * 탈출 시 bad_request.
+ */
+export function assertProjectPath(projectRoot: string, p: string): string {
   const root = resolve(projectRoot);
+  const abs = resolve(root, p);
+  const rel = relative(root, abs);
+  if (rel === "" || isEscapeRel(rel)) {
+    throw Object.assign(new Error(`path escapes project root: ${p}`), { code: "bad_request" });
+  }
+  return abs;
+}
+
+export function assertSafePath(projectRoot: string, p: string): string {  const root = resolve(projectRoot);
   const abs = resolve(root, p);
   const rel = relative(root, abs);
   // rel === "" (루트 자체)도 파일이 아니므로 거부

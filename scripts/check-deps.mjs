@@ -54,3 +54,38 @@ if (violations.length > 0) {
 } else {
   console.log("check-deps: OK (no local->core imports)");
 }
+
+// M4.2-4-1: 어댑터(server.ts, cli.ts, ui/**) import 허용 목록.
+// 허용: app/, shared의 schema·dto·errors, logger, MCP SDK, zod.
+// 금지: filestore, services/**, runner/**, node:fs 등 나머지 local 내부·node 내장.
+const ADAPTER_RES = [/[/\\]server\.ts$/, /[/\\]cli\.ts$/, /[/\\]ui[/\\]/];
+const ADAPTER_ALLOW_RES = [
+  /from\s+["']\.\/app\/[^"']*["']/,
+  /from\s+["']\.\.\/app\/[^"']*["']/,
+  /from\s+["']@procforge\/shared\/(schema|dto|errors)\.js["']/,
+  /from\s+["']\.\/logger\.js["']/,
+  /from\s+["']\.\.\/logger\.js["']/,
+  /from\s+["']@modelcontextprotocol\/[^"']*["']/,
+  /from\s+["']zod["']/,
+];
+const adapterViolations = [];
+for (const f of files) {
+  if (!ADAPTER_RES.some((re) => re.test(f))) continue;
+  const lines = readFileSync(f, "utf8").split("\n");
+  lines.forEach((line, i) => {
+    const stripped = line.trim();
+    if (!stripped.startsWith("import ") && !stripped.startsWith("} from ") && !stripped.includes('require(')) return;
+    if (stripped.startsWith("//")) return;
+    if (!ADAPTER_ALLOW_RES.some((re) => re.test(stripped))) {
+      adapterViolations.push(`${f}:${i + 1}: ${stripped}`);
+    }
+  });
+}
+
+if (adapterViolations.length > 0) {
+  console.error("DEP VIOLATION (M4.2-4-1): adapters may import only app/, shared schema/dto/errors, logger, MCP SDK, zod.");
+  for (const v of adapterViolations) console.error("  " + v);
+  process.exit(1);
+} else {
+  console.log("check-deps: OK (adapter imports)");
+}
