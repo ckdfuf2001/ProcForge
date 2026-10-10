@@ -922,7 +922,7 @@ export class ProcForgeApp {
     if (!st) throw pfError("not_found", `run ${runId} not found`);
     if (!st.pending.includes(nodeId)) throw pfError("bad_request", `대기 중인 노드가 아님: ${nodeId}`);
     const approved = [...new Set([...st.approved, nodeId])];
-    writeRunState(this.procforgeDir, { ...st, approved });
+    writeRunState(this.procforgeDir, { ...st, approved, suspended: undefined, status: "ready" });
     return { runId, nodeId, approved: true };
   }
 
