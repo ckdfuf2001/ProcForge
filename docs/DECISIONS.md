@@ -285,6 +285,9 @@
   uuid·시각 정규화 후 session·nodes·확정 응답 일치.
 - 4-6: test/arg-schema.test.ts — server 소스 정적 파싱으로 도구↔
   inputSchema 대응, 핸들러 a.*·설명서 (필수/선택) 인자는 스키마 키.
+- 4-1/4-2 수정: check-deps가 Windows에서 빈 스캔(항상 통과)이던 결함
+  수정 (fileURLToPath). 멀티라인 import 여는 행 제외, *.test.ts는
+  저장 범위 검사에서 제외 (저장소 직접 검증 목적).
 - 3-2: junitPath는 프로젝트 안만 허용(탈출 bad_request), 생략 시
   runs/<runId>/junit.xml 항상 기록. 응답에 junitPath 포함.
 - 3-3: pf_test.procedure에 PROCEDURE_NAME_RE zod 적용 (MCP 입력은

@@ -1,5 +1,6 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 // CI: local 패키지가 core 서버 전용 로직을 직접 import하지 못하도록 검사.
 // 허용: @procforge/shared, 상대경로, 외부 라이브러리.
@@ -7,7 +8,7 @@ import { join } from "node:path";
 // 예외(M0-6 개정, M1.5): 합성 루트 packages/local/src/core-inprocess.ts 1파일만 허용.
 // M6에서 이 파일만 HTTP CoreClient로 교체한다.
 
-const LOCAL_SRC = new URL("../packages/local/src/", import.meta.url).pathname;
+const LOCAL_SRC = join(dirname(fileURLToPath(import.meta.url)), "..", "packages", "local", "src");
 
 function listFiles(dir, out = []) {
   let entries;
@@ -74,8 +75,11 @@ for (const f of files) {
   const lines = readFileSync(f, "utf8").split("\n");
   lines.forEach((line, i) => {
     const stripped = line.trim();
-    if (!stripped.startsWith("import ") && !stripped.startsWith("} from ") && !stripped.includes('require(')) return;
     if (stripped.startsWith("//")) return;
+    // 모듈 식별자가 있는 행만 검사 (멀티라인 import 여는 행 `import {` 제외,
+    // 닫는 행 `} from "x"`·한 줄 import·require 포함).
+    const isImportLine = /from\s+["']/.test(stripped) || stripped.includes("require(") || /^import\s+["']/.test(stripped);
+    if (!isImportLine) return;
     if (!ADAPTER_ALLOW_RES.some((re) => re.test(stripped))) {
       adapterViolations.push(`${f}:${i + 1}: ${stripped}`);
     }
@@ -116,6 +120,7 @@ if (fsViolations.length > 0) {
 // M4.2-4-2: FileStore 저장 계열은 core in-process 구현 파일에서만 허용.
 // 허용: packages/core/src/**, core-inprocess.ts, filestore.ts(내부),
 // app/**, services/**, runner/**, procedure.ts(App 경로 import).
+// 제외: *.test.ts (저장소 직접 검증이 목적).
 const SAVE_ALLOW_RES = [
   /packages[/\\]core[/\\]src[/\\]/,
   /[/\\]core-inprocess\.ts$/,
@@ -128,6 +133,7 @@ const SAVE_ALLOW_RES = [
 const SAVE_CALL_RES = [/\.saveSession\s*\(/, /\.saveNode\s*\(/, /\.appendEvents\s*\(/, /\.commitChange\s*\(/, /\.touchSession\s*\(/, /\.repairDiscard\s*\(/];
 const saveViolations = [];
 for (const f of files) {
+  if (f.endsWith(".test.ts")) continue;
   if (SAVE_ALLOW_RES.some((re) => re.test(f))) continue;
   const lines = readFileSync(f, "utf8").split("\n");
   lines.forEach((line, i) => {
