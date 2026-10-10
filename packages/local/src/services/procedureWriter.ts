@@ -175,6 +175,8 @@ function renderSkillMd(doc: ProcedureDoc): string {
     `# ${doc.name}`,
     ``,
     `이 skill은 확정된 절차를 검증(replay)하거나 새 데이터로 실행(run)한다. 탐색 금지.`,
+    `입력 파일 경로·표지 문구처럼 기간이 들어간 값은 var로 분류한다.`,
+    `예: "sales-\${params.month}.xlsx", "월간보고서 \${params.month} (최종)".`,
     `파라미터: ${Object.keys(doc.params).map((k) => `\`${k}\``).join(", ") || "없음"}`,
     ``,
     `검증: \`procforge test procedures/${doc.name} --param k=v ...\``,

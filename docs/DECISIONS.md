@@ -320,6 +320,8 @@
   strict 시 bad_request. 역치 근거: 인덱스·개수·tolerance 오탐 방지.
 - M5.1-B2: numeric_match.expected에 ref 허용 ("$노드.필드" 약식,
   "${params.x}"). core는 deferred, runner에서 판정. advise 안내 문구 갱신.
+- M5.1-B3: 기간 값 var 분류 문구 (PROMPT_TEXT 7항·SKILL).
+  resolveVar 문자열 내 ${params.k} 치환 구현 ($노드 혼합은 미지원).
 - M5-1: `procforge run <procedure> --param k=v [--out dir] [--force]` 신설
   (App.runProcedure 경유). 출력은 runs/<runId>/fs, --out 지정 시에만 완료 후
   프로젝트 안으로 복사 (기존 파일은 --force 없이 거부).

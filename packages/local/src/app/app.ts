@@ -63,6 +63,8 @@ export const PROMPT_TEXT = [
   "4. pass여도 자동 확정 없음. pf_confirm_leaf(tool, argSpecs)로 확정한다.",
   "5. 외부에 영향을 주는 실행은 직접 하지 말고 pf_ask_human으로 승인 요청.",
   "6. needs_human이면 사람 조언을 pf_advise로 등록한 뒤 계속한다.",
+  "7. 입력 파일 경로·표지 문구처럼 기간이 들어간 값은 var로 분류한다.",
+  "   예: \"sales-${params.month}.xlsx\", \"월간보고서 ${params.month} (최종)\".",
 ].join("\n");
 
 export type AppDeps = {

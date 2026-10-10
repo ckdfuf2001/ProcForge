@@ -84,6 +84,13 @@ export function resolveVar(
     if (!(pm[1] in params)) throw new Error(`params 참조 없음: ${pm[1]}`);
     return params[pm[1]];
   }
+  // M5.1-B3: 문자열 내 템플릿 치환 ("sales-${params.month}.xlsx" 등)
+  if (ref.includes("${params.")) {
+    return ref.replace(/\$\{params\.([A-Za-z0-9_.-]+)\}/g, (m, k: string) => {
+      if (!(k in params)) throw new Error(`params 참조 없음: ${k}`);
+      return params[k];
+    });
+  }
   const m = /^\$(\d+(?:\.\d+)*)(.*)$/.exec(ref);
   if (!m) throw new Error(`지원하지 않는 참조: ${ref}`);
   const [, nid, rest] = m;
