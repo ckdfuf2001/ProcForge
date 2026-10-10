@@ -147,7 +147,7 @@ describe("M2 E2E 월간보고서 (fake-ppt-mcp + scripted host, 신도구)", () 
         argSpecs: { template: { kind: "fixed", value: "template.j2" }, month: { kind: "var", ref: "${params.month}" } },
       });
 
-      expect(await call("pf_next", { sessionId: sid })).toEqual({ done: true });
+      expect(await call("pf_next", { sessionId: sid })).toMatchObject({ done: true });
 
       // .procforge 저장 검증 (서버와 별도 FileStore로 재읽기)
       expect(existsSync(join(pfdir, "sessions", sid, "session.json"))).toBe(true);

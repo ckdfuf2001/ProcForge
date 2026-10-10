@@ -226,6 +226,9 @@
 - 2.5-4: pf_next 쓰기 전환 (READ_ONLY 제외·WRITE_ANN·잠금은 change 내장).
   confirmLeaf 결과물 수정+확정을 leaf 입력 artifacts로 통합 (amend 2회차
   제거). guide-3단계-6(pf_next annotation) 선행 해소.
+- 2.5-5: 변경 응답에 revision/changedNodeIds (done:true 포함 균일).
+  순서 인자 core 메서드는 객체 입력으로 통일 (ChangeOpts 삭제). MCP 입력에
+  expectedRevision/actor 추가 (actor 미지정 시 host). App은 전달만.
 
 ## M3.2
 

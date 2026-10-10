@@ -339,7 +339,7 @@ describe("M3 runner", () => {
     await runSession({ procforgeDir: pfdir, projectRoot: root, allowProjectRead: true, sessionId: sid, mode: "record" });
     writeOpencodeConfig(BROKEN_CMD);
     await runSession({ procforgeDir: pfdir, projectRoot: root, allowProjectRead: true, sessionId: sid, mode: "replay" });
-    await client.pfAdvise(sid, "1.2", "문체를 다듬어라");
+    await client.pfAdvise({ sessionId: sid, nodeId: "1.2", text: "문체를 다듬어라" });
     // 1.3 재확정 (stale open → report → leaf). 기존 fixture 내용을 함께 제출해 file_exists 통과
     const store13 = new FileStore(pfdir);
     const n13 = store13.getNode(sid, "1.3")!;
@@ -491,7 +491,7 @@ describe("M3.2 runner", () => {
     const sid = await scriptedSession();
     // 구 세션 흉내: 1.1을 프로젝트 절대경로로 재확정 (서버 정규화 우회 = client 직접 호출)
     const abs = join(root, "data.pptx");
-    await client.pfReopen(sid, "1.1", "migration test");
+    await client.pfReopen({ sessionId: sid, nodeId: "1.1", reason: "migration test" });
     await client.pfReport({
       sessionId: sid, nodeId: "1.1",
       tool: { server: "fake-ppt", name: "list_slides" }, args: { file: abs },
@@ -750,7 +750,7 @@ describe("M3.4 runner", () => {
     await leaf("1.3", "d");
     await runSession({ procforgeDir: pfdir, projectRoot: root, sessionId: sid, mode: "record" });
     // 1.2.1 argSpec 변경 → draft(1.3) stale
-    await client.pfReopen(sid, "1.2.1", "change");
+    await client.pfReopen({ sessionId: sid, nodeId: "1.2.1", reason: "change" });
     await client.pfReport({
       sessionId: sid, nodeId: "1.2.1",
       tool: { server: "fake-ppt", name: "echo" }, args: { title: "b1-new" },

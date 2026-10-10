@@ -89,6 +89,8 @@ export const PfNextOutputSchema = z.object({
     .array(z.object({ nodeId: z.string(), waitingOn: z.array(z.string()), reason: z.string() }))
     .optional(),
   instruction: z.string().optional(),
+  revision: z.number().optional(),
+  changedNodeIds: z.array(z.string()).optional(),
 });
 export const PfReportOutputSchema = z.object({
   verdict: z.enum(["pass", "fail", "unverifiable"]),
@@ -96,24 +98,42 @@ export const PfReportOutputSchema = z.object({
   unverified: z.array(z.string()).optional(),
   instruction: z.string(),
   warnings: z.array(z.string()).optional(),
+  revision: z.number().optional(),
+  changedNodeIds: z.array(z.string()).optional(),
 });
 export const PfSplitOutputSchema = z.object({
   node: NodeSummarySchema,
   created: z.array(NodeSummarySchema),
   instruction: z.string(),
+  revision: z.number().optional(),
+  changedNodeIds: z.array(z.string()).optional(),
 });
 export const PfConfirmLeafOutputSchema = z.object({
   node: NodeSummarySchema,
   instruction: z.string(),
   warnings: z.array(z.string()),
+  revision: z.number().optional(),
+  changedNodeIds: z.array(z.string()).optional(),
 });
-export const PfRetryOutputSchema = z.object({ node: NodeSummarySchema, instruction: z.string() });
-export const PfAskHumanOutputSchema = z.object({ node: NodeSummarySchema, instruction: z.string() });
+export const PfRetryOutputSchema = z.object({
+  node: NodeSummarySchema,
+  instruction: z.string(),
+  revision: z.number().optional(),
+  changedNodeIds: z.array(z.string()).optional(),
+});
+export const PfAskHumanOutputSchema = z.object({
+  node: NodeSummarySchema,
+  instruction: z.string(),
+  revision: z.number().optional(),
+  changedNodeIds: z.array(z.string()).optional(),
+});
 export const PfAdviseOutputSchema = z.object({
   constraints: z.array(ConstraintSummarySchema),
   rejected: z.array(z.object({ proposal: z.unknown(), reason: z.string() })),
   note: z.string().optional(),
   node: NodeSummarySchema,
+  revision: z.number().optional(),
+  changedNodeIds: z.array(z.string()).optional(),
 });
 export const TreeEntrySchema = z.object({
   id: z.string(),
@@ -129,11 +149,33 @@ export const PfTreeOutputSchema = z.object({
   nextCursor: z.number().nullable(),
 });
 export const PfGetNodeOutputSchema = z.object({ node: NodeSchema });
-export const PfLockOutputSchema = z.object({ node: NodeSummarySchema });
-export const PfReopenOutputSchema = z.object({ node: NodeSummarySchema });
-export const PfEditArgsOutputSchema = z.object({ node: NodeSummarySchema, instruction: z.string() });
-export const PfEditNodeOutputSchema = z.object({ node: NodeSummarySchema, instruction: z.string() });
-export const PfApproveOutputSchema = z.object({ node: NodeSummarySchema });
+export const PfLockOutputSchema = z.object({
+  node: NodeSummarySchema,
+  revision: z.number().optional(),
+  changedNodeIds: z.array(z.string()).optional(),
+});
+export const PfReopenOutputSchema = z.object({
+  node: NodeSummarySchema,
+  revision: z.number().optional(),
+  changedNodeIds: z.array(z.string()).optional(),
+});
+export const PfEditArgsOutputSchema = z.object({
+  node: NodeSummarySchema,
+  instruction: z.string(),
+  revision: z.number().optional(),
+  changedNodeIds: z.array(z.string()).optional(),
+});
+export const PfEditNodeOutputSchema = z.object({
+  node: NodeSummarySchema,
+  instruction: z.string(),
+  revision: z.number().optional(),
+  changedNodeIds: z.array(z.string()).optional(),
+});
+export const PfApproveOutputSchema = z.object({
+  node: NodeSummarySchema,
+  revision: z.number().optional(),
+  changedNodeIds: z.array(z.string()).optional(),
+});
 export const CatalogEntrySummarySchema = z.object({ server: z.string(), name: z.string(), schemaHash: z.string() });
 export const PfRefreshCatalogOutputSchema = z.object({
   entries: z.array(CatalogEntrySummarySchema),

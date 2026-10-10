@@ -99,7 +99,7 @@ describe("pf_finalize", () => {
   it("미해결 세션은 bad_request + 목록", async () => {
     const sid = await scripted();
     // 1.2를 reopen하여 미해결 상태로
-    await client.pfReopen(sid, "1.2", "test");
+    await client.pfReopen({ sessionId: sid, nodeId: "1.2", reason: "test" });
     await expect(appFor().finalize({ sessionId: sid, name: "bad" })).rejects.toThrow(/미해결 노드: 1\.2/);
   }, 30000);
 

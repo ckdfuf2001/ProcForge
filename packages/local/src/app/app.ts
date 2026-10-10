@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { CoreClient } from "@procforge/shared/core-client.js";
+import type { Actor } from "@procforge/shared/dto.js";
 import { pfError } from "@procforge/shared/errors.js";
 import { collectCatalog } from "../catalog.js";
 import { nodeSummary } from "../views.js";
@@ -83,8 +84,12 @@ export class ProcForgeApp {
   async next(a: any): Promise<Record<string, unknown>> {
     const sid = a.sessionId as string;
     const s = await this.core.getSession(sid);
-    const out = await this.core.pfNext(sid);
-    if (out.done) return { done: true };
+    const out = await this.core.pfNext({
+      sessionId: sid,
+      expectedRevision: a.expectedRevision as number | undefined,
+      actor: (a.actor as Actor | undefined) ?? "host",
+    });
+    if (out.done) return { done: true, revision: out.revision, changedNodeIds: out.changedNodeIds };
     // M4.1-7: 노드 분기 직전 sandbox 스냅샷 (pf_report 입출력 판정용)
     try {
       writePreSnapshot(
@@ -99,6 +104,8 @@ export class ProcForgeApp {
       node: nodeSummary(out.node, s.limits),
       ...(out.blocked ? { blocked: out.blocked } : {}),
       instruction: out.instruction,
+      revision: out.revision,
+      changedNodeIds: out.changedNodeIds,
     };
   }
 
@@ -145,6 +152,8 @@ export class ProcForgeApp {
       selfReason: a.selfReason as string,
       rubricReasons: a.rubricReasons as Record<string, string> | undefined,
       attemptId,
+      expectedRevision: a.expectedRevision as number | undefined,
+      actor: (a.actor as Actor | undefined) ?? "host",
     });
     return { ...(out as unknown as Record<string, unknown>), warnings: reportWarnings };
   }
@@ -201,16 +210,30 @@ export class ProcForgeApp {
       sideEffect: a.sideEffect as "none" | "local_write" | "external" | undefined,
       goldenIgnore: a.ignore as string[] | undefined,
       artifacts: merged,
+      expectedRevision: a.expectedRevision as number | undefined,
+      actor: (a.actor as Actor | undefined) ?? "host",
     });
-    return { node: nodeSummary(out.node, s.limits), instruction: out.instruction, warnings: norm.warnings };
+    return {
+      node: nodeSummary(out.node, s.limits),
+      instruction: out.instruction,
+      warnings: norm.warnings,
+      revision: out.revision,
+      changedNodeIds: out.changedNodeIds,
+    };
   }
 
   async retry(a: any): Promise<Record<string, unknown>> {
     const sid = a.sessionId as string;
     const s = await this.core.getSession(sid);
-    logger.info("pf_retry", { sessionId: sid, nodeId: a.nodeId, reason: a.reason });
-    const out = await this.core.pfResolve({ sessionId: sid, nodeId: a.nodeId as string, decision: "retry" });
-    return { node: nodeSummary(out.node, s.limits), instruction: out.instruction };
+      logger.info("pf_retry", { sessionId: sid, nodeId: a.nodeId, reason: a.reason });
+      const out = await this.core.pfResolve({
+        sessionId: sid,
+        nodeId: a.nodeId as string,
+        decision: "retry",
+        expectedRevision: a.expectedRevision as number | undefined,
+        actor: (a.actor as Actor | undefined) ?? "host",
+      });
+      return { node: nodeSummary(out.node, s.limits), instruction: out.instruction, revision: out.revision, changedNodeIds: out.changedNodeIds };
   }
 
   async split(a: any): Promise<Record<string, unknown>> {
@@ -218,33 +241,51 @@ export class ProcForgeApp {
     const s = await this.core.getSession(sid);
     const kids = a.children as { goal: string; dependsOn?: string[]; sideEffect?: "none" | "local_write" | "external" }[] | undefined;
     if (!kids || kids.length === 0) throw pfError("bad_request", "children이 비었다.", "최소 1개의 {goal}을 넣어 pf_split 재호출.");
-    const out = await this.core.pfResolve({ sessionId: sid, nodeId: a.nodeId as string, decision: "split", children: kids });
-    return {
-      node: nodeSummary(out.node, s.limits),
-      created: (out.created ?? []).map((c) => nodeSummary(c, s.limits)),
-      instruction: out.instruction,
-    };
+      const out = await this.core.pfResolve({
+        sessionId: sid,
+        nodeId: a.nodeId as string,
+        decision: "split",
+        children: kids,
+        expectedRevision: a.expectedRevision as number | undefined,
+        actor: (a.actor as Actor | undefined) ?? "host",
+      });
+      return {
+        node: nodeSummary(out.node, s.limits),
+        created: (out.created ?? []).map((c) => nodeSummary(c, s.limits)),
+        instruction: out.instruction,
+        revision: out.revision,
+        changedNodeIds: out.changedNodeIds,
+      };
   }
 
   async askHuman(a: any): Promise<Record<string, unknown>> {
     const sid = a.sessionId as string;
     const s = await this.core.getSession(sid);
-    logger.info("pf_ask_human", { sessionId: sid, nodeId: a.nodeId, question: a.question });
-    const out = await this.core.pfResolve({
-      sessionId: sid,
-      nodeId: a.nodeId as string,
-      decision: "ask_human",
-      plan: a.plan as { tool: { server: string; name: string }; args: Record<string, unknown> } | undefined,
-      note: a.question as string,
-    });
-    return { node: nodeSummary(out.node, s.limits), instruction: out.instruction };
+      logger.info("pf_ask_human", { sessionId: sid, nodeId: a.nodeId, question: a.question });
+      const out = await this.core.pfResolve({
+        sessionId: sid,
+        nodeId: a.nodeId as string,
+        decision: "ask_human",
+        plan: a.plan as { tool: { server: string; name: string }; args: Record<string, unknown> } | undefined,
+        note: a.question as string,
+        expectedRevision: a.expectedRevision as number | undefined,
+        actor: (a.actor as Actor | undefined) ?? "host",
+      });
+      return { node: nodeSummary(out.node, s.limits), instruction: out.instruction, revision: out.revision, changedNodeIds: out.changedNodeIds };
   }
 
   async approve(a: any): Promise<Record<string, unknown>> {
     const sid = a.sessionId as string;
     const s = await this.core.getSession(sid);
-    const n = await this.core.pfApprove(sid, a.nodeId as string, a.approved as boolean, a.note as string | undefined);
-    return { node: nodeSummary(n, s.limits) };
+    const out = await this.core.pfApprove({
+      sessionId: sid,
+      nodeId: a.nodeId as string,
+      approved: a.approved as boolean,
+      note: a.note as string | undefined,
+      expectedRevision: a.expectedRevision as number | undefined,
+      actor: (a.actor as Actor | undefined) ?? "host",
+    });
+    return { node: nodeSummary(out.node, s.limits), revision: out.revision, changedNodeIds: out.changedNodeIds };
   }
 
   async advise(a: any): Promise<Record<string, unknown>> {
@@ -257,16 +298,23 @@ export class ProcForgeApp {
       procforgeDir: this.procforgeDir, sessionId: sid,
       artifacts: cur.attempts[cur.attempts.length - 1]?.artifacts ?? [],
     });
-    const out = await this.core.pfAdvise(sid, nid, a.text as string, {
-      proposedConstraints: a.proposedConstraints as unknown[] | undefined,
-      fixtureContents,
-    });
-    return {
-      constraints: out.constraints.map((c) => ({ id: c.id, kind: c.kind, summary: `${c.kind}` })),
-      rejected: out.rejected,
-      ...(out.note ? { note: out.note } : {}),
-      node: nodeSummary(out.node, s.limits),
-    };
+      const out = await this.core.pfAdvise({
+        sessionId: sid,
+        nodeId: nid,
+        text: a.text as string,
+        proposedConstraints: a.proposedConstraints as unknown[] | undefined,
+        fixtureContents,
+        expectedRevision: a.expectedRevision as number | undefined,
+        actor: (a.actor as Actor | undefined) ?? "host",
+      });
+      return {
+        constraints: out.constraints.map((c) => ({ id: c.id, kind: c.kind, summary: `${c.kind}` })),
+        rejected: out.rejected,
+        ...(out.note ? { note: out.note } : {}),
+        node: nodeSummary(out.node, s.limits),
+        revision: out.revision,
+        changedNodeIds: out.changedNodeIds,
+      };
   }
 
   async tree(a: any): Promise<Record<string, unknown>> {
@@ -321,15 +369,26 @@ export class ProcForgeApp {
   async lock(a: any): Promise<Record<string, unknown>> {
     const sid = a.sessionId as string;
     const s = await this.core.getSession(sid);
-    const n = await this.core.pfLock(sid, a.nodeId as string);
-    return { node: nodeSummary(n, s.limits) };
+    const out = await this.core.pfLock({
+      sessionId: sid,
+      nodeId: a.nodeId as string,
+      expectedRevision: a.expectedRevision as number | undefined,
+      actor: (a.actor as Actor | undefined) ?? "host",
+    });
+    return { node: nodeSummary(out.node, s.limits), revision: out.revision, changedNodeIds: out.changedNodeIds };
   }
 
   async reopen(a: any): Promise<Record<string, unknown>> {
     const sid = a.sessionId as string;
     const s = await this.core.getSession(sid);
-    const n = await this.core.pfReopen(sid, a.nodeId as string, a.reason as string);
-    return { node: nodeSummary(n, s.limits) };
+    const out = await this.core.pfReopen({
+      sessionId: sid,
+      nodeId: a.nodeId as string,
+      reason: a.reason as string,
+      expectedRevision: a.expectedRevision as number | undefined,
+      actor: (a.actor as Actor | undefined) ?? "host",
+    });
+    return { node: nodeSummary(out.node, s.limits), revision: out.revision, changedNodeIds: out.changedNodeIds };
   }
 
   async editArgs(a: any): Promise<Record<string, unknown>> {
@@ -342,8 +401,10 @@ export class ProcForgeApp {
         set: a.patch?.set as Record<string, import("@procforge/shared/schema.js").ArgSpec> | undefined,
         remove: a.patch?.remove as string[] | undefined,
       },
+      expectedRevision: a.expectedRevision as number | undefined,
+      actor: (a.actor as Actor | undefined) ?? "host",
     });
-    return { node: nodeSummary(out.node, s.limits), instruction: out.instruction };
+    return { node: nodeSummary(out.node, s.limits), instruction: out.instruction, revision: out.revision, changedNodeIds: out.changedNodeIds };
   }
 
   async editNode(a: any): Promise<Record<string, unknown>> {
@@ -355,8 +416,10 @@ export class ProcForgeApp {
       goal: a.goal as string | undefined,
       addConstraints: a.addConstraints as import("@procforge/shared/schema.js").Constraint[] | undefined,
       removeConstraintIds: a.removeConstraintIds as string[] | undefined,
+      expectedRevision: a.expectedRevision as number | undefined,
+      actor: (a.actor as Actor | undefined) ?? "host",
     });
-    return { node: nodeSummary(out.node, s.limits), instruction: out.instruction };
+    return { node: nodeSummary(out.node, s.limits), instruction: out.instruction, revision: out.revision, changedNodeIds: out.changedNodeIds };
   }
 
   async refreshCatalog(): Promise<Record<string, unknown>> {

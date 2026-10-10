@@ -6,10 +6,10 @@ import type { ProcedureDoc } from "./procedure.js";
 // M0~M5: packages/core가 이 인터페이스의 in-process 구현을 제공한다.
 // M6: HTTP CoreClient 구현으로 교체한다. local 소스에서 core 직접 import 금지.
 
-/** 변경 메서드 공통 옵션 (M4.2-0.5, R6). 생략 시 검사 없이 진행, actor는 host */
-export type ChangeOpts = {
-  expectedRevision?: number;
-  actor?: Actor;
+/** 변경 결과 공통 메타 (M4.2-2.5-5, 모든 변경 응답에 포함) */
+export type ChangeMeta = {
+  revision: number;
+  changedNodeIds: string[];
 };
 
 export type PfStartInput = {
@@ -28,6 +28,11 @@ export type PfStartOutput = {
 };
 
 export type PfNextOutput =
+  | { done: false; node: Node; blocked?: BlockedEntry[]; instruction: string; revision: number; changedNodeIds: string[] }
+  | { done: true; revision: number; changedNodeIds: string[] };
+
+/** pfNext 본문 반환형 (메타 제외 유니온) */
+export type PfNextPayload =
   | { done: false; node: Node; blocked?: BlockedEntry[]; instruction: string }
   | { done: true };
 
@@ -65,7 +70,7 @@ export type PfReportOutput = {
   failedConstraints: string[];
   unverified?: string[];
   instruction: string;
-};
+} & ChangeMeta;
 
 export type PfResolveDecision = "leaf" | "split" | "retry" | "ask_human";
 
@@ -93,7 +98,7 @@ export type PfResolveOutput = {
   node: Node;
   created?: Node[];
   instruction: string;
-};
+} & ChangeMeta;
 
 export type PfAdviseOutput = {
   constraints: Constraint[];
@@ -101,7 +106,7 @@ export type PfAdviseOutput = {
   node: Node;
   /** 추가 안내 (M4 numeric 제안 유도 등) */
   note?: string;
-};
+} & ChangeMeta;
 
 /** attempt artifacts 교체 (M4.2-1, 확정 보정용). golden은 이후 leaf 확정 시 재구성 */
 export type AmendAttemptArtifactsInput = {
@@ -141,14 +146,12 @@ export type PfAdviseInput = {
   sessionId: string;
   nodeId: string;
   text: string;
-  opts?: {
-    /** 호스트 제안 조건 (M4). core가 최신 fixture로 평가해 채택/거부 */
-    proposedConstraints?: unknown[];
-    /** 최신 fixture 내용 (local이 읽어 전달, M4) */
-    fixtureContents?: Record<string, string>;
-    expectedRevision?: number;
-    actor?: Actor;
-  };
+  /** 호스트 제안 조건 (M4). core가 최신 fixture로 평가해 채택/거부 */
+  proposedConstraints?: unknown[];
+  /** 최신 fixture 내용 (local이 읽어 전달, M4) */
+  fixtureContents?: Record<string, string>;
+  expectedRevision?: number;
+  actor?: Actor;
 };
 
 // local checker → core 주입 계약. core·local 모두 shared 타입만 사용.
@@ -159,21 +162,21 @@ export type EvaluateFn = (
 
 export interface CoreClient {
   pfStart(input: PfStartInput): Promise<PfStartOutput>;
-  pfNext(sessionId: string, opts?: ChangeOpts): Promise<PfNextOutput>;
+  pfNext(input: PfNextInput): Promise<PfNextOutput>;
   pfReport(input: PfReportInput): Promise<PfReportOutput>;
   pfResolve(input: PfResolveInput): Promise<PfResolveOutput>;
-  pfAdvise(sessionId: string, nodeId: string, text: string, opts?: PfAdviseInput["opts"]): Promise<PfAdviseOutput>;
+  pfAdvise(input: PfAdviseInput): Promise<PfAdviseOutput>;
   pfTree(sessionId: string): Promise<{ nodes: Node[]; session: Session }>;
-  pfLock(sessionId: string, nodeId: string, opts?: ChangeOpts): Promise<Node>;
-  pfReopen(sessionId: string, nodeId: string, reason: string, opts?: ChangeOpts): Promise<Node>;
+  pfLock(input: PfLockInput): Promise<{ node: Node } & ChangeMeta>;
+  pfReopen(input: PfReopenInput): Promise<{ node: Node } & ChangeMeta>;
   /** attempt artifacts 교체 (server 직접 저장 대체) */
-  amendAttemptArtifacts(input: AmendAttemptArtifactsInput): Promise<{ node: Node; revision: number }>;
+  amendAttemptArtifacts(input: AmendAttemptArtifactsInput): Promise<{ node: Node } & ChangeMeta>;
   /** 카탈로그 저장 (M4.2-2, 수집은 local). 세션 toolCatalog 교체 */
-  pfUpdateCatalog(input: { sessionId: string; entries: unknown[]; expectedRevision?: number; actor?: Actor }): Promise<{ revision: number }>;
+  pfUpdateCatalog(input: { sessionId: string; entries: unknown[]; expectedRevision?: number; actor?: Actor }): Promise<ChangeMeta>;
   /** 확정 인자 수정 (M4.2-2) */
-  pfEditArgs(input: PfEditArgsInput): Promise<{ node: Node; instruction: string }>;
+  pfEditArgs(input: PfEditArgsInput): Promise<{ node: Node; instruction: string } & ChangeMeta>;
   /** 목표·검사 조건 직접 수정 (M4.2-2) */
-  pfEditNode(input: PfEditNodeInput): Promise<{ node: Node; instruction: string }>;
+  pfEditNode(input: PfEditNodeInput): Promise<{ node: Node; instruction: string } & ChangeMeta>;
   /** 상태 이벤트 조회 (M4.2-2, R7 히스토리 원천) */
   getEvents(sessionId: string, sinceSeq?: number): Promise<EventEntry[]>;
   /** 세션 조회 (M4.2-2.5, TTL 판정 포함) */
@@ -183,5 +186,39 @@ export interface CoreClient {
   /** 절차서 문서 조립 (M4.2-1, 검증·params 경고 포함. 파일 쓰기는 local) */
   pfBuildProcedure(sessionId: string, name: string): Promise<{ doc: ProcedureDoc; warnings: string[] }>;
   /** external dry-run 계획 승인/거부 (M2.6-4) */
-  pfApprove(sessionId: string, nodeId: string, approved: boolean, note?: string, opts?: ChangeOpts): Promise<Node>;
+  pfApprove(input: PfApproveInput): Promise<{ node: Node } & ChangeMeta>;
 }
+
+/** 객체 입력 (M4.2-2.5-5, 순서 인자 통일) */
+export type PfNextInput = {
+  sessionId: string;
+  expectedRevision?: number;
+  actor?: Actor;
+};
+
+/** 객체 입력 (M4.2-2.5-5) */
+export type PfLockInput = {
+  sessionId: string;
+  nodeId: string;
+  expectedRevision?: number;
+  actor?: Actor;
+};
+
+/** 객체 입력 (M4.2-2.5-5) */
+export type PfReopenInput = {
+  sessionId: string;
+  nodeId: string;
+  reason: string;
+  expectedRevision?: number;
+  actor?: Actor;
+};
+
+/** 객체 입력 (M4.2-2.5-5) */
+export type PfApproveInput = {
+  sessionId: string;
+  nodeId: string;
+  approved: boolean;
+  note?: string;
+  expectedRevision?: number;
+  actor?: Actor;
+};

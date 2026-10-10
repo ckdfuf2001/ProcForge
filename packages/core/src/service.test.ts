@@ -114,7 +114,7 @@ describe("M3.4.3-1 pfNext 교착", () => {
       sessionId: session.id, nodeId: "1.1", decision: "leaf",
       tool: { server: "fs", name: "read" }, argSpecs: { v: { kind: "fixed", value: 1 } },
     });
-    const nxt = await svc.pfNext(session.id);
+    const nxt = await svc.pfNext({ sessionId: session.id });
     expect(nxt.done).toBe(false);
     if (!nxt.done) {
       expect(nxt.blocked ?? []).toEqual([]);
@@ -143,7 +143,7 @@ describe("M3.4.4-1 실효 의존 ready/stale", () => {
     };
     await leaf("1.1");
     // 1.2 미완료: 다음은 1.2.1이어야지 1.3.x가 아니어야 함
-    const nxt = await svc.pfNext(sid);
+    const nxt = await svc.pfNext({ sessionId: sid });
     expect(nxt.done).toBe(false);
     if (!nxt.done) expect(nxt.node.id).toBe("1.2.1");
   });
@@ -165,7 +165,7 @@ describe("M3.4.4-1 실효 의존 ready/stale", () => {
       argSpecs: { w: { kind: "var", ref: "$1.1" } },
     });
     // 1.1 변경 → var 참조 노드 stale
-    await svc.pfReopen(sid, "1.1", "change");
+    await svc.pfReopen({ sessionId: sid, nodeId: "1.1", reason: "change" });
     await svc.pfReport({ ...rep(), sessionId: sid, nodeId: "1.1", args: { v: "a2" } });
     await svc.pfResolve({
       sessionId: sid, nodeId: "1.1", decision: "leaf",
@@ -269,7 +269,7 @@ describe("M3.4.4-1 실효 의존 ready/stale", () => {
       sessionId: sid, nodeId: "1.1", decision: "leaf",
       tool: { server: "fs", name: "read" }, argSpecs: { v: { kind: "fixed", value: "a" } },
     });
-    const nxt = await svc.pfNext(sid);
+    const nxt = await svc.pfNext({ sessionId: sid });
     expect(nxt.done).toBe(false);
     if (!nxt.done) expect(nxt.node.id).toBe("1.2.1");
   });
@@ -290,7 +290,7 @@ describe("M3.4.4-1 실효 의존 ready/stale", () => {
       tool: { server: "fs", name: "read" },
       argSpecs: { w: { kind: "var", ref: "$1.1" } },
     });
-    await svc.pfReopen(sid, "1.1", "change");
+    await svc.pfReopen({ sessionId: sid, nodeId: "1.1", reason: "change" });
     await svc.pfReport({ ...rep(), sessionId: sid, nodeId: "1.1", args: { v: "a2" } });
     await svc.pfResolve({
       sessionId: sid, nodeId: "1.1", decision: "leaf",
@@ -367,7 +367,7 @@ describe("M3.4.3-3 stale: split 유지 + 자손 leaf만 open", () => {
     await leaf("1.3.1", "c1");
     await leaf("1.3.2", "c2");
     // 1.2.1 argSpec 변경
-    await svc.pfReopen(sid, "1.2.1", "change");
+    await svc.pfReopen({ sessionId: sid, nodeId: "1.2.1", reason: "change" });
     await svc.pfReport({ ...rep(), sessionId: sid, nodeId: "1.2.1", args: { v: "new" } });
     await svc.pfResolve({
       sessionId: sid, nodeId: "1.2.1", decision: "leaf",
@@ -400,7 +400,10 @@ describe("M4 advise 제안/채택", () => {
     const sid = session.id;
     await svc.pfResolve({ sessionId: sid, nodeId: "1", decision: "ask_human" });
     const fx = { "out/a.txt": "hello" };
-    const out = await svc.pfAdvise(sid, "1", "파일 확인", {
+    const out = await svc.pfAdvise({
+      sessionId: sid,
+      nodeId: "1",
+      text: "파일 확인",
       proposedConstraints: [
         { id: "p1", kind: "file_exists", spec: { path: "out/a.txt" }, source: "human" },
         { id: "p2", kind: "json_path_exists", spec: { path: "x", jsonPointer: "/nope" }, source: "human" },
@@ -421,7 +424,10 @@ describe("M4 advise 제안/채택", () => {
     const { session } = await svc.pfStart({ request: "r", toolCatalog: catalog });
     const sid = session.id;
     await svc.pfResolve({ sessionId: sid, nodeId: "1", decision: "ask_human" });
-    const out = await svc.pfAdvise(sid, "1", "문체를 다듬어라", {
+    const out = await svc.pfAdvise({
+      sessionId: sid,
+      nodeId: "1",
+      text: "문체를 다듬어라",
       proposedConstraints: [{ id: "p1", kind: "equals", spec: { expected: 1, actual: 1 }, source: "human" }],
       fixtureContents: {},
     });
@@ -434,7 +440,7 @@ describe("M4 advise 제안/채택", () => {
     const svc = new CoreService(createMemoryStore(), passEval);
     const { session } = await svc.pfStart({ request: "r", toolCatalog: catalog });
     const sid = session.id;
-    const out = await svc.pfAdvise(sid, "1", "매출은 부가세 제외로");
+    const out = await svc.pfAdvise({ sessionId: sid, nodeId: "1", text: "매출은 부가세 제외로" });
     expect(out.constraints[0].kind).toBe("llm_rubric");
     expect(out.note ?? "").toMatch(/proposedConstraints/);
   });
@@ -487,7 +493,7 @@ describe("M3.4-6 펼친 의존 hash + stale 전파", () => {
 
   it("2.1 argSpec 변경 → draft stale(open), 무관 노드는 유지", async () => {
     const { svc, sid } = await confirmedTree();
-    await svc.pfReopen(sid, "1.2.1", "change");
+    await svc.pfReopen({ sessionId: sid, nodeId: "1.2.1", reason: "change" });
     await svc.pfReport({ ...repE(), sessionId: sid, nodeId: "1.2.1", args: { v: "b1-new" } });
     await svc.pfResolve({
       sessionId: sid, nodeId: "1.2.1", decision: "leaf",
@@ -526,12 +532,12 @@ describe("M2.6-4 external 승인 흐름", () => {
     expect(ask.node.attempts[0].verdict).toBeUndefined();
 
     // 계획 없이 승인 시도 → 불가(다른 노드)
-    await expect(svc.pfApprove(session.id, "1", true)).rejects.toThrow();
+    await expect(svc.pfApprove({ sessionId: session.id, nodeId: "1", approved: true })).rejects.toThrow();
 
     // 거부 → open + 조언 기록
-    const rej = await svc.pfApprove(session.id, "1.1", false, "내일 발송");
-    expect(rej.status).toBe("open");
-    expect(rej.advice.at(-1)?.text).toBe("내일 발송");
+    const rej = await svc.pfApprove({ sessionId: session.id, nodeId: "1.1", approved: false, note: "내일 발송" });
+    expect(rej.node.status).toBe("open");
+    expect(rej.node.advice.at(-1)?.text).toBe("내일 발송");
 
     // 다시 계획 → 승인 → 확정
     await svc.pfResolve({
@@ -540,9 +546,9 @@ describe("M2.6-4 external 승인 흐름", () => {
       decision: "ask_human",
       plan: { tool: { server: "mail", name: "send" }, args: { to: "a@b.c" } },
     });
-    const ap = await svc.pfApprove(session.id, "1.1", true, "ok");
-    expect(ap.status).toBe("probing");
-    expect(ap.approval).toBeDefined();
+    const ap = await svc.pfApprove({ sessionId: session.id, nodeId: "1.1", approved: true, note: "ok" });
+    expect(ap.node.status).toBe("probing");
+    expect(ap.node.approval).toBeDefined();
     const leaf = await svc.pfResolve({
       sessionId: session.id,
       nodeId: "1.1",
@@ -651,7 +657,7 @@ describe("M1.5-1 pass여도 leaf 자동 확정 없음", () => {
     });
     expect(done.node.status).toBe("leaf");
     expect(done.node.golden).toBeDefined();
-    const nxt = await svc2.pfNext(s2.session.id);
+    const nxt = await svc2.pfNext({ sessionId: s2.session.id });
     expect(nxt.done).toBe(true);
   });
 
@@ -768,7 +774,7 @@ describe("M4.2-0.5 revision·이벤트 트랜잭션", () => {
   it("읽기 전용 pfNext는 revision 유지", async () => {
     const svc = new CoreService(createMemoryStore(), passEval);
     const s = await svc.pfStart({ request: "r", toolCatalog: catalog });
-    await svc.pfNext(s.session.id);
+    await svc.pfNext({ sessionId: s.session.id });
     expect((await svc.pfTree(s.session.id)).session.revision).toBe(0);
   });
 
@@ -888,7 +894,7 @@ describe("M1.5-3 llm_rubric 사유 필수", () => {
   it("사유 없으면 needs_human, 보충 후 open 복귀 아님 retry로 재보고", async () => {
     const svc = new CoreService(createMemoryStore(), passEval);
     const { session } = await svc.pfStart({ request: "r", toolCatalog: catalog });
-    await svc.pfAdvise(session.id, "1", "문체를 자연스럽게");
+    await svc.pfAdvise({ sessionId: session.id, nodeId: "1", text: "문체를 자연스럽게" });
     let tree = await svc.pfTree(session.id);
     const rubricId = tree.nodes[0].constraints.find((c) => c.kind === "llm_rubric")!.id;
     const r = await svc.pfReport({ ...rep(), sessionId: session.id });
@@ -919,7 +925,7 @@ describe("core 상태머신 회귀 (M1)", () => {
   it("checker fail + self pass → fail, 소진 시 needs_human", async () => {
     const svc = new CoreService(createMemoryStore(), failEval);
     const { session } = await svc.pfStart({ request: "r", toolCatalog: catalog, limits: { maxDepth: 3, maxRetries: 1, maxNodes: 10 } });
-    await svc.pfAdvise(session.id, "1", "결과 파일 out/report.md 생성");
+    await svc.pfAdvise({ sessionId: session.id, nodeId: "1", text: "결과 파일 out/report.md 생성" });
     await svc.pfReport({ ...rep(), sessionId: session.id });
     let tree = await svc.pfTree(session.id);
     expect(tree.nodes[0].status).toBe("probing");
@@ -936,7 +942,7 @@ describe("core 상태머신 회귀 (M1)", () => {
     await svc.pfResolve({ sessionId: session.id, nodeId: "1.1", decision: "ask_human" });
     let tree = await svc.pfTree(session.id);
     expect(tree.nodes.find((n) => n.id === "1.1")?.status).toBe("needs_human");
-    await svc.pfAdvise(session.id, "1.1", "매출은 부가세 제외 기준");
+    await svc.pfAdvise({ sessionId: session.id, nodeId: "1.1", text: "매출은 부가세 제외 기준" });
     tree = await svc.pfTree(session.id);
     expect(tree.nodes.find((n) => n.id === "1.1")?.status).toBe("open");
   });
@@ -961,13 +967,13 @@ describe("core 상태머신 회귀 (M1)", () => {
       });
     };
     // 1.2는 1.1 대기 → pfNext는 1.1 반환
-    let nxt = await svc.pfNext(session.id);
+    let nxt = await svc.pfNext({ sessionId: session.id });
     if (!nxt.done) expect(nxt.node.id).toBe("1.1");
     await finishLeaf("1.1");
-    nxt = await svc.pfNext(session.id);
+    nxt = await svc.pfNext({ sessionId: session.id });
     if (!nxt.done) expect(nxt.node.id).toBe("1.2");
     await finishLeaf("1.2");
-    expect(await svc.pfNext(session.id)).toEqual({ done: true });
+    expect((await svc.pfNext({ sessionId: session.id })).done).toBe(true);
   });
 
   it("depth 초과 split 거부 → needs_human", async () => {
@@ -996,7 +1002,7 @@ describe("core 상태머신 회귀 (M1)", () => {
   it("locked 노드 재분해 금지 + leaf 확정 불가", async () => {
     const svc = new CoreService(createMemoryStore(), passEval);
     const { session } = await svc.pfStart({ request: "r", toolCatalog: catalog });
-    await svc.pfLock(session.id, "1");
+    await svc.pfLock({ sessionId: session.id, nodeId: "1" });
     await expect(svc.pfResolve({ sessionId: session.id, nodeId: "1", decision: "split", children: [{ goal: "x" }] })).rejects.toThrow();
     await expect(
       svc.pfResolve({ sessionId: session.id, nodeId: "1", decision: "leaf", tool: { server: "fs", name: "read" }, argSpecs: {} }),
@@ -1008,7 +1014,7 @@ describe("core 상태머신 회귀 (M1)", () => {
     const { session } = await svc.pfStart({ request: "r", toolCatalog: catalog });
     await svc.pfResolve({ sessionId: session.id, nodeId: "1", decision: "split", children: [{ goal: "a" }, { goal: "b" }] });
     await svc.pfReport({ ...rep(), sessionId: session.id, nodeId: "1.1" });
-    await svc.pfAdvise(session.id, "1.1", "형식을 맞춰라");
+    await svc.pfAdvise({ sessionId: session.id, nodeId: "1.1", text: "형식을 맞춰라" });
     const tree = await svc.pfTree(session.id);
     expect(tree.nodes.find((n) => n.id === "1.1")?.constraints.length).toBeGreaterThan(0);
   });
@@ -1071,7 +1077,7 @@ describe("M4.2-2 pfEditArgs/pfEditNode", () => {
     expect(r.node.golden).toEqual(goldenBefore);
     expect(r.instruction).toMatch(/pf_next/);
     // pfNext 안내에 수정 고지
-    const nxt = await svc.pfNext(sid);
+    const nxt = await svc.pfNext({ sessionId: sid });
     expect(nxt.done).toBe(false);
     if (!nxt.done) expect(nxt.instruction).toMatch(/사람이 인자를 수정함/);
     // 보고하면 suggestedArgs 소진
@@ -1099,7 +1105,7 @@ describe("M4.2-2 pfEditArgs/pfEditNode", () => {
       svc.pfEditArgs({ sessionId: sid, nodeId: "1", patch: { set: { bogus: { kind: "fixed", value: 1 } } } }),
     ).rejects.toThrow(/unknown/);
     // 잠금
-    await svc.pfLock(sid, "1");
+    await svc.pfLock({ sessionId: sid, nodeId: "1" });
     await expect(
       svc.pfEditArgs({ sessionId: sid, nodeId: "1", patch: { set: { file_path: { kind: "fixed", value: "c" } } } }),
     ).rejects.toThrow(/locked/);
