@@ -15,8 +15,11 @@ export type ValidateOptions = {
 
 function isValidRefSyntax(ref: string): boolean {
   // 허용: ${params.xxx} | ${...} | $<id> | $<id>.output | $<id>.output.<dotpath>
+  // M5.1-B3: 문자열 내 ${params.k} 템플릿도 허용
   if (/^\$\{params\.[A-Za-z0-9_.-]+\}$/.test(ref)) return true;
   if (/^\$\{\}$/.test(ref)) return false;
+  const tk = templateParamsKeys(ref);
+  if (tk !== null) return tk.length > 0;
   const m = /^\$(\d+(?:\.\d+)*)(.*)$/.exec(ref);
   if (!m) return false;
   const rest = m[2];
@@ -39,6 +42,25 @@ function parseRef(ref: string): { paramsKey?: string; nodeId?: string; fieldPath
   if (rest === "" || rest === ".output") return { nodeId };
   if (rest.startsWith(".output.")) return { nodeId, fieldPath: rest.slice(".output.".length) };
   return null;
+}
+
+/**
+ * M5.1-B3: 문자열 내 `${params.k}` 템플릿에서 참조된 params 키 목록.
+ * 템플릿이 아니면 null. `${` 가 있으나 params 형식이 아니면 null이 아니라
+ * 빈 배열 아닌 형태로 실패 처리해야 하므로, `${` 포함 + 유효 키 0개면 [] 반환.
+ */
+export function templateParamsKeys(ref: string): string[] | null {
+  if (!ref.includes("${")) return null;
+  if (/^\$\{params\.[A-Za-z0-9_.-]+\}$/.test(ref)) return null; // 전체 참조는 기존 경로
+  const keys: string[] = [];
+  const re = /\$\{params\.([A-Za-z0-9_.-]+)\}/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(ref))) keys.push(m[1]);
+  const stripped = ref.replace(/\$\{params\.[A-Za-z0-9_.-]+\}/g, "");
+  if (stripped.includes("${")) return []; // 깨진 ${...} 잔존 → 무효 템플릿
+  if (stripped.includes("$")) return []; // $노드 혼합은 미지원 → 무효 취급
+  if (keys.length === 0) return [];
+  return keys;
 }
 
 function getByDotPath(root: unknown, path: string): boolean {
@@ -185,10 +207,23 @@ export function validateTree(session: Session, nodes: Node[], opts: ValidateOpti
     }
 
     // var 참조 검사 (10-3, 10-4)
-    if (n.args) {
+      if (n.args) {
       for (const [argName, spec] of Object.entries(n.args)) {
         if (spec.kind !== "var") continue;
         const ref = (spec as { ref: string }).ref;
+        // M5.1-B3: 템플릿 var는 포함된 params 키 존재 여부만 검사
+        const tkeys = templateParamsKeys(ref);
+        if (tkeys !== null) {
+          if (tkeys.length === 0) {
+            errors.push({ code: "bad_ref_field", nodeId: n.id, message: `arg ${argName}: bad template ref ${ref}` });
+            continue;
+          }
+          for (const k of tkeys) {
+            if (!(k in session.params))
+              errors.push({ code: "bad_ref", nodeId: n.id, message: `arg ${argName}: unknown params ${k}` });
+          }
+          continue;
+        }
         if (!isValidRefSyntax(ref)) {
           errors.push({ code: "bad_ref_field", nodeId: n.id, message: `arg ${argName}: bad ref syntax ${ref}` });
           continue;

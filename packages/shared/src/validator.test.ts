@@ -101,6 +101,16 @@ describe("validator 10종", () => {
     expect(errs.some((e) => e.code === "cycle")).toBe(true);
   });
 
+  it("M5.1-B3 템플릿 var 허용 + 미등록 키 거부 + 깨진 템플릿 거부", () => {
+    const s = baseSession();
+    const ok = leaf("1", { args: { path: { kind: "var", ref: "sales-${params.month}.xlsx" } } });
+    expect(validateTree(s, [ok]).filter((e) => e.code === "bad_ref" || e.code === "bad_ref_field")).toEqual([]);
+    const unknown = leaf("1", { args: { path: { kind: "var", ref: "sales-${params.typo}.xlsx" } } });
+    expect(validateTree(s, [unknown]).some((e) => e.code === "bad_ref")).toBe(true);
+    const broken = leaf("1", { args: { path: { kind: "var", ref: "sales-${month}.xlsx" } } });
+    expect(validateTree(s, [broken]).some((e) => e.code === "bad_ref_field")).toBe(true);
+  });
+
   it("6. depth 초과", () => {
     const s = baseSession();
     const n = leaf("1", { depth: 99 });
