@@ -781,7 +781,8 @@ export class CoreService implements CoreClient {
         this.propagateStale(s.id, n.id);
         return { result: {
           node: next,
-          instruction: warnings.length > 0 ? `leaf 확정. 경고: ${warnings.join("; ")}` : `leaf 확정. pf_next로 계속하라.`,
+          // 경고가 있어도 다음 도구 언급 유지 (기계 추종 계약: pf_next).
+          instruction: warnings.length > 0 ? `leaf 확정. 경고: ${warnings.join("; ")}. pf_next로 계속하라.` : `leaf 확정. pf_next로 계속하라.`,
         }, summary: `leaf ${n.id} ${input.tool.server}/${input.tool.name}` };
       }
     }
