@@ -45,6 +45,11 @@ async function linked() {
 
 const EXPECTED_ORDER = [...TOOL_NAMES];
 
+/** 에러 텍스트 추출 (코드가 맨 앞에 오는 형식: "code: message (힌트: ...)") */
+function errText(r: unknown): string {
+  return ((r as { content: { type: string; text: string }[] }).content[0] as { text: string }).text;
+}
+
 const EXPECTED_ANNOTATIONS: Record<string, Record<string, boolean>> = {
   pf_start: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
   pf_next: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
@@ -105,6 +110,18 @@ describe("tools/list 스냅샷 (결정적 순서·annotations)", () => {
 });
 
 describe("도구 응답 계약 (outputSchema 통과)", () => {
+  it("에러는 structuredContent 없음 (엄격 클라이언트 -32602 방지)", async () => {
+    const { mcp, close } = await linked();
+    try {
+      const r = await mcp.callTool({ name: "pf_next", arguments: { sessionId: "123e4567-e89b-42d3-a456-426614174000" } });
+      expect(r.isError).toBe(true);
+      expect(errText(r)).toMatch(/^session_not_found:/);
+      const body = (r as { structuredContent?: unknown }).structuredContent;
+      expect(body === undefined).toBe(true);
+    } finally {
+      await close();
+    }
+  });
   it("전체 플로우", async () => {
     const { mcp, close } = await linked();
     try {
@@ -271,23 +288,19 @@ describe("도구 응답 계약 (outputSchema 통과)", () => {
         },
       });
       expect(stale.isError).toBe(true);
-      expect((stale.structuredContent as { error: { code: string } }).error.code).toBe("conflict");
+      expect(errText(stale)).toMatch(/^conflict:/);
     } finally {
       await close();
     }
   }, 30000);
 
-  it("에러 봉투: session_not_found", async () => {
+  it("에러 텍스트: session_not_found (코드 선행)", async () => {
     const { mcp, close } = await linked();
     try {
       const r = await mcp.callTool({ name: "pf_next", arguments: { sessionId: "123e4567-e89b-42d3-a456-426614174000" } });
       expect(r.isError).toBe(true);
-      const parsed = ErrorEnvelopeShape.safeParse(r.structuredContent);
-      expect(parsed.success).toBe(true);
-      if (parsed.success) {
-        expect(parsed.data.error.code).toBe("session_not_found");
-        expect(parsed.data.error.hint.length).toBeGreaterThan(0);
-      }
+      expect(errText(r)).toMatch(/^session_not_found:/);
+      expect(errText(r)).toMatch(/힌트:/);
     } finally {
       await close();
     }
@@ -300,9 +313,8 @@ describe("도구 응답 계약 (outputSchema 통과)", () => {
       const sid = started.sessionId;
       const r = await mcp.callTool({ name: "pf_split", arguments: { sessionId: sid, nodeId: "1", children: [{ goal: "x", dependsOn: ["9.9"] }] } });
       expect(r.isError).toBe(true);
-      const body = r.structuredContent as { error: { code: string; message: string; hint: string } };
-      expect(body.error.code).toBe("bad_request");
-      expect(body.error.message).toMatch(/dep_missing/);
+      expect(errText(r)).toMatch(/^bad_request:/);
+      expect(errText(r)).toMatch(/dep_missing/);
     } finally {
       await close();
     }
@@ -335,7 +347,7 @@ describe("M2.5-6 세션 TTL", () => {
       const started = (await mcp.callTool({ name: "pf_start", arguments: { request: "x" } })).structuredContent as { sessionId: string };
       const r = await mcp.callTool({ name: "pf_next", arguments: { sessionId: started.sessionId } });
       expect(r.isError).toBe(true);
-      expect((r.structuredContent as { error: { code: string } }).error.code).toBe("session_not_found");
+      expect(errText(r)).toMatch(/^session_not_found:/);
     } finally {
       await mcp.close();
       await server.close();

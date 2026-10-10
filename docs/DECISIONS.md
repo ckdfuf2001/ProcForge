@@ -341,6 +341,12 @@
   ${params.k} 해결 (params 없으면 deferred, 미등록 키는 hard fail).
   R1 변경 사유: 검사값 자체가 녹화 수치와 같으면 하드코딩이므로 ref 강제.
   약식 ref: validator·resolveVar가 "$1.1.rows" 허용 (숫자 꼬리는 노드 id 귀속).
+- MCP 에러 계약: 에러 결과에 structuredContent를 붙이지 않는다.
+  SDK 출력 검증이 object 스키마만 지원하고 (union 불가 확인),
+  엄격한 클라이언트는 에러 봉투를 성공 스키마로 검증해 실제 에러를
+  -32602로 가린다. 코드는 텍스트 맨 앞에 둔다 ("code: message (힌트: ...)").
+  (bc-guide 세션 finalize 실패 추적에서 발견: 실제 원인은
+  1.2/1.3 missing required arg: command였으나 -32602에 가려졌음)
 - M5.2-5: 수락 테스트. CI E2E m52-monthly.test.ts (절차서 monthly):
   1.1 script 집계 + period==${params.month}, 1.2 script 렌더 +
   total==$1.1.total. a 9월 분해 strict 0, b 10월 실행·독립 계산 일치,

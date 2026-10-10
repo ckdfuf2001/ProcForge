@@ -84,11 +84,13 @@ function errResult(e: unknown) {
   const hint = (e as { hint?: string } | null)?.hint ?? HINTS[code] ?? HINTS["internal"];
   const message = code === "internal" ? "내부 오류가 발생했다." : e instanceof Error ? e.message : String(e);
   if (code === "internal") logger.error("internal", e instanceof Error ? (e.stack ?? e.message) : String(e));
-  const body = { error: { code, message, hint: `${hint}`.trim() } };
+  // 에러에는 structuredContent를 붙이지 않는다. SDK 출력 검증이 object 스키마만
+  // 지원하고, 엄격한 클라이언트는 에러 봉투를 성공 스키마로 검증해 실제 에러를
+  // -32602로 가린다. 코드는 텍스트 맨 앞에 둔다 ("code: message (힌트: ...)").
+  const hintText = `${hint}`.trim();
   return {
     isError: true as const,
-    content: [{ type: "text" as const, text: `${code}: ${message} (힌트: ${body.error.hint})` }],
-    structuredContent: body,
+    content: [{ type: "text" as const, text: `${code}: ${message} (힌트: ${hintText})` }],
   };
 }
 
