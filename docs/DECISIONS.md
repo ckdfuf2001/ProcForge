@@ -265,6 +265,8 @@
   runs/<runId>/junit.xml 항상 기록. 응답에 junitPath 포함.
 - 3-3: pf_test.procedure에 PROCEDURE_NAME_RE zod 적용 (MCP 입력은
   이름만, 경로 지정은 CLI/runner 직접 호출로 유지). ../ 등 거부.
+- 3-4: pf_test nodeId를 wire 스키마에 추가 (runner 서브트리 실행 노출).
+  서브트리만 결과에 포함, 없는 노드는 not_found.
 
 ## M3.2
 

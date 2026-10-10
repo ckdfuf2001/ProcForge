@@ -152,6 +152,51 @@ describe("도구 응답 계약 (outputSchema 통과)", () => {
     }
   });
 
+  it("M4.1.1-4 pf_test nodeId 서브트리만 실행 (계약)", async () => {
+    const { mcp, close } = await linked();
+    try {
+      const call = async (name: string, args: Record<string, unknown>) => {
+        const r = await mcp.callTool({ name, arguments: args });
+        expect(r.isError, `${name} should succeed`).toBeFalsy();
+        const parsed = (OUTPUT_SCHEMAS[name] as { safeParse: (v: unknown) => { success: boolean } }).safeParse(r.structuredContent);
+        expect(parsed.success, `${name} outputSchema`).toBe(true);
+        return r.structuredContent as Record<string, unknown>;
+      };
+      const started = await call("pf_start", { request: "서브트리" });
+      const sid = started["sessionId"] as string;
+      await call("pf_split", { sessionId: sid, nodeId: "1", children: [{ goal: "a" }, { goal: "b" }] });
+      for (const nid of ["1.1", "1.2"]) {
+        await call("pf_report", {
+          sessionId: sid, nodeId: nid,
+          tool: { server: "opencode", name: "read" }, args: { path: "x" },
+          resultSummary: "ok", selfVerdict: "pass", selfReason: "ok",
+        });
+        await call("pf_confirm_leaf", {
+          sessionId: sid, nodeId: nid,
+          tool: { server: "opencode", name: "read" }, argSpecs: { path: { kind: "fixed", value: "x" } },
+        });
+      }
+      // 서브트리 실행: 1.1만 결과에 포함
+      const sub = await call("pf_test", { sessionId: sid, mode: "replay", nodeId: "1.1" });
+      const { readFileSync } = await import("node:fs");
+      const subReport = JSON.parse(readFileSync(sub["reportPath"] as string, "utf8")) as {
+        results: { nodeId: string }[];
+      };
+      expect(subReport.results.map((r) => r.nodeId).sort()).toEqual(["1.1"]);
+      // 전체 실행: 부모(비leaf 스킵) + 둘 다 포함
+      const full = await call("pf_test", { sessionId: sid, mode: "replay" });
+      const fullReport = JSON.parse(readFileSync(full["reportPath"] as string, "utf8")) as {
+        results: { nodeId: string }[];
+      };
+      expect(fullReport.results.map((r) => r.nodeId).sort()).toEqual(["1", "1.1", "1.2"]);
+      // 없는 노드 → 오류
+      const bad = await mcp.callTool({ name: "pf_test", arguments: { sessionId: sid, mode: "replay", nodeId: "9.9" } });
+      expect(bad.isError).toBe(true);
+    } finally {
+      await close();
+    }
+  }, 60000);
+
   it("M4.2-2 pf_edit_args/node E2E", async () => {
     const { mcp, close } = await linked();
     try {

@@ -159,6 +159,7 @@ export type RefreshCatalogInput = z.infer<typeof RefreshCatalogInputSchema>;
 export const TestInputSchema = z.object({
   sessionId: SessionIdSchema.optional(),
   procedure: z.string().regex(PROCEDURE_NAME_RE, "procedure 이름 규칙 위반").optional(),
+  nodeId: NodeIdSchema.optional(),
   params: z.record(z.string()).optional(),
   mode: z.enum(["record", "replay", "passthrough", "live"]).optional(),
   updateGolden: z.boolean().optional(),

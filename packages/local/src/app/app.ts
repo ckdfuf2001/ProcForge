@@ -630,8 +630,7 @@ export class ProcForgeApp {
       procforgeDir: this.procforgeDir,
       projectRoot: this.projectRoot,
       sessionId: sid,
-      // nodeId는 wire 스키마에 없음 (3단계-4에서 추가). runner 직접 호출용으로 유지.
-      nodeId: (a as TestInput & { nodeId?: string }).nodeId,
+      nodeId: a.nodeId as string | undefined,
       mode: (a.mode as "record" | "replay" | "passthrough" | "live" | undefined) ?? "replay",
       updateGolden: (a.updateGolden as boolean | undefined) ?? false,
       allowProjectRead: (a.allowProjectRead as boolean | undefined) ?? false,
