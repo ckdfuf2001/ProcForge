@@ -22,12 +22,18 @@ export function runScript(input: {
 }): ScriptResult {
   const timeout = input.timeoutMs ?? DEFAULT_SCRIPT_TIMEOUT_MS;
   const cmd = input.runtime === "node" ? process.execPath : "python";
+  // Windows 로캘(cp949) stdio가 한글 JSON을 깨뜨려 서로게이트가 생기므로
+  // python 실행 시 UTF-8로 고정 (M5-dogfood MCP 관측과 동일).
+  const env = input.runtime === "python"
+    ? { ...process.env, PYTHONUTF8: "1", PYTHONIOENCODING: "utf-8" }
+    : process.env;
   const r = spawnSync(cmd, [input.scriptAbs], {
     cwd: input.cwd,
     input: JSON.stringify(input.args),
     encoding: "utf8",
     timeout,
     maxBuffer: 10 * 1024 * 1024,
+    env,
   });
   const errTail = (r.stderr ?? "").toString().slice(-2000);
   if (r.error) {

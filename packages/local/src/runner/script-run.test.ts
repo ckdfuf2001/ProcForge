@@ -45,6 +45,14 @@ describe("runScript", () => {
     expect(r.json).toEqual({ got: { n: 3 } });
   });
 
+  it("python 한글 stdio도 UTF-8 (로캘 무관)", () => {
+    if (!havePython()) return;
+    const f = join(root, "ko.py");
+    writeFileSync(f, "import json,sys\na=json.load(sys.stdin)\nprint(json.dumps({'summary':a['t'],'json':{'t':a['t']}},ensure_ascii=False))");
+    const r = runScript({ runtime: "python", scriptAbs: f, args: { t: "월간보고서 2026-10 (최종)" }, cwd: fsDir });
+    expect(r.summary).toBe("월간보고서 2026-10 (최종)");
+    expect(r.json).toEqual({ t: "월간보고서 2026-10 (최종)" });
+  });
   it("비정상 종료·비JSON·타임아웃은 throw", () => {
     const bad = join(root, "bad.mjs");
     writeFileSync(bad, "console.error('boom');process.exit(3);");
