@@ -348,6 +348,12 @@
   (bc-guide 세션 finalize 실패 추적에서 발견: 실제 원인은
   1.2/1.3 missing required arg: command였으나 -32602에 가려졌음)
 - M5.2-5: 수락 테스트. CI E2E m52-monthly.test.ts (절차서 monthly):
+- M5.3-0-4: 증거. 호스트 내장 툴(bash 등) leaf는 실행 증거가 없다 —
+  attempt에 남는 건 호스트 주장(resultSummary)과 인자뿐. confirm은
+  artifacts 비어 있으면 경고 (거부 아님). 한계: core attempt는 resultJson을
+  저장하지 않아 (실측 확인) 결과 JSON을 증거·미러로 쓸 수 없다.
+  R2 미러 면제는 attempts resultJson이 있을 때만 동작 (단위 계약).
+  auto constraint 강제는 경로가 있어야 가능하므로 미적용 (경고로 대체).
   1.1 script 집계 + period==${params.month}, 1.2 script 렌더 +
   total==$1.1.total. a 9월 분해 strict 0, b 10월 실행·독립 계산 일치,
   c 11월 부재 bad_request, d 데이터 교체 period fail+blocked.

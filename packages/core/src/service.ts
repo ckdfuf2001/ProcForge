@@ -720,6 +720,14 @@ export class CoreService implements CoreClient {
           throw err("bad_args", `argSpecs unknown: ${hints.join("; ")}. 등록된 인자만 사용하라.`);
         }
         const warnings: string[] = [];
+        // M5.3-0-4: 증거 없는 leaf 경고. attempt에 결과물(artifact)이 하나도
+        // 없으면 호스트 주장(resultSummary)만으로 확정하는 셈이므로 경고한다
+        // (거부 아님). resultJson은 저장되지 않아 증거로 쓸 수 없다 (DECISIONS).
+        {
+          const hasArtifacts = ((last?.artifacts ?? []) as unknown[]).length > 0;
+          if (!hasArtifacts)
+            warnings.push(`증거 없음: 결과물(artifact) 없이 확정 (${input.tool!.server}/${input.tool!.name}) — 가짜 leaf 주의`);
+        }
         // M5.3-0-1: required 키 강제 (누락 → bad_request + 목록).
         // 스키마에 required가 없으면 확정 시 경고 (검증 불가).
         const required = readSchemaProps(cat.inputSchema).required ?? [];

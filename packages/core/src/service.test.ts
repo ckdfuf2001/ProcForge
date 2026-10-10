@@ -1349,4 +1349,12 @@ describe("M5.3-0-1 confirm required 강제", () => {
     expect(ok.node.status).toBe("leaf");
     expect(ok.instruction).toMatch(/required 없음/);
   });
+  it("M5.3-0-4 증거 없는 leaf → 경고", async () => {
+    const svc = new CoreService(createMemoryStore(), passEval);
+    const { session } = await svc.pfStart({ request: "r", toolCatalog: catalog });
+    await svc.pfReport({ ...rep(), sessionId: session.id });
+    const warned = await svc.pfResolve({ sessionId: session.id, nodeId: "1", decision: "leaf", tool: { server: "fs", name: "read" }, argSpecs: {} as never });
+    expect(warned.node.status).toBe("leaf");
+    expect(warned.instruction).toMatch(/증거 없음/);
+  });
 });
