@@ -229,6 +229,12 @@
 - 2.5-5: 변경 응답에 revision/changedNodeIds (done:true 포함 균일).
   순서 인자 core 메서드는 객체 입력으로 통일 (ChangeOpts 삭제). MCP 입력에
   expectedRevision/actor 추가 (actor 미지정 시 host). App은 전달만.
+- 2.5-6: App 입출력 DTO (shared/dto, MCP inputSchema와 공유, 단일 원천).
+  argSpecs path는 shared 스키마 기준(inout 허용으로 일치). test nodeId는
+  wire 스키마에 없음 (3단계-4에서 추가, runner 직접 호출용 유지).
+- 2.5-5: 변경 응답에 revision/changedNodeIds (done:true 포함 균일).
+  순서 인자 core 메서드는 객체 입력으로 통일 (ChangeOpts 삭제). MCP 입력에
+  expectedRevision/actor 추가 (actor 미지정 시 host). App은 전달만.
 
 ## M3.2
 

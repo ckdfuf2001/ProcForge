@@ -192,6 +192,43 @@ describe("도구 응답 계약 (outputSchema 통과)", () => {
     }
   }, 30000);
 
+  it("M4.2-2.5-6 wire 경유 revision 전달", async () => {
+    const { mcp, close } = await linked();
+    try {
+      const call = async (name: string, args: Record<string, unknown>) => {
+        const r = await mcp.callTool({ name, arguments: args });
+        expect(r.isError, `${name} should succeed`).toBeFalsy();
+        return r.structuredContent as Record<string, unknown>;
+      };
+      const started = await call("pf_start", { request: "rev" });
+      const sid = started["sessionId"] as string;
+      await call("pf_split", { sessionId: sid, nodeId: "1", children: [{ goal: "a" }] });
+      const rep = await call("pf_report", {
+        sessionId: sid, nodeId: "1.1",
+        tool: { server: "opencode", name: "read" }, args: { path: "x" },
+        resultSummary: "ok", selfVerdict: "pass", selfReason: "ok",
+        expectedRevision: 1, actor: "human",
+      });
+      // 변경 응답에 revision/changedNodeIds 포함
+      expect(rep["revision"]).toBe(2);
+      expect(rep["changedNodeIds"]).toEqual(["1.1"]);
+      // stale revision → conflict 봉투
+      const stale = await mcp.callTool({
+        name: "pf_report",
+        arguments: {
+          sessionId: sid, nodeId: "1.1",
+          tool: { server: "opencode", name: "read" }, args: { path: "x" },
+          resultSummary: "ok", selfVerdict: "pass", selfReason: "ok",
+          expectedRevision: 1,
+        },
+      });
+      expect(stale.isError).toBe(true);
+      expect((stale.structuredContent as { error: { code: string } }).error.code).toBe("conflict");
+    } finally {
+      await close();
+    }
+  }, 30000);
+
   it("에러 봉투: session_not_found", async () => {
     const { mcp, close } = await linked();
     try {

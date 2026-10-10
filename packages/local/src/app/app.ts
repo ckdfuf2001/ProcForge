@@ -5,6 +5,29 @@ import type { Actor } from "@procforge/shared/dto.js";
 import { pfError } from "@procforge/shared/errors.js";
 import { collectCatalog } from "../catalog.js";
 import { nodeSummary } from "../views.js";
+import type { OUTPUT_SCHEMAS } from "../views.js";
+import type {
+  AdviseInput,
+  ApproveInput,
+  AskHumanInput,
+  ConfirmLeafInput,
+  EditArgsInput,
+  EditNodeInput,
+  FinalizeInput,
+  GetNodeInput,
+  LockInput,
+  NextInput,
+  RefreshCatalogInput,
+  ReopenInput,
+  ReportInput,
+  RetryInput,
+  SplitInput,
+  StartInput,
+  TestInput,
+  TreeInput,
+} from "@procforge/shared/dto.js";
+
+type OutputOf<K extends keyof typeof OUTPUT_SCHEMAS> = import("zod").infer<(typeof OUTPUT_SCHEMAS)[K]>;
 import { seedSandbox } from "../services/workspace.js";
 import { logger } from "../logger.js";
 import { diffSnapshot, readCaptureRecord, readPreSnapshot, takeSandboxSnapshot, toBaseRel, writePreSnapshot } from "../services/snapshot.js";
@@ -59,7 +82,7 @@ export class ProcForgeApp {
     this.maxArtifactBytes = deps.maxArtifactBytes ?? 5 * 1024 * 1024;
   }
 
-  async start(a: any): Promise<Record<string, unknown>> {    const collected = a.toolCatalog
+  async start(a: StartInput): Promise<OutputOf<"pf_start">> {    const collected = a.toolCatalog
       ? undefined
       : await collectCatalog(this.projectRoot, { cacheDir: join(this.procforgeDir, "cache") });
     const catalog = a.toolCatalog ?? collected!.entries;
@@ -81,7 +104,7 @@ export class ProcForgeApp {
     };
   }
 
-  async next(a: any): Promise<Record<string, unknown>> {
+  async next(a: NextInput): Promise<OutputOf<"pf_next">> {
     const sid = a.sessionId as string;
     const s = await this.core.getSession(sid);
     const out = await this.core.pfNext({
@@ -109,7 +132,7 @@ export class ProcForgeApp {
     };
   }
 
-  async report(a: any): Promise<Record<string, unknown>> {
+  async report(a: ReportInput): Promise<OutputOf<"pf_report">> {
     const sid = a.sessionId as string;
     const sess = await this.core.getSession(sid);
     const nid = a.nodeId as string;
@@ -158,7 +181,7 @@ export class ProcForgeApp {
     return { ...(out as unknown as Record<string, unknown>), warnings: reportWarnings };
   }
 
-  async confirmLeaf(a: any): Promise<Record<string, unknown>> {
+  async confirmLeaf(a: ConfirmLeafInput): Promise<OutputOf<"pf_confirm_leaf">> {
     const sid = a.sessionId as string;
     const s = await this.core.getSession(sid);
     if (!a.argSpecs) throw pfError("bad_request", "argSpecs가 없다.", "마지막 실행 인자 키를 모두 분류해 pf_confirm_leaf 재호출.");
@@ -222,7 +245,7 @@ export class ProcForgeApp {
     };
   }
 
-  async retry(a: any): Promise<Record<string, unknown>> {
+  async retry(a: RetryInput): Promise<OutputOf<"pf_retry">> {
     const sid = a.sessionId as string;
     const s = await this.core.getSession(sid);
       logger.info("pf_retry", { sessionId: sid, nodeId: a.nodeId, reason: a.reason });
@@ -236,7 +259,7 @@ export class ProcForgeApp {
       return { node: nodeSummary(out.node, s.limits), instruction: out.instruction, revision: out.revision, changedNodeIds: out.changedNodeIds };
   }
 
-  async split(a: any): Promise<Record<string, unknown>> {
+  async split(a: SplitInput): Promise<OutputOf<"pf_split">> {
     const sid = a.sessionId as string;
     const s = await this.core.getSession(sid);
     const kids = a.children as { goal: string; dependsOn?: string[]; sideEffect?: "none" | "local_write" | "external" }[] | undefined;
@@ -258,7 +281,7 @@ export class ProcForgeApp {
       };
   }
 
-  async askHuman(a: any): Promise<Record<string, unknown>> {
+  async askHuman(a: AskHumanInput): Promise<OutputOf<"pf_ask_human">> {
     const sid = a.sessionId as string;
     const s = await this.core.getSession(sid);
       logger.info("pf_ask_human", { sessionId: sid, nodeId: a.nodeId, question: a.question });
@@ -274,7 +297,7 @@ export class ProcForgeApp {
       return { node: nodeSummary(out.node, s.limits), instruction: out.instruction, revision: out.revision, changedNodeIds: out.changedNodeIds };
   }
 
-  async approve(a: any): Promise<Record<string, unknown>> {
+  async approve(a: ApproveInput): Promise<OutputOf<"pf_approve">> {
     const sid = a.sessionId as string;
     const s = await this.core.getSession(sid);
     const out = await this.core.pfApprove({
@@ -288,7 +311,7 @@ export class ProcForgeApp {
     return { node: nodeSummary(out.node, s.limits), revision: out.revision, changedNodeIds: out.changedNodeIds };
   }
 
-  async advise(a: any): Promise<Record<string, unknown>> {
+  async advise(a: AdviseInput): Promise<OutputOf<"pf_advise">> {
     const sid = a.sessionId as string;
     const s = await this.core.getSession(sid);
     const nid = a.nodeId as string;
@@ -317,7 +340,7 @@ export class ProcForgeApp {
       };
   }
 
-  async tree(a: any): Promise<Record<string, unknown>> {
+  async tree(a: TreeInput): Promise<OutputOf<"pf_tree">> {
     const sid = a.sessionId as string;
     const s = await this.core.getSession(sid);
     const { nodes } = await this.core.pfTree(sid);
@@ -357,7 +380,7 @@ export class ProcForgeApp {
     };
   }
 
-  async getNode(a: any): Promise<Record<string, unknown>> {
+  async getNode(a: GetNodeInput): Promise<OutputOf<"pf_get_node">> {
     const sid = a.sessionId as string;
     await this.core.getSession(sid);
     const { nodes } = await this.core.pfTree(sid);
@@ -366,7 +389,7 @@ export class ProcForgeApp {
     return { node: n };
   }
 
-  async lock(a: any): Promise<Record<string, unknown>> {
+  async lock(a: LockInput): Promise<OutputOf<"pf_lock">> {
     const sid = a.sessionId as string;
     const s = await this.core.getSession(sid);
     const out = await this.core.pfLock({
@@ -378,7 +401,7 @@ export class ProcForgeApp {
     return { node: nodeSummary(out.node, s.limits), revision: out.revision, changedNodeIds: out.changedNodeIds };
   }
 
-  async reopen(a: any): Promise<Record<string, unknown>> {
+  async reopen(a: ReopenInput): Promise<OutputOf<"pf_reopen">> {
     const sid = a.sessionId as string;
     const s = await this.core.getSession(sid);
     const out = await this.core.pfReopen({
@@ -391,7 +414,7 @@ export class ProcForgeApp {
     return { node: nodeSummary(out.node, s.limits), revision: out.revision, changedNodeIds: out.changedNodeIds };
   }
 
-  async editArgs(a: any): Promise<Record<string, unknown>> {
+  async editArgs(a: EditArgsInput): Promise<OutputOf<"pf_edit_args">> {
     const sid = a.sessionId as string;
     const s = await this.core.getSession(sid);
     const out = await this.core.pfEditArgs({
@@ -407,7 +430,7 @@ export class ProcForgeApp {
     return { node: nodeSummary(out.node, s.limits), instruction: out.instruction, revision: out.revision, changedNodeIds: out.changedNodeIds };
   }
 
-  async editNode(a: any): Promise<Record<string, unknown>> {
+  async editNode(a: EditNodeInput): Promise<OutputOf<"pf_edit_node">> {
     const sid = a.sessionId as string;
     const s = await this.core.getSession(sid);
     const out = await this.core.pfEditNode({
@@ -422,7 +445,7 @@ export class ProcForgeApp {
     return { node: nodeSummary(out.node, s.limits), instruction: out.instruction, revision: out.revision, changedNodeIds: out.changedNodeIds };
   }
 
-  async refreshCatalog(): Promise<Record<string, unknown>> {
+  async refreshCatalog(_a: RefreshCatalogInput): Promise<OutputOf<"pf_refresh_catalog">> {
     const c = await collectCatalog(this.projectRoot, { cacheDir: join(this.procforgeDir, "cache"), refresh: true });
     return {
       entries: c.entries.map((e) => ({ server: e.server, name: e.name, schemaHash: e.schemaHash })),
@@ -431,7 +454,7 @@ export class ProcForgeApp {
     };
   }
 
-  async test(a: any): Promise<Record<string, unknown>> {
+  async test(a: TestInput): Promise<OutputOf<"pf_test">> {
     if (a.procedure) {
       const { report, sessionId: imported } = await runProcedureTest(this.procforgeDir, this.projectRoot, a.procedure as string, {
         procforgeDir: this.procforgeDir,
@@ -461,7 +484,8 @@ export class ProcForgeApp {
       procforgeDir: this.procforgeDir,
       projectRoot: this.projectRoot,
       sessionId: sid,
-      nodeId: a.nodeId as string | undefined,
+      // nodeId는 wire 스키마에 없음 (3단계-4에서 추가). runner 직접 호출용으로 유지.
+      nodeId: (a as TestInput & { nodeId?: string }).nodeId,
       mode: (a.mode as "record" | "replay" | "passthrough" | "live" | undefined) ?? "replay",
       updateGolden: (a.updateGolden as boolean | undefined) ?? false,
       allowProjectRead: (a.allowProjectRead as boolean | undefined) ?? false,
@@ -480,7 +504,7 @@ export class ProcForgeApp {
     };
   }
 
-  async finalize(a: any): Promise<Record<string, unknown>> {
+  async finalize(a: FinalizeInput): Promise<OutputOf<"pf_finalize">> {
     const sid = a.sessionId as string;
     await this.core.getSession(sid);
     const { doc, warnings } = await this.core.pfBuildProcedure(sid, a.name as string);

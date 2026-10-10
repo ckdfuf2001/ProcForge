@@ -2,6 +2,26 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { NodeIdSchema, SessionIdSchema, ConstraintSchema } from "@procforge/shared/schema.js";
+import {
+  AdviseInputSchema,
+  ApproveInputSchema,
+  AskHumanInputSchema,
+  ConfirmLeafInputSchema,
+  EditArgsInputSchema,
+  EditNodeInputSchema,
+  FinalizeInputSchema,
+  GetNodeInputSchema,
+  LockInputSchema,
+  NextInputSchema,
+  RefreshCatalogInputSchema,
+  ReopenInputSchema,
+  ReportInputSchema,
+  RetryInputSchema,
+  SplitInputSchema,
+  StartInputSchema,
+  TestInputSchema,
+  TreeInputSchema,
+} from "@procforge/shared/dto.js";
 import { errorCodeOf } from "@procforge/shared/errors.js";
 import { logger } from "./logger.js";
 import { OUTPUT_SCHEMAS } from "./views.js";
@@ -71,30 +91,6 @@ function ok(payload: Record<string, unknown>) {
 const READ_ONLY_ANN = { readOnlyHint: true, idempotentHint: true, openWorldHint: false };
 const WRITE_ANN = { readOnlyHint: false, destructiveHint: false, openWorldHint: false };
 
-const ToolRefShape = z.object({ server: z.string().min(1), name: z.string().min(1) });
-const CatalogEntryShape = z.object({
-  server: z.string().min(1),
-  name: z.string().min(1),
-  inputSchema: z.record(z.unknown()),
-  schemaHash: z.string().min(1),
-});
-const PathHintShape = z.enum(["in", "out"]).optional();
-const RevisionOptsShape = {
-  expectedRevision: z.number().int().min(0).optional(),
-  actor: z.enum(["host", "human", "runner"]).optional(),
-};
-const ArgSpecShape = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("fixed"), value: z.unknown(), path: PathHintShape }),
-  z.object({ kind: z.literal("var"), ref: z.string().min(1), path: PathHintShape }),
-  z.object({
-    kind: z.literal("generated"),
-    instruction: z.string().min(1),
-    inputs: z.array(z.string()).default([]),
-    constraints: z.array(z.string()).default([]),
-    path: PathHintShape,
-  }),
-]);
-
 export function buildServer(deps: ServerDeps): McpServer {
   const server = new McpServer({ name: "procforge-local", version: "0.2.0" });
   const { app } = deps;
@@ -136,13 +132,7 @@ export function buildServer(deps: ServerDeps): McpServer {
         "limits(선택, 예: {\"maxDepth\":5,\"maxRetries\":2,\"maxNodes\":50}).",
         "세션·루트 노드·수행 지침 반환. 세션은 30일 미사용 시 만료. 다음: pf_next.",
       ].join("\n"),
-      inputSchema: {
-        request: z.string().min(1),
-        params: z.record(z.string()).optional(),
-        toolCatalog: z.array(CatalogEntryShape).optional(),
-        seedFiles: z.array(z.string()).optional(),
-        limits: z.object({ maxDepth: z.number().int().min(1), maxRetries: z.number().int().min(0), maxNodes: z.number().int().min(1) }).optional(),
-      },
+      inputSchema: StartInputSchema,
       outputSchema: OUTPUT_SCHEMAS["pf_start"] as never,
       annotations: WRITE_ANN,
     },
@@ -165,7 +155,7 @@ export function buildServer(deps: ServerDeps): McpServer {
         "인자: sessionId.",
         "노드 요약과 지침 반환. done=true면 종료. 다음: 실행 후 pf_report, 크면 pf_split.",
       ].join("\n"),
-      inputSchema: { sessionId: SessionIdSchema, ...RevisionOptsShape },
+      inputSchema: NextInputSchema,
       outputSchema: OUTPUT_SCHEMAS["pf_next"] as never,
       annotations: WRITE_ANN,
     },
@@ -189,19 +179,7 @@ export function buildServer(deps: ServerDeps): McpServer {
         "artifacts(sandbox 상대경로, 선택, 5MB 상한), rubricReasons(사람 판단 항목 사유, 선택).",
         "통과해도 자동 확정 없음. 다음: pf_confirm_leaf 또는 pf_split.",
       ].join("\n"),
-      inputSchema: {
-        sessionId: SessionIdSchema,
-        nodeId: NodeIdSchema,
-        tool: ToolRefShape,
-        args: z.record(z.unknown()),
-        resultSummary: z.string(),
-        resultJson: z.unknown().optional(),
-        artifacts: z.array(z.string()).optional(),
-        selfVerdict: z.enum(["pass", "fail"]),
-        selfReason: z.string().min(1),
-        rubricReasons: z.record(z.string()).optional(),
-        ...RevisionOptsShape,
-      },
+      inputSchema: ReportInputSchema,
       outputSchema: OUTPUT_SCHEMAS["pf_report"] as never,
       annotations: WRITE_ANN,
     },
@@ -224,12 +202,7 @@ export function buildServer(deps: ServerDeps): McpServer {
         "children(필수, 최소 1개, 예: [{\"goal\":\"슬라이드 목록 읽기\"}]).",
         "부모와 생성된 자식 반환. 다음: pf_next로 자식 처리.",
       ].join("\n"),
-      inputSchema: {
-        sessionId: SessionIdSchema,
-        nodeId: NodeIdSchema,
-        children: z.array(z.object({ goal: z.string().min(1), dependsOn: z.array(z.string()).optional(), sideEffect: z.enum(["none", "local_write", "external"]).optional() })).min(1),
-        ...RevisionOptsShape,
-      },
+      inputSchema: SplitInputSchema,
       outputSchema: OUTPUT_SCHEMAS["pf_split"] as never,
       annotations: WRITE_ANN,
     },
@@ -253,15 +226,7 @@ export function buildServer(deps: ServerDeps): McpServer {
         "예: {\"month\":{\"kind\":\"var\",\"ref\":\"${params.month}\"}}), ignore(선택, 비교 제외 JSON 경로).",
         "leaf 확정과 golden 기록 반환. 다음: pf_next.",
       ].join("\n"),
-      inputSchema: {
-        sessionId: SessionIdSchema,
-        nodeId: NodeIdSchema,
-        tool: ToolRefShape,
-        argSpecs: z.record(ArgSpecShape),
-        sideEffect: z.enum(["none", "local_write", "external"]).optional(),
-        ignore: z.array(z.string()).optional(),
-        ...RevisionOptsShape,
-      },
+      inputSchema: ConfirmLeafInputSchema,
       outputSchema: OUTPUT_SCHEMAS["pf_confirm_leaf"],
       annotations: WRITE_ANN,
     },
@@ -284,7 +249,7 @@ export function buildServer(deps: ServerDeps): McpServer {
         "reason(필수, 재시도 사유, 기록용).",
         "probing 복귀 또는 한도 초과 시 needs_human. 다음: 실행 후 pf_report.",
       ].join("\n"),
-      inputSchema: { sessionId: SessionIdSchema, nodeId: NodeIdSchema, reason: z.string().min(1), ...RevisionOptsShape },
+      inputSchema: RetryInputSchema,
       outputSchema: OUTPUT_SCHEMAS["pf_retry"] as never,
       annotations: WRITE_ANN,
     },
@@ -307,13 +272,7 @@ export function buildServer(deps: ServerDeps): McpServer {
         "question(필수, 사람에게 물을 내용), plan(선택, {tool,args} dry-run 계획, 승인 대상).",
         "needs_human 전환. 계획이 있으면 pf_approve 대기, 없으면 pf_advise 대기.",
       ].join("\n"),
-      inputSchema: {
-        sessionId: SessionIdSchema,
-        nodeId: NodeIdSchema,
-        question: z.string().min(1),
-        plan: z.object({ tool: ToolRefShape, args: z.record(z.unknown()) }).optional(),
-        ...RevisionOptsShape,
-      },
+      inputSchema: AskHumanInputSchema,
       outputSchema: OUTPUT_SCHEMAS["pf_ask_human"] as never,
       annotations: WRITE_ANN,
     },
@@ -336,13 +295,7 @@ export function buildServer(deps: ServerDeps): McpServer {
         "approved(필수), note(선택, 거부 사유·승인 메모).",
         "승인 시 확정 가능 상태(probing)로, 거부 시 open으로. 다음: 승인 후 pf_confirm_leaf.",
       ].join("\n"),
-      inputSchema: {
-        sessionId: SessionIdSchema,
-        nodeId: NodeIdSchema,
-        approved: z.boolean(),
-        note: z.string().optional(),
-        ...RevisionOptsShape,
-      },
+      inputSchema: ApproveInputSchema,
       outputSchema: OUTPUT_SCHEMAS["pf_approve"] as never,
       annotations: WRITE_ANN,
     },
@@ -365,13 +318,7 @@ export function buildServer(deps: ServerDeps): McpServer {
         "text(필수, 예: \"매출은 세전 기준\"), proposedConstraints(선택, 호스트 제안 조건 배열).",
         "제안은 최신 fixture로 평가해 채택/거부. needs_human이면 open 복귀. 다음: pf_next.",
       ].join("\n"),
-      inputSchema: {
-        sessionId: SessionIdSchema,
-        nodeId: NodeIdSchema,
-        text: z.string().min(1),
-        proposedConstraints: z.array(ConstraintSchema).optional(),
-        ...RevisionOptsShape,
-      },
+      inputSchema: AdviseInputSchema,
       outputSchema: OUTPUT_SCHEMAS["pf_advise"] as never,
       annotations: WRITE_ANN,
     },
@@ -394,13 +341,7 @@ export function buildServer(deps: ServerDeps): McpServer {
         "detail(summary|full, 기본 summary), nodeId(서브트리, 선택), limit(기본 50), cursor(기본 0).",
         "목록·상태별 개수·hasMore 반환. 상세가 필요하면 pf_get_node.",
       ].join("\n"),
-      inputSchema: {
-        sessionId: SessionIdSchema,
-        detail: z.enum(["summary", "full"]).optional(),
-        nodeId: NodeIdSchema.optional(),
-        limit: z.number().int().min(1).max(500).optional(),
-        cursor: z.number().int().min(0).optional(),
-      },
+      inputSchema: TreeInputSchema,
       outputSchema: OUTPUT_SCHEMAS["pf_tree"] as never,
       annotations: READ_ONLY_ANN,
     },
@@ -422,7 +363,7 @@ export function buildServer(deps: ServerDeps): McpServer {
         "선수: pf_tree로 id 확인 후.",
         "nodeId 지정. 전체 attempts·조건 포함. 다음: 상태에 맞는 도구 호출.",
       ].join("\n"),
-      inputSchema: { sessionId: SessionIdSchema, nodeId: NodeIdSchema },
+      inputSchema: GetNodeInputSchema,
       outputSchema: OUTPUT_SCHEMAS["pf_get_node"] as never,
       annotations: READ_ONLY_ANN,
     },
@@ -444,7 +385,7 @@ export function buildServer(deps: ServerDeps): McpServer {
         "선수: leaf 확정 후.",
         "잠긴 노드와 그 조상은 재분해 금지. 다음: pf_next 계속 또는 pf_reopen.",
       ].join("\n"),
-      inputSchema: { sessionId: SessionIdSchema, nodeId: NodeIdSchema, ...RevisionOptsShape },
+      inputSchema: LockInputSchema,
       outputSchema: OUTPUT_SCHEMAS["pf_lock"] as never,
       annotations: WRITE_ANN,
     },
@@ -466,7 +407,7 @@ export function buildServer(deps: ServerDeps): McpServer {
         "선수: pf_lock 이후, 사람 판단으로만.",
         "reason(필수). 다음: pf_next.",
       ].join("\n"),
-      inputSchema: { sessionId: SessionIdSchema, nodeId: NodeIdSchema, reason: z.string().min(1), ...RevisionOptsShape },
+      inputSchema: ReopenInputSchema,
       outputSchema: OUTPUT_SCHEMAS["pf_reopen"] as never,
       annotations: WRITE_ANN,
     },
@@ -489,15 +430,7 @@ export function buildServer(deps: ServerDeps): McpServer {
         "patch(set: 바꿀 인자 분류, remove: 지울 키). fixed 값 수정·fixed↔var 전환.",
         "leaf는 open으로, 수정분은 suggestedArgs에 저장. 다음: pf_next.",
       ].join("\n"),
-      inputSchema: {
-        sessionId: SessionIdSchema,
-        nodeId: NodeIdSchema,
-        patch: z.object({
-          set: z.record(ArgSpecShape).optional(),
-          remove: z.array(z.string()).optional(),
-        }),
-        ...RevisionOptsShape,
-      },
+      inputSchema: EditArgsInputSchema,
       outputSchema: OUTPUT_SCHEMAS["pf_edit_args"] as never,
       annotations: WRITE_ANN,
     },
@@ -520,14 +453,7 @@ export function buildServer(deps: ServerDeps): McpServer {
         "goal(선택), addConstraints(선택), removeConstraintIds(선택, 하나 이상 필요).",
         "목표 변경 시 leaf는 open으로. 다음: pf_next.",
       ].join("\n"),
-      inputSchema: {
-        sessionId: SessionIdSchema,
-        nodeId: NodeIdSchema,
-        goal: z.string().min(1).optional(),
-        addConstraints: z.array(ConstraintSchema).optional(),
-        removeConstraintIds: z.array(z.string()).optional(),
-        ...RevisionOptsShape,
-      },
+      inputSchema: EditNodeInputSchema,
       outputSchema: OUTPUT_SCHEMAS["pf_edit_node"] as never,
       annotations: WRITE_ANN,
     },
@@ -550,13 +476,13 @@ export function buildServer(deps: ServerDeps): McpServer {
         "인자 없음. 캐시 무시하고 수집.",
         "서버·이름·해시 목록과 warnings 반환.",
       ].join("\n"),
-      inputSchema: {},
+      inputSchema: RefreshCatalogInputSchema,
       outputSchema: OUTPUT_SCHEMAS["pf_refresh_catalog"] as never,
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
     },
     async () => {
       try {
-        return ok(await app.refreshCatalog());
+        return ok(await app.refreshCatalog({}));
       } catch (e) {
         return errResult(e);
       }
@@ -575,15 +501,7 @@ export function buildServer(deps: ServerDeps): McpServer {
         "updateGolden(선택), allowProjectRead(선택), junitPath(선택).",
         "요약과 report 경로 반환. 다음: 실패 노드는 pf_tree로 확인.",
       ].join("\n"),
-      inputSchema: {
-        sessionId: SessionIdSchema.optional(),
-        procedure: z.string().optional(),
-        params: z.record(z.string()).optional(),
-        mode: z.enum(["record", "replay", "passthrough", "live"]).optional(),
-        updateGolden: z.boolean().optional(),
-        allowProjectRead: z.boolean().optional(),
-        junitPath: z.string().optional(),
-      },
+      inputSchema: TestInputSchema,
       outputSchema: OUTPUT_SCHEMAS["pf_test"] as never,
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
     },
@@ -607,7 +525,7 @@ export function buildServer(deps: ServerDeps): McpServer {
         "force(선택, 기존 명령 파일 덮어쓰기).",
         "procedure.json·PROCEDURE.md·SKILL.md·tests·command 반환. 다음: pf_test로 검증.",
       ].join("\n"),
-      inputSchema: { sessionId: SessionIdSchema, name: z.string().min(1), force: z.boolean().optional() },
+      inputSchema: FinalizeInputSchema,
       outputSchema: OUTPUT_SCHEMAS["pf_finalize"] as never,
       annotations: WRITE_ANN,
     },
