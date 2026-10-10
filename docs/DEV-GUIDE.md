@@ -303,6 +303,23 @@ C4 CI E2E에도 C2·C3를 fake 서버로 추가. M5-dogfood.md 3절을 실제 �
 6. M5-dogfood.md 3절을 a~d 결과로 교체. MCP command 상대경로는 후속 후보로
    DECISIONS에만 기록.
 
+### M5.3-0 확정 게이트 선행 (M5.3 전)
+배경: BC 가이드 실사용 세션 finalize 실패 추적 — 1.2/1.3 leaf가
+`opencode/bash` 필수 인자(`command`) 없이 확정됐고, finalize 검증에서야
+거부됨. 게다가 에러 봉투가 엄격 클라이언트에서 -32602에 가려져 원인 파악 지연.
+0-1 pf_confirm_leaf: tool inputSchema required 키가 argSpecs에 모두 있어야
+  확정 (누락 → bad_request + 누락 키 목록). OpenCode 내장 툴(bash, read,
+  write, edit 등) 카탈로그 항목에 required 포함 스키마 정의. 없으면 확정 시 경고.
+0-2 bc 세션 redacted export를 테스트 fixture로 저장 → "필수 인자 없는 leaf는
+  confirm 단계에서 거부" 회귀 테스트.
+0-3 에러 텍스트 계약 고정: 첫 줄 "<code>: <message>", 선택 둘째 줄
+  "hint: <hint>". 파서 함수 shared에 두고 계약 테스트로 전 도구 에러 형식
+  검증. following-host E2E가 이 파서로 code 판별.
+0-4 호스트 내장 툴(bash 등) leaf는 실행 증거가 없다는 점을 DECISIONS에 기록하고,
+  가능하면 결과물 파일 존재/해시를 auto constraint로 강제(증거 없는 pass 방지).
+0-5 bc 세션 결과를 docs/M5-dogfood.md에 "관찰: 실사용 1건" 절로 기록
+  (호스트·모델·막힌 지점·가짜 leaf 원인).
+
 ### M5 검증과 실행 분리
 - `procforge test <proc>`: replay 전용, drift 검출만.
 - `procforge run <procedure> --param k=v ... [--out <dir>]`: live 실행 전용.
@@ -383,6 +400,7 @@ C4 CI E2E에도 C2·C3를 fake 서버로 추가. M5-dogfood.md 3절을 실제 �
 | M5.1 | 잠금 회수 정정·감사·진짜 10월 검증 | [x] | `00661cf` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38067485259 | A 회수 정정(9c0171b)·B 감사·상대조건·템플릿(c56a7c1·935df1b·725c9f3·75b7cc5)·C 10월 검증(00661cf) |
 | M5 | 검증/실행 분리 | [x] | `78e6514` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38067485259 | M5.2 수락 a~d로 재확정 (입력 바인딩·값 흐름 실증) |
 | M5.2 | 교차 기간 재사용 | [x] | `adf6ae7` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38074263388 | 입력 바인딩·스크립트 leaf·값 흐름·수락 a~d·단가 통일 |
+| M5.3-0 | 확정 게이트 선행 | [ ] | | | confirm required 강제·회귀·에러 계약·증거 경고·관찰 기록 |
 | M5.5 | 반복 노드 | [ ] | | | |
 | M5.6 | 상태 / sideEffect | [ ] | | | |
 | - | 크롤링 테스트 | [ ] | | | 사람 진행 |
@@ -409,3 +427,4 @@ C4 CI E2E에도 C2·C3를 fake 서버로 추가. M5-dogfood.md 3절을 실제 �
 | 2026-10-11 | 6, 8 | M5.1 완료 + M5 재확정: A 회수 정정·B1 감사(R1/R2 정밀화)·B2 상대조건·B3 템플릿var·C1 10월 분해(감사 0)·C2 live pass 3·C3 음성(c-total fail+blocked)·C4 CI E2E·A4 m25 50회·양 모드 37+61+183 | fixture-sealed 규명·MCP UTF-8 stdio·한계 문구 삭제 |
 | 2026-10-11 | 6, 8 | M5.2 신설 + M5 미완료로 재환원: 11월 실행 실험(pass 3·표지 2026-11·표 10월 수치, run 52ff17ab)으로 교차 기간 재사용 미증명 확정 | 입력 바인딩·스크립트 leaf·값 흐름·수락 a~d |
 | 2026-10-11 | 6, 8 | M5.2 완료 + M5 재확정: 입력 바인딩·스크립트 leaf(kind script)·교차 경고·expected 감사·약식 ref·수락 a~d(CI+실측)·runner UTF-8·단가 통일·양 모드 38+61+200 | 절차서 monthly (기간 없음) |
+| 2026-10-11 | 6, 8 | M5.3-0 신설: BC 실사용 세션 finalize 실패(가짜 leaf + -32602 마스킹) → 확정 게이트 0-1~0-5 | M5.3 진입 전 확정 단계 결함 해소 |
