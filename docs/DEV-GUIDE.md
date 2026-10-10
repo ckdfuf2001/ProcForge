@@ -301,7 +301,7 @@ server.registerTool("pf_report", spec, async (a) => {
 | M4.2 | 3단계 M4.1.1 버그 1~7 | [x] | `307bcd6` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38027160130 | 6번은 2.5-4에서 해소됨 |
 | M4.2 | 4-0 (3-0 잔여) | [x] | `49a649b` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38033626665 | corrupt 잔류 거부·CLI repair·planPendings 공용·무세션 pending 뷰 |
 | M4.2 | 4단계 강제 장치 1~6 | [x] | `3f66861` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38033626665 | 1~6 전부 구현·테스트 |
-| M3.5 | PPT 실사용 테스트 | [ ] | | | 사람 진행 |
+| M3.5 | PPT 실사용 테스트 | [~] | `19c3c6d` | (진행 중) | 단일 모델 1차 완료, 2종 비교·토큰 통계는 사람 보완 필요 |
 | M5 | 검증/실행 분리 | [ ] | | | |
 | M5.5 | 반복 노드 | [ ] | | | |
 | M5.6 | 상태 / sideEffect | [ ] | | | |
