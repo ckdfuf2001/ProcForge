@@ -333,6 +333,9 @@
   수집·재작성 → import 시 세션 → run fs의 scripts/ (cwd는 fs).
   stdin=해석 인자 JSON, stdout={"summary","json"}=노드 출력. 타임아웃 기본 60s.
   script 항목은 resolve·rewrite·recordKey 제외. 전 모드 실행 (녹화 없음).
+- M5.2-3: 값 흐름. PROMPT 8항·SKILL에 "앞 노드 출력과 같은 값은 ref" 명시.
+  감사 변경: fixed가 다른 노드 녹화 출력과 일치하면 미러 여부 무관 경고
+  (ref 후보). R1(검사값 면제)·R2(자기 노드 미러 면제)는 유지.
 - M5-1: `procforge run <procedure> --param k=v [--out dir] [--force]` 신설
   (App.runProcedure 경유). 출력은 runs/<runId>/fs, --out 지정 시에만 완료 후
   프로젝트 안으로 복사 (기존 파일은 --force 없이 거부).

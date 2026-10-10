@@ -108,6 +108,26 @@ describe("auditFixedValues", () => {
       auditFixedValues({ params: {}, nodes: [dateFix], cassettes: cas }).some((w) => w.includes("날짜 표현")),
     ).toBe(true);
   });
+  it("M5.2-3 다른 노드 녹화와 일치하는 fixed는 면제 없이 경고", () => {
+    const cas = new Map([
+      ["1.1", [{ response: { summary: "total 1500000", json: { total: 1500000 } } }]],
+      ["1.2", [{ response: { summary: "updated 3", json: { rows: [["A", "1,000,000"]] } } }]],
+    ]);
+    // 1.2 fixed가 1.1 녹화(1500000)와 일치 + 자기 미러여도 경고
+    const n12 = node("1.2", {
+      args: { total: { kind: "fixed", value: 1500000 } },
+      attempts: [{ resultJson: { total: 1500000 }, resultSummary: "total 1500000" } as never],
+    });
+    const out = auditFixedValues({ params: {}, nodes: [node("1.1"), n12], cassettes: cas });
+    expect(out.some((w) => w.includes("다른 노드(1.1)") && w.includes("ref 후보"))).toBe(true);
+    // 자기 노드 녹화에만 일치 + 미러면 경고 없음 (R2 유지)
+    const onlyOwn = node("1.9", {
+      args: { v: { kind: "fixed", value: 7777777 } },
+      attempts: [{ resultJson: { v: 7777777 }, resultSummary: "v 7777777" } as never],
+    });
+    const cas2 = new Map([["1.9", [{ response: { summary: "v 7777777", json: { v: 7777777 } } }]]]);
+    expect(auditFixedValues({ params: {}, nodes: [onlyOwn], cassettes: cas2 })).toEqual([]);
+  });
   it("recordedNumbers 추출", () => {
     const s = recordedNumbers([{ response: { summary: "Edited 3 cells", json: { n: 1320000 } } }]);
     expect(s.has(1320000)).toBe(true);

@@ -9,7 +9,9 @@ import type { ArgSpec, Constraint, Node } from "@procforge/shared/schema.js";
 //   R1 numeric_match의 expected/expectedRef/min/max는 검사값이므로 녹화 수치
 //      일치에서 면제 (params 부분 일치·날짜 검사는 유지).
 //   R2 노드 자신의 resultJson/resultSummary에 그대로 있는 값(미러)은
-//      결정성(원인==결과)이므로 녹화 수치 일치에서 면제 (params·날짜 유지).
+//      결정성(원인==결과)이므로 자기 노드 녹화 수치 일치에서 면제 (params·날짜 유지).
+// - M5.2-3 값 흐름: fixed 값이 다른 노드 녹화 출력과 일치하면 면제 없이 경고
+//   (ref 후보). R2 미러 면제는 자기 노드 녹화에만 적용.
 
 const DATE_RES = [
   /\b(19|20)\d{2}-(0?[1-9]|1[0-2])\b/,
@@ -102,6 +104,14 @@ export function auditFixedValues(input: {
     return out;
   };
   const paramEntries = Object.entries(input.params).filter(([, v]) => v.length >= 3);
+  /** 다른 노드 녹화 집합에 포함된 노드 id (M5.2-3 값 흐름) */
+  const crossHits = (nodeId: string, num: number): string[] => {
+    const out: string[] = [];
+    for (const [nid, set] of recNums) {
+      if (nid !== nodeId && set.has(num)) out.push(nid);
+    }
+    return out;
+  };
   const checkScalar = (
     nodeId: string, where: string, value: string | number, checkParams: boolean,
     opts: { mirror: Set<number>; bound: boolean },
@@ -117,17 +127,23 @@ export function auditFixedValues(input: {
       }
       if (isDateLike(value)) push(nodeId, where, value, "날짜 표현");
       const num = numValue(value);
-      if (
-        num !== undefined && Math.abs(num) >= 1000 && !opts.bound && !opts.mirror.has(num) &&
-        (recNums.get(nodeId) ?? new Set()).has(num)
-      ) {
+      if (num === undefined || Math.abs(num) < 1000) return;
+      if (!opts.bound && !opts.mirror.has(num) && (recNums.get(nodeId) ?? new Set()).has(num)) {
         push(nodeId, where, value, "녹화 응답 수치와 일치");
       }
-    } else if (
-      Math.abs(value) >= 1000 && !opts.bound && !opts.mirror.has(value) &&
-      (recNums.get(nodeId) ?? new Set()).has(value)
-    ) {
-      push(nodeId, where, String(value), "녹화 응답 수치와 일치");
+      // M5.2-3: fixed 값이 다른 노드 녹화 출력과 일치하면 면제 없이 경고 (ref 후보)
+      if (!checkParams) {
+        const hit = crossHits(nodeId, num);
+        if (hit.length > 0) push(nodeId, where, value, `다른 노드(${hit.join(",")}) 녹화 출력과 일치 (ref 후보)`);
+      }
+    } else if (Math.abs(value) >= 1000) {
+      if (!opts.bound && !opts.mirror.has(value) && (recNums.get(nodeId) ?? new Set()).has(value)) {
+        push(nodeId, where, String(value), "녹화 응답 수치와 일치");
+      }
+      if (!checkParams) {
+        const hit = crossHits(nodeId, value);
+        if (hit.length > 0) push(nodeId, where, String(value), `다른 노드(${hit.join(",")}) 녹화 출력과 일치 (ref 후보)`);
+      }
     }
   };
   const NUMERIC_BOUND_FIELDS = new Set(["expected", "expectedRef", "min", "max"]);

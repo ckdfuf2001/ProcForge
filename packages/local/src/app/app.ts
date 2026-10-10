@@ -65,6 +65,8 @@ export const PROMPT_TEXT = [
   "6. needs_human이면 사람 조언을 pf_advise로 등록한 뒤 계속한다.",
   "7. 입력 파일 경로·표지 문구처럼 기간이 들어간 값은 var로 분류한다.",
   "   예: \"sales-${params.month}.xlsx\", \"월간보고서 ${params.month} (최종)\".",
+  "8. 앞 노드 출력과 같은 값은 fixed로 박지 말고 ref로 받아온다.",
+  "   예: 표 셀은 \"$1.1.rows\", 합계는 \"$1.1.total\".",
 ].join("\n");
 
 export type AppDeps = {
