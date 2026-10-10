@@ -304,6 +304,11 @@
   argv: [...]}` 고정. runner는 run fs에서 직접 실행해 stdout을 golden으로
   삼는다 (바이너리 출력은 sha/size 지문). 호스트 자의 실행은 pf_report 대상이
   아니며, 스크립트 없는 단계는 ask_human으로 전환한다.
+- M3.5.2-1: lockfile 원자 획득 (openSync wx, 존재확인→쓰기 금지).
+  내용은 {pid, token, at}. stale은 rename 경합 승리자만 회수·재시도,
+  release는 token 일치 시에만 삭제. Windows 일시 오류는 conflict로 재시도.
+- M3.5.2-2: 8자식×50회 동시 보고 부하 테스트 (CI 양 OS 자동 포함).
+  events seq 중복 0·revision 연속·실패는 conflict만.
 - 4-1/4-2 수정: check-deps가 Windows에서 빈 스캔(항상 통과)이던 결함
   수정 (fileURLToPath). 멀티라인 import 여는 행 제외, *.test.ts는
   저장 범위 검사에서 제외 (저장소 직접 검증 목적).

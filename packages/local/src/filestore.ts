@@ -1,5 +1,6 @@
-import { mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync, unlinkSync, statSync, appendFileSync, renameSync } from "node:fs";
+import { mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync, unlinkSync, statSync, appendFileSync, renameSync, openSync, writeSync, closeSync } from "node:fs";
 import { join, dirname } from "node:path";
+import { randomUUID } from "node:crypto";
 import type { Store } from "@procforge/shared/store.js";
 import type { CommitChange } from "@procforge/shared/store.js";
 import type { Node, Session } from "@procforge/shared/schema.js";
@@ -346,40 +347,98 @@ export class FileStore implements Store {
   }
 
   /**
-   * 락 획득. fresh 락이 있으면 conflict. 오래된 락(staleMs 경과)은 정리 후 획득.
+   * 락 획득 (M3.5.2). openSync "wx" 원자 생성 (존재확인→쓰기 금지).
+   * fresh 락이 있으면 conflict. stale 락은 rename으로 회수한 쪽만 재시도.
+   * 내용은 {pid, token, at}, release는 token 일치 시에만 삭제.
    * release()를 반드시 호출. 동기는 유지하되 프로세스 간 보호용.
    */
   acquireLock(sid: string, staleMs = 30000): () => void {
     assertSessionId(sid);
     const p = this.lockPath(sid);
     mkdirSync(dirname(p), { recursive: true });
-    if (existsSync(p)) {
-      let stale = true;
+    const token = randomUUID();
+    const payload = JSON.stringify({ pid: process.pid, token, at: new Date().toISOString() });
+    // 원자 생성 시도. EEXIST면 실패(false).
+    // M3.5.2: Windows 일시 오류(EPERM/EBUSY/EACCES)도 실패로 간주해 conflict
+    // 경로로 재시도 (영구 거부와 구분 불가, withLock 재시도 상한으로 bounded).
+    const tryCreate = (): boolean => {
+      let fd = -1;
       try {
-        const at = statSync(p).mtimeMs;
-        stale = Date.now() - at > staleMs;
-      } catch {
-        stale = true;
+        fd = openSync(p, "wx");
+      } catch (e) {
+        const code = (e as { code?: string }).code;
+        if (code === "EEXIST" || code === "EPERM" || code === "EBUSY" || code === "EACCES") return false;
+        throw e;
       }
-      if (!stale) throw pfError("conflict", `session locked: ${sid}`);
       try {
-        unlinkSync(p);
-      } catch {
-        // 경합 시 상대가 이미 정리 — 계속 진행
+        writeSync(fd, payload);
+        return true;
+      } catch (e) {
+        try {
+          unlinkSync(p);
+        } catch {
+          // 정리 실패 무시
+        }
+        if ((e as { code?: string }).code === "EPERM" || (e as { code?: string }).code === "EBUSY" || (e as { code?: string }).code === "EACCES") {
+          throw pfError("conflict", `session locked: ${sid}`);
+        }
+        throw e;
+      } finally {
+        if (fd >= 0) {
+          try {
+            closeSync(fd);
+          } catch {
+            // 무시
+          }
+        }
       }
-      logger.warn("stale session lock cleaned", { sessionId: sid });
-    }
-    writeFileSync(p, JSON.stringify({ pid: process.pid, at: new Date().toISOString() }));
-    let released = false;
-    return () => {
-      if (released) return;
-      released = true;
+    };
+    const releaseState = { done: false };
+    const release = (): void => {
+      if (releaseState.done) return;
+      releaseState.done = true;
+      let ours = false;
+      try {
+        const cur = JSON.parse(readFileSync(p, "utf8")) as { token?: string } | null;
+        ours = !!cur && cur.token === token;
+      } catch {
+        ours = false;
+      }
+      if (!ours) return;
       try {
         unlinkSync(p);
       } catch {
         // 이미 없음 — 무시
       }
     };
+    if (tryCreate()) return release;
+    // 이미 있음: fresh면 conflict, stale이면 회수 경합
+    let stale = true;
+    try {
+      stale = Date.now() - statSync(p).mtimeMs > staleMs;
+    } catch {
+      stale = true;
+    }
+    if (!stale) throw pfError("conflict", `session locked: ${sid}`);
+    // stale 회수: rename 성공한 쪽만 진행 (패자는 ENOENT → conflict).
+    // 직전 재확인으로 그 사이 생긴 fresh 락 탈취 방지.
+    const staleName = `${p}.stale-${randomUUID()}`;
+    try {
+      const at = statSync(p).mtimeMs;
+      if (Date.now() - at <= staleMs) throw pfError("conflict", `session locked: ${sid}`);
+      renameSync(p, staleName);
+    } catch (e) {
+      if ((e as { code?: string }).code === "conflict") throw e;
+      throw pfError("conflict", `session locked: ${sid}`);
+    }
+    try {
+      unlinkSync(staleName);
+    } catch {
+      // best-effort (남겨도 판독에 무해 — .json 아님)
+    }
+    logger.warn("stale session lock cleaned", { sessionId: sid });
+    if (tryCreate()) return release;
+    throw pfError("conflict", `session locked: ${sid}`);
   }
 
   // ---- 세션 TTL용 메타 (M2.5-6) ----
