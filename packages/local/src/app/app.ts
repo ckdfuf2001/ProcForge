@@ -1,4 +1,5 @@
-import { join } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { CoreClient } from "@procforge/shared/core-client.js";
 import type { Actor } from "@procforge/shared/dto.js";
@@ -30,8 +31,8 @@ import type {
 type OutputOf<K extends keyof typeof OUTPUT_SCHEMAS> = import("zod").infer<(typeof OUTPUT_SCHEMAS)[K]>;
 import { seedSandbox } from "../services/workspace.js";
 import { logger } from "../logger.js";
-import { diffSnapshot, readCaptureRecord, readPreSnapshot, takeSandboxSnapshot, toBaseRel, writePreSnapshot } from "../services/snapshot.js";
-import { classifyReportPaths, collectExistingPaths, ingestReportJobs, readFixtureContents } from "../services/artifacts.js";
+import { diffSnapshot, readCaptureRecord, readPreSnapshot, takeSandboxSnapshot, toBaseRel, writePreCopies, writePreSnapshot } from "../services/snapshot.js";
+import { appendCaptureRecord, classifyReportPaths, collectExistingPaths, collectResultFiles, ingestOriginalFixture, ingestReportJobs, readFixtureContents, resolveOriginal, roleForCapture } from "../services/artifacts.js";
 import { ingestArtifacts, normalizeArgSpecs, readManifest } from "../artifacts.js";
 import { runSession } from "../runner/index.js";
 import { runProcedureTest } from "../runner/procedure-run.js";
@@ -114,6 +115,7 @@ export class ProcForgeApp {
     });
     if (out.done) return { done: true, revision: out.revision, changedNodeIds: out.changedNodeIds };
     // M4.2-2.5.1-3: 처음 probing 진입 때만 사전 스냅샷 기록. 실패는 경고로 반환.
+    // M4.1.1-1: strict 모드면 pf_next 시점 사본도 저장 (inout 원본 탐색용).
     const nextWarnings: string[] = [];
     if (out.enteredProbing) {
       try {
@@ -121,6 +123,9 @@ export class ProcForgeApp {
           this.procforgeDir, sid, out.node.id,
           takeSandboxSnapshot(join(this.procforgeDir, "sandbox", sid)),
         );
+        if (this.strictSandbox) {
+          writePreCopies(this.procforgeDir, sid, out.node.id, join(this.procforgeDir, "sandbox", sid));
+        }
       } catch (e) {
         nextWarnings.push(`스냅샷 기록 실패: ${e instanceof Error ? e.message : String(e)}`);
       }
@@ -146,26 +151,61 @@ export class ProcForgeApp {
     const args = (a.args ?? {}) as Record<string, unknown>;
     const baseDir = this.strictSandbox ? join(this.procforgeDir, "sandbox", sid) : this.projectRoot;
     const cat = sess.toolCatalog.find((t) => t.server === toolRef.server && t.name === toolRef.name);
-    // M4.1-7 스냅샷 판정: 새로 생기거나 바뀐 파일 → out, 그 외 자동분 → in.
-    // 호스트 제출분은 명시 입력(in) 유지. 스냅샷 없으면 기존 로직 폴백 + 경고.
+    // M4.1-7 스냅샷 판정: 새로 생긴 파일 → out, 바뀐 파일 → inout (M4.1.1-1),
+    // 그 외 자동분 → in. 호스트 제출분은 명시 입력(in) 유지.
+    // 스냅샷 없으면 원본 대비 변경을 직접 비교해 inout 판정 (폴백).
     const reportWarnings: string[] = [];
-    let outRels: Set<string> | undefined;
+    const createdRels = new Set<string>();
+    const modifiedRels = new Set<string>();
+    let snapshotMiss = false;
     if (this.strictSandbox) {
       const pre = readPreSnapshot(this.procforgeDir, sid, nid);
       if (!pre) {
+        snapshotMiss = true;
         reportWarnings.push(`스냅샷 없음(${nid}): 기존 존재 기반 캡처로 폴백 (pf_next 경유 권장)`);
       } else {
         const d = diffSnapshot(pre, baseDir);
-        outRels = new Set([...d.created, ...d.modified]);
+        for (const r of d.created) createdRels.add(r);
+        for (const r of d.modified) modifiedRels.add(r);
+      }
+    }
+    const relOfReport = (p: string) => toBaseRel(baseDir, p);
+    let treeCache: import("@procforge/shared/schema.js").Node[] | undefined;
+    const getTreeNodes = async () => treeCache ??= (await this.core.pfTree(sid)).nodes;
+    const manifestNow = readManifest(this.procforgeDir, sid);
+    const resolveHere = (rel: string) => resolveOriginal({
+      procforgeDir: this.procforgeDir, sessionId: sid, nodeId: nid, rel,
+      nodes: treeCache ?? [], manifest: manifestNow,
+    });
+    if (snapshotMiss) {
+      // 폴백: in/inout 후보·응답 파일 중 원본과 다르면 inout
+      const cands = new Set<string>([
+        ...collectExistingPaths({ baseDir, tool: toolRef, args, catalogEntry: cat, roles: ["in", "inout"] }),
+        ...collectResultFiles({ baseDir, resultJson: a.resultJson }),
+      ]);
+      if (cands.size > 0) await getTreeNodes();
+      for (const p of cands) {
+        const rel = relOfReport(p);
+        const orig = resolveHere(rel);
+        if (!orig) continue;
+        try {
+          const cur = readFileSync(resolve(baseDir, p));
+          if (!orig.buf.equals(cur)) modifiedRels.add(rel);
+        } catch {
+          // 읽기 실패 무시
+        }
       }
     }
     const jobs = classifyReportPaths({
       baseDir, tool: toolRef, args, catalogEntry: cat,
-      resultJson: a.resultJson, hostPaths: (a.artifacts ?? []) as string[], outRels,
+      resultJson: a.resultJson, hostPaths: (a.artifacts ?? []) as string[],
+      createdRels, modifiedRels,
     });
-    const { stored, contents } = ingestReportJobs({
+    if (jobs.some((j) => j.kind === "inout")) await getTreeNodes();
+    const { stored, contents } = await ingestReportJobs({
       procforgeDir: this.procforgeDir, sessionId: sid, nodeId: nid,
       attemptId, baseDir, jobs, maxBytes: this.maxArtifactBytes,
+      resolveOriginal: resolveHere,
     });
     const out = await this.core.pfReport({
       sessionId: sid,
@@ -204,6 +244,16 @@ export class ProcForgeApp {
     if (cur && last) {
       // M4.1-7: 보고 시 out 판정분은 attempt에서 제외 (golden 입력 순수 유지, 증거 파일은 보존)
       const sidecar = readCaptureRecord(this.procforgeDir, sid, nodeId, last.id);
+      // M4.1.1-1: 미해결 inout·소실된 원본이 있으면 확정 거부
+      const unresolved = sidecar?.unresolvedInouts ?? [];
+      if (unresolved.length > 0) {
+        throw pfError("bad_request", `inout 원본 없음: ${unresolved.join(", ")}`, "pf_next 경유 실행·seed 확인 후 다시 pf_report.");
+      }
+      for (const fx of sidecar?.inouts ?? []) {
+        if (!existsSync(join(this.procforgeDir, "sessions", sid, fx))) {
+          throw pfError("bad_request", `inout fixture 없음: ${fx}`, "다시 pf_report.");
+        }
+      }
       const outSet = new Set(sidecar?.outs ?? []);
       const kept = last.artifacts.filter((fx) => !outSet.has(fx));
       const fixedArgs: Record<string, unknown> = {};
@@ -221,13 +271,79 @@ export class ProcForgeApp {
       const fresh = collectExistingPaths({
         baseDir, tool: toolRef, args: fixedArgs, specs: norm.specs, catalogEntry: cat, roles: ["in", "inout"],
       }).filter((p) => !covered.has(relOf(p)));
+      // M4.1.1-1: fresh 중 수정분은 inout → 원본 해결 (없으면 bad_request)
+      let treeCacheC: import("@procforge/shared/schema.js").Node[] | undefined;
+      const getTreeC = async () => treeCacheC ??= (await this.core.pfTree(sid)).nodes;
+      const resolveC = (rel: string) => resolveOriginal({
+        procforgeDir: this.procforgeDir, sessionId: sid, nodeId, rel,
+        nodes: treeCacheC ?? [], manifest,
+      });
+      let snapshotModified: Set<string> | undefined;
+      if (this.strictSandbox) {
+        const pre = readPreSnapshot(this.procforgeDir, sid, nodeId);
+        if (pre) snapshotModified = new Set(diffSnapshot(pre, baseDir).modified);
+      }
+      const freshIn: string[] = [];
+      const freshInout: string[] = [];
+      for (const p of fresh) {
+        const rel = relOf(p);
+        let isInout = snapshotModified?.has(rel) ?? false;
+        if (!isInout && !snapshotModified) {
+          await getTreeC();
+          const orig = resolveC(rel);
+          if (orig) {
+            try {
+              if (!orig.buf.equals(readFileSync(resolve(baseDir, p)))) isInout = true;
+            } catch {
+              // 읽기 실패 무시
+            }
+          }
+        }
+        (isInout ? freshInout : freshIn).push(p);
+      }
+      if (freshInout.length > 0) await getTreeC();
       merged = [...kept];
-      if (fresh.length > 0) {
+      const addIns: string[] = [];
+      const addOuts: string[] = [];
+      const addInouts: string[] = [];
+      let nextIdx = last.artifacts.length;
+      if (freshIn.length > 0) {
         const ing = ingestArtifacts({
           procforgeDir: this.procforgeDir, sessionId: sid, nodeId, attemptId: last.id,
-          baseDir, paths: fresh, maxBytes: this.maxArtifactBytes, startIndex: last.artifacts.length,
+          baseDir, paths: freshIn, maxBytes: this.maxArtifactBytes, startIndex: nextIdx,
         });
+        nextIdx += freshIn.length;
         merged.push(...ing.stored);
+        addIns.push(...ing.stored);
+      }
+      if (freshInout.length > 0) {
+        // 증거(수정본) 먼저, 원본은 마지막
+        const ev = ingestArtifacts({
+          procforgeDir: this.procforgeDir, sessionId: sid, nodeId, attemptId: last.id,
+          baseDir, paths: freshInout, maxBytes: this.maxArtifactBytes, startIndex: nextIdx,
+        });
+        nextIdx += freshInout.length;
+        merged.push(...ev.stored);
+        addOuts.push(...ev.stored);
+        for (const p of freshInout) {
+          const rel = relOf(p);
+          const orig = resolveC(rel);
+          if (!orig) {
+            throw pfError("bad_request", `inout 원본 없음: ${rel}`, "pf_next 경유 실행·seed 확인 후 다시 pf_report.");
+          }
+          const o = ingestOriginalFixture({
+            procforgeDir: this.procforgeDir, sessionId: sid, nodeId, attemptId: last.id,
+            rel, buf: orig.buf, index: nextIdx++, maxBytes: this.maxArtifactBytes,
+          });
+          merged.push(o.stored);
+          addIns.push(o.stored);
+          addInouts.push(o.stored);
+        }
+      }
+      if (addIns.length > 0 || addOuts.length > 0 || addInouts.length > 0) {
+        appendCaptureRecord(this.procforgeDir, sid, nodeId, last.id, {
+          ins: addIns, outs: addOuts, inouts: addInouts,
+        });
       }
     }
     const out = await this.core.pfResolve({
@@ -264,12 +380,16 @@ export class ProcForgeApp {
       actor: (a.actor as Actor | undefined) ?? "host",
     });
     // M4.2-2.5.1-3: 재시도 성공 시에도 사전 스냅샷 기록. 실패는 경고로 반환.
+    // M4.1.1-1: strict 모드면 pf_next 시점 사본도 저장 (inout 원본 탐색용).
     const retryWarnings: string[] = [];
     try {
       writePreSnapshot(
         this.procforgeDir, sid, a.nodeId as string,
         takeSandboxSnapshot(join(this.procforgeDir, "sandbox", sid)),
       );
+      if (this.strictSandbox) {
+        writePreCopies(this.procforgeDir, sid, a.nodeId as string, join(this.procforgeDir, "sandbox", sid));
+      }
     } catch (e) {
       retryWarnings.push(`스냅샷 기록 실패: ${e instanceof Error ? e.message : String(e)}`);
     }

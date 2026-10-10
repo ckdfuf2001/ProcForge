@@ -68,6 +68,11 @@ function appendManifest(procforgeDir: string, sessionId: string, entries: Record
   writeAtomicFile(p, JSON.stringify(cur, null, 2));
 }
 
+/** manifest 항목 추가 (M4.1.1-1, 메모리 원본 fixture용) */
+export function appendManifestEntries(procforgeDir: string, sessionId: string, entries: Record<string, string>): void {
+  appendManifest(procforgeDir, sessionId, entries);
+}
+
 const MIME_BY_EXT: Record<string, string> = {  ".txt": "text/plain",
   ".md": "text/markdown",
   ".json": "application/json",
@@ -202,6 +207,16 @@ export function setupSandbox(input: {
     mkdirSync(dirname(dest), { recursive: true });
     copyFileSync(abs, dest);
     copied.push(rel);
+    // M4.1.1-1: seed 원본 보존 (inout 탐색 1순위, 5MB 이하만 best-effort)
+    try {
+      if (statSync(abs).size <= 5 * 1024 * 1024) {
+        const keep = join(input.procforgeDir, "sessions", input.sessionId, "seed", rel);
+        mkdirSync(dirname(keep), { recursive: true });
+        copyFileSync(abs, keep);
+      }
+    } catch {
+      // 보존 실패 무시 (pre-copy·캡처 기록 폴백)
+    }
   }
   return { sandboxDir, copied };
 }

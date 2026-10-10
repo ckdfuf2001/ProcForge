@@ -257,6 +257,10 @@
   revision 파일 폴백 제거 (호출자가 항상 bumped session 전달).
 - 3-0-4: 읽기 pending zod 파싱은 3-0-1에서 완료. applyPending seq Set 1회
   계산, 파일락 낡은 주석 정리, filestore assert/conflict를 pfError로 통일.
+- 3-1: 바뀐 파일은 inout 분류. 원본 탐색 seed→앞노드캡처→pre-copy,
+  pf_next/retry 시점 사본(nodes/<id>/pre/, 5MB 이하) + seed 원본 보존.
+  원본 fixture를 golden에 유지(증거는 outs), run fs 오버레이는 원본 우선.
+  미해결 inout은 confirm 거부.
 
 ## M3.2
 

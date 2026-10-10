@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 
 // sandbox 스냅샷 기반 입출력 판정 (M4.1-7). App 경유, 어댑터 직접 호출 금지.
@@ -38,6 +38,71 @@ export function preSnapshotPath(procforgeDir: string, sessionId: string, nodeId:
   return join(procforgeDir, "sessions", sessionId, "nodes", nodeId, "pre-snapshot.json");
 }
 
+/** pf_next 시점 사본 디렉터리 (M4.1.1-1, inout 원본 탐색용) */
+export function preCopyDir(procforgeDir: string, sessionId: string, nodeId: string): string {
+  return join(procforgeDir, "sessions", sessionId, "nodes", nodeId, "pre");
+}
+
+/** seed 원본 보존 디렉터리 (M4.1.1-1, inout 원본 탐색 1순위) */
+export function seedOriginalDir(procforgeDir: string, sessionId: string): string {
+  return join(procforgeDir, "sessions", sessionId, "seed");
+}
+
+/**
+ * sandbox 파일 사본 저장 (M4.1.1-1). 개당 maxBytes 이하만, 초과분은 건너뜀.
+ * 반환은 복사된 sandbox 상대경로들.
+ */
+export function writePreCopies(
+  procforgeDir: string,
+  sessionId: string,
+  nodeId: string,
+  sandboxDir: string,
+  maxBytes = 5 * 1024 * 1024,
+): string[] {
+  const copied: string[] = [];
+  const dest = preCopyDir(procforgeDir, sessionId, nodeId);
+  for (const e of takeSandboxSnapshot(sandboxDir)) {
+    if (e.size > maxBytes) continue;
+    try {
+      const src = join(resolve(sandboxDir), e.path);
+      const d = join(dest, e.path);
+      mkdirSync(dirname(d), { recursive: true });
+      copyFileSync(src, d);
+      copied.push(e.path);
+    } catch {
+      // 개별 실패 무시 (best-effort)
+    }
+  }
+  return copied;
+}
+
+/** pf_next 시점 사본 읽기 (없으면 undefined) */
+export function readPreCopy(
+  procforgeDir: string,
+  sessionId: string,
+  nodeId: string,
+  rel: string,
+): Buffer | undefined {
+  try {
+    const p = join(preCopyDir(procforgeDir, sessionId, nodeId), rel);
+    if (!existsSync(p)) return undefined;
+    return readFileSync(p);
+  } catch {
+    return undefined;
+  }
+}
+
+/** seed 원본 읽기 (없으면 undefined) */
+export function readSeedOriginal(procforgeDir: string, sessionId: string, rel: string): Buffer | undefined {
+  try {
+    const p = join(seedOriginalDir(procforgeDir, sessionId), rel);
+    if (!existsSync(p)) return undefined;
+    return readFileSync(p);
+  } catch {
+    return undefined;
+  }
+}
+
 export function writePreSnapshot(procforgeDir: string, sessionId: string, nodeId: string, entries: SnapshotEntry[]): void {
   const p = preSnapshotPath(procforgeDir, sessionId, nodeId);
   mkdirSync(dirname(p), { recursive: true });
@@ -69,7 +134,14 @@ export function diffSnapshot(pre: SnapshotEntry[], sandboxDir: string): { create
   return { created, modified };
 }
 
-export type CaptureRecord = { ins: string[]; outs: string[] };
+export type CaptureRecord = {
+  ins: string[];
+  outs: string[];
+  /** inout 원본 fixture들 (M4.1.1-1, replay 입력·golden 유지) */
+  inouts: string[];
+  /** 원본을 찾지 못한 inout 상대경로들 (M4.1.1-1, confirm 거부용) */
+  unresolvedInouts?: string[];
+};
 
 export function captureRecordPath(procforgeDir: string, sessionId: string, nodeId: string, attemptId: string): string {
   return join(procforgeDir, "sessions", sessionId, "capture", nodeId, `${attemptId}.json`);
@@ -98,7 +170,7 @@ export function readCaptureRecord(
   try {
     const parsed = JSON.parse(readFileSync(p, "utf8")) as CaptureRecord;
     if (!Array.isArray(parsed.ins) || !Array.isArray(parsed.outs)) return undefined;
-    return parsed;
+    return { ins: parsed.ins, outs: parsed.outs, inouts: Array.isArray(parsed.inouts) ? parsed.inouts : [], ...(parsed.unresolvedInouts ? { unresolvedInouts: parsed.unresolvedInouts } : {}) };
   } catch {
     return undefined;
   }
