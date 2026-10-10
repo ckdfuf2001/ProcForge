@@ -1,10 +1,13 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, writeFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
+import { spawn } from "node:child_process";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { CoreService, createMemoryStore } from "@procforge/core";
+import { FileStore } from "../src/filestore.js";
 import { buildServer } from "../src/server.js";
 import { ProcForgeApp } from "../src/app/app.js";
 import { checkerEvaluate } from "../src/checker.js";
@@ -95,4 +98,68 @@ describe("M4.2-2.5 core/파일 저장소 분리 실증", () => {
       await server.close();
     }
   }, 30000);
+
+  it("M4.2-2.5.1-1 두 프로세스 동시 커밋·조회: seq 중복 0", async () => {
+    // FileStore 기반 core + 세션 준비 (자식과 같은 폴더 공유)
+    const store = new FileStore(pfdir);
+    const core = new CoreService(store, checkerEvaluate);
+    const toolCatalog = [{ server: "t", name: "x", inputSchema: {}, schemaHash: "h" }];
+    const started = await core.pfStart({ request: "conc", toolCatalog: toolCatalog as never });
+    const sid = started.session.id;
+    await core.pfResolve({
+      sessionId: sid, nodeId: "1", decision: "split", children: [{ goal: "a" }, { goal: "b" }],
+    });
+    // 자식 프로세스: 1.2에 5회 보고 (conflict 시 재시도)
+    const here = dirname(fileURLToPath(import.meta.url));
+    const coreDist = pathToFileURL(join(here, "..", "..", "core", "dist", "service.js")).href;
+    const storeDist = pathToFileURL(join(here, "..", "dist", "filestore.js")).href;
+    const childCode = [
+      `import { CoreService } from ${JSON.stringify(coreDist)};`,
+      `import { FileStore } from ${JSON.stringify(storeDist)};`,
+      `const [pfdir, sid, nid, count] = process.argv.slice(2);`,
+      `const svc = new CoreService(new FileStore(pfdir), () => ({ verdict: "pass", failedConstraints: [] }));`,
+      `const sleep = (ms) => new Promise((r) => setTimeout(r, ms));`,
+      `for (let i = 0; i < Number(count); i++) {`,
+      `  for (let t = 0; t < 200; t++) {`,
+      `    try {`,
+      `      await svc.pfReport({ sessionId: sid, nodeId: nid, tool: { server: "t", name: "x" }, args: {}, resultSummary: "c" + i, selfVerdict: "pass", selfReason: "ok" });`,
+      `      break;`,
+      `    } catch (e) {`,
+      `      if (e?.code !== "conflict" || t === 199) { console.error(e?.message ?? e); process.exit(1); }`,
+      `      await sleep(10);`,
+      `    }`,
+      `  }`,
+      `}`,
+    ].join("\n");
+    const childPath = join(root, "child-report.mjs");
+    writeFileSync(childPath, childCode);
+    const child = spawn(process.execPath, [childPath, pfdir, sid, "1.2", "5"], { stdio: "ignore" });
+    const childDone = new Promise<void>((resolve, reject) => {
+      child.on("exit", (c) => (c === 0 ? resolve() : reject(new Error(`child exit ${c}`))));
+      child.on("error", reject);
+    });
+    // 부모: 1.1에 5회 보고 (창을 넓히려고 사이마다 대기)
+    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+    for (let i = 0; i < 5; i++) {
+      for (let t = 0; t < 200; t++) {
+        try {
+          await core.pfReport({
+            sessionId: sid, nodeId: "1.1",
+            tool: { server: "t", name: "x" }, args: {},
+            resultSummary: `p${i}`, selfVerdict: "pass", selfReason: "ok",
+          });
+          break;
+        } catch (e) {
+          if ((e as { code?: string }).code !== "conflict" || t === 199) throw e;
+          await sleep(10);
+        }
+      }
+      await sleep(50);
+    }
+    await childDone;
+    // 검증: split 1 + 보고 10 = revision 11, seq 1..11 중복 없음
+    expect((await core.getSession(sid)).revision).toBe(11);
+    const seqs = (await core.getEvents(sid)).map((e) => e.seq).sort((a, b) => a - b);
+    expect(seqs).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
+  }, 60000);
 });

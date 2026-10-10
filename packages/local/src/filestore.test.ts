@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { mkdtempSync, writeFileSync, existsSync, readFileSync, mkdirSync } from "node:fs";
+import { mkdtempSync, writeFileSync, existsSync, readFileSync, mkdirSync, readdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
@@ -94,6 +94,32 @@ describe("FileStore ID 이중 검증 (M2.6-2)", () => {
     });
     expect(order).toEqual(["node:1.1", "session", "events"]);
     expect(new FileStore(dir).getSession(sid)?.revision).toBe(1);
+  });
+
+  it("M4.2-2.5.1-1 pending 조회: 파일 불변 + 메모리 뷰 반영", () => {
+    store.saveSession(testSession());
+    store.saveNode(sid, testNode("1.1", "old"));
+    const sessDir = join(dir, "sessions", sid);
+    writeFileSync(join(sessDir, "pending-1.json"), JSON.stringify({
+      revision: 1,
+      session: { ...testSession(), revision: 1 },
+      nodes: [testNode("1.1", "new")],
+      events: [],
+    }));
+    const snapTree = (d: string, out: Record<string, string> = {}): Record<string, string> => {
+      for (const e of readdirSync(d, { withFileTypes: true })) {
+        const p = join(d, e.name);
+        if (e.isDirectory()) snapTree(p, out);
+        else out[p] = readFileSync(p, "utf8");
+      }
+      return out;
+    };
+    const before = snapTree(sessDir);
+    const reread = new FileStore(dir);
+    expect(reread.getSession(sid)?.revision).toBe(1);
+    expect(reread.getNode(sid, "1.1")?.goal).toBe("new");
+    expect([...reread.getNodes(sid).values()].find((n) => n.id === "1.1")?.goal).toBe("new");
+    expect(snapTree(sessDir)).toEqual(before);
   });
 
   it("M4.2-2.5-3 저장 실패해도 재로드 시 일관성", () => {

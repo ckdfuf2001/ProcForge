@@ -37,13 +37,12 @@ export class FileStore implements Store {
     assertSessionId(id);
     const p = join(this.sessionDir(id), "session.json");
     if (!existsSync(p)) return undefined;
-    try {
-      this.recoverSession(id);
-    } catch {
-      // 복구 best-effort (읽기는 이어감)
-    }
-    // M4.2-0.5-2: 읽기는 순수 조회 (구 세션 revision 기본값은 파서가 적용)
+    // M4.2-0.5-2: 읽기는 순수 조회 (구 세션 revision 기본값은 파서가 적용).
+    // M4.2-2.5.1-1: pending이 있으면 파일 쓰기 없이 메모리 뷰에 반영.
     const raw = JSON.parse(readFileSync(p, "utf8")) as Record<string, unknown>;
+    for (const change of this.readPendings(id)) {
+      if (change.session) Object.assign(raw, change.session);
+    }
     return SessionSchema.parse(raw);
   }
 
@@ -56,11 +55,16 @@ export class FileStore implements Store {
     assertSessionId(sessionId);
     const dir = join(this.sessionDir(sessionId), "nodes");
     const out = new Map<string, Node>();
-    if (!existsSync(dir)) return out;
-    for (const f of readdirSync(dir)) {
-      if (!f.endsWith(".json") || f === ".lock") continue;
-      const n = NodeSchema.parse(JSON.parse(readFileSync(join(dir, f), "utf8")));
-      out.set(n.id, n);
+    if (existsSync(dir)) {
+      for (const f of readdirSync(dir)) {
+        if (!f.endsWith(".json") || f === ".lock") continue;
+        const n = NodeSchema.parse(JSON.parse(readFileSync(join(dir, f), "utf8")));
+        out.set(n.id, n);
+      }
+    }
+    // M4.2-2.5.1-1: pending 반영 메모리 뷰 (쓰기 없음)
+    for (const change of this.readPendings(sessionId)) {
+      for (const n of change.nodes ?? []) out.set(n.id, n);
     }
     return out;
   }
@@ -69,8 +73,14 @@ export class FileStore implements Store {
     assertSessionId(sessionId);
     assertNodeId(nodeId);
     const p = join(this.sessionDir(sessionId), "nodes", `${nodeId}.json`);
-    if (!existsSync(p)) return undefined;
-    return NodeSchema.parse(JSON.parse(readFileSync(p, "utf8")));
+    let base: Node | undefined;
+    if (existsSync(p)) base = NodeSchema.parse(JSON.parse(readFileSync(p, "utf8")));
+    // M4.2-2.5.1-1: pending 반영 메모리 뷰 (쓰기 없음)
+    for (const change of this.readPendings(sessionId)) {
+      const found = (change.nodes ?? []).find((n) => n.id === nodeId);
+      if (found) base = found;
+    }
+    return base;
   }
 
   saveNode(sessionId: string, n: Node): void {
@@ -90,9 +100,26 @@ export class FileStore implements Store {
   /** 상태 이벤트 조회 (R7 히스토리 원천, R7형만) */
   readEvents(sessionId: string): EventEntry[] {
     assertSessionId(sessionId);
+    const out = this.readFileEvents(sessionId);
+    // M4.2-2.5.1-1: pending 반영 메모리 뷰 (쓰기 없음, seq 중복 방지)
+    const seen = new Set(out.map((e) => e.seq));
+    for (const change of this.readPendings(sessionId)) {
+      for (const e of change.events ?? []) {
+        if (!seen.has(e.seq)) {
+          seen.add(e.seq);
+          out.push(e);
+        }
+      }
+    }
+    out.sort((a, b) => a.seq - b.seq);
+    return out;
+  }
+
+  /** events.jsonl 파일분만 읽기 (커밋 중복 제거 기준용) */
+  private readFileEvents(sessionId: string): EventEntry[] {
     const p = join(this.sessionDir(sessionId), "events.jsonl");
-    if (!existsSync(p)) return [];
     const out: EventEntry[] = [];
+    if (!existsSync(p)) return out;
     for (const line of readFileSync(p, "utf8").split("\n")) {
       const t = line.trim();
       if (!t) continue;
@@ -110,9 +137,23 @@ export class FileStore implements Store {
     const dir = this.sessionDir(sid);
     if (!existsSync(dir)) return [];
     return readdirSync(dir)
-      .filter((f) => f.startsWith("pending-") && f.endsWith(".json"))
-      .sort()
+      .filter((f) => /^pending-\d+\.json$/.test(f))
+      .sort((a, b) => Number.parseInt(a.slice(8, -5), 10) - Number.parseInt(b.slice(8, -5), 10))
       .map((f) => join(dir, f));
+  }
+
+  /** pending 파싱 (읽기 경로용, 쓰기 없음. 손상은 건너뜀) */
+  private readPendings(sid: string): CommitChange[] {
+    const out: CommitChange[] = [];
+    for (const f of this.pendingFiles(sid)) {
+      try {
+        const parsed = JSON.parse(readFileSync(f, "utf8")) as CommitChange | null;
+        if (parsed && typeof parsed === "object") out.push(parsed);
+      } catch {
+        // 손상 pending은 읽기에서 건너뜀 (쓰기 경로에서 .corrupt로 이동)
+      }
+    }
+    return out;
   }
 
   /**
@@ -149,7 +190,8 @@ export class FileStore implements Store {
   private applyPending(sid: string, c: CommitChange): void {
     for (const n of c.nodes ?? []) this.saveNode(sid, n);
     if (c.session) this.saveSession(c.session);
-    const fresh = (c.events ?? []).filter((e) => !this.readEvents(sid).some((x) => x.seq === e.seq));
+    // 파일 기준 중복 제거 (자기 pending은 미반영 취급)
+    const fresh = (c.events ?? []).filter((e) => !this.readFileEvents(sid).some((x) => x.seq === e.seq));
     if (fresh.length > 0) this.appendEvents(sid, fresh);
   }
 
