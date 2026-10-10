@@ -340,6 +340,12 @@
   않음 (R1 축소: expectedRef/min/max만 면제). equals expected의
   ${params.k} 해결 (params 없으면 deferred, 미등록 키는 hard fail).
   R1 변경 사유: 검사값 자체가 녹화 수치와 같으면 하드코딩이므로 ref 강제.
+  약식 ref: validator·resolveVar가 "$1.1.rows" 허용 (숫자 꼬리는 노드 id 귀속).
+- M5.2-5: 수락 테스트. CI E2E m52-monthly.test.ts (절차서 monthly):
+  1.1 script 집계 + period==${params.month}, 1.2 script 렌더 +
+  total==$1.1.total. a 9월 분해 strict 0, b 10월 실행·독립 계산 일치,
+  c 11월 부재 bad_request, d 데이터 교체 period fail+blocked.
+  CI에 setup-python + openpyxl.
 - M5-1: `procforge run <procedure> --param k=v [--out dir] [--force]` 신설
   (App.runProcedure 경유). 출력은 runs/<runId>/fs, --out 지정 시에만 완료 후
   프로젝트 안으로 복사 (기존 파일은 --force 없이 거부).
