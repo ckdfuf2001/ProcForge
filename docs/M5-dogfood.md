@@ -20,27 +20,29 @@
   2번 슬라이드 표 매출(세전) A 120/1,090,909, B 80/727,273.
 - numeric_match (1.2): pass (failedConstraints 없음).
 
-## 3. 해석 (M5.1-C에서 실제 결과로 교체)
+## 3. 해석 (M5.2 수락 a~d 결과로 교체)
 
-- M5 당시 한계의 메커니즘 확정: live run은 확정 fixture에서 입력을 시딩한다
-  (fixture-sealed). 워크스페이스 작업 파일이 바뀌어도 실행 입력은 그대로이므로,
-  9월 절차서의 10월 실행은 9월 산출물을 재생성할 수밖에 없었다.
-- M5.1-C1 `monthly-2026-10` (3 leaf, strict finalize 감사 0):
-  1.1 `pptx/read_json` agg.json + numeric `c-total` (합계 1500000),
-  1.2 `pptx/pptx_set_table` 10월 표 고정값,
-  1.3 `pptx/pptx_set_title` text var `월간보고서 ${params.month} (최종)` (B3).
-  agg.json은 sales-2026-10.xlsx에서 호스트가 실측 집계한 값
-  (A 100/1000000, B 50/500000, 합계 1500000).
-- C2 month=2026-10 live 실행: pass=3 fail=0. run 산출 a.pptx 표지
-  `월간보고서 2026-10 (최종)` + 표 10월 수치 확인. 워크스페이스 9월 파일 무오염.
-- C3 1.1 fixture 합계 9999999 조작: 1.1 fail (`c-total`) + 1.2/1.3 blocked,
-  하류 미실행. 복원 후 live pass=3.
-- C4 CI E2E `m51-monthly.test.ts` (fake-ppt + `read_json`): 9월 확정 →
-  10월 실행 `filled:2026-10:` + `보고서 2026-10` (전체 var·템플릿 치환),
-  조작 시 numeric fail + blocked, 복원 후 통과.
-- 관측 (절차서 밖 기록): MCP stdio는 UTF-8 규격. 파이썬 서버가 로캘(cp949)
-  stdio로 한글 JSON을 읽으면 서로게이트 mojibake가 생기므로
-  `stdin/stdout.reconfigure(encoding="utf-8")` 필수. run은 MCP command를
-  run fs 기준이 아닌 절대경로로 지정해야 한다 (상대경로 미지원, 후속 후보).
+- 절차서 `monthly` (기간 없음, 9월 xlsx만으로 분해·strict finalize 감사 0):
+  1.1 script 집계 (`sales-${params.month}.xlsx` 바인딩 입력) + `period ==
+  ${params.month}`, 1.2 script 렌더 (`$1.1.rows` + 표지 템플릿) +
+  `total == $1.1.total`. 고정 숫자·날짜 리터럴 없음.
+- a 9월 분해: strict finalize warnings []. 9월 실측 앵커
+  (A 120/1200000, B 80/800000, 합계 2000000).
+- b 10월 xlsx 추가 후 run month=2026-10: pass 2. 산출 report.txt/pptx가
+  테스트 독립 계산(A 100/1000000, B 50/500000, 합계 1500000)과 일치,
+  표지 2026-10. 9월 절차서가 10월 파일을 읽은 첫 사례 (입력 바인딩).
+- c month=2026-11 (파일 없음): 실행 전 bad_request (입력 바인딩 실패).
+  노드 실행 0.
+- d sales-2026-10.xlsx에 9월 데이터: 1.1 fail (`c-period`,
+  period 2026-09 ≠ 2026-10) + 1.2 blocked. 복원 후 live pass 2.
+- 11월 한계 실험 기록 (M5.1 절차서 monthly-2026-10):
+  month=2026-11 실행이 pass 3, 표지 2026-11 + 표 10월 수치
+  (run 52ff17ab). 고정 표값 + fixture-sealed의 실증. M5.2에서 해소.
+- 관측 (절차서 밖 기록): MCP stdio는 UTF-8 규격. 파이썬 서버·스크립트 모두
+  stdin/stdout UTF-8 고정 필요 (runner는 python 실행 시 PYTHONUTF8=1,
+  PYTHONIOENCODING=utf-8 주입). run은 MCP command를 run fs 기준이 아닌
+  절대경로로 지정해야 한다 (상대경로 미지원, 후속 후보).
 - replay 모드는 카세트 없는 live 절차서에서 실행 불가
   (`record 없이 실행 불가`) — record 절차서 전용.
+- 샘플 정합화 (M5.2-6): 9월 xlsx 단가를 포함 기준 11000으로 통일
+  (금액 열 불변, 집계 불변). 단가×수량 == 금액이 양 달 모두 성립.
