@@ -94,7 +94,10 @@ export async function runSession(opts: RunOptions): Promise<RunReport> {
   const session = store.getSession(opts.sessionId);
   if (!session) throw Object.assign(new Error(`세션 없음: ${opts.sessionId}`), { code: "session_not_found" });
   const runId = opts.runId ?? randomUUID();
-  const { runDir, fsDir } = setupRunFs(opts.procforgeDir, opts.sessionId, runId);
+  const { runDir, fsDir } = setupRunFs(opts.procforgeDir, opts.sessionId, runId, {
+    projectRoot: opts.projectRoot,
+    params: session.params as Record<string, string>,
+  });
   const release = store.acquireLock(opts.sessionId, 60000);
   // M5.1-A1: 장기 보유 중 하트비트 (20s 주기)
   const beat = setInterval(() => {

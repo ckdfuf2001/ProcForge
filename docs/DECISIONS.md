@@ -324,6 +324,10 @@
   "${params.x}"). core는 deferred, runner에서 판정. advise 안내 문구 갱신.
 - M5.1-B3: 기간 값 var 분류 문구 (PROMPT_TEXT 7항·SKILL).
   resolveVar 문자열 내 ${params.k} 치환 구현 ($노드 혼합은 미지원).
+- M5.2-1: 입력 바인딩. in/inout + "${params." 포함 값만 run 시작 시
+  projectRoot에서 해석해 run fs로 복사 (fixture 아님, bound가 덮어씀).
+  fixed 리터럴·$노드 참조는 제외. 부재·탈출·미등록 키는 실행 전 bad_request.
+  전 모드 적용 (replay 포함).
 - M5-1: `procforge run <procedure> --param k=v [--out dir] [--force]` 신설
   (App.runProcedure 경유). 출력은 runs/<runId>/fs, --out 지정 시에만 완료 후
   프로젝트 안으로 복사 (기존 파일은 --force 없이 거부).
