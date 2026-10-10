@@ -857,7 +857,7 @@ export class CoreService implements CoreClient {
       if (!n.args) throw err("bad_request", `node ${n.id}에 확정된 인자가 없어 수정 불가. pf_confirm_leaf 먼저.`);
       const set = input.patch.set ?? {};
       for (const [k, spec] of Object.entries(set)) {
-        if (!spec || (spec.kind !== "fixed" && spec.kind !== "var" && spec.kind !== "generated")) {
+        if (!spec || (spec.kind !== "fixed" && spec.kind !== "var" && spec.kind !== "generated" && spec.kind !== "script")) {
           throw err("bad_request", `bad patch spec: ${k}`);
         }
       }

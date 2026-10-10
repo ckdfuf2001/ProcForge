@@ -43,6 +43,53 @@ export type WriteProcedureResult = {
   commandFile: string;
 };
 
+/**
+ * M5.2-2: script-kind 인자의 호스트 스크립트 수집.
+ * procedures/<name>/scripts/<nodeId>.<ext>로 복사하고 doc의 file 값을
+ * 수집 경로로 재작성. 노드당 스크립트 1개 초과·미존재·범위 밖·확장자 불가는
+ * finalize 실패(bad_request). doc을 변형해 반환 (호출자가 procedure.json 기록).
+ */
+export function collectScripts(
+  doc: ProcedureDoc,
+  projectRoot: string,
+  buildDir: string,
+  files: string[],
+): ProcedureDoc {
+  const normRoot = projectRoot.split("\\").join("/").replace(/\/$/, "");
+  for (const n of doc.nodes as (ProcedureDoc["nodes"][number] & { args?: Record<string, ArgSpec> })[]) {
+    const entries = Object.entries(n.args ?? {}).filter(([, s]) => (s as ArgSpec).kind === "script");
+    if (entries.length > 1) {
+      throw Object.assign(new Error(`스크립트는 노드당 1개: ${n.id}`), { code: "bad_request" });
+    }
+    for (const [k, s] of entries) {
+      const spec = s as unknown as { file: string };
+      const rel = String(spec.file ?? "").split("\\").join("/");
+      const m = /^(.*)\.(py|mjs)$/.exec(rel);
+      if (!m || rel.includes("..") || rel.startsWith("/") || /^[a-zA-Z]:/.test(rel)) {
+        throw Object.assign(new Error(`스크립트 경로 볼 수 없음: ${n.id}.${k}=${spec.file} (작업공간 상대 .py/.mjs만)`), {
+          code: "bad_request",
+        });
+      }
+      const abs = join(projectRoot, rel);
+      if (!existsSync(abs)) {
+        throw Object.assign(new Error(`스크립트 없음: ${n.id}.${k}=${spec.file}`), { code: "bad_request" });
+      }
+      const normAbs = abs.split("\\").join("/");
+      if (!(normAbs === normRoot || normAbs.startsWith(`${normRoot}/`))) {
+        throw Object.assign(new Error(`스크립트가 작업공간 밖: ${n.id}.${k}=${spec.file}`), {
+          code: "bad_request",
+        });
+      }
+      const destRel = `scripts/${n.id.split(".").join("_")}.${rel.split(".").pop()}`;
+      mkdirSync(dirname(join(buildDir, destRel)), { recursive: true });
+      copyFileSync(abs, join(buildDir, destRel));
+      spec.file = destRel;
+      files.push(destRel);
+    }
+  }
+  return doc;
+}
+
 export function writeProcedure(input: {
   procforgeDir: string;
   projectRoot?: string;
@@ -72,7 +119,7 @@ export function writeProcedure(input: {
     writeFileSync(p, data);
     files.push(rel.replace(/\\/g, "/"));
   };
-  put("procedure.json", JSON.stringify(doc, null, 2));
+  put("procedure.json", JSON.stringify(collectScripts(doc, projectRoot, buildDir, files), null, 2));
   put("PROCEDURE.md", renderProcedureMd(doc, input.auditFindings ?? []));
   put("SKILL.md", renderSkillMd(doc));
   const commandMd = renderCommandMd(doc);
@@ -141,6 +188,7 @@ function renderProcedureMd(doc: ProcedureDoc, auditFindings: string[] = []): str
       const s = spec as ArgSpec;
       if (s.kind === "fixed") L.push(`  - \`${k}\` = \`${JSON.stringify((s as { value: unknown }).value)}\``);
       else if (s.kind === "var") L.push(`  - \`${k}\` ← ${(s as { ref: string }).ref}`);
+      else if (s.kind === "script") L.push(`  - \`${k}\` = 스크립트: \`${(s as { file: string }).file}\``);
       else L.push(`  - \`${k}\` = 생성: ${(s as { instruction: string }).instruction}`);
     }
     if (n.constraints.length > 0) {

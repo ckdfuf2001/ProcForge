@@ -29,6 +29,10 @@ export function resolveArgs(input: {
       out[k] = (spec as { value: unknown }).value;
     } else if (spec.kind === "var") {
       out[k] = resolveVar((spec as { ref: string }).ref, input.params, input.outputs, input.topo);
+    } else if (spec.kind === "script") {
+      // M5.2-2: 스크립트 지정은 해석 대상 아님. 파일 위치는 finalize/import가
+      // 절차서 기준으로 재작성하므로 여기서는 원문 유지 (execNode가 처리).
+      out[k] = (spec as { file: string }).file;
     } else {
       if (input.supplied && Object.prototype.hasOwnProperty.call(input.supplied, k)) {
         out[k] = input.supplied[k];

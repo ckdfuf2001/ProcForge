@@ -88,6 +88,8 @@ export function importProcedure(
   };
   copyTree(join(procTests, "fixtures"), join(sessDir, "fixtures"));
   copyTree(join(procTests, "cassettes"), join(sessDir, "cassettes"));
+  // M5.2-2: 절차서 scripts/ → 세션 scripts/ (run fs 실행용)
+  copyTree(join(procforgeDir, "procedures", parsed.name, "scripts"), join(sessDir, "scripts"));
   const mf = join(procTests, "fixtures-manifest.json");
   if (existsSync(mf)) copyFileSync(mf, join(sessDir, "fixtures-manifest.json"));
   return { sessionId };

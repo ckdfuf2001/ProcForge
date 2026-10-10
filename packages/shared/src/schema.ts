@@ -48,10 +48,20 @@ export const ArgSpecGeneratedSchema = z.object({
   constraints: z.array(z.string()).default([]),
   path: PathRoleSchema.optional(),
 });
+export const ArgSpecScriptSchema = z.object({
+  /** 호스트 작성 스크립트 (M5.2-2). file은 workspace 상대경로(확정 시),
+      finalize에서 procedures/<name>/scripts/<nodeId>.<ext>로 수집·재작성. */
+  kind: z.literal("script"),
+  file: z.string().min(1),
+  runtime: z.enum(["python", "node"]).default("python"),
+  timeoutMs: z.number().int().positive().max(600000).optional(),
+  path: PathRoleSchema.optional(),
+});
 export const ArgSpecSchema = z.discriminatedUnion("kind", [
   ArgSpecFixedSchema,
   ArgSpecVarSchema,
   ArgSpecGeneratedSchema,
+  ArgSpecScriptSchema,
 ]);
 export type ArgSpec = z.infer<typeof ArgSpecSchema>;
 

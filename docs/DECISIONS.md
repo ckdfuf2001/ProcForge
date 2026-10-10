@@ -328,6 +328,11 @@
   projectRoot에서 해석해 run fs로 복사 (fixture 아님, bound가 덮어씀).
   fixed 리터럴·$노드 참조는 제외. 부재·탈출·미등록 키는 실행 전 bad_request.
   전 모드 적용 (replay 포함).
+- M5.2-2: 스크립트 leaf. arg kind "script" {file, runtime python|node,
+  timeoutMs} (노드당 1개). finalize가 procedures/<name>/scripts/<nodeId>.ext로
+  수집·재작성 → import 시 세션 → run fs의 scripts/ (cwd는 fs).
+  stdin=해석 인자 JSON, stdout={"summary","json"}=노드 출력. 타임아웃 기본 60s.
+  script 항목은 resolve·rewrite·recordKey 제외. 전 모드 실행 (녹화 없음).
 - M5-1: `procforge run <procedure> --param k=v [--out dir] [--force]` 신설
   (App.runProcedure 경유). 출력은 runs/<runId>/fs, --out 지정 시에만 완료 후
   프로젝트 안으로 복사 (기존 파일은 --force 없이 거부).

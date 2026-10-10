@@ -13,6 +13,7 @@ import { normalizeArgSpecs, fixtureFileExists, readManifest } from "../artifacts
 import { ConnectionPool } from "./connections.js";
 import { findRecording, loadCassette, recordKey, saveRecording, toToolResponse, compareToolResponses } from "./recordings.js";
 import { resolveArgs } from "./resolve.js";
+import { runScript } from "./script-run.js";
 import { inferPathRole, rewritePaths, type InferredRole, type PathRole } from "./paths.js";
 import { setupRunFs } from "./workdir.js";
 import { writeRunState } from "../services/run-state.js";
@@ -327,8 +328,14 @@ async function execNode(
   }
   const inputSchema = catalogInputSchema(opts, n);
   const readOnly = catalogReadOnly(opts, n);
+  // M5.2-2: script-kind 항목은 도구 인자 파이프라인(resolve·rewrite·recordKey)에서
+  // 제외. 파일 위치는 원본 spec에서 직접 읽는다.
+  const scriptEntry = Object.entries(specs).find(([, s]) => (s as { kind?: string }).kind === "script");
+  const toolSpecs: typeof specs = scriptEntry
+    ? Object.fromEntries(Object.entries(specs).filter(([k]) => k !== scriptEntry[0]))
+    : specs;
   const roles: Record<string, PathRole | InferredRole | undefined> = {};
-  for (const [k, spec] of Object.entries(specs)) {
+  for (const [k, spec] of Object.entries(toolSpecs)) {
     const explicit = (spec as { path?: PathRole }).path;
     if (explicit) {
       roles[k] = explicit;
@@ -348,7 +355,7 @@ async function execNode(
   }
   const args = rewritePaths(
     resolveArgs({
-      specs,
+      specs: toolSpecs,
       params,
       outputs,
       attempts: n.attempts,
@@ -369,7 +376,25 @@ async function execNode(
   let resp: ToolResponse;
   let mocked = false;
 
-  if (n.sideEffect === "external" && mode !== "live") {
+  // M5.2-2: 스크립트 leaf는 MCP 대신 호스트 스크립트 실행 (전 모드).
+  if (scriptEntry) {
+    const spec = scriptEntry[1] as unknown as { file: string; runtime?: string; timeoutMs?: number };
+    const rel = String(spec.file ?? "").split("\\").join("/");
+    if (!rel.startsWith("scripts/") || rel.includes("..")) {
+      throw Object.assign(new Error(`스크립트 경로 볼 수 없음: ${n.id}.${scriptEntry[0]}=${spec.file}`), {
+        code: "bad_request",
+      });
+    }
+    const scriptAbs = join(opts.procforgeDir, "runs", runId, rel);
+    const out = runScript({
+      runtime: spec.runtime ?? "python",
+      scriptAbs,
+      args,
+      cwd: fsDir,
+      timeoutMs: spec.timeoutMs,
+    });
+    resp = { resultText: out.summary, resultJson: out.json };
+  } else if (n.sideEffect === "external" && mode !== "live") {
     // record/replay/passthrough에서 실제 호출 금지 (M3)
     const rec = findRecording(loadCassette(opts.procforgeDir, opts.sessionId, n.id), key);
     if (rec) {

@@ -1,4 +1,4 @@
-import { copyFileSync, existsSync, mkdirSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readdirSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import type { Node } from "@procforge/shared/schema.js";
 import { FileStore } from "../filestore.js";
@@ -42,7 +42,27 @@ export function setupRunFs(
   if (bound?.projectRoot && bound?.params) {
     seedBoundInputs(nodes, bound.projectRoot, bound.params, fsDir);
   }
+  // M5.2-2: 세션 scripts/ → runs/<runId>/scripts/ (fs와 분리, cwd는 fs).
+  copyTree(join(procforgeDir, "sessions", sessionId, "scripts"), join(runDir, "scripts"));
   return { runId, runDir, fsDir };
+}
+
+/** 디렉토리 트리 복사 (없으면 무시) */
+export function copyTree(src: string, dst: string): void {
+  if (!existsSync(src)) return;
+  const walk = (d: string): void => {
+    for (const e of readdirSync(d, { withFileTypes: true })) {
+      const p = join(d, e.name);
+      if (e.isDirectory()) {
+        walk(p);
+        continue;
+      }
+      const rel = relative(src, p);
+      mkdirSync(dirname(join(dst, rel)), { recursive: true });
+      copyFileSync(p, join(dst, rel));
+    }
+  };
+  walk(src);
 }
 
 /**
