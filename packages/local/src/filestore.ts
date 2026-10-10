@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync, unlinkSync, statSync, appendFileSync, renameSync, openSync, writeSync, closeSync } from "node:fs";
+import { mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync, unlinkSync, statSync, appendFileSync, renameSync, openSync, writeSync, closeSync, utimesSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { Store } from "@procforge/shared/store.js";
@@ -19,6 +19,34 @@ export function assertSessionId(sid: string): void {
 
 export function assertNodeId(nid: string): void {
   if (!NodeIdSchema.safeParse(nid).success) throw pfError("bad_request", `bad node id: ${nid}`);
+}
+
+/** lock 회수 계측 (M5.1-A3). 테스트에서 reset 후 단언. */
+export const lockStats = { reclaims: 0 };
+export function resetLockStats(): void {
+  lockStats.reclaims = 0;
+}
+
+/** pid 생존 확인 (M5.1-A1). ESRCH=사망, 그 외(EPERM 포함)=생존 취급. */
+function pidAlive(pid: unknown): boolean {
+  if (typeof pid !== "number" || !Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return (e as { code?: string }).code !== "ESRCH";
+  }
+}
+
+/** lock 파일 내용 읽기 (best-effort) */
+function readLockContent(p: string): { pid?: unknown; token?: unknown } | undefined {
+  try {
+    const parsed = JSON.parse(readFileSync(p, "utf8")) as { pid?: unknown; token?: unknown } | null;
+    if (parsed && typeof parsed === "object") return parsed;
+    return undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 // NOTE: local 전용. core 패키지는 이 파일을 모른다. 합성은 core-inprocess.ts에서만.
@@ -347,8 +375,22 @@ export class FileStore implements Store {
   }
 
   /**
-   * 락 획득 (M3.5.2). openSync "wx" 원자 생성 (존재확인→쓰기 금지).
-   * fresh 락이 있으면 conflict. stale 락은 rename으로 회수한 쪽만 재시도.
+   * 락 mtime 갱신 (M5.1-A1 하트비트, best-effort).
+   * 보유자만 주기 호출. 탈취된 파일의 수명까지 늘릴 수 있으나 release token 검사로 무해.
+   */
+  refreshLock(sid: string): void {
+    try {
+      const now = new Date();
+      utimesSync(this.lockPath(sid), now, now);
+    } catch {
+      // 무시
+    }
+  }
+
+  /**
+   * 락 획득 (M3.5.2, M5.1-A1/A2). openSync "wx" 원자 생성 (존재확인→쓰기 금지).
+   * fresh 락·생존 pid 락이 있으면 conflict. stale 락은 rename 경합 승리 +
+   * token 일치 확인 후에만 재시도, 불일치 시 원위치 후 conflict.
    * 내용은 {pid, token, at}, release는 token 일치 시에만 삭제.
    * release()를 반드시 호출. 동기는 유지하되 프로세스 간 보호용.
    */
@@ -412,6 +454,9 @@ export class FileStore implements Store {
       }
     };
     if (tryCreate()) return release;
+    // M5.1-A1: 살아 있는 pid의 잠금은 절대 회수 금지
+    const observed = readLockContent(p);
+    if (observed && pidAlive(observed.pid)) throw pfError("conflict", `session locked: ${sid}`);
     // 이미 있음: fresh면 conflict, stale이면 회수 경합
     let stale = true;
     try {
@@ -420,9 +465,10 @@ export class FileStore implements Store {
       stale = true;
     }
     if (!stale) throw pfError("conflict", `session locked: ${sid}`);
-    // stale 회수: rename 성공한 쪽만 진행 (패자는 ENOENT → conflict).
+    // stale 회수: rename 성공한 쪽만 진행.
     // 직전 재확인으로 그 사이 생긴 fresh 락 탈취 방지.
     const staleName = `${p}.stale-${randomUUID()}`;
+    const observedToken = typeof observed?.token === "string" ? observed.token : undefined;
     try {
       const at = statSync(p).mtimeMs;
       if (Date.now() - at <= staleMs) throw pfError("conflict", `session locked: ${sid}`);
@@ -431,6 +477,43 @@ export class FileStore implements Store {
       if ((e as { code?: string }).code === "conflict") throw e;
       throw pfError("conflict", `session locked: ${sid}`);
     }
+    // M5.1-A2: 옮겨진 파일의 token이 관찰분과 다르면 새 잠금을 잘못 옮긴 것 →
+    // 즉시 원위치 후 conflict. 일치할 때만 진행.
+    let movedRaw: string | undefined;
+    try {
+      movedRaw = readFileSync(staleName, "utf8");
+    } catch {
+      movedRaw = undefined;
+    }
+    let movedToken: string | undefined;
+    try {
+      const moved = movedRaw === undefined ? undefined : (JSON.parse(movedRaw) as { token?: unknown } | null);
+      if (moved && typeof moved === "object" && typeof moved.token === "string") movedToken = moved.token;
+    } catch {
+      // 파싱 실패는 불일치 취급
+    }
+    if (observedToken !== undefined && movedToken !== observedToken) {
+      try {
+        renameSync(staleName, p);
+      } catch {
+        try {
+          const fd = openSync(p, "wx");
+          try {
+            if (movedRaw !== undefined) writeSync(fd, movedRaw);
+          } finally {
+            try {
+              closeSync(fd);
+            } catch {
+              // 무시
+            }
+          }
+        } catch {
+          // 점유 중 — 아무것도 덮어쓰지 않음
+        }
+      }
+      throw pfError("conflict", `session locked: ${sid}`);
+    }
+    lockStats.reclaims++;
     try {
       unlinkSync(staleName);
     } catch {
@@ -455,6 +538,7 @@ export class FileStore implements Store {
   /**
    * 세션 lockfile 안에서 실행 (M4.2-2.5, core change 트랜잭션용).
    * M4.2-2.5.1-5: 잠금 중이면 25ms 간격 최대 20회 재시도 후 conflict.
+   * M5.1-A1: 보유 중 하트비트 (staleMs/3 주기, 기본 10s).
    */
   async withLock<T>(sid: string, fn: () => T | Promise<T>): Promise<T> {
     for (let i = 0; i < 20; i++) {
@@ -466,9 +550,11 @@ export class FileStore implements Store {
         await new Promise((r) => setTimeout(r, 25));
         continue;
       }
+      const beat = setInterval(() => this.refreshLock(sid), 10000);
       try {
         return await fn();
       } finally {
+        clearInterval(beat);
         release();
       }
     }

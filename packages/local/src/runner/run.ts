@@ -96,6 +96,14 @@ export async function runSession(opts: RunOptions): Promise<RunReport> {
   const runId = opts.runId ?? randomUUID();
   const { runDir, fsDir } = setupRunFs(opts.procforgeDir, opts.sessionId, runId);
   const release = store.acquireLock(opts.sessionId, 60000);
+  // M5.1-A1: 장기 보유 중 하트비트 (20s 주기)
+  const beat = setInterval(() => {
+    try {
+      store.refreshLock(opts.sessionId);
+    } catch {
+      // 무시
+    }
+  }, 20000);
   const pool = new ConnectionPool(opts.projectRoot, fsDir, opts.allowBash ?? false);
   const t0 = Date.now();
   try {
@@ -279,6 +287,7 @@ export async function runSession(opts: RunOptions): Promise<RunReport> {
     logger.info("run complete", { runId, ...summary, durationMs: Date.now() - t0 });
     return report;
   } finally {
+    clearInterval(beat);
     release();
     await pool.close();
   }

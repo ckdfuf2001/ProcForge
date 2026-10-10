@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { spawn } from "node:child_process";
 import { CoreService } from "@procforge/core";
-import { FileStore } from "../src/filestore.js";
+import { FileStore, resetLockStats, lockStats } from "../src/filestore.js";
 import { checkerEvaluate } from "../src/checker.js";
 import { wrapClient } from "./client-mode.js";
 
@@ -22,6 +22,7 @@ beforeEach(() => {
 
 describe("M3.5.2 lockfile 부하", () => {
   it("8×50 동시 보고: seq 중복 0·revision 연속", async () => {
+    resetLockStats();
     const store = new FileStore(pfdir);
     const core = wrapClient(new CoreService(store, checkerEvaluate));
     const toolCatalog = [{ server: "t", name: "x", inputSchema: {}, schemaHash: "h" }];
@@ -69,5 +70,7 @@ describe("M3.5.2 lockfile 부하", () => {
     const seqs = (await core.getEvents(sid)).map((e) => e.seq).sort((a, b) => a - b);
     expect(seqs).toHaveLength(401);
     expect(seqs).toEqual(Array.from({ length: 401 }, (_, i) => i + 1));
+    // M5.1-A3: 전원 생존 부하에서 회수 0회
+    expect(lockStats.reclaims).toBe(0);
   }, 240000);
 });

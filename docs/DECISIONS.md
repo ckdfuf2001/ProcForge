@@ -311,6 +311,10 @@
 - M3.5.2-2: 8자식×50회 동시 보고 부하 테스트 (CI 양 OS 자동 포함).
   events seq 중복 0·revision 연속·실패는 conflict만.
   m25 20회 연속 통과, 클린 클론 36+61+163 통과.
+- M5.1-A: 잠금 회수 정정. stale = pid 사망 또는 (age 초과 AND 하트비트 미갱신),
+  보유 중 heartbeat, 생존 pid 절대 회수 금지. 회수는 rename 승자 + token 일치
+  확인, 불일치 시 원위치 후 conflict. 회수 계측 + stderr 로그.
+  m25 파일 50회 연속 통과 (전체 스위트 추가 검증은 최종 보고 전).
 - M5-1: `procforge run <procedure> --param k=v [--out dir] [--force]` 신설
   (App.runProcedure 경유). 출력은 runs/<runId>/fs, --out 지정 시에만 완료 후
   프로젝트 안으로 복사 (기존 파일은 --force 없이 거부).

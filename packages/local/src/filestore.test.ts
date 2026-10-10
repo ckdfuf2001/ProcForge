@@ -430,6 +430,17 @@ describe("세션 lockfile (M2.6-7)", () => {
     r2();
   });
 
+  it("M5.1-A1 살아 있는 pid 잠금은 staleMs=0에도 회수 금지", () => {
+    const release = store.acquireLock(sid, 1);
+    try {
+      expect(() => store.acquireLock(sid, 0)).toThrow(/locked/);
+    } finally {
+      release();
+    }
+    // 해제한 뒤에는 획득 가능
+    store.acquireLock(sid, 0)();
+  });
+
   it("외부 프로세스가 잡은 락은 conflict, 강제 종료 후 stale 정리", async () => {
     const { spawn, spawnSync } = await import("node:child_process");
     const holder = join(dir, "holder.mjs");
