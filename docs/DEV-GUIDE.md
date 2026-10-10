@@ -287,7 +287,7 @@ server.registerTool("pf_report", spec, async (a) => {
 | M4.2 | 1단계 server.ts 로직 이전 | [x] | `3fbdecf` | https://github.com/ckdfuf2001/ProcForge/actions/runs/37961465051 | 16개 도구 + core 2종 선행 |
 | M4.2 | 2단계 신규 CoreClient 메서드 | [x] | `55a93d1` | https://github.com/ckdfuf2001/ProcForge/actions/runs/37983222893 | edit×2·catalog·events·MCP 2종 |
 | M4.2 | 2.5단계 App 직접 접근 제거 | [x] | `7c72b2f` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38010705021 | 8항목 + 분리 실증 |
-| M4.2 | 2.5.1 보정 1~5 | [~] | `b562083` | (진행 중) | 읽기 메모리뷰·pending 정렬/손상/거부·enteredProbing·revision 전달·잠금대기 |
+| M4.2 | 2.5.1 보정 1~5 | [x] | `caf8b18` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38023996163 | 읽기 메모리뷰·pending 정렬/손상/거부·enteredProbing·revision 전달·잠금대기 |
 | M4.2 | 3단계 M4.1.1 버그 1~7 | [ ] | | | |
 | M4.2 | 4단계 강제 장치 1~6 | [ ] | | | |
 | M3.5 | PPT 실사용 테스트 | [ ] | | | 사람 진행 |
