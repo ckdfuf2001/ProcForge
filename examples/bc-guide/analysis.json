@@ -1,0 +1,372 @@
+[
+  {
+    "slide": 1,
+    "layout": "빈화면",
+    "shapes": {
+      "textboxes": 2,
+      "pictures": 0,
+      "tables": 0,
+      "charts": 0,
+      "placeholders": 0,
+      "shapes": 3
+    },
+    "texts": [
+      "SAP ERP 소개 / Day 1",
+      "2019. 02 / ERP팀 오창열, 김현진 선임"
+    ]
+  },
+  {
+    "slide": 2,
+    "layout": "제목 및 내용",
+    "shapes": {
+      "textboxes": 2,
+      "pictures": 1,
+      "tables": 0,
+      "charts": 0,
+      "placeholders": 1,
+      "shapes": 4
+    },
+    "texts": [
+      "ERP / SAP 란 무엇인가 / ERP 기반 업무소개 / ERP, Portal, BW, EAI, Legacy.  /  / SAP ERP(R/3 ECC HANA) / SAP presentation layer / GUI, FIORI, Bex / SAP App-Server layer / Netweaver, component. Workprocess. /  / 모듈 업무 (ABAP, CTS, Notes, Support Package)  / ABAP? / ABAP Memory 처리. / 개발시 알아야 하는 ABAP 메모리 처리 구조. / C",
+      "SAP ERP 소개 목차"
+    ]
+  },
+  {
+    "slide": 3,
+    "layout": "제목 및 내용",
+    "shapes": {
+      "textboxes": 2,
+      "pictures": 2,
+      "tables": 0,
+      "charts": 0,
+      "placeholders": 1,
+      "shapes": 5
+    },
+    "texts": [
+      "ERP(Enterprise Resource Planning) : 전사적 자원 관리 / SAP(Systems, Application and Products in data processing)  / ERP를 위한 프로그램을 만든 회사명.  / 현재는 ERP를 넘어 더 많은 영역을 커버하는 중. /  / 전사란? / 자원이란?",
+      "ERP / SAP 이란 무엇인가"
+    ]
+  },
+  {
+    "slide": 4,
+    "layout": "제목 및 내용",
+    "shapes": {
+      "textboxes": 2,
+      "pictures": 2,
+      "tables": 0,
+      "charts": 0,
+      "placeholders": 1,
+      "shapes": 5
+    },
+    "texts": [
+      "업무 영역별로 독립적 분담 / 지불, 모금, 분석 등 /  / 외부 시스템과 연계 / 은행 등 / 별도 프로그램 /  / 안전성과 신뢰성- 많은 안정장치가 있다는 점이 key. – 감사 부분 등. / 만약 아래와 같다면…? / 수 만명의 사용자. / 수 백일의 정산 / 다양한 화폐(통화) 이용 / 독립된 접근 환경",
+      "ERP로 자원관리?"
+    ]
+  },
+  {
+    "slide": 5,
+    "layout": "제목 및 내용",
+    "shapes": {
+      "textboxes": 4,
+      "pictures": 2,
+      "tables": 0,
+      "charts": 0,
+      "placeholders": 0,
+      "shapes": 7
+    },
+    "texts": [
+      "공급자",
+      "일반 고객",
+      "현업",
+      "ERP 기반 업무"
+    ]
+  },
+  {
+    "slide": 6,
+    "layout": "제목 및 내용",
+    "shapes": {
+      "textboxes": 5,
+      "pictures": 3,
+      "tables": 0,
+      "charts": 0,
+      "placeholders": 0,
+      "shapes": 16
+    },
+    "texts": [
+      "Lagacy",
+      "Lagacy",
+      "Lagacy",
+      "EAI(MS Biztalk)",
+      "ERP 기반 업무 - 구성도"
+    ]
+  },
+  {
+    "slide": 7,
+    "layout": "제목 및 내용",
+    "shapes": {
+      "textboxes": 9,
+      "pictures": 2,
+      "tables": 0,
+      "charts": 0,
+      "placeholders": 1,
+      "shapes": 16
+    },
+    "texts": [
+      "Presentation Layer / GUI(Graphical User Interface) 제공 / 데이터 입력, 처리, 출력과정을 보여줌",
+      "Application Layer / Application 로직에 따라 데이터 처리, 양방향 통신 / DataBase에 Read/Write수행.",
+      "Database Layer / Data 저장",
+      "Data 입력",
+      "DB Data 요청",
+      "저장 및 Data 제공",
+      "Data 처리",
+      "SAP ERP R/3",
+      "80년대 도입된 개념으로 90년대에 개발한 SAP ERP 프로그램명 R/3. / R/3는 서비스하지 않지만 개념은 계속 사용"
+    ]
+  },
+  {
+    "slide": 8,
+    "layout": "제목 및 내용",
+    "shapes": {
+      "textboxes": 1,
+      "pictures": 4,
+      "tables": 0,
+      "charts": 0,
+      "placeholders": 0,
+      "shapes": 6
+    },
+    "texts": [
+      "SAP Presentation layer – Fiori, GUI, Bex"
+    ]
+  },
+  {
+    "slide": 9,
+    "layout": "제목 및 내용",
+    "shapes": {
+      "textboxes": 3,
+      "pictures": 2,
+      "tables": 0,
+      "charts": 0,
+      "placeholders": 1,
+      "shapes": 10
+    },
+    "texts": [
+      "Netweaver AS Abap+Java /  / ABAP? JAVA? /  / Application은 어디에? /  / Work-processes란? /  / 로직 흐름은?",
+      "Netweaver",
+      "SAP App-Server layer - component"
+    ]
+  },
+  {
+    "slide": 10,
+    "layout": "제목 및 내용",
+    "shapes": {
+      "textboxes": 2,
+      "pictures": 1,
+      "tables": 0,
+      "charts": 0,
+      "placeholders": 1,
+      "shapes": 4
+    },
+    "texts": [
+      "각 컴포넌트는 os에서 process(thread) 형태로 하나의 작업만 반복적으로 감지 및 수행\t /  / Application(program) : DB에 코드 형태로 저장, 호출 시 로드 /  / Dispatcher : work process에 request(유저, 프로그램, 기타 정보) 할당 /  / WorkProcess : 연산 처리 프로세스 / Dialog, Update, Update2, Background, Spool(print), Enqueue(lock). /  / Memory : WP내부에 Internal memory",
+      "SAP App-Server layer – component"
+    ]
+  },
+  {
+    "slide": 11,
+    "layout": "제목 및 내용",
+    "shapes": {
+      "textboxes": 2,
+      "pictures": 2,
+      "tables": 0,
+      "charts": 0,
+      "placeholders": 1,
+      "shapes": 5
+    },
+    "texts": [
+      "로그인 시 수행 단계 /  / Dispatcher에 리퀘스트 발생 / 리퀘스트 저장 / 적절한 WP에 할당 / 유저 정보 로드 (Roll in) / 요청자료 Buffer탐색 (캐쉬메모리) / DB 조회 – 화면 제공 / 유저 정보 반납 (Roll out)",
+      "기타 – Request 수행 흐름 (SAP GUI로그인)"
+    ]
+  },
+  {
+    "slide": 12,
+    "layout": "제목 및 내용",
+    "shapes": {
+      "textboxes": 2,
+      "pictures": 1,
+      "tables": 0,
+      "charts": 0,
+      "placeholders": 1,
+      "shapes": 4
+    },
+    "texts": [
+      "R/3 => Netweaver + ECC = BusinessSuite = ERP / (어느 정도 변화와 차이는 있지만 전부 ERP를 지칭) /  / S/4HANA : Suite for HANA DB /  / EP, EAI, BW, BusinessProgram (SCM, HR, OIL… )  /  / Sybases, Tmax, Oracle, DB2, HANA",
+      "기타 – 기술적 용어 ECC, ERP, S/4HANA…"
+    ]
+  },
+  {
+    "slide": 13,
+    "layout": "제목 및 내용",
+    "shapes": {
+      "textboxes": 1,
+      "pictures": 3,
+      "tables": 0,
+      "charts": 0,
+      "placeholders": 0,
+      "shapes": 5
+    },
+    "texts": [
+      "모듈 업무, 프로그램"
+    ]
+  },
+  {
+    "slide": 14,
+    "layout": "제목 및 내용",
+    "shapes": {
+      "textboxes": 3,
+      "pictures": 2,
+      "tables": 0,
+      "charts": 0,
+      "placeholders": 0,
+      "shapes": 6
+    },
+    "texts": [
+      "마스터 데이터?  / -분산시스템 등장으로 기원됨. /  / •어떤 조직이든지 고객, 제품, 공급자, 벤더, 직원, 재무, 정책 등과 같은 비즈니스 프로세스의 중심이 되는 공통 개념들이 있다. 이것들은 고립된 여러 시스템에 분산된 중복된 데이터로 다양한 의미와 형태로 존재한다.  /  / •가장 기본적인 목표는 조직의 핵심 비즈니스 엔티티를 동기화하고 일관성 있는 뷰로 바라볼 수 있도록 하는 것 /  / •마스터 데이터 객체는 조직 전반에 걸쳐 있는 다양한 어플리케이션에서 사용되는 핵심 비즈니스 객체와 연관 메타데이터, 속성, 정의",
+      "Ex) PA30 트렌젝션(t-code)",
+      "모듈 업무 – 프로세스의 이해"
+    ]
+  },
+  {
+    "slide": 15,
+    "layout": "제목 및 내용",
+    "shapes": {
+      "textboxes": 2,
+      "pictures": 3,
+      "tables": 0,
+      "charts": 0,
+      "placeholders": 1,
+      "shapes": 6
+    },
+    "texts": [
+      "Internal 테이블(변수)을 이용해 데이터 처리 (Internal Memory) / 많은 변수 사용 지양 /   – DB 튜닝과 유사",
+      "모듈 업무 – ABAP 개발"
+    ]
+  },
+  {
+    "slide": 16,
+    "layout": "제목 및 내용",
+    "shapes": {
+      "textboxes": 18,
+      "pictures": 1,
+      "tables": 0,
+      "charts": 0,
+      "placeholders": 1,
+      "shapes": 36
+    },
+    "texts": [
+      "Roll / Extended /  / Private",
+      "Virtual / Memory / (Heap)",
+      "Wp01",
+      "Wp02",
+      "Wp03",
+      "Shared Memory",
+      "Internal Memory",
+      "Internal Memory",
+      "Internal Memory",
+      "Internal Memory / (User Independent) /   / -Program Code / -Stack / -Static Data / … / -Buffer / -Abap",
+      "User Context / U_1 /  /  / Abap Var / Internal Tab",
+      "User Context / U_2 /  /  / Abap Var / Internal Tab",
+      "User Context / (U_3) /  /  / Abap Var / Internal Tab",
+      "User Context / U_4 /  /  / Abap Var / Internal Tab",
+      "Roll in",
+      "Private Memory",
+      "Extended Memory",
+      "SAP Memory Mangement"
+    ]
+  },
+  {
+    "slide": 17,
+    "layout": "제목 및 내용",
+    "shapes": {
+      "textboxes": 5,
+      "pictures": 4,
+      "tables": 0,
+      "charts": 0,
+      "placeholders": 1,
+      "shapes": 13
+    },
+    "texts": [
+      "User Session : 유저 영역 최대 6개의 Session / External Session : gui화면과 1:1 매핑 / Internal Session : 개별 프로그램 영역 (이동가능) / Abap Memory : Internel Session 간 데이터 공유 가능. / Sap Memory : 외부 세션 영역간 데이터 공유 가능 /    해당 영역으로 export/impot 하여서 세션간 공유 가능.",
+      "User session",
+      "External  / session",
+      "Internal <-> abap memory",
+      "Memory Management– User context, mapping"
+    ]
+  },
+  {
+    "slide": 18,
+    "layout": "제목 및 내용",
+    "shapes": {
+      "textboxes": 3,
+      "pictures": 2,
+      "tables": 0,
+      "charts": 0,
+      "placeholders": 1,
+      "shapes": 7
+    },
+    "texts": [
+      "SAP System landscape – 3단계로 구성",
+      "초기 설치시 TMS를 통해 이전될 환경 설정",
+      "CTS, TMS REQUEST"
+    ]
+  },
+  {
+    "slide": 19,
+    "layout": "제목 및 내용",
+    "shapes": {
+      "textboxes": 3,
+      "pictures": 3,
+      "tables": 0,
+      "charts": 0,
+      "placeholders": 0,
+      "shapes": 7
+    },
+    "texts": [
+      "새로운 Object를 생성시 (프로그램, 파일, DB등)",
+      "T-code : se09 를 통해 다른 시스템으로 이전 가능",
+      "CTS, TMS REQUEST"
+    ]
+  },
+  {
+    "slide": 20,
+    "layout": "제목 및 내용",
+    "shapes": {
+      "textboxes": 2,
+      "pictures": 3,
+      "tables": 0,
+      "charts": 0,
+      "placeholders": 0,
+      "shapes": 6
+    },
+    "texts": [
+      "노츠, 업데이트",
+      "http://support.sap.com"
+    ]
+  },
+  {
+    "slide": 21,
+    "layout": "제목 및 내용",
+    "shapes": {
+      "textboxes": 3,
+      "pictures": 4,
+      "tables": 0,
+      "charts": 0,
+      "placeholders": 0,
+      "shapes": 8
+    },
+    "texts": [
+      "SAP Gui에서 노츠 적용",
+      "SAP Gui에서 component level 확인  / 특정 component level을 요하는 경우 확인 후 BC에 요청",
+      "노츠, 업데이트"
+    ]
+  }
+]
