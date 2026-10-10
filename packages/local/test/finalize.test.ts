@@ -231,15 +231,16 @@ describe("pf_finalize", () => {
     await expect(appFor().finalize({ sessionId: sid, name: "ok-name-1" })).resolves.toBeDefined();
   }, 30000);
 
-  it("M4.1-8 SKILL/command 문구는 검증(replay) 한정", async () => {
+  it("M5-6 SKILL/command 문구는 run 지원 (M4.1-8 철회)", async () => {
     const sid = await scripted();
-    const out = await appFor().finalize({ sessionId: sid, name: "honest-test" });
+    const out = await appFor().finalize({ sessionId: sid, name: "run-test" });
     const skill = readFileSync(join(out.dir, "SKILL.md"), "utf8");
-    expect(skill).toContain("검증(replay)만 가능");
-    expect(skill).toContain("미지원(M5)");
+    expect(skill).toContain("procforge run");
+    expect(skill).not.toContain("미지원(M5)");
+    expect(skill).not.toContain("검증(replay)만 가능");
     const cmd = readFileSync(join(out.dir, "command.md"), "utf8");
-    expect(cmd).toContain("검증(replay)");
-    expect(cmd).toContain("미지원(M5");
+    expect(cmd).toContain("procforge run");
+    expect(cmd).not.toContain("미지원(M5");
     expect(skill).not.toContain("그대로 실행");
   }, 30000);
 });
