@@ -101,6 +101,22 @@ describe("validator 10종", () => {
     expect(errs.some((e) => e.code === "cycle")).toBe(true);
   });
 
+  it("M5.2-4 약식 $1.1.rows 허용 + 미등록 노드 거부", () => {
+    const s = baseSession();
+    const ok = leaf("2", {
+      parentId: null,
+      args: { r: { kind: "var", ref: "$1.1.rows" } },
+    });
+    const errs = validateTree(s, [leaf("1.1"), ok], { outputs: { "1.1": { rows: [1] } } });
+    expect(errs.filter((e) => e.code === "bad_ref" || e.code === "bad_ref_field")).toEqual([]);
+    const bad = leaf("2", {
+      parentId: null,
+      args: { r: { kind: "var", ref: "$9.9.rows" } },
+    });
+    expect(
+      validateTree(s, [leaf("1.1"), bad]).some((e) => e.code === "bad_ref"),
+    ).toBe(true);
+  });
   it("M5.1-B3 템플릿 var 허용 + 미등록 키 거부 + 깨진 템플릿 거부", () => {
     const s = baseSession();
     const ok = leaf("1", { args: { path: { kind: "var", ref: "sales-${params.month}.xlsx" } } });

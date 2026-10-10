@@ -107,11 +107,14 @@ export function resolveVar(
     }
     if (rest === "" || rest === ".output") return obj;
     if (rest.startsWith(".output.")) return getByDot(obj, rest.slice(".output.".length));
+    // M5.2-4 약식: $<id>.<field>
+    if (/^\.[A-Za-z][A-Za-z0-9_.-]*$/.test(rest)) return getByDot(obj, rest.slice(1));
     throw new Error(`지원하지 않는 참조: ${ref}`);
   }
   if (!outputs.has(nid)) throw new Error(`노드 출력 없음: ${nid}`);
   const base = outputs.get(nid);
   if (rest === "" || rest === ".output") return base;
   if (rest.startsWith(".output.")) return getByDot(base, rest.slice(".output.".length));
+  if (/^\.[A-Za-z][A-Za-z0-9_.-]*$/.test(rest)) return getByDot(base, rest.slice(1));
   throw new Error(`지원하지 않는 참조: ${ref}`);
 }

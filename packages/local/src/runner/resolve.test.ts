@@ -10,6 +10,12 @@ describe("resolveVar 템플릿", () => {
     expect(resolveVar("$1.1.output.total", {}, outputs)).toBe(5);
   });
 
+  it("M5.2-4 약식 $1.1.rows 해결", () => {
+    const outputs = new Map<string, unknown>([["1.1", { rows: [1, 2], total: 5 }]]);
+    expect(resolveVar("$1.1.rows", {}, outputs)).toEqual([1, 2]);
+    expect(resolveVar("$1.1.output.total", {}, outputs)).toBe(5);
+    expect(() => resolveVar("$1.1.missing", {}, outputs)).toThrow();
+  });
   it("문자열 내 ${params.k} 치환", () => {
     expect(resolveVar("sales-${params.month}.xlsx", { month: "2026-10" }, outputs)).toBe("sales-2026-10.xlsx");
     expect(resolveVar("월간보고서 ${params.month} (최종)", { month: "2026-10" }, outputs)).toBe("월간보고서 2026-10 (최종)");

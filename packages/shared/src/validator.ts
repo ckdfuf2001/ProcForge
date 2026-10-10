@@ -29,6 +29,9 @@ function isValidRefSyntax(ref: string): boolean {
     const field = rest.slice(".output.".length);
     return field.length > 0 && /^[A-Za-z0-9_.-]+$/.test(field);
   }
+  // M5.2-4 약식: $<id>.<field> (".output." 생략). 숫자 꼬리는 노드 id로 귀속
+  // ("$1.1.2"는 노드 1.1.2. 필드가 숫자면 ".output."을 쓸 것).
+  if (/^\.[A-Za-z][A-Za-z0-9_.-]*$/.test(rest)) return true;
   return false;
 }
 
@@ -41,6 +44,7 @@ function parseRef(ref: string): { paramsKey?: string; nodeId?: string; fieldPath
   const rest = m[2];
   if (rest === "" || rest === ".output") return { nodeId };
   if (rest.startsWith(".output.")) return { nodeId, fieldPath: rest.slice(".output.".length) };
+  if (/^\.[A-Za-z][A-Za-z0-9_.-]*$/.test(rest)) return { nodeId, fieldPath: rest.slice(1) };
   return null;
 }
 
