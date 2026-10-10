@@ -284,6 +284,17 @@ describe("M4.2-3-0 pending 정리 (낡은 revision)", () => {
     expect(store.readEvents(sid).map((e) => e.seq)).toEqual([6, 7]);
   });
 
+  it("M4.2-3-0-3 session 없으면 internal (revision 폴백 없음)", () => {
+    store.saveSession(sess(4));
+    try {
+      store.commitChange(sid, { nodes: [], events: [] });
+      expect.unreachable();
+    } catch (e) {
+      expect((e as { code?: string }).code).toBe("internal");
+    }
+    expect(readdirSync(join(dir, "sessions", sid)).filter((f) => f.startsWith("pending-"))).toEqual([]);
+  });
+
   it("M4.2-3-0-2 손상 뒤 정상 pending은 미적용, commit은 internal", () => {
     store.saveSession(sess(4));
     const sessDir = join(dir, "sessions", sid);
@@ -307,7 +318,8 @@ describe("M4.2-3-0 pending 정리 (낡은 revision)", () => {
   });
 });
 
-describe("세션 lockfile (M2.6-7)", () => {  it("acquire → release 왕복", () => {
+describe("세션 lockfile (M2.6-7)", () => {
+  it("acquire → release 왕복", () => {
     const release = store.acquireLock(sid);
     expect(existsSync(join(dir, "sessions", sid, ".lock"))).toBe(true);
     expect(() => store.acquireLock(sid)).toThrow(/locked/);

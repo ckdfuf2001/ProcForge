@@ -8,7 +8,6 @@ import type { EventEntry } from "@procforge/shared/dto.js";
 import { EventEntrySchema } from "@procforge/shared/dto.js";
 import { NodeIdSchema, NodeSchema, SessionIdSchema, SessionSchema } from "@procforge/shared/schema.js";
 import { CommitChangeSchema } from "@procforge/shared/store.js";
-import type { CommitChange } from "@procforge/shared/store.js";
 import { logger } from "./logger.js";
 import * as fsutil from "./fsutil.js";
 
@@ -236,15 +235,17 @@ export class FileStore implements Store {
   /**
    * 원자 커밋 (M4.2-2.5-3): pending 원자 저장 → 노드 → 세션 → 이벤트 반영 →
    * pending 삭제. 시작 시 남은 pending부터 재반영.
+   * M4.2-3-0-3: session 필수 (없으면 internal), revision 폴백 없음.
    */
   commitChange(sid: string, c: CommitChange): void {
     assertSessionId(sid);
+    if (!c.session) throw pfError("internal", "commitChange requires session", "호출자 확인 필요");
     // M4.2-2.5.1-2: 복구 실패 시 새 커밋 거부
     const rec = this.recoverSession(sid);
     if (rec.failed.length > 0) {
       throw pfError("internal", `복구 실패(${rec.failed.length}건), 수동 확인 필요`, "복구 필요");
     }
-    const rev = c.session?.revision ?? this.readSessionRaw(sid)?.revision ?? 0;
+    const rev = c.session.revision;
     mkdirSync(this.sessionDir(sid), { recursive: true });
     this.writeAtomic(
       join(this.sessionDir(sid), `pending-${rev}.json`),

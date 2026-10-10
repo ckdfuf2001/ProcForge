@@ -253,6 +253,8 @@
   pending 삭제는 fsutil.unlinkRetrySync 재시도 사용.
 - 3-0-2: recoverSession은 첫 실패·손상에서 중단, 손상도 failed 처리로
   새 커밋 거부. 손상 파일명은 .corrupt-<rev>-<ts>.json (파일명에서 rev 추출).
+- 3-0-3: FileStore.commitChange는 session 필수 (없으면 internal).
+  revision 파일 폴백 제거 (호출자가 항상 bumped session 전달).
 
 ## M3.2
 
