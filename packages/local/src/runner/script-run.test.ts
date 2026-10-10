@@ -30,7 +30,7 @@ beforeEach(() => {
 describe("runScript", () => {
   it("node 스크립트: stdin 인자 → stdout JSON", () => {
     const f = join(root, "echo.mjs");
-    writeFileSync(f, "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const a=JSON.parse(s);console.log(JSON.stringify({summary:'n='+a.n,json:{got:a}}))});");
+    writeFileSync(f, "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const a=JSON.parse(s);process.stdout.write(JSON.stringify({summary:'n='+a.n,json:{got:a}}));});");
     const r = runScript({ runtime: "node", scriptAbs: f, args: { n: 3 }, cwd: fsDir });
     expect(r.summary).toBe("n=3");
     expect(r.json).toEqual({ got: { n: 3 } });
@@ -58,10 +58,10 @@ describe("runScript", () => {
     writeFileSync(bad, "console.error('boom');process.exit(3);");
     expect(() => runScript({ runtime: "node", scriptAbs: bad, args: {}, cwd: fsDir })).toThrowError(/비정상 종료\(3\)/);
     const notJson = join(root, "notjson.mjs");
-    writeFileSync(notJson, "console.log('plain text');");
+    writeFileSync(notJson, "process.stdout.write('plain text');");
     expect(() => runScript({ runtime: "node", scriptAbs: notJson, args: {}, cwd: fsDir })).toThrowError(/JSON 아님/);
     const slow = join(root, "slow.mjs");
-    writeFileSync(slow, "setTimeout(()=>console.log('{}'),5000);");
+    writeFileSync(slow, "setTimeout(()=>process.stdout.write('{}'),5000);");
     expect(() => runScript({ runtime: "node", scriptAbs: slow, args: {}, cwd: fsDir, timeoutMs: 300 })).toThrowError(/타임아웃/);
   });
 });
