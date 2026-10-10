@@ -144,75 +144,97 @@ export class FileStore implements Store {
   }
 
   /**
-   * pending 파싱 (읽기 경로용, 쓰기 없음).
-   * M4.2-3-0-1: zod 파싱 실패·낡은 revision(<= 파일 session.revision)은 제외.
-   * 낡은 pending 정리는 recoverSession·commitChange 진입 시 수행.
+   * pending 적용 계획 (M4.2-4-0-2, 읽기·복구 공용).
+   * - 적용은 파일 revision 직후부터 `revision === 직전+1`인 연속분만.
+   * - 낡은 revision(<= 파일)은 stale (정리만, 체인 유지).
+   * - revision 누락·파싱 실패는 corrupt, 불연속은 gap. 첫 손상·불연속에서 중단.
+   * - 파일이 없으면 최저 pending부터 체인 시작 (4-0-3 무세션 뷰).
    */
-  private readPendings(sid: string): CommitChange[] {
-    const out: CommitChange[] = [];
-    const curRev = this.readSessionRaw(sid)?.revision;
+  planPendings(sid: string): {
+    baseRev: number | undefined;
+    chain: { file: string; rev: number; change: CommitChange }[];
+    stale: string[];
+    stoppedAt?: { file: string; reason: "corrupt" | "gap" };
+  } {
+    const baseRev = this.readSessionRaw(sid)?.revision;
+    const chain: { file: string; rev: number; change: CommitChange }[] = [];
+    const stale: string[] = [];
+    let stoppedAt: { file: string; reason: "corrupt" | "gap" } | undefined;
+    let expected: number | undefined = baseRev !== undefined ? baseRev + 1 : undefined;
     for (const f of this.pendingFiles(sid)) {
-      try {
-        const parsed = CommitChangeSchema.safeParse(JSON.parse(readFileSync(f, "utf8")));
-        if (!parsed.success) continue;
-        if (parsed.data.revision !== undefined && curRev !== undefined && parsed.data.revision <= curRev) continue;
-        out.push(parsed.data);
-      } catch {
-        // 손상 pending은 읽기에서 건너뜀 (쓰기 경로에서 .corrupt로 이동)
-      }
-    }
-    return out;
-  }
-
-  /**
-   * 남은 pending 재반영 (M4.2-2.5-3, 2.5.1-2). 숫자 revision 순 적용.
-   * M4.2-3-0-1: 낡은 revision(<= 파일 session.revision)은 적용 없이 정리만.
-   * M4.2-3-0-2: 첫 실패·손상에서 중단, 손상도 failed (새 커밋 거부).
-   * 손상 파일은 .corrupt-<rev>-<ts>로 이동 (삭제 금지). 삭제는 fsutil 재시도 사용.
-   */
-  recoverSession(sid: string): { applied: string[]; failed: string[] } {
-    const applied: string[] = [];
-    const failed: string[] = [];
-    for (const f of this.pendingFiles(sid)) {
-      const curRev = this.readSessionRaw(sid)?.revision;
       let change: CommitChange | undefined;
       try {
         const parsed = CommitChangeSchema.safeParse(JSON.parse(readFileSync(f, "utf8")));
-        if (parsed.success) {
-          if (parsed.data.revision !== undefined && curRev !== undefined && parsed.data.revision <= curRev) {
-            try {
-              fsutil.unlinkRetrySync(f);
-            } catch {
-              // 정리 실패 무시 (다음 진입 시 재시도)
-            }
-            continue;
-          }
-          change = parsed.data;
-        }
+        if (parsed.success) change = parsed.data;
       } catch {
-        // 손상 pending은 아래에서 .corrupt로 이동
+        // 손상 pending (revision 누락 포함)
       }
       if (!change) {
+        stoppedAt = { file: f, reason: "corrupt" };
+        break;
+      }
+      if (baseRev !== undefined && change.revision <= baseRev) {
+        stale.push(f);
+        continue;
+      }
+      if (expected === undefined) expected = change.revision;
+      if (change.revision !== expected) {
+        stoppedAt = { file: f, reason: "gap" };
+        break;
+      }
+      chain.push({ file: f, rev: change.revision, change });
+      expected = change.revision + 1;
+    }
+    return { baseRev, chain, stale, stoppedAt };
+  }
+
+  /** pending 적용분 (읽기 경로용, 쓰기 없음. planPendings 체인만) */
+  private readPendings(sid: string): CommitChange[] {
+    return this.planPendings(sid).chain.map((e) => e.change);
+  }
+
+  /**
+   * 남은 pending 재반영 (M4.2-2.5-3, 2.5.1-2). planPendings 체인만 적용.
+   * M4.2-3-0-1: 낡은 revision은 적용 없이 정리만.
+   * M4.2-3-0-2: 첫 실패·손상에서 중단, 손상도 failed (새 커밋 거부).
+   * M4.2-4-0-2: 불연속(gap)도 중단 + failed (새 커밋 거부).
+   * 손상 파일은 .corrupt-<rev>-<ts>로 이동 (삭제 금지). 삭제는 fsutil 재시도 사용.
+   */
+  recoverSession(sid: string): { applied: string[]; failed: string[] } {
+    const plan = this.planPendings(sid);
+    const applied: string[] = [];
+    const failed: string[] = [];
+    for (const f of plan.stale) {
+      try {
+        fsutil.unlinkRetrySync(f);
+      } catch {
+        // 정리 실패 무시 (다음 진입 시 재시도)
+      }
+    }
+    for (const e of plan.chain) {
+      try {
+        this.applyPending(sid, e.change);
+        applied.push(e.file);
+      } catch {
+        failed.push(e.file);
+        break;
+      }
+      try {
+        fsutil.unlinkRetrySync(e.file);
+      } catch {
+        // 삭제 실패 무시 (다음 진입 시 재반영, 멱등)
+      }
+    }
+    if (plan.stoppedAt) {
+      const f = plan.stoppedAt.file;
+      if (plan.stoppedAt.reason === "corrupt") {
         try {
           renameSync(f, join(this.sessionDir(sid), `.corrupt-${this.pendingRev(f)}-${Date.now()}.json`));
         } catch {
           // 무시
         }
-        failed.push(f);
-        break;
       }
-      try {
-        this.applyPending(sid, change);
-        applied.push(f);
-      } catch {
-        failed.push(f);
-        break;
-      }
-      try {
-        fsutil.unlinkRetrySync(f);
-      } catch {
-        // 삭제 실패 무시 (다음 진입 시 재반영, 멱등)
-      }
+      failed.push(f);
     }
     return { applied, failed };
   }

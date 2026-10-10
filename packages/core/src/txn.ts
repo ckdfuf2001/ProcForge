@@ -100,6 +100,7 @@ export class TxStore implements Store {
     ]);
     for (const sid of sids) {
       this.base.commitChange(sid, {
+        revision: this.sessions.get(sid)?.revision ?? 0,
         ...(this.sessions.has(sid) ? { session: this.sessions.get(sid)! } : {}),
         nodes: [...(this.nodes.get(sid)?.values() ?? [])],
         events: this.bufferedEvents.filter((e) => e.sessionId === sid).flatMap((e) => e.events),

@@ -7,9 +7,9 @@ import type { Node, Session } from "./schema.js";
 // 영속성 포트. core·local 모두 shared의 이 인터페이스에만 의존한다.
 // (local→core 직접 import 금지 회피용. M0-6/DECISIONS 참조)
 
-/** 원자 커밋 단위 (M4.2-2.5-3): 세션+노드+이벤트 일괄. revision은 pending 파일 판별용 */
+/** 원자 커밋 단위 (M4.2-2.5-3): 세션+노드+이벤트 일괄. revision은 pending 파일 판별용 (필수) */
 export const CommitChangeSchema = z.object({
-  revision: z.number().int().nonnegative().optional(),
+  revision: z.number().int().nonnegative(),
   session: SessionSchema.optional(),
   nodes: z.array(NodeSchema).optional(),
   events: z.array(EventEntrySchema).optional(),

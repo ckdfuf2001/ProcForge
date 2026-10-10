@@ -99,7 +99,7 @@ describe("FileStore ID 이중 검증 (M2.6-2)", () => {
   });
 
   it("M4.2-2.5.1-2 pending 숫자 순 적용 (9→10)", () => {
-    store.saveSession(testSession());
+    store.saveSession({ ...testSession(), revision: 8 });
     store.saveNode(sid, testNode("1.1", "old"));
     const sessDir = join(dir, "sessions", sid);
     const mk = (rev: number, goal: string) => writeFileSync(join(sessDir, `pending-${rev}.json`), JSON.stringify({
@@ -294,6 +294,43 @@ describe("M4.2-3-0 pending 정리 (낡은 revision)", () => {
       expect((e as { code?: string }).code).toBe("internal");
     }
     expect(readdirSync(join(dir, "sessions", sid)).filter((f) => f.startsWith("pending-"))).toEqual([]);
+  });
+
+  it("M4.2-4-0-2 손상 뒤 정상분은 읽기에도 미반영", () => {
+    store.saveSession(sess(4));
+    const sessDir = join(dir, "sessions", sid);
+    writeFileSync(join(sessDir, "pending-5.json"), "not-json{{{");
+    writeFileSync(join(sessDir, "pending-6.json"), JSON.stringify({
+      revision: 6, session: sess(6), nodes: [nd("1.1", "six")], events: [],
+    }));
+    // 읽기: 손상에서 중단 → 6 미반영 (파일 rev4 그대로)
+    expect(store.getSession(sid)?.revision).toBe(4);
+    expect(store.getNode(sid, "1.1")).toBeUndefined();
+    expect(store.planPendings(sid).stoppedAt).toMatchObject({ reason: "corrupt" });
+  });
+
+  it("M4.2-4-0-2 불연속 pending은 미적용·커밋 거부", () => {
+    store.saveSession(sess(5));
+    const sessDir = join(dir, "sessions", sid);
+    writeFileSync(join(sessDir, "pending-7.json"), JSON.stringify({
+      revision: 7, session: sess(7), nodes: [nd("1.1", "seven")], events: [],
+    }));
+    // 복구: 6 결번 → 미적용
+    expect(store.recoverSession(sid)).toMatchObject({ applied: [] });
+    expect(existsSync(join(sessDir, "pending-7.json"))).toBe(true);
+    expect(JSON.parse(readFileSync(join(sessDir, "session.json"), "utf8")).revision).toBe(5);
+    expect(store.getSession(sid)?.revision).toBe(5);
+    // 커밋 거부
+    try {
+      store.commitChange(sid, { session: sess(6), nodes: [], events: [] });
+      expect.unreachable();
+    } catch (e) {
+      expect((e as { code?: string }).code).toBe("internal");
+    }
+    // repair --discard 7 후 커밋 성공
+    expect(store.repairDiscard(sid, 7).removed).toHaveLength(1);
+    store.commitChange(sid, { session: sess(6), nodes: [], events: [] });
+    expect(store.getSession(sid)?.revision).toBe(6);
   });
 
   it("M4.2-3-0-2 손상 뒤 정상 pending은 미적용, commit은 internal", () => {
