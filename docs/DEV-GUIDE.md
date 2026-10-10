@@ -287,6 +287,7 @@ server.registerTool("pf_report", spec, async (a) => {
 | M4.2 | 1단계 server.ts 로직 이전 | [x] | `3fbdecf` | https://github.com/ckdfuf2001/ProcForge/actions/runs/37961465051 | 16개 도구 + core 2종 선행 |
 | M4.2 | 2단계 신규 CoreClient 메서드 | [x] | `55a93d1` | https://github.com/ckdfuf2001/ProcForge/actions/runs/37983222893 | edit×2·catalog·events·MCP 2종 |
 | M4.2 | 2.5단계 App 직접 접근 제거 | [x] | `7c72b2f` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38010705021 | 8항목 + 분리 실증 |
+| M4.2 | 2.5.1 보정 1~5 | [~] | `b562083` | (진행 중) | 읽기 메모리뷰·pending 정렬/손상/거부·enteredProbing·revision 전달·잠금대기 |
 | M4.2 | 3단계 M4.1.1 버그 1~7 | [ ] | | | |
 | M4.2 | 4단계 강제 장치 1~6 | [ ] | | | |
 | M3.5 | PPT 실사용 테스트 | [ ] | | | 사람 진행 |
@@ -306,3 +307,4 @@ server.registerTool("pf_report", spec, async (a) => {
 | 2026-10-09 | 전체 | v2 작성 (CoreClient / App / LocalServices 계층, M4.2~M7 로드맵) | 상태 변경 경로 단일화, UI·원격 core 대비 |
 | 2026-10-09 | 0, 1, 6, 8 | 0.1 진행표 기록 규칙 보완(docs: 허용), R6 revision core 책임 명시, R7 events.jsonl 분리·seq=revision, 0.5단계 신설 | 1단계에서 옮기는 메서드마다 revision·이벤트를 자동 획득하도록 순서 조정 (전체 작업량 감소) |
 | 2026-10-09 | 1, 6, 8 | R1 App 직접 접근 금지 명시 + 2.5단계 신설 (core getSession/getNode·withLock·pending 원자 커밋·응답 revision·DTO) | 3단계 전에 core·파일 저장소 분리 가능성을 실증하면 이후 작업이 설정 변경 수준으로 축소 |
+| 2026-10-10 | 8 | 2.5.1 보정 1~5 진행 (읽기 메모리뷰·pending 정렬/손상/복구/거부·enteredProbing 스냅샷·report 판정 메모리/호출경계·revision 전달·withLock 25ms×20회 대기; App isLocked 제거·getEvent 메모리뷰·주석 //→///) | 0.5~2.5 구현 중 발견된 예외 5종이 3단계 진입 전 해소 필요 (멈춤 없는 read·복구 순서·스냅샷 경합·revision 전달·잠금 대기) |
