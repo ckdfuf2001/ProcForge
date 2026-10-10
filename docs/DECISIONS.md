@@ -261,6 +261,9 @@
   pf_next/retry 시점 사본(nodes/<id>/pre/, 5MB 이하) + seed 원본 보존.
   원본 fixture를 golden에 유지(증거는 outs), run fs 오버레이는 원본 우선.
   미해결 inout은 confirm 거부.
+- 4-0-1: .corrupt-* 잔류 시 commitChange 계속 거부. 해제는 CLI
+  `procforge repair <sid> --discard <rev>`로만 (App.repair 경유, MCP 도구 없음),
+  human repair 이벤트 기록.
 - 3-2: junitPath는 프로젝트 안만 허용(탈출 bad_request), 생략 시
   runs/<runId>/junit.xml 항상 기록. 응답에 junitPath 포함.
 - 3-3: pf_test.procedure에 PROCEDURE_NAME_RE zod 적용 (MCP 입력은

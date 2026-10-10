@@ -217,6 +217,47 @@ export class FileStore implements Store {
     return { applied, failed };
   }
 
+  /** .corrupt-* 잔류 파일 목록 (M4.2-4-0-1, 커밋 거부 조건) */
+  corruptFiles(sid: string): string[] {
+    const dir = this.sessionDir(sid);
+    if (!existsSync(dir)) return [];
+    return readdirSync(dir)
+      .filter((f) => /^\.corrupt-.*\.json$/.test(f))
+      .map((f) => join(dir, f));
+  }
+
+  /**
+   * 손상 rev 해제 (M4.2-4-0-1, CLI repair 전용).
+   * .corrupt-<rev>-* + pending-<rev>.json 제거 후 human 이벤트 기록.
+   */
+  repairDiscard(sid: string, rev: number): { removed: string[] } {
+    assertSessionId(sid);
+    if (!Number.isInteger(rev) || rev < 0) throw pfError("bad_request", `bad revision: ${rev}`);
+    const dir = this.sessionDir(sid);
+    const removed: string[] = [];
+    for (const f of existsSync(dir) ? readdirSync(dir) : []) {
+      const m = /^\.corrupt-(\d+)-\d+\.json$/.exec(f);
+      if ((m?.[1] === String(rev) || f === `pending-${rev}.json`) && !f.startsWith(".lock")) {
+        try {
+          fsutil.unlinkRetrySync(join(dir, f));
+          removed.push(f);
+        } catch {
+          // 정리 실패 무시 (다음 repair에서 재시도)
+        }
+      }
+    }
+    if (removed.length === 0) throw pfError("bad_request", `nothing to discard: rev ${rev}`, "rev 확인 필요");
+    const fileRev = this.readSessionRaw(sid)?.revision;
+    const seqs = this.readFileEvents(sid).map((e) => e.seq);
+    const seq = seqs.length > 0 ? Math.max(...seqs) + 1 : Math.max(1, fileRev ?? 0);
+    this.appendEvents(sid, [{
+      seq, revision: fileRev ?? 0, at: new Date().toISOString(), actor: "human",
+      method: "repair", nodeIds: [], beforeHash: "", afterHash: "",
+      summary: `repair --discard ${rev} (${removed.length} files)`,
+    }]);
+    return { removed };
+  }
+
   /** pending-<rev>.json 파일명에서 rev 추출 (손상 파일명용, 실패 시 unknown) */
   private pendingRev(f: string): string {
     const m = /(?:^|[\\/])pending-(\d+)\.json$/.exec(f);
@@ -240,6 +281,11 @@ export class FileStore implements Store {
   commitChange(sid: string, c: CommitChange): void {
     assertSessionId(sid);
     if (!c.session) throw pfError("internal", "commitChange requires session", "호출자 확인 필요");
+    // M4.2-4-0-1: 손상 잔류 시 새 커밋 거부 (CLI repair로만 해제)
+    const corrupt = this.corruptFiles(sid);
+    if (corrupt.length > 0) {
+      throw pfError("internal", `손상 파일 잔류(${corrupt.length}건), repair 필요`, "복구 필요");
+    }
     // M4.2-2.5.1-2: 복구 실패 시 새 커밋 거부
     const rec = this.recoverSession(sid);
     if (rec.failed.length > 0) {

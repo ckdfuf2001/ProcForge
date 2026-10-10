@@ -37,6 +37,7 @@ import { ingestArtifacts, normalizeArgSpecs, readManifest } from "../artifacts.j
 import { runSession } from "../runner/index.js";
 import { runProcedureTest } from "../runner/procedure-run.js";
 import { writeJUnitFile, resolveJUnitPath } from "../services/runner.js";
+import { repairDiscard } from "../services/repair.js";
 import { writeProcedure } from "../services/procedureWriter.js";
 
 // ProcForge 유스케이스층 (M4.2-1). 사용자 행동 1개 = 메서드 1개.
@@ -651,8 +652,18 @@ export class ProcForgeApp {
     };
   }
 
-  async finalize(a: FinalizeInput): Promise<OutputOf<"pf_finalize">> {
+  /**
+   * 손상 rev 해제 (M4.2-4-0-1, CLI 전용. MCP 도구 없음).
+   * .corrupt-<rev>-* + pending-<rev>.json 제거 후 human 이벤트 기록.
+   */
+  async repair(a: { sessionId: unknown; discardRev: unknown }): Promise<{ removed: string[] }> {
     const sid = a.sessionId as string;
+    const rev = typeof a.discardRev === "number" ? a.discardRev : Number(a.discardRev);
+    if (!Number.isInteger(rev) || rev < 0) throw pfError("bad_request", `bad revision: ${String(a.discardRev)}`);
+    return repairDiscard(this.procforgeDir, sid, rev);
+  }
+
+  async finalize(a: FinalizeInput): Promise<OutputOf<"pf_finalize">> {    const sid = a.sessionId as string;
     await this.core.getSession(sid);
     const { doc, warnings } = await this.core.pfBuildProcedure(sid, a.name as string);
     const written = writeProcedure({

@@ -6,6 +6,8 @@ import { runSession, toJUnit } from "./runner/index.js";
 import { runProcedureTest } from "./runner/procedure-run.js";
 import { buildTrace, formatTraceMarkdown } from "./trace.js";
 import { exportSession } from "./export.js";
+import { createLocalStack } from "./core-inprocess.js";
+import { ProcForgeApp } from "./app/app.js";
 
 const { values, positionals } = parseArgs({
   args: process.argv.slice(2),
@@ -19,6 +21,7 @@ const { values, positionals } = parseArgs({
     "allow-bash": { type: "boolean", default: false },
     "allow-project-read": { type: "boolean", default: false },
     changed: { type: "boolean", default: false },
+    discard: { type: "string" },
     "procforge-dir": { type: "string" },
     "project-root": { type: "string" },
     redact: { type: "boolean", default: false },
@@ -166,12 +169,37 @@ async function cmdExport(): Promise<number> {
   }
 }
 
+async function cmdRepair(): Promise<number> {
+  const [sid] = positionals.slice(1);
+  const discard = values.discard as string | undefined;
+  if (!sid || discard === undefined) {
+    console.error("usage: procforge repair <sessionId> --discard <rev>");
+    return 2;
+  }
+  if (!/^\d+$/.test(discard)) {
+    console.error(`bad --discard (revision 숫자 필요): ${discard}`);
+    return 2;
+  }
+  const { projectRoot, procforgeDir } = dirs();
+  try {
+    const { client } = createLocalStack(procforgeDir);
+    const app = new ProcForgeApp({ core: client, procforgeDir, projectRoot });
+    const r = await app.repair({ sessionId: sid, discardRev: Number(discard) });
+    console.log(`repaired: discarded ${r.removed.length} files (${r.removed.join(", ")})`);
+    return 0;
+  } catch (e) {
+    console.error(`error: ${e instanceof Error ? e.message : String(e)}`);
+    return 1;
+  }
+}
+
 async function main(): Promise<number> {
   const [cmd] = positionals;
   if (cmd === "test") return cmdTest();
   if (cmd === "trace") return cmdTrace();
   if (cmd === "export") return cmdExport();
-  console.error("usage: procforge <test|trace|export> ...");
+  if (cmd === "repair") return cmdRepair();
+  console.error("usage: procforge <test|trace|export|repair> ...");
   return 2;
 }
 

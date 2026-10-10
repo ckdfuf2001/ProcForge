@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { mkdtempSync, writeFileSync, existsSync, readFileSync, mkdirSync, readdirSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { join, dirname, resolve } from "node:path";
+import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -315,6 +316,41 @@ describe("M4.2-3-0 pending 정리 (낡은 revision)", () => {
       expect((e as { code?: string }).code).toBe("internal");
       expect((e as { hint?: string }).hint).toBe("복구 필요");
     }
+  });
+
+  it("M4.2-4-0-1 손상 → 거부 2회 → CLI repair → 성공 + human 이벤트", () => {
+    store.saveSession(sess(4));
+    const sessDir = join(dir, "sessions", sid);
+    writeFileSync(join(sessDir, "pending-5.json"), "not-json{{{");
+    // 1회차: .corrupt 이동 + 거부
+    try {
+      store.commitChange(sid, { session: sess(5), nodes: [], events: [] });
+      expect.unreachable();
+    } catch (e) {
+      expect((e as { code?: string }).code).toBe("internal");
+    }
+    expect(readdirSync(sessDir).some((f) => /^\.corrupt-5-\d+\.json$/.test(f))).toBe(true);
+    // 2회차: 잔류 거부
+    try {
+      store.commitChange(sid, { session: sess(5), nodes: [], events: [] });
+      expect.unreachable();
+    } catch (e) {
+      expect((e as { code?: string }).code).toBe("internal");
+      expect((e as Error).message).toMatch(/repair 필요/);
+    }
+    // CLI repair로만 해제
+    const cli = resolve(__dirname, "..", "dist", "cli.js");
+    const r = spawnSync(process.execPath, [cli, "repair", sid, "--discard", "5"], {
+      env: { ...process.env, PROCFORGE_DIR: dir, PROCFORGE_PROJECT_ROOT: dir },
+      encoding: "utf8",
+    });
+    expect(r.status).toBe(0);
+    // 커밋 성공 + human 이벤트 기록
+    store.commitChange(sid, { session: sess(5), nodes: [], events: [] });
+    expect(store.getSession(sid)?.revision).toBe(5);
+    const rep = store.readEvents(sid).find((e) => e.method === "repair");
+    expect(rep?.actor).toBe("human");
+    expect(rep?.summary).toMatch(/--discard 5/);
   });
 });
 
