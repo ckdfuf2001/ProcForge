@@ -275,6 +275,34 @@ C2 month=2026-10 live 실행 → 표지·표 수치 검증 (기대값 하드코�
 C3 음성 테스트 (조작 시 numeric_match fail + 하류 미실행).
 C4 CI E2E에도 C2·C3를 fake 서버로 추가. M5-dogfood.md 3절을 실제 결과로 교체.
 
+### M5.2 교차 기간 재사용 (입력 바인딩·스크립트 leaf·값 흐름)
+배경: M5.1-C1은 10월 데이터로 분해한 절차서를 10월에 실행 — 교차 기간
+재사용 미증명. 실증: month=2026-11 실행이 11월 파일 없이 pass 3,
+표지 2026-11 + 표 10월 수치 (run 52ff17ab). fixture-sealed + 표 고정값 탓.
+1. 입력 바인딩: argSpec in/inout 경로가 var/템플릿(예
+   "sales-${params.month}.xlsx")이면 run 시작 시 projectRoot에서 해석해
+   run fs로 복사 (fixture 아님). fixture는 test/replay 전용.
+   파일 부재는 실행 전 bad_request. 비파라미터 입력만 fixture 시딩.
+2. 스크립트 leaf (M3.5.1-5 결정 구현): 호스트 작성 스크립트를
+   procedures/<name>/scripts/<nodeId>.(py|mjs)로 저장, runner가 run fs에서
+   실행(타임아웃, cwd=run fs, 프로젝트 쓰기 금지, stdout JSON = 노드 출력).
+   pf_confirm_leaf에 kind:"script" 추가, 계약 테스트 포함.
+3. 값 흐름: 표 셀 등 앞 노드 출력과 같은 값은 fixed 금지 →
+   ref("$1.1.rows"). 감사 R1/R2 재검토: fixed 값이 다른 노드 녹화 출력과
+   일치하면 면제 없이 경고(strict 시 거부). 면제 규칙 변경은 DECISIONS 기록.
+4. constraint: 기대값 고정 숫자 금지(감사 대상). 표 합계 == $1.1.total,
+   집계 출력 period == ${params.month}.
+5. 수락 테스트 (CI E2E + 실측 둘 다):
+   a 워크스페이스에 9월 xlsx만 둔 상태로 분해·strict finalize → 절차서 이름
+   monthly (기간 없음).
+   b sales-2026-10.xlsx 추가 후 run month=2026-10 → 표 값이 테스트가
+   xlsx에서 직접 계산한 값과 일치, 표지 2026-10.
+   c month=2026-11 (파일 없음) → 실행 전 bad_request.
+   d sales-2026-10.xlsx 내용을 9월 데이터로 바꿔 run →
+   period constraint fail, 하류 blocked.
+6. M5-dogfood.md 3절을 a~d 결과로 교체. MCP command 상대경로는 후속 후보로
+   DECISIONS에만 기록.
+
 ### M5 검증과 실행 분리
 - `procforge test <proc>`: replay 전용, drift 검출만.
 - `procforge run <procedure> --param k=v ... [--out <dir>]`: live 실행 전용.
@@ -353,7 +381,8 @@ C4 CI E2E에도 C2·C3를 fake 서버로 추가. M5-dogfood.md 3절을 실제 �
 | M3.5.1 | dogfood 후속 수정 (M5 전) | [x] | `98e99d5` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38055900040 | file_exists pin·drift 기준·resultJson 대조·카탈로그 타임아웃·스크립트 leaf 결정·dogfood 보정 |
 | M3.5.2 | 잠금 원자화 (M5 전) | [x] | `5eb43b8` | (아래 run) | openSync wx·token release·부하 테스트·클린 클론 |
 | M5.1 | 잠금 회수 정정·감사·진짜 10월 검증 | [x] | `00661cf` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38067485259 | A 회수 정정(9c0171b)·B 감사·상대조건·템플릿(c56a7c1·935df1b·725c9f3·75b7cc5)·C 10월 검증(00661cf) |
-| M5 | 검증/실행 분리 | [x] | `78e6514` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38067485259 | M5.1-C2/C4로 재확정 (fixture-sealed 규명·var 치환 실증) |
+| M5 | 검증/실행 분리 | [~] | `78e6514` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38067485259 | M5.2 완료 후 재확정 (사유: M5.1-C1은 10월 데이터로 분해한 절차서를 10월에 실행 — 교차 기간 재사용 미증명) |
+| M5.2 | 교차 기간 재사용 | [ ] | | | 입력 바인딩·스크립트 leaf·값 흐름·수락 a~d |
 | M5.5 | 반복 노드 | [ ] | | | |
 | M5.6 | 상태 / sideEffect | [ ] | | | |
 | - | 크롤링 테스트 | [ ] | | | 사람 진행 |
@@ -378,3 +407,4 @@ C4 CI E2E에도 C2·C3를 fake 서버로 추가. M5-dogfood.md 3절을 실제 �
 | 2026-10-10 | 6, 8 | M3.5.2·M5 신설: 잠금 원자화 후 live 실행 분리 (CLI run·suspended·pf_run_*·판정·승인·문구·E2E·실측) | M5 live 실행 전에 프로세스 간 잠금 경합을 먼저 제거, 검증/실행 분리로 재바인딩·신규 데이터 실행 지원 |
 | 2026-10-11 | 6, 8 | M5.1 신설 + M5 미완료로 환원: A 잠금 회수 정정 (pid 생존·하트비트·원위치·계측·50회) · B 파라미터화 감사·C 진짜 10월 검증 | dogfood에서 드러난 회수 경합 잔재·절차서 하드코딩·요약-비교 한계를 M5 확정 전에 해소 |
 | 2026-10-11 | 6, 8 | M5.1 완료 + M5 재확정: A 회수 정정·B1 감사(R1/R2 정밀화)·B2 상대조건·B3 템플릿var·C1 10월 분해(감사 0)·C2 live pass 3·C3 음성(c-total fail+blocked)·C4 CI E2E·A4 m25 50회·양 모드 37+61+183 | fixture-sealed 규명·MCP UTF-8 stdio·한계 문구 삭제 |
+| 2026-10-11 | 6, 8 | M5.2 신설 + M5 미완료로 재환원: 11월 실행 실험(pass 3·표지 2026-11·표 10월 수치, run 52ff17ab)으로 교차 기간 재사용 미증명 확정 | 입력 바인딩·스크립트 leaf·값 흐름·수락 a~d |
