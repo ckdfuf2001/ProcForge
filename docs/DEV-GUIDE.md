@@ -334,8 +334,8 @@ server.registerTool("pf_report", spec, async (a) => {
 | M4.2 | 4단계 강제 장치 1~6 | [x] | `3f66861` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38033626665 | 1~6 전부 구현·테스트 |
 | M3.5 | PPT 실사용 테스트 | [~] | `19c3c6d` | (진행 중) | 단일 모델 1차 완료, 2종 비교·토큰 통계는 사람 보완 필요 |
 | M3.5.1 | dogfood 후속 수정 (M5 전) | [x] | `98e99d5` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38055900040 | file_exists pin·drift 기준·resultJson 대조·카탈로그 타임아웃·스크립트 leaf 결정·dogfood 보정 |
-| M3.5.2 | 잠금 원자화 (M5 전) | [ ] | | | openSync wx·token release·부하 테스트·클린 클론 |
-| M5 | 검증/실행 분리 | [ ] | | | CLI run·suspended·pf_run_*·판정·승인·문구·E2E·실측 |
+| M3.5.2 | 잠금 원자화 (M5 전) | [x] | `5eb43b8` | (아래 run) | openSync wx·token release·부하 테스트·클린 클론 |
+| M5 | 검증/실행 분리 | [x] | `78e6514` | (아래 run) | CLI run·suspended·pf_run_*·판정·승인·문구·E2E·실측 |
 | M5 | 검증/실행 분리 | [ ] | | | |
 | M5.5 | 반복 노드 | [ ] | | | |
 | M5.6 | 상태 / sideEffect | [ ] | | | |
