@@ -292,8 +292,8 @@ server.registerTool("pf_report", spec, async (a) => {
 | M4.2 | 2단계 신규 CoreClient 메서드 | [x] | `55a93d1` | https://github.com/ckdfuf2001/ProcForge/actions/runs/37983222893 | edit×2·catalog·events·MCP 2종 |
 | M4.2 | 2.5단계 App 직접 접근 제거 | [x] | `7c72b2f` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38010705021 | 8항목 + 분리 실증 |
 | M4.2 | 2.5.1 보정 1~5 | [x] | `caf8b18` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38023996163 | 읽기 메모리뷰·pending 정렬/손상/거부·enteredProbing·revision 전달·잠금대기 |
-| M4.2 | 3-0 (2.5.1 잔여) | [ ] | | | 낡은 pending 정리만·recover 중단/실패·commitChange session 필수·읽기 zod |
-| M4.2 | 3단계 M4.1.1 버그 1~7 | [ ] | | | 6번은 2.5-4에서 해소됨 |
+| M4.2 | 3-0 (2.5.1 잔여) | [x] | `2532523` | (3단계와 함께 확인) | 낡은 pending 정리만·recover 중단/실패·commitChange session 필수·읽기 zod |
+| M4.2 | 3단계 M4.1.1 버그 1~7 | [~] | `307bcd6` | (진행 중) | 6번은 2.5-4에서 해소됨 |
 | M4.2 | 4단계 강제 장치 1~6 | [ ] | | | |
 | M3.5 | PPT 실사용 테스트 | [ ] | | | 사람 진행 |
 | M5 | 검증/실행 분리 | [ ] | | | |
@@ -314,3 +314,4 @@ server.registerTool("pf_report", spec, async (a) => {
 | 2026-10-09 | 1, 6, 8 | R1 App 직접 접근 금지 명시 + 2.5단계 신설 (core getSession/getNode·withLock·pending 원자 커밋·응답 revision·DTO) | 3단계 전에 core·파일 저장소 분리 가능성을 실증하면 이후 작업이 설정 변경 수준으로 축소 |
 | 2026-10-10 | 8 | 2.5.1 보정 1~5 진행 (읽기 메모리뷰·pending 정렬/손상/복구/거부·enteredProbing 스냅샷·report 판정 메모리/호출경계·revision 전달·withLock 25ms×20회 대기; App isLocked 제거·getEvent 메모리뷰·주석 //→///) | 0.5~2.5 구현 중 발견된 예외 5종이 3단계 진입 전 해소 필요 (멈춤 없는 read·복구 순서·스냅샷 경합·revision 전달·잠금 대기) |
 | 2026-10-10 | 6, 8 | 3-0 (2.5.1 잔여) 신설: 낡은 pending 정리만·recover 첫 실패 중단/손상 실패·commitChange session 필수·읽기 경로 zod | pending 재반영이 낡은 변경을 되살리거나 손상을 넘기면 3단계 스냅샷·확정 로직의 전제가 무너짐 — 3단계 진입 전 해소 |
+| 2026-10-10 | 3, 4, 8 | 3단계 1·2·3·4·5·7 완료 (6번은 2.5-4 해소): inout 분류+pre-copy/seed 원본·junit 경로·procedure 이름·pf_test nodeId·golden 원문 경고·advise summary | 확정·실행의 입력 완전성(원본)·출력 위치·재실행 범위를 4단계 강제 장치 전에 고정 |
