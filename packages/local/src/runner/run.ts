@@ -9,7 +9,7 @@ import { FileStore } from "../filestore.js";
 import { evaluateAll } from "../checker.js";
 import { logger } from "../logger.js";
 import { writeAtomicFile } from "../fsutil.js";
-import { normalizeArgSpecs, fixtureFileExists } from "../artifacts.js";
+import { normalizeArgSpecs, fixtureFileExists, readManifest } from "../artifacts.js";
 import { ConnectionPool } from "./connections.js";
 import { findRecording, loadCassette, recordKey, saveRecording, toToolResponse } from "./recordings.js";
 import { resolveArgs } from "./resolve.js";
@@ -354,7 +354,16 @@ async function execNode(
 
   // 판정 (checker 재사용, llm_rubric·deferred는 별도 집계)
   // M3.6-3: fixture 존재 검사는 바이너리 존재+크기>0 (sha256 비교 금지)
-  const fileExists = (p: string) => fixtureFileExists(join(opts.procforgeDir, "sessions", opts.sessionId, p));
+  // M3.5.1-1: 논리 경로(source rel)는 manifest 역조회로 판정 (구 fixture 키도 허용)
+  const manifest = readManifest(opts.procforgeDir, opts.sessionId);
+  const sessDir = join(opts.procforgeDir, "sessions", opts.sessionId);
+  const fileExists = (p: string) => {
+    if (fixtureFileExists(join(sessDir, p))) return true;
+    for (const [fx, src] of Object.entries(manifest)) {
+      if (src === p && fixtureFileExists(join(sessDir, fx))) return true;
+    }
+    return false;
+  };
   const nodeOutputs: Record<string, unknown> = {};
   for (const [k, v] of outputs) nodeOutputs[k] = v;
   const r = evaluateAll(n.constraints, {

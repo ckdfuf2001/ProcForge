@@ -1245,8 +1245,46 @@ describe("M4.2-2.5-4 leaf artifacts 통합", () => {
   });
 });
 
-describe("M4.2-1 pfBuildProcedure", () => {
-  it("검증·경고·문서 조립", async () => {
+describe("M3.5.1-1 auto 재생성", () => {
+  it("file_exists는 논리 경로 저장 + 재보고 시 재생성 (human 유지)", async () => {
+    const svc = new CoreService(createMemoryStore(), passEval);
+    const s = await svc.pfStart({ request: "r", toolCatalog: catalog });
+    await svc.pfReport({
+      ...rep(), sessionId: s.session.id,
+      resultJson: { ok: true }, artifacts: ["fx/1/a.txt"],
+      artifactContents: { "fx/1/a.txt": "A", "src/a.txt": "A" },
+      artifactSources: { "fx/1/a.txt": "src/a.txt" },
+    });
+    let n = (await svc.pfTree(s.session.id)).nodes[0];
+    expect(n.constraints.filter((c) => c.kind === "file_exists").map((c) => c.spec)).toEqual([{ path: "src/a.txt" }]);
+    // human 제약 추가 후 새 attempt로 재보고 (구 pin이 있어도 통과)
+    await svc.pfEditNode({
+      sessionId: s.session.id, nodeId: "1",
+      addConstraints: [{ id: "h1", kind: "json_path_exists", spec: { path: "ok" }, source: "human" }],
+    });
+    const r2 = await svc.pfReport({
+      ...rep(), sessionId: s.session.id,
+      resultJson: { ok: true }, artifacts: ["fx/2/a.txt"],
+      artifactContents: { "fx/2/a.txt": "A2", "src/a.txt": "A2" },
+      artifactSources: { "fx/2/a.txt": "src/a.txt" },
+    });
+    expect(r2.verdict).toBe("pass");
+    n = (await svc.pfTree(s.session.id)).nodes[0];
+    const fe = n.constraints.filter((c) => c.kind === "file_exists");
+    expect(fe).toHaveLength(1);
+    expect(fe[0].spec).toEqual({ path: "src/a.txt" });
+    expect(n.constraints.some((c) => c.id === "h1")).toBe(true);
+  });
+
+  it("auto file_exists sources 매핑", () => {
+    const auto = autoConstraints({ ok: true }, ["fx/1/a.txt"], { "fx/1/a.txt": "src/a.txt" });
+    expect(auto.find((c) => c.kind === "file_exists")?.spec).toEqual({ path: "src/a.txt" });
+    const legacy = autoConstraints({ ok: true }, ["fx/1/a.txt"]);
+    expect(legacy.find((c) => c.kind === "file_exists")?.spec).toEqual({ path: "fx/1/a.txt" });
+  });
+});
+
+describe("M4.2-1 pfBuildProcedure", () => {  it("검증·경고·문서 조립", async () => {
     const svc = new CoreService(createMemoryStore(), passEval);
     const s = await svc.pfStart({ request: "r", params: { month: "2026-09" }, toolCatalog: catalog });
     await svc.pfReport({ ...rep(), sessionId: s.session.id, args: { f: "report-2026-09.txt" } });

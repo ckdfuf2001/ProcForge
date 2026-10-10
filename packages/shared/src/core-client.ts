@@ -61,6 +61,8 @@ export type PfReportInput = {
   rubricReasons?: Record<string, string>;
   /** local이 미리 채번한 attempt id (fixture 경로 결정용, M2). 없으면 core가 채번 */
   attemptId?: string;
+  /** fixture → sandbox 논리 경로 매핑 (M3.5.1-1, auto file_exists 경로용) */
+  artifactSources?: Record<string, string>;
   expectedRevision?: number;
   actor?: Actor;
 };

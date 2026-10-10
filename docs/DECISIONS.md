@@ -285,6 +285,9 @@
   uuid·시각 정규화 후 session·nodes·확정 응답 일치.
 - 4-6: test/arg-schema.test.ts — server 소스 정적 파싱으로 도구↔
   inputSchema 대응, 핸들러 a.*·설명서 (필수/선택) 인자는 스키마 키.
+- M3.5.1-1: auto file_exists는 fixture 키 대신 sandbox 논리 경로 저장
+  (artifactSources 전달). 매 pass마다 source:auto 재생성(human 유지) 후
+  평가·저장. runner fileExists는 manifest 역조회. 재보고 pin 해소.
 - 4-1/4-2 수정: check-deps가 Windows에서 빈 스캔(항상 통과)이던 결함
   수정 (fileURLToPath). 멀티라인 import 여는 행 제외, *.test.ts는
   저장 범위 검사에서 제외 (저장소 직접 검증 목적).

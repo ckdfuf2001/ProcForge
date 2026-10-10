@@ -79,19 +79,22 @@ export { isResolved };
 import { effectiveDeps, expandDepLeafs, hasCycle, hasLineageDep } from "@procforge/shared/deps.js";
 
 /**
- * 첫 pass 결과 형태 기반 auto constraint 생성 (M1.5-2).
- * file_exists(artifacts) + json_path_exists(result 최상위 키). 최대 10개.
+ * pass 결과 형태 기반 auto constraint 생성 (M1.5-2, M3.5.1-1 재생성).
+ * file_exists는 attempt fixture 키가 아니라 sandbox 기준 논리 경로
+ * (sources 매핑, 없으면 fixture 키 그대로). json_path_exists(result 최상위 키).
+ * 최대 10개. source는 항상 auto.
  */
 export function autoConstraints(
   resultJson: unknown,
   artifacts: string[],
+  sources?: Record<string, string>,
 ): Constraint[] {
   const out: Constraint[] = [];
   let i = 0;
   const id = () => `auto-${i++}`;
   for (const a of artifacts) {
     if (out.length >= 10) break;
-    out.push({ id: id(), kind: "file_exists", spec: { path: a }, source: "auto", note: "auto: first-pass shape" });
+    out.push({ id: id(), kind: "file_exists", spec: { path: sources?.[a] ?? a }, source: "auto", note: "auto: first-pass shape" });
   }
   if (out.length < 10 && resultJson !== null && typeof resultJson === "object" && !Array.isArray(resultJson)) {
     for (const k of Object.keys(resultJson as Record<string, unknown>)) {
@@ -502,8 +505,12 @@ export class CoreService implements CoreClient {
       }, summary: `report ${n.id} rubric-missing` };
     }
 
-    // verdict 계산 (M1.5-2): constraints가 비었으면 selfVerdict 사용
+    // verdict 계산 (M1.5-2): constraints가 비었으면 selfVerdict 사용.
+    // M3.5.1-1: source:auto 제약은 매 pass마다 재생성(human 유지). 평가는
+    // human + 재생성분으로 (낡은 attempt 키 pin 제거).
     const artifactsMap: Record<string, string> = { ...(input.artifactContents ?? {}) };
+    const human = n.constraints.filter((c) => c.source !== "auto");
+    const freshAuto = autoConstraints(input.resultJson, input.artifacts ?? [], input.artifactSources);
     let verdict: "pass" | "fail";
     let failedConstraints: string[];
     let unverified: string[] | undefined;
@@ -511,7 +518,7 @@ export class CoreService implements CoreClient {
       verdict = input.selfVerdict;
       failedConstraints = verdict === "pass" ? [] : ["self"];
     } else {
-      const r = this.evaluate(n.constraints, {
+      const r = this.evaluate([...human, ...freshAuto], {
         resultSummary: input.resultSummary,
         resultJson: input.resultJson,
         artifacts: artifactsMap,
@@ -524,12 +531,8 @@ export class CoreService implements CoreClient {
 
     if (verdict === "pass") {
       // M1.5-1: pass여도 leaf 자동 확정 없음. probing 유지 + resolve 요구.
-      // 첫 pass + constraints 비어 있으면 결과 형태 기반 auto constraint 부착.
-      let constraints = n.constraints;
-      if (n.constraints.length === 0) {
-        const auto = autoConstraints(input.resultJson, input.artifacts ?? []);
-        if (auto.length > 0) constraints = [...n.constraints, ...auto];
-      }
+      // M3.5.1-1: auto 제약 재생성 저장 (human 유지).
+      const constraints = [...human, ...freshAuto];
       const next: Node = {
         ...n,
         status: "probing",
@@ -540,7 +543,7 @@ export class CoreService implements CoreClient {
       next.hash = this.hashFor(s.id, next);
       this.store.saveNode(s.id, next);
       if (next.hash !== n.hash) this.propagateStale(s.id, n.id);
-      const autoNote = constraints.length > n.constraints.length ? ` 결과 형태 기반 auto constraint ${constraints.length - n.constraints.length}개 부착.` : "";
+      const autoNote = freshAuto.length > 0 ? ` 결과 형태 기반 auto constraint ${freshAuto.length}개 부착.` : "";
       return { result: {
         verdict,
         failedConstraints: [],

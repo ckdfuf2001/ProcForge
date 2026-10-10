@@ -211,6 +211,15 @@ export class ProcForgeApp {
       attemptId, baseDir, jobs, maxBytes: this.maxArtifactBytes,
       resolveOriginal: resolveHere,
     });
+    // M3.5.1-1: fixture → 논리 경로 매핑 전달 + 논리 경로 alias (auto file_exists 판정용)
+    const manifestAfter = readManifest(this.procforgeDir, sid);
+    const sources: Record<string, string> = {};
+    for (const fx of stored) {
+      const src = manifestAfter[fx];
+      if (!src) continue;
+      sources[fx] = src;
+      if (contents[fx] !== undefined && contents[src] === undefined) contents[src] = contents[fx];
+    }
     const out = await this.core.pfReport({
       sessionId: sid,
       nodeId: nid,
@@ -220,6 +229,7 @@ export class ProcForgeApp {
       resultJson: a.resultJson,
       artifacts: stored,
       artifactContents: contents,
+      artifactSources: sources,
       selfVerdict: a.selfVerdict as "pass" | "fail",
       selfReason: a.selfReason as string,
       rubricReasons: a.rubricReasons as Record<string, string> | undefined,
