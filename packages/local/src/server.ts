@@ -26,6 +26,7 @@ import { errorCodeOf } from "@procforge/shared/errors.js";
 import { logger } from "./logger.js";
 import { OUTPUT_SCHEMAS } from "./app/surface.js";
 import { logEvent } from "./app/surface.js";
+import { APP_METHODS } from "./app/tools.js";
 import type { ProcForgeApp } from "./app/app.js";
 import { PROMPT_TEXT, DEFAULT_SESSION_TTL_MS } from "./app/app.js";
 
@@ -99,6 +100,16 @@ export function buildServer(deps: ServerDeps): McpServer {
   const R = (name: string, config: any, cb: any) => {
     if (enabled(name)) server.registerTool(name, config, logged(name, cb) as never);
   };
+  // M4.2-4-3: APP_METHODS 디스패치 (1:1 매핑 단일 원천).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const H = (name: keyof typeof APP_METHODS) => async (a: any) => {
+    try {
+      const method = APP_METHODS[name] as keyof ProcForgeApp;
+      return ok((await (app[method] as (arg: any) => Promise<Record<string, unknown>>)(a)) as Record<string, unknown>);
+    } catch (e) {
+      return errResult(e);
+    }
+  };
   // pf_* 호출 기록 (trace용, M3.5)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const logged = (name: string, cb: any) => async (a: any, extra: any) => {
@@ -136,13 +147,7 @@ export function buildServer(deps: ServerDeps): McpServer {
       outputSchema: OUTPUT_SCHEMAS["pf_start"] as never,
       annotations: WRITE_ANN,
     },
-    async (a: any) => {
-      try {
-        return ok(await app.start(a));
-      } catch (e) {
-        return errResult(e);
-      }
-    },
+    H("pf_start"),
   );
 
   R(
@@ -159,13 +164,7 @@ export function buildServer(deps: ServerDeps): McpServer {
       outputSchema: OUTPUT_SCHEMAS["pf_next"] as never,
       annotations: WRITE_ANN,
     },
-    async (a: any) => {
-      try {
-        return ok(await app.next(a));
-      } catch (e) {
-        return errResult(e);
-      }
-    },
+    H("pf_next"),
   );
 
   R(
@@ -183,13 +182,7 @@ export function buildServer(deps: ServerDeps): McpServer {
       outputSchema: OUTPUT_SCHEMAS["pf_report"] as never,
       annotations: WRITE_ANN,
     },
-    async (a: any) => {
-      try {
-        return ok(await app.report(a));
-      } catch (e) {
-        return errResult(e);
-      }
-    },
+    H("pf_report"),
   );
 
   R(
@@ -206,13 +199,7 @@ export function buildServer(deps: ServerDeps): McpServer {
       outputSchema: OUTPUT_SCHEMAS["pf_split"] as never,
       annotations: WRITE_ANN,
     },
-    async (a: any) => {
-      try {
-        return ok(await app.split(a));
-      } catch (e) {
-        return errResult(e);
-      }
-    },
+    H("pf_split"),
   );
 
   R(
@@ -230,13 +217,7 @@ export function buildServer(deps: ServerDeps): McpServer {
       outputSchema: OUTPUT_SCHEMAS["pf_confirm_leaf"],
       annotations: WRITE_ANN,
     },
-    async (a: any) => {
-      try {
-        return ok(await app.confirmLeaf(a));
-      } catch (e) {
-        return errResult(e);
-      }
-    },
+    H("pf_confirm_leaf"),
   );
 
   R(
@@ -253,13 +234,7 @@ export function buildServer(deps: ServerDeps): McpServer {
       outputSchema: OUTPUT_SCHEMAS["pf_retry"] as never,
       annotations: WRITE_ANN,
     },
-    async (a: any) => {
-      try {
-        return ok(await app.retry(a));
-      } catch (e) {
-        return errResult(e);
-      }
-    },
+    H("pf_retry"),
   );
 
   R(
@@ -276,13 +251,7 @@ export function buildServer(deps: ServerDeps): McpServer {
       outputSchema: OUTPUT_SCHEMAS["pf_ask_human"] as never,
       annotations: WRITE_ANN,
     },
-    async (a: any) => {
-      try {
-        return ok(await app.askHuman(a));
-      } catch (e) {
-        return errResult(e);
-      }
-    },
+    H("pf_ask_human"),
   );
 
   R(
@@ -299,13 +268,7 @@ export function buildServer(deps: ServerDeps): McpServer {
       outputSchema: OUTPUT_SCHEMAS["pf_approve"] as never,
       annotations: WRITE_ANN,
     },
-    async (a: any) => {
-      try {
-        return ok(await app.approve(a));
-      } catch (e) {
-        return errResult(e);
-      }
-    },
+    H("pf_approve"),
   );
 
   R(
@@ -322,13 +285,7 @@ export function buildServer(deps: ServerDeps): McpServer {
       outputSchema: OUTPUT_SCHEMAS["pf_advise"] as never,
       annotations: WRITE_ANN,
     },
-    async (a: any) => {
-      try {
-        return ok(await app.advise(a));
-      } catch (e) {
-        return errResult(e);
-      }
-    },
+    H("pf_advise"),
   );
 
   R(
@@ -345,13 +302,7 @@ export function buildServer(deps: ServerDeps): McpServer {
       outputSchema: OUTPUT_SCHEMAS["pf_tree"] as never,
       annotations: READ_ONLY_ANN,
     },
-    async (a: any) => {
-      try {
-        return ok(await app.tree(a));
-      } catch (e) {
-        return errResult(e);
-      }
-    },
+    H("pf_tree"),
   );
 
   R(
@@ -367,13 +318,7 @@ export function buildServer(deps: ServerDeps): McpServer {
       outputSchema: OUTPUT_SCHEMAS["pf_get_node"] as never,
       annotations: READ_ONLY_ANN,
     },
-    async (a: any) => {
-      try {
-        return ok(await app.getNode(a));
-      } catch (e) {
-        return errResult(e);
-      }
-    },
+    H("pf_get_node"),
   );
 
   R(
@@ -389,13 +334,7 @@ export function buildServer(deps: ServerDeps): McpServer {
       outputSchema: OUTPUT_SCHEMAS["pf_lock"] as never,
       annotations: WRITE_ANN,
     },
-    async (a: any) => {
-      try {
-        return ok(await app.lock(a));
-      } catch (e) {
-        return errResult(e);
-      }
-    },
+    H("pf_lock"),
   );
 
   R(
@@ -411,13 +350,7 @@ export function buildServer(deps: ServerDeps): McpServer {
       outputSchema: OUTPUT_SCHEMAS["pf_reopen"] as never,
       annotations: WRITE_ANN,
     },
-    async (a: any) => {
-      try {
-        return ok(await app.reopen(a));
-      } catch (e) {
-        return errResult(e);
-      }
-    },
+    H("pf_reopen"),
   );
 
   R(
@@ -434,13 +367,7 @@ export function buildServer(deps: ServerDeps): McpServer {
       outputSchema: OUTPUT_SCHEMAS["pf_edit_args"] as never,
       annotations: WRITE_ANN,
     },
-    async (a: any) => {
-      try {
-        return ok(await app.editArgs(a));
-      } catch (e) {
-        return errResult(e);
-      }
-    },
+    H("pf_edit_args"),
   );
 
   R(
@@ -457,13 +384,7 @@ export function buildServer(deps: ServerDeps): McpServer {
       outputSchema: OUTPUT_SCHEMAS["pf_edit_node"] as never,
       annotations: WRITE_ANN,
     },
-    async (a: any) => {
-      try {
-        return ok(await app.editNode(a));
-      } catch (e) {
-        return errResult(e);
-      }
-    },
+    H("pf_edit_node"),
   );
 
   R(
@@ -480,13 +401,7 @@ export function buildServer(deps: ServerDeps): McpServer {
       outputSchema: OUTPUT_SCHEMAS["pf_refresh_catalog"] as never,
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
     },
-    async () => {
-      try {
-        return ok(await app.refreshCatalog({}));
-      } catch (e) {
-        return errResult(e);
-      }
-    },
+    H("pf_refresh_catalog"),
   );
 
   R(
@@ -505,13 +420,7 @@ export function buildServer(deps: ServerDeps): McpServer {
       outputSchema: OUTPUT_SCHEMAS["pf_test"] as never,
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
     },
-    async (a: any) => {
-      try {
-        return ok(await app.test(a));
-      } catch (e) {
-        return errResult(e);
-      }
-    },
+    H("pf_test"),
   );
 
   R(
@@ -529,13 +438,7 @@ export function buildServer(deps: ServerDeps): McpServer {
       outputSchema: OUTPUT_SCHEMAS["pf_finalize"] as never,
       annotations: WRITE_ANN,
     },
-    async (a: any) => {
-      try {
-        return ok(await app.finalize(a));
-      } catch (e) {
-        return errResult(e);
-      }
-    },
+    H("pf_finalize"),
   );
 
   server.registerPrompt(

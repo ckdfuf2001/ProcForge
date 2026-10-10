@@ -276,6 +276,8 @@
 - 4-2: 어댑터 fs 직접 사용 금지 (saveNode·write/read/exists/mkdir) +
   FileStore 저장 계열 호출 허용 범위 (core·합성·filestore·app·services·
   runner·procedure) 검사를 check-deps에 추가.
+- 4-3: app/tools.ts APP_METHODS 단일 원천, server 핸들러를 디스패치로
+  전환. TOOL_NAMES 집합 일치 + 메서드 존재 테스트.
 - 3-2: junitPath는 프로젝트 안만 허용(탈출 bad_request), 생략 시
   runs/<runId>/junit.xml 항상 기록. 응답에 junitPath 포함.
 - 3-3: pf_test.procedure에 PROCEDURE_NAME_RE zod 적용 (MCP 입력은
