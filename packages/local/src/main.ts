@@ -10,7 +10,9 @@ const ttlDays = Number(process.env.PROCFORGE_SESSION_TTL_DAYS ?? "30");
 const sessionTtlMs = Number.isFinite(ttlDays) && ttlDays > 0 ? ttlDays * 86400000 : DEFAULT_SESSION_TTL_MS;
 const strictSandbox = process.env.PROCFORGE_STRICT_SANDBOX !== "0";
 const maxArtifactBytes = Number(process.env.PROCFORGE_MAX_ARTIFACT_BYTES ?? `${5 * 1024 * 1024}`);
+const catalogTimeoutMsRaw = Number(process.env.PROCFORGE_CATALOG_TIMEOUT_MS ?? "");
+const catalogTimeoutMs = Number.isFinite(catalogTimeoutMsRaw) && catalogTimeoutMsRaw > 0 ? catalogTimeoutMsRaw : undefined;
 
 // App 조립은 app/bootstrap으로 (M4.2-4-1). server는 완성된 App만 받는다.
-const { app } = createApp({ procforgeDir, projectRoot, sessionTtlMs, strictSandbox, maxArtifactBytes });
+const { app } = createApp({ procforgeDir, projectRoot, sessionTtlMs, strictSandbox, maxArtifactBytes, catalogTimeoutMs });
 await runStdio({ app, procforgeDir, readOnly });

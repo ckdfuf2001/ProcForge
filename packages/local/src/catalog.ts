@@ -158,6 +158,9 @@ export function loadMcpConfigs(projectRoot: string): { servers: Record<string, M
   return { servers, sources };
 }
 
+/** 카탈로그 수집 기본 타임아웃 (M3.5.1-4, 저사양·cold start 대응) */
+export const DEFAULT_CATALOG_TIMEOUT_MS = 15000;
+
 /** MCP stdio 서버 연결 (runner 연결 풀이 재사용, M3). cwd 지정 시 run fs로 spawn (M3.1-3) */
 export async function connectMcpServer(
   serverName: string,
@@ -191,54 +194,59 @@ async function listServerTools(
   if (cfg.type === "remote" || cmd.length === 0) {
     return { entries: [], warning: `${serverName}: remote/unsupported transport skipped` };
   }
-  const client = new Client({ name: "procforge-catalog", version: "0.0.0" });
-  const timeout = new Promise<never>((_, reject) => {
-    setTimeout(() => reject(new Error("timeout")), timeoutMs);
-  });
-  // 연결은 connectMcpServer로 일원화하되 타임아웃 경쟁을 위해 transport 직접 구성
-  const transport = new StdioClientTransport({
-    command: cmd[0],
-    args: cmd.slice(1),
-    cwd: cfg.cwd,
-    env: { ...process.env, ...(cfg.environment ?? {}) } as Record<string, string>,
-  });
-  try {
-    await Promise.race([client.connect(transport), timeout]);
-    const { tools } = await client.listTools();
-    const entries = tools.map((t) => {
-      const inputSchema = (t.inputSchema ?? { type: "object" }) as Record<string, unknown>;
-      const a = (t.annotations ?? {}) as Record<string, boolean>;
-      return {
-        server: serverName,
-        name: t.name,
-        inputSchema,
-        schemaHash: schemaHash(inputSchema),
-        annotations: {
-          readOnlyHint: a["readOnlyHint"],
-          destructiveHint: a["destructiveHint"],
-          idempotentHint: a["idempotentHint"],
-          openWorldHint: a["openWorldHint"],
-        },
-      };
+  // M3.5.1-4: 1회 재시도 (cold start·일시 오류 대응)
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const client = new Client({ name: "procforge-catalog", version: "0.0.0" });
+    const timeout = new Promise<never>((_, reject) => {
+      setTimeout(() => reject(new Error("timeout")), timeoutMs);
     });
-    return { entries };
-  } catch (e) {
-    return { entries: [], warning: `${serverName}: ${e instanceof Error ? e.message : String(e)}` };
-  } finally {
+    // 연결은 connectMcpServer로 일원화하되 타임아웃 경쟁을 위해 transport 직접 구성
+    const transport = new StdioClientTransport({
+      command: cmd[0],
+      args: cmd.slice(1),
+      cwd: cfg.cwd,
+      env: { ...process.env, ...(cfg.environment ?? {}) } as Record<string, string>,
+    });
     try {
-      await client.close();
-    } catch {
-      // 무시
+      await Promise.race([client.connect(transport), timeout]);
+      const { tools } = await client.listTools();
+      const entries = tools.map((t) => {
+        const inputSchema = (t.inputSchema ?? { type: "object" }) as Record<string, unknown>;
+        const a = (t.annotations ?? {}) as Record<string, boolean>;
+        return {
+          server: serverName,
+          name: t.name,
+          inputSchema,
+          schemaHash: schemaHash(inputSchema),
+          annotations: {
+            readOnlyHint: a["readOnlyHint"],
+            destructiveHint: a["destructiveHint"],
+            idempotentHint: a["idempotentHint"],
+            openWorldHint: a["openWorldHint"],
+          },
+        };
+      });
+      return { entries };
+    } catch (e) {
+      lastError = e;
+    } finally {
+      try {
+        await client.close();
+      } catch {
+        // 무시
+      }
     }
   }
+  return { entries: [], warning: `${serverName}: ${lastError instanceof Error ? lastError.message : String(lastError)}` };
 }
 
-/** opencode.json mcp 항목 + 내장 툴 → toolCatalog 수집 (M2.5: 캐시+5초 타임아웃) */
+/** opencode.json mcp 항목 + 내장 툴 → toolCatalog 수집 (M2.5: 캐시+타임아웃, M3.5.1-4: 기본 15s) */
 export async function collectCatalog(
   projectRoot: string,
   opts: { timeoutMs?: number; cacheDir?: string; refresh?: boolean; opencodeVersion?: string; runOpencode?: VersionRunner } = {},
 ): Promise<{ entries: ToolCatalogEntry[]; warnings: string[]; cached: boolean; opencodeVersion: string }> {
-  const timeoutMs = opts.timeoutMs ?? 5000;
+  const timeoutMs = opts.timeoutMs ?? DEFAULT_CATALOG_TIMEOUT_MS;
   const CACHE_TTL_MS = 10 * 60 * 1000;
   const cachePath = opts.cacheDir ? join(opts.cacheDir, "catalog.json") : undefined;
   // M3.6-7: 버전이 다르면 스키마가 다를 수 있어 fingerprint에 포함

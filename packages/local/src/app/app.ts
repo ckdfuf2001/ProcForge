@@ -69,6 +69,8 @@ export type AppDeps = {
   sessionTtlMs?: number;
   strictSandbox?: boolean;
   maxArtifactBytes?: number;
+  /** 카탈로그 수집 타임아웃 (M3.5.1-4) */
+  catalogTimeoutMs?: number;
 };
 
 export class ProcForgeApp {
@@ -78,6 +80,7 @@ export class ProcForgeApp {
   private sessionTtlMs: number | undefined;
   private strictSandbox: boolean;
   private maxArtifactBytes: number;
+  private catalogTimeoutMs: number | undefined;
 
   constructor(deps: AppDeps) {
     this.core = deps.core;
@@ -86,11 +89,12 @@ export class ProcForgeApp {
     this.sessionTtlMs = deps.sessionTtlMs;
     this.strictSandbox = deps.strictSandbox ?? true;
     this.maxArtifactBytes = deps.maxArtifactBytes ?? 5 * 1024 * 1024;
+    this.catalogTimeoutMs = deps.catalogTimeoutMs;
   }
 
   async start(a: StartInput): Promise<OutputOf<"pf_start">> {    const collected = a.toolCatalog
       ? undefined
-      : await collectCatalog(this.projectRoot, { cacheDir: join(this.procforgeDir, "cache") });
+      : await collectCatalog(this.projectRoot, { cacheDir: join(this.procforgeDir, "cache"), ...(this.catalogTimeoutMs !== undefined ? { timeoutMs: this.catalogTimeoutMs } : {}) });
     const catalog = a.toolCatalog ?? collected!.entries;
     const warnings = collected?.warnings ?? [];
     const out = await this.core.pfStart({ request: a.request as string, params: a.params as Record<string, string> | undefined, toolCatalog: catalog as never, limits: a.limits as never, opencodeVersion: collected?.opencodeVersion });
@@ -631,7 +635,7 @@ export class ProcForgeApp {
   }
 
   async refreshCatalog(_a: RefreshCatalogInput): Promise<OutputOf<"pf_refresh_catalog">> {
-    const c = await collectCatalog(this.projectRoot, { cacheDir: join(this.procforgeDir, "cache"), refresh: true });
+    const c = await collectCatalog(this.projectRoot, { cacheDir: join(this.procforgeDir, "cache"), refresh: true, ...(this.catalogTimeoutMs !== undefined ? { timeoutMs: this.catalogTimeoutMs } : {}) });
     return {
       entries: c.entries.map((e) => ({ server: e.server, name: e.name, schemaHash: e.schemaHash })),
       warnings: c.warnings,

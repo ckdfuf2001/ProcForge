@@ -1,13 +1,16 @@
 import { describe, it, expect } from "vitest";
 import { mkdtempSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
+import { fileURLToPath } from "node:url";
 import {
   BUILTIN_BY_MAJOR,
   BUILTIN_TOOLS,
   builtinMajor,
   builtinToolsFor,
+  collectCatalog,
+  DEFAULT_CATALOG_TIMEOUT_MS,
   detectOpencodeVersion,
 } from "../src/catalog.js";
 import { ConnectionPool } from "../src/runner/connections.js";
@@ -58,7 +61,6 @@ describe("M3.6-7 카탈로그 버전", () => {
     });
     expect(store.getSession(id)?.opencodeVersion).toBe("1.2.3");
   });
-
   it("runner read offset/limit", async () => {
     const dir = mkdtempSync(join(tmpdir(), "pf-cat-"));
     writeFileSync(join(dir, "a.txt"), "l0\nl1\nl2\nl3");
@@ -73,4 +75,42 @@ describe("M3.6-7 카탈로그 버전", () => {
       await pool.close();
     }
   });
+});
+
+describe("M3.5.1-4 카탈로그 타임아웃·재시도", () => {
+  it("기본 타임아웃 15s", () => {
+    expect(DEFAULT_CATALOG_TIMEOUT_MS).toBe(15000);
+  });
+
+  it("첫 실패 서버는 1회 재시도 후 수집", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "pf-catflaky-"));
+    const here = dirname(fileURLToPath(import.meta.url));
+    const flag = join(dir, "flag");
+    writeFileSync(
+      join(dir, "opencode.json"),
+      JSON.stringify({
+        mcp: {
+          flaky: {
+            type: "local",
+            command: [process.execPath, resolve(here, "../test/fixtures/flaky-mcp-server.mjs")],
+            environment: { FLAG_PATH: flag },
+          },
+        },
+      }),
+    );
+    const c = await collectCatalog(dir, { timeoutMs: 20000 });
+    expect(c.entries.some((e) => e.server === "flaky" && e.name === "ping")).toBe(true);
+    expect(c.warnings.filter((w) => w.startsWith("flaky:"))).toEqual([]);
+  }, 60000);
+
+  it("계속 실패 서버는 경고 + 내장 항목 유지", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "pf-catbad-"));
+    writeFileSync(
+      join(dir, "opencode.json"),
+      JSON.stringify({ mcp: { bad: { type: "local", command: ["nonexistent-procforge-bin-xyz"] } } }),
+    );
+    const c = await collectCatalog(dir, { timeoutMs: 10000 });
+    expect(c.warnings.some((w) => w.startsWith("bad:"))).toBe(true);
+    expect(c.entries.some((e) => e.server === "opencode" && e.name === "read")).toBe(true);
+  }, 60000);
 });

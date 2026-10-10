@@ -293,6 +293,8 @@
   updateGolden 시 카세트도 재기준.
 - M3.5.1-3: report 시 resultJson 키를 카세트 녹화 응답과 대조 (키 일치로
   탐색). 미확인 키는 경고, auto json은 확인된 키에서만 생성. 없으면 신뢰 유지.
+- M3.5.1-4: 카탈로그 수집 기본 15s + 서버당 1회 재시도. App/CLI 설정화
+  (PROCFORGE_CATALOG_TIMEOUT_MS).
 - 4-1/4-2 수정: check-deps가 Windows에서 빈 스캔(항상 통과)이던 결함
   수정 (fileURLToPath). 멀티라인 import 여는 행 제외, *.test.ts는
   저장 범위 검사에서 제외 (저장소 직접 검증 목적).
