@@ -347,13 +347,18 @@
   -32602로 가린다. 코드는 텍스트 맨 앞에 둔다 ("code: message (힌트: ...)").
   (bc-guide 세션 finalize 실패 추적에서 발견: 실제 원인은
   1.2/1.3 missing required arg: command였으나 -32602에 가려졌음)
-- M5.2-5: 수락 테스트. CI E2E m52-monthly.test.ts (절차서 monthly):
+- 검증 규율: 로컬 vitest는 패키지 간 import를 dist로 해결한다.
+  core/shared 변경 후에는 반드시 `pnpm -r build`부터 하고 테스트할 것.
+  (M5.3-0-4 확정 문구가 stale dist 때문에 로컬에서만 통과하고
+  클린 클론에서 실패한 사례. 확정 instruction은 경고가 있어도
+  다음 도구 언급을 유지해야 한다 — 기계 추종 계약.)
 - M5.3-0-4: 증거. 호스트 내장 툴(bash 등) leaf는 실행 증거가 없다 —
   attempt에 남는 건 호스트 주장(resultSummary)과 인자뿐. confirm은
   artifacts 비어 있으면 경고 (거부 아님). 한계: core attempt는 resultJson을
   저장하지 않아 (실측 확인) 결과 JSON을 증거·미러로 쓸 수 없다.
   R2 미러 면제는 attempts resultJson이 있을 때만 동작 (단위 계약).
   auto constraint 강제는 경로가 있어야 가능하므로 미적용 (경고로 대체).
+- M5.2-5: 수락 테스트. CI E2E m52-monthly.test.ts (절차서 monthly):
   1.1 script 집계 + period==${params.month}, 1.2 script 렌더 +
   total==$1.1.total. a 9월 분해 strict 0, b 10월 실행·독립 계산 일치,
   c 11월 부재 bad_request, d 데이터 교체 period fail+blocked.
