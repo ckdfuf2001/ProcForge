@@ -7,7 +7,7 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { buildServer, TOOL_NAMES, READ_ONLY_TOOLS, PROMPT_TEXT } from "../src/server.js";
 import { ProcForgeApp } from "../src/app/app.js";
 import { OUTPUT_SCHEMAS, ErrorEnvelopeShape } from "../src/views.js";
-import { createLocalStack } from "../src/core-inprocess.js";
+import { testStack } from "./client-mode.js";
 
 let root: string;
 let pfdir: string;
@@ -33,7 +33,7 @@ afterEach(() => {
 });
 
 async function linked() {
-  const { client, store } = createLocalStack(pfdir);
+  const { client, store } = testStack(pfdir);
   const app = new ProcForgeApp({ core: client, procforgeDir: pfdir, projectRoot: root });
   const server = buildServer({ app, procforgeDir: pfdir });
   const [ct, st] = InMemoryTransport.createLinkedPair();
@@ -84,7 +84,7 @@ describe("tools/list 스냅샷 (결정적 순서·annotations)", () => {
   });
 
   it("READ_ONLY 모드: 읽기 2종만", async () => {
-    const { client } = createLocalStack(pfdir);
+    const { client } = testStack(pfdir);
     const app = new ProcForgeApp({ core: client, procforgeDir: pfdir, projectRoot: root });
     const server = buildServer({ app, procforgeDir: pfdir, readOnly: true });
     const [ct, st] = InMemoryTransport.createLinkedPair();
@@ -321,7 +321,7 @@ describe("도구 응답 계약 (outputSchema 통과)", () => {
 
 describe("M2.5-6 세션 TTL", () => {
   it("만료 세션은 session_not_found", async () => {
-    const { client } = createLocalStack(pfdir, { sessionTtlMs: -1 });
+    const { client } = testStack(pfdir, { sessionTtlMs: -1 });
     const app = new ProcForgeApp({ core: client, procforgeDir: pfdir, projectRoot: root });
     const server = buildServer({ app, procforgeDir: pfdir });
     const [ct, st] = InMemoryTransport.createLinkedPair();
@@ -342,7 +342,7 @@ describe("M2.5-6 세션 TTL", () => {
 
 describe("M2.5-5 응답 크기", () => {
   it("200노드 트리 기본 응답 바이트 한도", async () => {
-    const { client } = createLocalStack(pfdir);
+    const { client } = testStack(pfdir);
     const started = await client.pfStart({
       request: "big",
       toolCatalog: [],

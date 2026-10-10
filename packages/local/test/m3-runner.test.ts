@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import { collectCatalog } from "../src/catalog.js";
-import { createLocalStack } from "../src/core-inprocess.js";
+import { testStack } from "./client-mode.js";
 import { ingestArtifacts } from "../src/artifacts.js";
 import { exportSession, listZip, readZipEntry } from "../src/export.js";
 import { runSession, toJUnit } from "../src/runner/index.js";
@@ -33,7 +33,7 @@ beforeEach(() => {
   writeFileSync(join(root, "data.pptx"), "x");
   writeFileSync(join(root, "template.j2"), "template {{month}}");
   writeOpencodeConfig(["node", serverMjs]);
-  client = createLocalStack(pfdir).client;
+  client = testStack(pfdir).client;
 });
 
 afterEach(() => {

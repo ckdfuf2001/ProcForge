@@ -3,7 +3,7 @@ import { mkdtempSync, existsSync, readFileSync, readdirSync, writeFileSync } fro
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { collectCatalog } from "../src/catalog.js";
-import { createLocalStack } from "../src/core-inprocess.js";
+import { testStack } from "./client-mode.js";
 import { importProcedure } from "../src/procedure.js";
 import { ProcedureDocSchema } from "@procforge/shared/procedure.js";
 import { ProcForgeApp } from "../src/app/app.js";
@@ -30,7 +30,7 @@ beforeEach(() => {
   process.env.HOME = home;
   process.env.USERPROFILE = home;
   writeOpencodeConfig(["node", serverMjs]);
-  client = createLocalStack(pfdir).client;
+  client = testStack(pfdir).client;
 });
 
 afterEach(() => {

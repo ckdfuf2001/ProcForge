@@ -6,7 +6,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { buildServer } from "../src/server.js";
 import { ProcForgeApp } from "../src/app/app.js";
-import { createLocalStack } from "../src/core-inprocess.js";
+import { testStack } from "./client-mode.js";
 import { runSession } from "../src/runner/index.js";
 import { FileStore } from "../src/filestore.js";
 import { writeCaptureRecord } from "../src/services/snapshot.js";
@@ -104,7 +104,7 @@ describe("M4.1.1-1 수정 노드 확정·replay (E2E)", () => {
   });
 
   async function linked() {
-    const { client } = createLocalStack(pfdir);
+    const { client } = testStack(pfdir);
     const app = new ProcForgeApp({ core: client, procforgeDir: pfdir, projectRoot: root });
     const server = buildServer({ app, procforgeDir: pfdir });
     const [ct, st] = InMemoryTransport.createLinkedPair();

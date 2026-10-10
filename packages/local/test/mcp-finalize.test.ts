@@ -6,7 +6,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { buildServer } from "../src/server.js";
 import { ProcForgeApp } from "../src/app/app.js";
-import { createLocalStack } from "../src/core-inprocess.js";
+import { testStack } from "./client-mode.js";
 
 let root: string;
 let pfdir: string;
@@ -40,7 +40,7 @@ afterEach(() => {
 
 describe("M4 MCP finalize/procedure", () => {
   it("pf_finalize → pf_test(procedure) 통과", async () => {
-    const { client } = createLocalStack(pfdir);
+    const { client } = testStack(pfdir);
     const app = new ProcForgeApp({ core: client, procforgeDir: pfdir, projectRoot: root });
     const server = buildServer({ app, procforgeDir: pfdir });
     const [ct, st] = InMemoryTransport.createLinkedPair();
@@ -81,7 +81,7 @@ describe("M4 MCP finalize/procedure", () => {
   }, 30000);
 
   it("M4.1.1-2 junitPath: 기본 runs/<runId>/junit.xml·지정·탈출 거부", async () => {
-    const { client } = createLocalStack(pfdir);
+    const { client } = testStack(pfdir);
     const app = new ProcForgeApp({ core: client, procforgeDir: pfdir, projectRoot: root });
     const server = buildServer({ app, procforgeDir: pfdir });
     const [ct, st] = InMemoryTransport.createLinkedPair();
@@ -129,7 +129,7 @@ describe("M4 MCP finalize/procedure", () => {
   }, 60000);
 
   it("M4.1.1-3 procedure 이름 규칙: '../' 거부", async () => {
-    const { client } = createLocalStack(pfdir);
+    const { client } = testStack(pfdir);
     const app = new ProcForgeApp({ core: client, procforgeDir: pfdir, projectRoot: root });
     const server = buildServer({ app, procforgeDir: pfdir });
     const [ct, st] = InMemoryTransport.createLinkedPair();
@@ -152,7 +152,7 @@ describe("M4 MCP finalize/procedure", () => {
   }, 30000);
 
   it("pf_advise 제안 채택/거부 (MCP)", async () => {
-    const { client } = createLocalStack(pfdir);
+    const { client } = testStack(pfdir);
     const app = new ProcForgeApp({ core: client, procforgeDir: pfdir, projectRoot: root });
     const server = buildServer({ app, procforgeDir: pfdir });
     const [ct, st] = InMemoryTransport.createLinkedPair();

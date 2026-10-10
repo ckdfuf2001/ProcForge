@@ -7,6 +7,7 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest]
+        client: [inprocess, loopback]
     runs-on: ${{ matrix.os }}
     defaults:
       run:
@@ -21,6 +22,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
       - run: pnpm -r run test -- --run --testTimeout=20000 --hookTimeout=20000
+        env:
+          PROCFORGE_CLIENT: ${{ matrix.client }}
       - run: pnpm check:deps
       - name: runner replay (M3, no LLM, junit)
         run: node scripts/m3-ci-replay.mjs

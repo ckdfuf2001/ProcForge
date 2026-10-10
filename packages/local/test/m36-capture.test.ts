@@ -6,7 +6,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { buildServer } from "../src/server.js";
 import { ProcForgeApp } from "../src/app/app.js";
-import { createLocalStack } from "../src/core-inprocess.js";
+import { testStack } from "./client-mode.js";
 import { FileStore } from "../src/filestore.js";
 import { fixtureFileExists } from "../src/artifacts.js";
 import { runSession } from "../src/runner/index.js";
@@ -40,7 +40,7 @@ afterEach(() => {
 });
 
 async function linked() {
-  const { client } = createLocalStack(pfdir);
+  const { client } = testStack(pfdir);
   const app = new ProcForgeApp({ core: client, procforgeDir: pfdir, projectRoot: root });
   const server = buildServer({ app, procforgeDir: pfdir });
   const [ct, st] = InMemoryTransport.createLinkedPair();
@@ -206,7 +206,7 @@ describe("M3.6-3 출력 자동 캡처", () => {
   }, 60000);
 
   it("M4.2-2.5.1-4 confirmLeaf 도중 변경 끼면 conflict + 결과물 불변", async () => {
-    const { client } = createLocalStack(pfdir);
+    const { client } = testStack(pfdir);
     const app = new ProcForgeApp({ core: client, procforgeDir: pfdir, projectRoot: root });
     const started = await client.pfStart({
       request: "경쟁",

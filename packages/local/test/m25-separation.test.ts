@@ -10,6 +10,7 @@ import { CoreService, createMemoryStore } from "@procforge/core";
 import { FileStore } from "../src/filestore.js";
 import { buildServer } from "../src/server.js";
 import { ProcForgeApp } from "../src/app/app.js";
+import { wrapClient } from "./client-mode.js";
 import { checkerEvaluate } from "../src/checker.js";
 
 // M4.2-2.5 완료 기준: FileStore 없는 별도 MemoryStore core로 MCP 계약 흐름 통과.
@@ -45,7 +46,7 @@ afterEach(() => {
 
 describe("M4.2-2.5 core/파일 저장소 분리 실증", () => {
   it("MemoryStore core + 임시 폴더 App으로 전체 MCP 흐름 통과", async () => {
-    const core = new CoreService(createMemoryStore(), checkerEvaluate);
+    const core = wrapClient(new CoreService(createMemoryStore(), checkerEvaluate));
     const app = new ProcForgeApp({ core, procforgeDir: pfdir, projectRoot: root });
     const server = buildServer({ app, procforgeDir: pfdir });
     const [ct, st] = InMemoryTransport.createLinkedPair();
@@ -102,7 +103,7 @@ describe("M4.2-2.5 core/파일 저장소 분리 실증", () => {
   it("M4.2-2.5.1-1 두 프로세스 동시 커밋·조회: seq 중복 0", async () => {
     // FileStore 기반 core + 세션 준비 (자식과 같은 폴더 공유)
     const store = new FileStore(pfdir);
-    const core = new CoreService(store, checkerEvaluate);
+    const core = wrapClient(new CoreService(store, checkerEvaluate));
     const toolCatalog = [{ server: "t", name: "x", inputSchema: {}, schemaHash: "h" }];
     const started = await core.pfStart({ request: "conc", toolCatalog: toolCatalog as never });
     const sid = started.session.id;

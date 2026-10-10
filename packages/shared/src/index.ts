@@ -10,3 +10,4 @@ export * from "./ids.js";
 export * from "./normalize.js";
 export * from "./deps.js";
 export * from "./args-schema.js";
+export * from "./loopback.js";
