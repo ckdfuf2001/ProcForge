@@ -217,7 +217,10 @@ export class CoreService implements CoreClient {
     const tx = new TxStore(this.base);
     this.tx = tx;
     try {
-      const { result, summary } = body();
+      const out = body() as { result: R; summary: string } | Promise<unknown>;
+      // M4.2-2.5-7: 본문은 동기 실행 (await 금지). Promise 반환은 즉시 internal 실패.
+      if (out instanceof Promise) throw err("internal", "change() body must be sync");
+      const { result, summary } = out;
       const changed = tx.writtenNodeIds(sessionId);
       if (changed.length === 0 && !tx.sessionWritten(sessionId)) {
         return { result, revision: pre.revision, changedNodeIds: [] as string[] };

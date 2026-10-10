@@ -778,6 +778,24 @@ describe("M4.2-0.5 revision·이벤트 트랜잭션", () => {
     expect((await svc.pfTree(s.session.id)).session.revision).toBe(0);
   });
 
+  it("M4.2-2.5-7 change 본문이 Promise면 internal + tx 복구", async () => {
+    const svc = new CoreService(createMemoryStore(), passEval);
+    const s = await svc.pfStart({ request: "r", toolCatalog: catalog });
+    try {
+      (svc as unknown as { change: (sid: string, op: object, body: () => unknown) => unknown }).change(
+        s.session.id,
+        { method: "t" },
+        async () => ({ result: 1, summary: "x" }),
+      );
+      expect.unreachable();
+    } catch (e) {
+      expect((e as { code?: string }).code).toBe("internal");
+    }
+    // tx 복구: 이후 정상 호출 가능
+    await svc.pfReport({ ...rep(), sessionId: s.session.id });
+    expect((await svc.pfTree(s.session.id)).session.revision).toBe(1);
+  });
+
   it("M4.2-2.5-2 변경은 withLock 안에서 실행", async () => {
     const { store, calls } = recordingStore();
     const svc = new CoreService(store, passEval);
