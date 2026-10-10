@@ -7,6 +7,7 @@ import {
   ToolCatalogEntrySchema,
   ToolRefSchema,
 } from "./schema.js";
+import { PROCEDURE_NAME_RE } from "./procedure.js";
 
 // CoreClient·MCP outputSchema·UI API 공용 DTO (M4.2-0, 가이드 2절 목표 형태).
 // R5: 입출력 JSON 직렬화 가능 (Date, Map, Buffer, 함수 금지).
@@ -157,7 +158,7 @@ export type RefreshCatalogInput = z.infer<typeof RefreshCatalogInputSchema>;
 
 export const TestInputSchema = z.object({
   sessionId: SessionIdSchema.optional(),
-  procedure: z.string().optional(),
+  procedure: z.string().regex(PROCEDURE_NAME_RE, "procedure 이름 규칙 위반").optional(),
   params: z.record(z.string()).optional(),
   mode: z.enum(["record", "replay", "passthrough", "live"]).optional(),
   updateGolden: z.boolean().optional(),

@@ -128,6 +128,29 @@ describe("M4 MCP finalize/procedure", () => {
     }
   }, 60000);
 
+  it("M4.1.1-3 procedure 이름 규칙: '../' 거부", async () => {
+    const { client } = createLocalStack(pfdir);
+    const app = new ProcForgeApp({ core: client, procforgeDir: pfdir, projectRoot: root });
+    const server = buildServer({ app, procforgeDir: pfdir });
+    const [ct, st] = InMemoryTransport.createLinkedPair();
+    const mcp = new Client({ name: "test", version: "0.0.0" });
+    await server.connect(st);
+    await mcp.connect(ct);
+    try {
+      for (const bad of ["../evil", "..", "a/b", "UPPER", ""]) {
+        const r = await mcp.callTool({ name: "pf_test", arguments: { procedure: bad, mode: "replay" } });
+        expect(r.isError).toBe(true);
+      }
+      // 정상 이름은 스키마 통과 (세션 없음은 not_found, 스키마 오류 아님)
+      const r = await mcp.callTool({ name: "pf_test", arguments: { procedure: "no-such-proc", mode: "replay" } });
+      expect(r.isError).toBe(true);
+      expect(JSON.stringify(r.content)).toMatch(/procedure 없음/);
+    } finally {
+      await mcp.close();
+      await server.close();
+    }
+  }, 30000);
+
   it("pf_advise 제안 채택/거부 (MCP)", async () => {
     const { client } = createLocalStack(pfdir);
     const app = new ProcForgeApp({ core: client, procforgeDir: pfdir, projectRoot: root });

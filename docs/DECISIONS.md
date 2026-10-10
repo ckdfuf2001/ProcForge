@@ -263,6 +263,8 @@
   미해결 inout은 confirm 거부.
 - 3-2: junitPath는 프로젝트 안만 허용(탈출 bad_request), 생략 시
   runs/<runId>/junit.xml 항상 기록. 응답에 junitPath 포함.
+- 3-3: pf_test.procedure에 PROCEDURE_NAME_RE zod 적용 (MCP 입력은
+  이름만, 경로 지정은 CLI/runner 직접 호출로 유지). ../ 등 거부.
 
 ## M3.2
 
