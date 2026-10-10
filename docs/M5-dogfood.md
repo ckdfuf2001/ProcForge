@@ -46,3 +46,23 @@
   (`record 없이 실행 불가`) — record 절차서 전용.
 - 샘플 정합화 (M5.2-6): 9월 xlsx 단가를 포함 기준 11000으로 통일
   (금액 열 불변, 집계 불변). 단가×수량 == 금액이 양 달 모두 성립.
+
+## 4. 관찰: 실사용 1건 (BC 가이드, M5.3-0)
+
+- 호스트: OpenCode 에이전트 (Muse Spark). 모델: muse-spark.
+  하위세션(Task)에 ProcForge MCP를 붙여 수행, 작업공간은 temp로 분리.
+- 작업: SAP ERP 소개 pptx(21슬라이드) 양식 분석 → 가이더용 GUIDE.md.
+  3/3 leaf 확정. 산출물은 `examples/bc-guide/`에 커밋.
+- 막힌 지점:
+  1. `pf_finalize` 2회 실패. 표시 오류는 `-32602 스키마 오류`였으나
+     실제 원인은 1.2/1.3의 `missing required arg: command`였음.
+     에러 봉투가 엄격 클라이언트에서 가려진 것 (MCP 에러 텍스트 계약으로 해소).
+  2. 세션 저장소 위치 불명 → 파일시스템 탐색으로 발견
+     (MCP 서버 projectRoot가 dogfood-m51).
+- 가짜 leaf 원인: 1.2/1.3이 `opencode/bash`로 확정됐으나 argSpecs에
+  필수 `command` 없이 `{lang, lines, path}`만 박음. confirm 당시에는
+  required 검사가 없어 통과, finalize 검증에서 거부됨.
+  실행 증거(artifact)도 없었음. 대응: M5.3-0-1 (confirm required 강제),
+  M5.3-0-4 (증거 없는 leaf 경고).
+- 해당 세션은 절차서로 finalize하지 않음 (leaf가 재실행 가능 호출이
+  아니므로). GUIDE.md가 최종 산출물.
