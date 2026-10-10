@@ -382,7 +382,7 @@ C4 CI E2E에도 C2·C3를 fake 서버로 추가. M5-dogfood.md 3절을 실제 �
 | M3.5.2 | 잠금 원자화 (M5 전) | [x] | `5eb43b8` | (아래 run) | openSync wx·token release·부하 테스트·클린 클론 |
 | M5.1 | 잠금 회수 정정·감사·진짜 10월 검증 | [x] | `00661cf` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38067485259 | A 회수 정정(9c0171b)·B 감사·상대조건·템플릿(c56a7c1·935df1b·725c9f3·75b7cc5)·C 10월 검증(00661cf) |
 | M5 | 검증/실행 분리 | [x] | `78e6514` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38067485259 | M5.2 수락 a~d로 재확정 (입력 바인딩·값 흐름 실증) |
-| M5.2 | 교차 기간 재사용 | [x] | `52a2518` | (아래 run) | 입력 바인딩·스크립트 leaf·값 흐름·수락 a~d·단가 통일 |
+| M5.2 | 교차 기간 재사용 | [x] | `adf6ae7` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38074263388 | 입력 바인딩·스크립트 leaf·값 흐름·수락 a~d·단가 통일 |
 | M5.5 | 반복 노드 | [ ] | | | |
 | M5.6 | 상태 / sideEffect | [ ] | | | |
 | - | 크롤링 테스트 | [ ] | | | 사람 진행 |
