@@ -13,11 +13,11 @@ import * as fsutil from "./fsutil.js";
 
 /** ID 이중 검증 (M2.6-2). 서버 zod에 더해 저장소 진입부에서도 검사. */
 export function assertSessionId(sid: string): void {
-  if (!SessionIdSchema.safeParse(sid).success) throw Object.assign(new Error(`bad session id: ${sid}`), { code: "bad_request" });
+  if (!SessionIdSchema.safeParse(sid).success) throw pfError("bad_request", `bad session id: ${sid}`);
 }
 
 export function assertNodeId(nid: string): void {
-  if (!NodeIdSchema.safeParse(nid).success) throw Object.assign(new Error(`bad node id: ${nid}`), { code: "bad_request" });
+  if (!NodeIdSchema.safeParse(nid).success) throw pfError("bad_request", `bad node id: ${nid}`);
 }
 
 // NOTE: local 전용. core 패키지는 이 파일을 모른다. 합성은 core-inprocess.ts에서만.
@@ -32,8 +32,7 @@ export class FileStore implements Store {
     fsutil.writeAtomicFile(path, data);
   }
 
-  // 동기 I/O + 싱글 스레드이므로 세션 단위 쓰기는 원자적.
-  // (이벤트 루프 interleaving 없음. M6 멀티프로세스 시 파일락 필요 — DECISIONS 참조)
+  // 세션 쓰기는 withLock 안에서 직렬화 (프로세스 간은 .lock advisory lock).
 
   getSession(id: string): Session | undefined {
     assertSessionId(id);
@@ -227,8 +226,9 @@ export class FileStore implements Store {
   private applyPending(sid: string, c: CommitChange): void {
     for (const n of c.nodes ?? []) this.saveNode(sid, n);
     if (c.session) this.saveSession(c.session);
-    // 파일 기준 중복 제거 (자기 pending은 미반영 취급)
-    const fresh = (c.events ?? []).filter((e) => !this.readFileEvents(sid).some((x) => x.seq === e.seq));
+    // 파일 기준 중복 제거 1회 계산 (자기 pending은 미반영 취급)
+    const have = new Set(this.readFileEvents(sid).map((e) => e.seq));
+    const fresh = (c.events ?? []).filter((e) => !have.has(e.seq));
     if (fresh.length > 0) this.appendEvents(sid, fresh);
   }
 
@@ -287,7 +287,7 @@ export class FileStore implements Store {
       } catch {
         stale = true;
       }
-      if (!stale) throw Object.assign(new Error(`session locked: ${sid}`), { code: "conflict" });
+      if (!stale) throw pfError("conflict", `session locked: ${sid}`);
       try {
         unlinkSync(p);
       } catch {
@@ -339,7 +339,7 @@ export class FileStore implements Store {
         release();
       }
     }
-    throw Object.assign(new Error(`session locked: ${sid}`), { code: "conflict" });
+    throw pfError("conflict", `session locked: ${sid}`);
   }
 
   getLastUsed(sid: string): number | undefined {

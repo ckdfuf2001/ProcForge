@@ -255,6 +255,8 @@
   새 커밋 거부. 손상 파일명은 .corrupt-<rev>-<ts>.json (파일명에서 rev 추출).
 - 3-0-3: FileStore.commitChange는 session 필수 (없으면 internal).
   revision 파일 폴백 제거 (호출자가 항상 bumped session 전달).
+- 3-0-4: 읽기 pending zod 파싱은 3-0-1에서 완료. applyPending seq Set 1회
+  계산, 파일락 낡은 주석 정리, filestore assert/conflict를 pfError로 통일.
 
 ## M3.2
 
