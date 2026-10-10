@@ -20,14 +20,27 @@
   2번 슬라이드 표 매출(세전) A 120/1,090,909, B 80/727,273.
 - numeric_match (1.2): pass (failedConstraints 없음).
 
-## 3. 해석
+## 3. 해석 (M5.1-C에서 실제 결과로 교체)
 
-- params가 세션에 정상 주입되고 live 실행이 결정적으로 재현됐다
-  (고정 인자 동일 → 동일 산출물, constraint 전부 통과).
-- 정직한 한계: 이 절차서에는 month에 바인딩된 출력 인자가 없어서 결과가
-  9월 내용 그대로다. 진짜 10월 산출물을 내려면 (a) 표지·출력 경로 등에
-  month var를 걸거나 (b) 10월 데이터 파일을 입력으로 받는 절차서가 필요하다.
-  후자는 sales-2026-10.xlsx가 준비되어 있으므로 M5.5 이후 반복 노드 등과 함께
-  확장 가능하다.
-- numeric_match 고정 expected 방식은 live/record/replay 모두에서 안정 판정됐다
-  (도구 출력에 숫자가 포함된 경우에 한함 — M3.5 관찰 2의 화법 준수).
+- M5 당시 한계의 메커니즘 확정: live run은 확정 fixture에서 입력을 시딩한다
+  (fixture-sealed). 워크스페이스 작업 파일이 바뀌어도 실행 입력은 그대로이므로,
+  9월 절차서의 10월 실행은 9월 산출물을 재생성할 수밖에 없었다.
+- M5.1-C1 `monthly-2026-10` (3 leaf, strict finalize 감사 0):
+  1.1 `pptx/read_json` agg.json + numeric `c-total` (합계 1500000),
+  1.2 `pptx/pptx_set_table` 10월 표 고정값,
+  1.3 `pptx/pptx_set_title` text var `월간보고서 ${params.month} (최종)` (B3).
+  agg.json은 sales-2026-10.xlsx에서 호스트가 실측 집계한 값
+  (A 100/1000000, B 50/500000, 합계 1500000).
+- C2 month=2026-10 live 실행: pass=3 fail=0. run 산출 a.pptx 표지
+  `월간보고서 2026-10 (최종)` + 표 10월 수치 확인. 워크스페이스 9월 파일 무오염.
+- C3 1.1 fixture 합계 9999999 조작: 1.1 fail (`c-total`) + 1.2/1.3 blocked,
+  하류 미실행. 복원 후 live pass=3.
+- C4 CI E2E `m51-monthly.test.ts` (fake-ppt + `read_json`): 9월 확정 →
+  10월 실행 `filled:2026-10:` + `보고서 2026-10` (전체 var·템플릿 치환),
+  조작 시 numeric fail + blocked, 복원 후 통과.
+- 관측 (절차서 밖 기록): MCP stdio는 UTF-8 규격. 파이썬 서버가 로캘(cp949)
+  stdio로 한글 JSON을 읽으면 서로게이트 mojibake가 생기므로
+  `stdin/stdout.reconfigure(encoding="utf-8")` 필수. run은 MCP command를
+  run fs 기준이 아닌 절대경로로 지정해야 한다 (상대경로 미지원, 후속 후보).
+- replay 모드는 카세트 없는 live 절차서에서 실행 불가
+  (`record 없이 실행 불가`) — record 절차서 전용.

@@ -42,6 +42,16 @@ server.tool(
 );
 
 server.tool(
+  "read_json",
+  "Read a JSON file and return parsed content (M5.1-C4)",
+  { path: z.string() },
+  async ({ path }) => {
+    const data = JSON.parse(readFileSync(path, "utf8"));
+    return { content: [{ type: "text", text: JSON.stringify(data) }] };
+  },
+);
+
+server.tool(
   "save",
   "Save text to a file (M3.3 weakIn test)",
   { file_path: z.string(), content: z.string().optional() },
