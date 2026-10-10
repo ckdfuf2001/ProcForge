@@ -371,6 +371,7 @@ export class CoreService implements CoreClient {
           done: false,
           node: h,
           instruction: `노드 ${h.id}는 사람의 조언이 필요하다. pf_advise로 조언을 등록하라.`,
+          enteredProbing: false,
         }, summary: `next needs_human ${h.id}` };
       }
       // M3.4.3-1 교착: ready 0 + pending + needs_human 없음
@@ -403,6 +404,7 @@ export class CoreService implements CoreClient {
         instruction:
           `교착: ${blocked.map((b) => `${b.nodeId}(${b.reason})`).join(", ")}. ` +
           `원인 노드(${causeIds || "없음"})에 pf_advise 또는 pf_reopen 하라.`,
+        enteredProbing: false,
       }, summary: `next deadlock ${first.id}` };
     }
     const n = ready[0];
@@ -411,15 +413,21 @@ export class CoreService implements CoreClient {
         done: false,
         node: n,
         instruction: `노드 ${n.id}는 외부 부작용(external)이다. 실제 실행 금지. dry-run으로 수행할 계획을 pf_report 대신 pf_ask_human으로 보고하고 사람 승인을 받아라.`,
+        enteredProbing: false,
       }, summary: `next external ${n.id}` };
     }
+    // M4.2-2.5.1-3: 분기 시 open→probing 전환 저장. 처음 전환될 때만 enteredProbing.
+    const wasOpen = n.status === "open";
+    const disp = wasOpen ? { ...n, status: "probing" as const } : n;
+    if (wasOpen) this.store.saveNode(sessionId, disp);
     return { result: {
       done: false,
-      node: n,
+      node: disp,
       instruction: n.suggestedArgs
         ? `사람이 인자를 수정함(node.suggestedArgs 참조). 이 인자로 실행 후 pf_report.`
         : `노드 ${n.id}(${n.goal}): 툴 1회로 가능한지 판단하라. 가능하면 sandbox(.procforge/sandbox/${sessionId}/) 사본에서 실행 후 ` +
           `pf_report(selfVerdict/selfReason 필수), 아니면 pf_split. pass여도 leaf 자동 확정 없음 — pf_confirm_leaf(tool, argSpecs) 제출이 필요하다.`,
+      enteredProbing: wasOpen,
     }, summary: `next ${n.id}` };
   });
   return { ...c.result, revision: c.revision, changedNodeIds: c.changedNodeIds };

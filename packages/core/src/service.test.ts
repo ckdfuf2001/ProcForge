@@ -771,11 +771,20 @@ describe("M4.2-0.5 revision·이벤트 트랜잭션", () => {
     expect(store.getNode(s.session.id, "1")!.attempts.length).toBe(0);
   });
 
-  it("읽기 전용 pfNext는 revision 유지", async () => {
+  it("M4.2-2.5.1-3 첫 분기는 enteredProbing + probing 전환", async () => {
     const svc = new CoreService(createMemoryStore(), passEval);
     const s = await svc.pfStart({ request: "r", toolCatalog: catalog });
-    await svc.pfNext({ sessionId: s.session.id });
-    expect((await svc.pfTree(s.session.id)).session.revision).toBe(0);
+    const first = await svc.pfNext({ sessionId: s.session.id });
+    expect(first.done).toBe(false);
+    if (!first.done) {
+      expect(first.enteredProbing).toBe(true);
+      expect(first.node.status).toBe("probing");
+    }
+    expect((await svc.pfTree(s.session.id)).session.revision).toBe(1);
+    // 두 번째 폴은 전환 없음
+    const second = await svc.pfNext({ sessionId: s.session.id });
+    expect(!second.done && second.enteredProbing).toBe(false);
+    expect((await svc.pfTree(s.session.id)).session.revision).toBe(1);
   });
 
   it("M4.2-2.5-7 change 본문이 Promise면 internal + tx 복구", async () => {

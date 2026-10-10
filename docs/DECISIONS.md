@@ -241,6 +241,9 @@
   반영 (파일 불변). 동시 커밋은 lockfile 직렬화 + 호출 측 재시도로 seq 중복 0.
 - 2.5.1-2: pending 숫자 정렬, 손상은 .corrupt-<ts>로 이동 (삭제 금지),
   복구 실패 시 새 커밋 거부 (internal + 힌트 "복구 필요").
+- 2.5.1-3: pfNext 분기 시 open→probing 전환 저장, 처음 전환만
+  enteredProbing. App은 true일 때만 스냅샷 (실패는 응답 경고),
+  pf_retry 성공 시도 기록. guide-3단계-6 잔여분 해소.
 
 ## M3.2
 

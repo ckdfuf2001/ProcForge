@@ -113,22 +113,27 @@ export class ProcForgeApp {
       actor: (a.actor as Actor | undefined) ?? "host",
     });
     if (out.done) return { done: true, revision: out.revision, changedNodeIds: out.changedNodeIds };
-    // M4.1-7: 노드 분기 직전 sandbox 스냅샷 (pf_report 입출력 판정용)
-    try {
-      writePreSnapshot(
-        this.procforgeDir, sid, out.node.id,
-        takeSandboxSnapshot(join(this.procforgeDir, "sandbox", sid)),
-      );
-    } catch {
-      // 추적 실패 무시
+    // M4.2-2.5.1-3: 처음 probing 진입 때만 사전 스냅샷 기록. 실패는 경고로 반환.
+    const nextWarnings: string[] = [];
+    if (out.enteredProbing) {
+      try {
+        writePreSnapshot(
+          this.procforgeDir, sid, out.node.id,
+          takeSandboxSnapshot(join(this.procforgeDir, "sandbox", sid)),
+        );
+      } catch (e) {
+        nextWarnings.push(`스냅샷 기록 실패: ${e instanceof Error ? e.message : String(e)}`);
+      }
     }
     return {
       done: false,
       node: nodeSummary(out.node, s.limits),
       ...(out.blocked ? { blocked: out.blocked } : {}),
       instruction: out.instruction,
+      enteredProbing: out.enteredProbing,
       revision: out.revision,
       changedNodeIds: out.changedNodeIds,
+      ...(nextWarnings.length > 0 ? { warnings: nextWarnings } : {}),
     };
   }
 
@@ -248,15 +253,31 @@ export class ProcForgeApp {
   async retry(a: RetryInput): Promise<OutputOf<"pf_retry">> {
     const sid = a.sessionId as string;
     const s = await this.core.getSession(sid);
-      logger.info("pf_retry", { sessionId: sid, nodeId: a.nodeId, reason: a.reason });
-      const out = await this.core.pfResolve({
-        sessionId: sid,
-        nodeId: a.nodeId as string,
-        decision: "retry",
-        expectedRevision: a.expectedRevision as number | undefined,
-        actor: (a.actor as Actor | undefined) ?? "host",
-      });
-      return { node: nodeSummary(out.node, s.limits), instruction: out.instruction, revision: out.revision, changedNodeIds: out.changedNodeIds };
+    logger.info("pf_retry", { sessionId: sid, nodeId: a.nodeId, reason: a.reason });
+    const out = await this.core.pfResolve({
+      sessionId: sid,
+      nodeId: a.nodeId as string,
+      decision: "retry",
+      expectedRevision: a.expectedRevision as number | undefined,
+      actor: (a.actor as Actor | undefined) ?? "host",
+    });
+    // M4.2-2.5.1-3: 재시도 성공 시에도 사전 스냅샷 기록. 실패는 경고로 반환.
+    const retryWarnings: string[] = [];
+    try {
+      writePreSnapshot(
+        this.procforgeDir, sid, a.nodeId as string,
+        takeSandboxSnapshot(join(this.procforgeDir, "sandbox", sid)),
+      );
+    } catch (e) {
+      retryWarnings.push(`스냅샷 기록 실패: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    return {
+      node: nodeSummary(out.node, s.limits),
+      instruction: out.instruction,
+      revision: out.revision,
+      changedNodeIds: out.changedNodeIds,
+      ...(retryWarnings.length > 0 ? { warnings: retryWarnings } : {}),
+    };
   }
 
   async split(a: SplitInput): Promise<OutputOf<"pf_split">> {

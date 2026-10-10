@@ -89,8 +89,10 @@ export const PfNextOutputSchema = z.object({
     .array(z.object({ nodeId: z.string(), waitingOn: z.array(z.string()), reason: z.string() }))
     .optional(),
   instruction: z.string().optional(),
+  enteredProbing: z.boolean().optional(),
   revision: z.number().optional(),
   changedNodeIds: z.array(z.string()).optional(),
+  warnings: z.array(z.string()).optional(),
 });
 export const PfReportOutputSchema = z.object({
   verdict: z.enum(["pass", "fail", "unverifiable"]),
@@ -120,6 +122,7 @@ export const PfRetryOutputSchema = z.object({
   instruction: z.string(),
   revision: z.number().optional(),
   changedNodeIds: z.array(z.string()).optional(),
+  warnings: z.array(z.string()).optional(),
 });
 export const PfAskHumanOutputSchema = z.object({
   node: NodeSummarySchema,

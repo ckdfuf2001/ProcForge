@@ -56,6 +56,45 @@ async function linked() {
 }
 
 describe("M4.1-7 스냅샷 입출력 판정", () => {
+  it("M4.2-2.5.1-3 두 pf_next 사이 생성분은 out", async () => {
+    const { call, close } = await linked();
+    try {
+      const started = await call("pf_start", { request: "두 번" });
+      const sid = started["sessionId"] as string;
+      const n1 = await call("pf_next", { sessionId: sid });
+      expect(n1["enteredProbing"]).toBe(true);
+      // 두 호출 사이 생성
+      mkdirSync(join(pfdir, "sandbox", sid, "output"), { recursive: true });
+      writeFileSync(join(pfdir, "sandbox", sid, "output", "mid.pptx"), "MID");
+      const n2 = await call("pf_next", { sessionId: sid });
+      expect(n2["enteredProbing"]).toBe(false);
+      const rep = await call("pf_report", {
+        sessionId: sid, nodeId: "1",
+        tool: { server: "fake-ppt", name: "save" },
+        args: { file_path: "output/mid.pptx", content: "MID" },
+        resultSummary: JSON.stringify({ saved: "output/mid.pptx" }),
+        resultJson: { saved: "output/mid.pptx" },
+        selfVerdict: "pass", selfReason: "ok",
+      });
+      expect(rep["verdict"]).toBe("pass");
+      const store = new FileStore(pfdir);
+      const attempt = store.getNode(sid, "1")!.attempts[0];
+      expect(attempt.artifacts.length).toBe(1);
+      expect(readCaptureRecord(pfdir, sid, "1", attempt.id)!.outs).toEqual(attempt.artifacts);
+      await call("pf_confirm_leaf", {
+        sessionId: sid, nodeId: "1",
+        tool: { server: "fake-ppt", name: "save" },
+        argSpecs: {
+          file_path: { kind: "fixed", value: "output/mid.pptx" },
+          content: { kind: "fixed", value: "MID" },
+        },
+      });
+      expect(new FileStore(pfdir).getNode(sid, "1")!.golden?.fixtures ?? []).toEqual([]);
+    } finally {
+      await close();
+    }
+  }, 30000);
+
   it("새로 생긴 파일은 out: golden 제외·run fs 미복사", async () => {
     const { call, close } = await linked();
     try {

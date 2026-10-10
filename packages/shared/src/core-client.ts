@@ -28,12 +28,12 @@ export type PfStartOutput = {
 };
 
 export type PfNextOutput =
-  | { done: false; node: Node; blocked?: BlockedEntry[]; instruction: string; revision: number; changedNodeIds: string[] }
+  | { done: false; node: Node; blocked?: BlockedEntry[]; instruction: string; enteredProbing: boolean; revision: number; changedNodeIds: string[] }
   | { done: true; revision: number; changedNodeIds: string[] };
 
 /** pfNext 본문 반환형 (메타 제외 유니온) */
 export type PfNextPayload =
-  | { done: false; node: Node; blocked?: BlockedEntry[]; instruction: string }
+  | { done: false; node: Node; blocked?: BlockedEntry[]; instruction: string; enteredProbing: boolean }
   | { done: true };
 
 export type BlockedReason = "dep_failed" | "dep_empty_split" | "dep_missing" | "dep_pending";
