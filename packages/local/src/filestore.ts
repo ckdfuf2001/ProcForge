@@ -169,7 +169,8 @@ export class FileStore implements Store {
   /**
    * 남은 pending 재반영 (M4.2-2.5-3, 2.5.1-2). 숫자 revision 순 적용.
    * M4.2-3-0-1: 낡은 revision(<= 파일 session.revision)은 적용 없이 정리만.
-   * 손상 파일은 .corrupt-<ts>로 이동 (삭제 금지). 삭제는 fsutil 재시도 사용.
+   * M4.2-3-0-2: 첫 실패·손상에서 중단, 손상도 failed (새 커밋 거부).
+   * 손상 파일은 .corrupt-<rev>-<ts>로 이동 (삭제 금지). 삭제는 fsutil 재시도 사용.
    */
   recoverSession(sid: string): { applied: string[]; failed: string[] } {
     const applied: string[] = [];
@@ -195,18 +196,19 @@ export class FileStore implements Store {
       }
       if (!change) {
         try {
-          renameSync(f, join(this.sessionDir(sid), `.corrupt-${Date.now()}.json`));
+          renameSync(f, join(this.sessionDir(sid), `.corrupt-${this.pendingRev(f)}-${Date.now()}.json`));
         } catch {
           // 무시
         }
-        continue;
+        failed.push(f);
+        break;
       }
       try {
         this.applyPending(sid, change);
         applied.push(f);
       } catch {
         failed.push(f);
-        continue;
+        break;
       }
       try {
         fsutil.unlinkRetrySync(f);
@@ -215,6 +217,12 @@ export class FileStore implements Store {
       }
     }
     return { applied, failed };
+  }
+
+  /** pending-<rev>.json 파일명에서 rev 추출 (손상 파일명용, 실패 시 unknown) */
+  private pendingRev(f: string): string {
+    const m = /(?:^|[\\/])pending-(\d+)\.json$/.exec(f);
+    return m ? m[1] : "unknown";
   }
 
   private applyPending(sid: string, c: CommitChange): void {

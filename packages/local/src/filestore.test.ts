@@ -116,7 +116,7 @@ describe("FileStore ID 이중 검증 (M2.6-2)", () => {
     expect(readdirSync(sessDir).filter((f) => f.startsWith("pending-"))).toEqual([]);
   });
 
-  it("M4.2-2.5.1-2 손상 pending은 .corrupt로 이동 (삭제 금지)", () => {
+  it("M4.2-3-0-2 손상 pending은 .corrupt-<rev>-<ts>로 이동 + 커밋 거부", () => {
     store.saveSession(testSession());
     const sessDir = join(dir, "sessions", sid);
     writeFileSync(join(sessDir, "pending-5.json"), "not-json{{{");
@@ -124,12 +124,18 @@ describe("FileStore ID 이중 검증 (M2.6-2)", () => {
     // 읽기: 건너뜀, 파일 유지
     expect(reread.getSession(sid)?.revision).toBe(0);
     expect(existsSync(join(sessDir, "pending-5.json"))).toBe(true);
-    // 커밋: .corrupt로 이동 후 진행
-    reread.commitChange(sid, { session: { ...testSession(), revision: 1 }, nodes: [], events: [] });
+    // 커밋: 손상도 실패 처리 → internal 거부 (hint 복구 필요)
+    try {
+      reread.commitChange(sid, { session: { ...testSession(), revision: 1 }, nodes: [], events: [] });
+      expect.unreachable();
+    } catch (e) {
+      expect((e as { code?: string }).code).toBe("internal");
+      expect((e as { hint?: string }).hint).toBe("복구 필요");
+    }
     const files = readdirSync(sessDir);
     expect(files.some((f) => f.startsWith("pending-"))).toBe(false);
-    expect(files.some((f) => f.startsWith(".corrupt-"))).toBe(true);
-    expect(new FileStore(dir).getSession(sid)?.revision).toBe(1);
+    expect(files.some((f) => /^\.corrupt-5-\d+\.json$/.test(f))).toBe(true);
+    expect(new FileStore(dir).getSession(sid)?.revision).toBe(0);
   });
 
   it("M4.2-2.5.1-2 복구 실패 시 새 커밋 거부", () => {
@@ -276,6 +282,28 @@ describe("M4.2-3-0 pending 정리 (낡은 revision)", () => {
     expect(store.getSession(sid)?.revision).toBe(7);
     expect(store.getNode(sid, "1.1")?.goal).toBe("seven");
     expect(store.readEvents(sid).map((e) => e.seq)).toEqual([6, 7]);
+  });
+
+  it("M4.2-3-0-2 손상 뒤 정상 pending은 미적용, commit은 internal", () => {
+    store.saveSession(sess(4));
+    const sessDir = join(dir, "sessions", sid);
+    writeFileSync(join(sessDir, "pending-5.json"), "not-json{{{");
+    writeFileSync(join(sessDir, "pending-6.json"), JSON.stringify({
+      revision: 6, session: sess(6), nodes: [nd("1.1", "six")], events: [],
+    }));
+    // 복구: 5 손상에서 중단, 6 미적용 (파일은 rev4 유지, pending-6 잔류)
+    expect(store.recoverSession(sid)).toMatchObject({ applied: [], failed: [join(sessDir, "pending-5.json")] });
+    expect(existsSync(join(sessDir, "pending-6.json"))).toBe(true);
+    expect(JSON.parse(readFileSync(join(sessDir, "session.json"), "utf8")).revision).toBe(4);
+    // 커밋 거부 (hint 복구 필요) — 손상 pending 복원 후 커밋 시도
+    writeFileSync(join(sessDir, "pending-5.json"), "not-json{{{");
+    try {
+      store.commitChange(sid, { session: sess(5), nodes: [], events: [] });
+      expect.unreachable();
+    } catch (e) {
+      expect((e as { code?: string }).code).toBe("internal");
+      expect((e as { hint?: string }).hint).toBe("복구 필요");
+    }
   });
 });
 

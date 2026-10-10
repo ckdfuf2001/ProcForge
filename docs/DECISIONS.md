@@ -251,6 +251,8 @@
 - 3-0-1: pending에 커밋 revision 기록(CommitChangeSchema). 낡은 pending
   (revision<=파일 session.revision)은 읽기·복구에서 적용 없이 정리만.
   pending 삭제는 fsutil.unlinkRetrySync 재시도 사용.
+- 3-0-2: recoverSession은 첫 실패·손상에서 중단, 손상도 failed 처리로
+  새 커밋 거부. 손상 파일명은 .corrupt-<rev>-<ts>.json (파일명에서 rev 추출).
 
 ## M3.2
 
