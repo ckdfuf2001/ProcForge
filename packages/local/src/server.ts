@@ -211,6 +211,7 @@ export function buildServer(deps: ServerDeps): McpServer {
         "선수: pf_report(verdict=pass).",
         "tool(마지막 실행과 동일), argSpecs(필수, 실행 인자 키 전체를 fixed/var/generated로 분류,",
         "예: {\"month\":{\"kind\":\"var\",\"ref\":\"${params.month}\"}}), ignore(선택, 비교 제외 JSON 경로).",
+        "var/generated ref는 실제 params 키·노드 출력이어야 하며, 무관한 ref는 재바인딩을 깨뜨린다.",
         "leaf 확정과 golden 기록 반환. 다음: pf_next.",
       ].join("\n"),
       inputSchema: ConfirmLeafInputSchema,
