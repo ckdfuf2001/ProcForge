@@ -5,7 +5,7 @@ import type { CoreClient } from "@procforge/shared/core-client.js";
 import type { Actor } from "@procforge/shared/dto.js";
 import { pfError } from "@procforge/shared/errors.js";
 import { collectCatalog } from "../catalog.js";
-import { nodeSummary } from "../views.js";
+import { constraintSummary, nodeSummary } from "../views.js";
 import type { OUTPUT_SCHEMAS } from "../views.js";
 import type {
   AdviseInput,
@@ -475,7 +475,7 @@ export class ProcForgeApp {
         actor: a.actor ?? "host",
       });
       return {
-        constraints: out.constraints.map((c) => ({ id: c.id, kind: c.kind, summary: `${c.kind}` })),
+        constraints: out.constraints.map((c) => ({ id: c.id, kind: c.kind, summary: constraintSummary(c) })),
         rejected: out.rejected,
         ...(out.note ? { note: out.note } : {}),
         node: nodeSummary(out.node, s.limits),

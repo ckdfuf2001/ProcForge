@@ -269,6 +269,8 @@
   서브트리만 결과에 포함, 없는 노드는 not_found.
 - 3-5: golden params 경고는 복원 전 원문 기준. 자리표시자 있으면
   경고 없음, 실제 값이 박혀 있으면 경고 (복원 후 오탐 제거).
+- 3-7: pf_advise 응답 constraints.summary는 constraintSummary 사용
+  (기존 kind 그대로 버그 수정, nodeSummary와 통일).
 
 ## M3.2
 

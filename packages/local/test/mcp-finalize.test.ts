@@ -178,6 +178,8 @@ describe("M4 MCP finalize/procedure", () => {
       });
       expect((adv["constraints"] as { id: string }[]).map((c) => c.id)).toEqual(["c1"]);
       expect((adv["rejected"] as unknown[])).toHaveLength(1);
+      // M4.1.1-7: 응답 summary는 constraintSummary 사용 (kind 그대로 아님)
+      expect((adv["constraints"] as { summary: string }[])[0].summary).toBe("exact=3");
     } finally {
       await mcp.close();
       await server.close();
