@@ -89,3 +89,60 @@ if (adapterViolations.length > 0) {
 } else {
   console.log("check-deps: OK (adapter imports)");
 }
+
+// M4.2-4-2: 어댑터 fs 직접 사용 금지 (saveNode|writeFileSync|readFileSync|existsSync|mkdirSync).
+const FS_BANNED_RES = [/saveNode/, /writeFileSync/, /readFileSync/, /existsSync/, /mkdirSync/];
+const fsViolations = [];
+for (const f of files) {
+  if (!ADAPTER_RES.some((re) => re.test(f))) continue;
+  const lines = readFileSync(f, "utf8").split("\n");
+  lines.forEach((line, i) => {
+    const stripped = line.trim();
+    if (stripped.startsWith("//") || stripped.startsWith("*")) return;
+    if (FS_BANNED_RES.some((re) => re.test(stripped))) {
+      fsViolations.push(`${f}:${i + 1}: ${stripped}`);
+    }
+  });
+}
+
+if (fsViolations.length > 0) {
+  console.error("DEP VIOLATION (M4.2-4-2): adapters must not use fs directly.");
+  for (const v of fsViolations) console.error("  " + v);
+  process.exit(1);
+} else {
+  console.log("check-deps: OK (no adapter fs)");
+}
+
+// M4.2-4-2: FileStore 저장 계열은 core in-process 구현 파일에서만 허용.
+// 허용: packages/core/src/**, core-inprocess.ts, filestore.ts(내부),
+// app/**, services/**, runner/**, procedure.ts(App 경로 import).
+const SAVE_ALLOW_RES = [
+  /packages[/\\]core[/\\]src[/\\]/,
+  /[/\\]core-inprocess\.ts$/,
+  /[/\\]filestore\.ts$/,
+  /[/\\]app[/\\]/,
+  /[/\\]services[/\\]/,
+  /[/\\]runner[/\\]/,
+  /[/\\]procedure\.ts$/,
+];
+const SAVE_CALL_RES = [/\.saveSession\s*\(/, /\.saveNode\s*\(/, /\.appendEvents\s*\(/, /\.commitChange\s*\(/, /\.touchSession\s*\(/, /\.repairDiscard\s*\(/];
+const saveViolations = [];
+for (const f of files) {
+  if (SAVE_ALLOW_RES.some((re) => re.test(f))) continue;
+  const lines = readFileSync(f, "utf8").split("\n");
+  lines.forEach((line, i) => {
+    const stripped = line.trim();
+    if (stripped.startsWith("//") || stripped.startsWith("*")) return;
+    if (SAVE_CALL_RES.some((re) => re.test(stripped))) {
+      saveViolations.push(`${f}:${i + 1}: ${stripped}`);
+    }
+  });
+}
+
+if (saveViolations.length > 0) {
+  console.error("DEP VIOLATION (M4.2-4-2): FileStore saves allowed only in core in-process files.");
+  for (const v of saveViolations) console.error("  " + v);
+  process.exit(1);
+} else {
+  console.log("check-deps: OK (saves in core in-process files)");
+}

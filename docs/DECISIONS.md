@@ -273,6 +273,9 @@
   CLI 인자는 app/cli-args, 표면 값은 app/surface 경유. CLI test/trace/
   export/repair 전부 App 메서드 경유. CLI --junit/--out은 프로젝트 안만
   허용으로 통일. pf_test changed wire 추가.
+- 4-2: 어댑터 fs 직접 사용 금지 (saveNode·write/read/exists/mkdir) +
+  FileStore 저장 계열 호출 허용 범위 (core·합성·filestore·app·services·
+  runner·procedure) 검사를 check-deps에 추가.
 - 3-2: junitPath는 프로젝트 안만 허용(탈출 bad_request), 생략 시
   runs/<runId>/junit.xml 항상 기록. 응답에 junitPath 포함.
 - 3-3: pf_test.procedure에 PROCEDURE_NAME_RE zod 적용 (MCP 입력은
