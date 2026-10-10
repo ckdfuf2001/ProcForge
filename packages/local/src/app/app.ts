@@ -42,6 +42,7 @@ import { importProcedure } from "../procedure.js";
 import { readRunState, writeRunState } from "../services/run-state.js";
 import { writeJUnitFile, resolveJUnitPath, copyRunFsToOut } from "../services/runner.js";
 import { repairDiscard } from "../services/repair.js";
+import { auditFixedValues } from "../services/finalize-audit.js";
 import { buildTrace, formatTraceMarkdown } from "../trace.js";
 import { exportSession } from "../export.js";
 import { assertProjectPath } from "../artifacts.js";
@@ -735,18 +736,34 @@ export class ProcForgeApp {
     });
   }
 
-    async finalize(a: FinalizeInput): Promise<OutputOf<"pf_finalize">> {
+  async finalize(a: FinalizeInput): Promise<OutputOf<"pf_finalize">> {
     const sid = a.sessionId as string;
     await this.core.getSession(sid);
     const { doc, warnings } = await this.core.pfBuildProcedure(sid, a.name as string);
+    // M5.1-B1: 고정값 감사 (params·날짜·녹화 수치). strict면 실패 시 거부.
+    const sess = await this.core.getSession(sid);
+    const { nodes } = await this.core.pfTree(sid);
+    const cassettes = new Map<string, { response: { summary: string; json?: unknown } }[]>();
+    for (const n of nodes) {
+      try {
+        cassettes.set(n.id, loadCassette(this.procforgeDir, sid, n.id));
+      } catch {
+        // 손상 카세트는 감사 제외 (record 경로에서 처리)
+      }
+    }
+    const audit = auditFixedValues({ params: sess.params, nodes, cassettes });
+    if ((a.strict as boolean | undefined) === true && audit.length > 0) {
+      throw pfError("bad_request", `고정값 감사 실패(${audit.length}건): ${audit.slice(0, 3).join("; ")}`);
+    }
     const written = writeProcedure({
       procforgeDir: this.procforgeDir,
       projectRoot: this.projectRoot,
       sessionId: sid,
       doc,
       force: (a.force as boolean | undefined) ?? false,
+      auditFindings: audit,
     });
-    return { name: doc.name, dir: written.dir, warnings, files: written.files, commandFile: written.commandFile };
+    return { name: doc.name, dir: written.dir, warnings: [...warnings, ...audit], files: written.files, commandFile: written.commandFile };
   }
 
   /** 절차서 live 실행 시작 (M5). 실행은 pf_run_next/supply로 단계 진행. */

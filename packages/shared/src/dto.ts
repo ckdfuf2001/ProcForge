@@ -173,6 +173,8 @@ export const FinalizeInputSchema = z.object({
   sessionId: SessionIdSchema,
   name: z.string().min(1),
   force: z.boolean().optional(),
+  /** 고정값 감사 실패 시 거부 (M5.1-B1) */
+  strict: z.boolean().optional(),
 });
 export type FinalizeInput = z.infer<typeof FinalizeInputSchema>;
 

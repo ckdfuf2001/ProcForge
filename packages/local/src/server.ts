@@ -439,7 +439,7 @@ export function buildServer(deps: ServerDeps): McpServer {
         "확정 트리를 절차서로 export한다.",
         "선수: 전 노드 resolved(leaf 또는 완성 split) 후.",
         "sessionId(필수), name(필수, 소문자·숫자·하이픈 1~64자).",
-        "force(선택, 기존 명령 파일 덮어쓰기).",
+        "force(선택, 기존 명령 파일 덮어쓰기), strict(선택, 고정값 감사 실패 시 거부).",
         "procedure.json·PROCEDURE.md·SKILL.md·tests·command 반환. 다음: pf_test로 검증.",
       ].join("\n"),
       inputSchema: FinalizeInputSchema,

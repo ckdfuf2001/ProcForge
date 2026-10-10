@@ -315,6 +315,9 @@
   보유 중 heartbeat, 생존 pid 절대 회수 금지. 회수는 rename 승자 + token 일치
   확인, 불일치 시 원위치 후 conflict. 회수 계측 + stderr 로그.
   m25 파일 50회 연속 통과 (전체 스위트 추가 검증은 최종 보고 전).
+- M5.1-B1: finalize 고정값 감사 (params 부분 일치=core 담당과 중복 방지로
+  constraint만·날짜 4종·녹화 수치 4자리+). warnings + PROCEDURE.md 절,
+  strict 시 bad_request. 역치 근거: 인덱스·개수·tolerance 오탐 방지.
 - M5-1: `procforge run <procedure> --param k=v [--out dir] [--force]` 신설
   (App.runProcedure 경유). 출력은 runs/<runId>/fs, --out 지정 시에만 완료 후
   프로젝트 안으로 복사 (기존 파일은 --force 없이 거부).

@@ -49,6 +49,8 @@ export function writeProcedure(input: {
   sessionId: string;
   doc: ProcedureDoc;
   force?: boolean;
+  /** 고정값 감사 결과 (M5.1-B1, PROCEDURE.md 기록용) */
+  auditFindings?: string[];
 }): WriteProcedureResult {
   const { procforgeDir, doc } = input;
   const name = doc.name;
@@ -71,7 +73,7 @@ export function writeProcedure(input: {
     files.push(rel.replace(/\\/g, "/"));
   };
   put("procedure.json", JSON.stringify(doc, null, 2));
-  put("PROCEDURE.md", renderProcedureMd(doc));
+  put("PROCEDURE.md", renderProcedureMd(doc, input.auditFindings ?? []));
   put("SKILL.md", renderSkillMd(doc));
   const commandMd = renderCommandMd(doc);
   put("command.md", commandMd);
@@ -114,7 +116,7 @@ export function writeProcedure(input: {
   return { dir, files: files.sort(), commandFile };
 }
 
-function renderProcedureMd(doc: ProcedureDoc): string {
+function renderProcedureMd(doc: ProcedureDoc, auditFindings: string[] = []): string {
   const byId = new Map(doc.nodes.map((n) => [n.id, n]));
   // M4.1-2: 노드 id 숫자 정렬 (1.2 < 1.10)
   const order = [...doc.nodes].sort((a, b) => compareNodeIds(a.id, b.id));
@@ -149,6 +151,13 @@ function renderProcedureMd(doc: ProcedureDoc): string {
       }
     }
     if (n.golden) L.push(`- 기대 출력: \`${n.golden.output.slice(0, 120)}\``);
+    L.push(``);
+  }
+  L.push(`## 고정값 감사 (M5.1-B1)`, ``);
+  if (auditFindings.length === 0) {
+    L.push(`- 발견 없음. 고정 인자·제약에 params 값·날짜 표현·녹화 수치 하드코딩이 없다.`, ``);
+  } else {
+    for (const f of auditFindings) L.push(`- ${f}`);
     L.push(``);
   }
   void roots;

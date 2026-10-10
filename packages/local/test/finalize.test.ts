@@ -231,8 +231,7 @@ describe("pf_finalize", () => {
     await expect(appFor().finalize({ sessionId: sid, name: "ok-name-1" })).resolves.toBeDefined();
   }, 30000);
 
-  it("M5-6 SKILL/command 문구는 run 지원 (M4.1-8 철회)", async () => {
-    const sid = await scripted();
+  it("M5-6 SKILL/command 문구는 run 지원 (M4.1-8 철회)", async () => {    const sid = await scripted();
     const out = await appFor().finalize({ sessionId: sid, name: "run-test" });
     const skill = readFileSync(join(out.dir, "SKILL.md"), "utf8");
     expect(skill).toContain("procforge run");
@@ -242,5 +241,16 @@ describe("pf_finalize", () => {
     expect(cmd).toContain("procforge run");
     expect(cmd).not.toContain("미지원(M5");
     expect(skill).not.toContain("그대로 실행");
+  }, 30000);
+
+  it("M5.1-B1 고정값 감사: 경고 + strict 거부", async () => {
+    const sid = await scripted();
+    // scripted 1.2 file="2026-09" (날짜 리터럴) → 감사 경고
+    const out = await appFor().finalize({ sessionId: sid, name: "audit-test" });
+    expect(out.warnings.some((w) => w.includes("날짜 표현"))).toBe(true);
+    const proc = readFileSync(join(out.dir, "PROCEDURE.md"), "utf8");
+    expect(proc).toContain("## 고정값 감사");
+    expect(proc).toContain("날짜 표현");
+    await expect(appFor().finalize({ sessionId: sid, name: "audit-test", strict: true })).rejects.toThrow(/고정값 감사 실패/);
   }, 30000);
 });
