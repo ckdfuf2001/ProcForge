@@ -498,7 +498,7 @@ export function buildServer(deps: ServerDeps): McpServer {
         "선수: 전 노드 leaf 확정 후 (세션) 또는 finalize 산출물 (절차서).",
         "sessionId 또는 procedure(둘 중 하나, 예: 'monthly-2026-09'), nodeId(서브트리, 선택),",
         "mode(record|replay|passthrough|live, 기본 replay), params(절차서 재바인딩),",
-        "updateGolden(선택), allowProjectRead(선택), junitPath(선택).",
+        "updateGolden(선택), allowProjectRead(선택), junitPath(선택, 프로젝트 안만, 생략 시 runs/<runId>/junit.xml).",
         "요약과 report 경로 반환. 다음: 실패 노드는 pf_tree로 확인.",
       ].join("\n"),
       inputSchema: TestInputSchema,

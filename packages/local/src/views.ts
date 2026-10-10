@@ -194,6 +194,7 @@ export const PfTestOutputSchema = z.object({
   skipped: z.number(),
   blocked: z.number(),
   reportPath: z.string(),
+  junitPath: z.string(),
   sessionId: z.string().optional(),
 });
 export const PfFinalizeOutputSchema = z.object({

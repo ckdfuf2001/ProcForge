@@ -36,7 +36,7 @@ import { appendCaptureRecord, classifyReportPaths, collectExistingPaths, collect
 import { ingestArtifacts, normalizeArgSpecs, readManifest } from "../artifacts.js";
 import { runSession } from "../runner/index.js";
 import { runProcedureTest } from "../runner/procedure-run.js";
-import { writeJUnitFile } from "../services/runner.js";
+import { writeJUnitFile, resolveJUnitPath } from "../services/runner.js";
 import { writeProcedure } from "../services/procedureWriter.js";
 
 // ProcForge 유스케이스층 (M4.2-1). 사용자 행동 1개 = 메서드 1개.
@@ -608,7 +608,8 @@ export class ProcForgeApp {
         updateGolden: (a.updateGolden as boolean | undefined) ?? false,
         allowProjectRead: (a.allowProjectRead as boolean | undefined) ?? false,
       });
-      if (a.junitPath) writeJUnitFile(a.junitPath as string, report);
+      const junitPathProc = resolveJUnitPath(this.projectRoot, this.procforgeDir, a.junitPath as string | undefined, report.runId);
+      writeJUnitFile(junitPathProc, report);
       return {
         runId: report.runId,
         mode: report.mode,
@@ -618,6 +619,7 @@ export class ProcForgeApp {
         skipped: report.summary.skipped,
         blocked: report.summary.blocked,
         reportPath: join(this.procforgeDir, "runs", report.runId, "report.json"),
+        junitPath: junitPathProc,
         sessionId: imported,
       };
     }
@@ -635,7 +637,8 @@ export class ProcForgeApp {
       allowProjectRead: (a.allowProjectRead as boolean | undefined) ?? false,
     });
     const reportPath = join(this.procforgeDir, "runs", report.runId, "report.json");
-    if (a.junitPath) writeJUnitFile(a.junitPath as string, report);
+    const junitPath = resolveJUnitPath(this.projectRoot, this.procforgeDir, a.junitPath as string | undefined, report.runId);
+    writeJUnitFile(junitPath, report);
     return {
       runId: report.runId,
       mode: report.mode,
@@ -645,6 +648,7 @@ export class ProcForgeApp {
       skipped: report.summary.skipped,
       blocked: report.summary.blocked,
       reportPath,
+      junitPath,
     };
   }
 

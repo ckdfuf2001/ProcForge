@@ -80,6 +80,54 @@ describe("M4 MCP finalize/procedure", () => {
     }
   }, 30000);
 
+  it("M4.1.1-2 junitPath: 기본 runs/<runId>/junit.xml·지정·탈출 거부", async () => {
+    const { client } = createLocalStack(pfdir);
+    const app = new ProcForgeApp({ core: client, procforgeDir: pfdir, projectRoot: root });
+    const server = buildServer({ app, procforgeDir: pfdir });
+    const [ct, st] = InMemoryTransport.createLinkedPair();
+    const mcp = new Client({ name: "test", version: "0.0.0" });
+    await server.connect(st);
+    await mcp.connect(ct);
+    try {
+      const call = async (name: string, args: Record<string, unknown>) => {
+        const r = await mcp.callTool({ name, arguments: args });
+        if (r.isError) throw new Error(`${name}: ${(r.content as { text: string }[])[0].text}`);
+        return r.structuredContent as Record<string, unknown>;
+      };
+      const started = await call("pf_start", { request: "보고서", params: { month: "2026-09" } });
+      const sid = started["sessionId"] as string;
+      await call("pf_split", { sessionId: sid, nodeId: "1", children: [{ goal: "목록" }] });
+      await call("pf_report", {
+        sessionId: sid, nodeId: "1.1",
+        tool: { server: "fake-ppt", name: "list_slides" }, args: { file: "data.pptx" },
+        resultSummary: JSON.stringify({ slides: ["a"] }), resultJson: { slides: ["a"] },
+        selfVerdict: "pass", selfReason: "ok",
+      });
+      await call("pf_confirm_leaf", {
+        sessionId: sid, nodeId: "1.1",
+        tool: { server: "fake-ppt", name: "list_slides" },
+        argSpecs: { file: { kind: "fixed", value: "data.pptx" } },
+      });
+      await call("pf_test", { sessionId: sid, mode: "record", allowProjectRead: true });
+      // 기본 경로
+      const rep = await call("pf_test", { sessionId: sid, mode: "replay", allowProjectRead: true });
+      const junitDefault = join(pfdir, "runs", rep["runId"] as string, "junit.xml");
+      expect(rep["junitPath"]).toBe(junitDefault);
+      const { readFileSync, existsSync } = await import("node:fs");
+      expect(existsSync(junitDefault)).toBe(true);
+      expect(readFileSync(junitDefault, "utf8")).toContain("<testsuite");
+      // 지정 경로 (프로젝트 안 중첩)
+      const rep2 = await call("pf_test", { sessionId: sid, mode: "replay", allowProjectRead: true, junitPath: "reports/j.xml" });
+      expect(rep2["junitPath"]).toBe(join(root, "reports", "j.xml"));
+      expect(existsSync(join(root, "reports", "j.xml"))).toBe(true);
+      // 탈출 거부
+      await expect(app.test({ sessionId: sid, mode: "replay", junitPath: "../evil.xml" } as never)).rejects.toThrow(/escapes project root/);
+    } finally {
+      await mcp.close();
+      await server.close();
+    }
+  }, 60000);
+
   it("pf_advise 제안 채택/거부 (MCP)", async () => {
     const { client } = createLocalStack(pfdir);
     const app = new ProcForgeApp({ core: client, procforgeDir: pfdir, projectRoot: root });
