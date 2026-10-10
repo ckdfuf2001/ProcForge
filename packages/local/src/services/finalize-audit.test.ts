@@ -62,6 +62,52 @@ describe("auditFixedValues", () => {
     expect(auditFixedValues({ params: P, nodes: ns, cassettes: noCass })).toEqual([]);
   });
 
+  it("R1 numeric 검사값은 녹화 수치 일치에서 면제 (params·날짜는 유지)", () => {
+    const cas = new Map([["1.1", [{ response: { summary: "total 1500000", json: { total: 1500000 } } }]]]);
+    const ns = [
+      node("1.1", {
+        constraints: [
+          { id: "c-total", kind: "numeric_match", spec: { path: "total", expected: 1500000 }, source: "human" },
+        ],
+      }),
+    ];
+    expect(auditFixedValues({ params: {}, nodes: ns, cassettes: cas })).toEqual([]);
+    // 날짜 문자열 expected는 여전히 경고
+    const ns2 = [
+      node("1.1", {
+        constraints: [
+          { id: "c-d", kind: "equals", spec: { path: "m", expected: "2026-10" }, source: "human" },
+        ],
+      }),
+    ];
+    expect(
+      auditFixedValues({ params: {}, nodes: ns2, cassettes: cas }).some((w) => w.includes("날짜 표현")),
+    ).toBe(true);
+  });
+
+  it("R2 자신의 결과물 미러는 면제, 미러 없는 고정은 여전히 경고", () => {
+    const cas = new Map([["1.2", [{ response: { summary: "updated 3", json: { rows: [["A", "1,000,000"]] } } }]]]);
+    const mirrored = node("1.2", {
+      args: { rows: { kind: "fixed", value: [["A", "1,000,000"]] } },
+      attempts: [{ resultJson: { rows: [["A", "1,000,000"]] }, resultSummary: "updated 3" } as never],
+    });
+    expect(auditFixedValues({ params: {}, nodes: [mirrored], cassettes: cas })).toEqual([]);
+    const leaked = node("1.2", {
+      args: { rows: { kind: "fixed", value: [["A", "1,000,000"]] } },
+      attempts: [],
+    });
+    expect(
+      auditFixedValues({ params: {}, nodes: [leaked], cassettes: cas }).some((w) => w.includes("녹화 응답 수치")),
+    ).toBe(true);
+    // 날짜 고정은 미러여도 경고 유지
+    const dateFix = node("1.2", {
+      args: { t: { kind: "fixed", value: "2026-10" } },
+      attempts: [{ resultJson: { t: "2026-10" }, resultSummary: "2026-10" } as never],
+    });
+    expect(
+      auditFixedValues({ params: {}, nodes: [dateFix], cassettes: cas }).some((w) => w.includes("날짜 표현")),
+    ).toBe(true);
+  });
   it("recordedNumbers 추출", () => {
     const s = recordedNumbers([{ response: { summary: "Edited 3 cells", json: { n: 1320000 } } }]);
     expect(s.has(1320000)).toBe(true);

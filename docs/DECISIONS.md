@@ -318,6 +318,8 @@
 - M5.1-B1: finalize 고정값 감사 (params 부분 일치=core 담당과 중복 방지로
   constraint만·날짜 4종·녹화 수치 4자리+). warnings + PROCEDURE.md 절,
   strict 시 bad_request. 역치 근거: 인덱스·개수·tolerance 오탐 방지.
+  정밀화 R1 numeric_match 검사값(expected/Ref/min/max) 면제,
+  R2 자신의 결과물 미러 면제 (params·날짜 검사는 유지).
 - M5.1-B2: numeric_match.expected에 ref 허용 ("$노드.필드" 약식,
   "${params.x}"). core는 deferred, runner에서 판정. advise 안내 문구 갱신.
 - M5.1-B3: 기간 값 var 분류 문구 (PROMPT_TEXT 7항·SKILL).

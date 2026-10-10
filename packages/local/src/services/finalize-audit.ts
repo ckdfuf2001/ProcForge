@@ -5,6 +5,11 @@ import type { ArgSpec, Constraint, Node } from "@procforge/shared/schema.js";
 // - constraint spec 값은 human/auto 모두 검사 (params 부분 일치 포함).
 // - 날짜 표현·녹화 응답 수치는 fixed 인자 + constraint spec 모두 검사.
 // - 수치 역치는 4자리 이상 정수 (인덱스·개수·tolerance 오탐 방지).
+// - M5.1-B1 정밀화 (C1 dogfood 교정):
+//   R1 numeric_match의 expected/expectedRef/min/max는 검사값이므로 녹화 수치
+//      일치에서 면제 (params 부분 일치·날짜 검사는 유지).
+//   R2 노드 자신의 resultJson/resultSummary에 그대로 있는 값(미러)은
+//      결정성(원인==결과)이므로 녹화 수치 일치에서 면제 (params·날짜 유지).
 
 const DATE_RES = [
   /\b(19|20)\d{2}-(0?[1-9]|1[0-2])\b/,
@@ -78,8 +83,29 @@ export function auditFixedValues(input: {
   };
   const recNums = new Map<string, Set<number>>();
   for (const [nid, entries] of input.cassettes) recNums.set(nid, recordedNumbers(entries));
+  // R2: 노드 자신의 attempt 결과물에 그대로 있는 수치 (미러)
+  const mirrorOf = (n: Node): Set<number> => {
+    const out = new Set<number>();
+    const atts = (n as unknown as { attempts?: { resultJson?: unknown; resultSummary?: string }[] }).attempts ?? [];
+    for (const a of atts) {
+      const scalars: Scalar[] = [];
+      deepScalars(a.resultJson, scalars, "");
+      for (const { value } of scalars) {
+        const num = numValue(value);
+        if (num !== undefined) out.add(num);
+      }
+      for (const m of String(a.resultSummary ?? "").matchAll(/-?\d[\d,]*(?:\.\d+)?/g)) {
+        const num = numValue(m[0]);
+        if (num !== undefined) out.add(num);
+      }
+    }
+    return out;
+  };
   const paramEntries = Object.entries(input.params).filter(([, v]) => v.length >= 3);
-  const checkScalar = (nodeId: string, where: string, value: string | number, checkParams: boolean): void => {
+  const checkScalar = (
+    nodeId: string, where: string, value: string | number, checkParams: boolean,
+    opts: { mirror: Set<number>; bound: boolean },
+  ): void => {
     if (typeof value === "string") {
       if (checkParams) {
         for (const [pk, pv] of paramEntries) {
@@ -91,20 +117,28 @@ export function auditFixedValues(input: {
       }
       if (isDateLike(value)) push(nodeId, where, value, "날짜 표현");
       const num = numValue(value);
-      if (num !== undefined && Math.abs(num) >= 1000 && (recNums.get(nodeId) ?? new Set()).has(num)) {
+      if (
+        num !== undefined && Math.abs(num) >= 1000 && !opts.bound && !opts.mirror.has(num) &&
+        (recNums.get(nodeId) ?? new Set()).has(num)
+      ) {
         push(nodeId, where, value, "녹화 응답 수치와 일치");
       }
-    } else if (Math.abs(value) >= 1000 && (recNums.get(nodeId) ?? new Set()).has(value)) {
+    } else if (
+      Math.abs(value) >= 1000 && !opts.bound && !opts.mirror.has(value) &&
+      (recNums.get(nodeId) ?? new Set()).has(value)
+    ) {
       push(nodeId, where, String(value), "녹화 응답 수치와 일치");
     }
   };
+  const NUMERIC_BOUND_FIELDS = new Set(["expected", "expectedRef", "min", "max"]);
   for (const n of input.nodes) {
+    const mirror = mirrorOf(n);
     for (const [k, spec] of Object.entries(n.args ?? {})) {
       const s = spec as ArgSpec;
       if (s.kind !== "fixed") continue;
       const scalars: Scalar[] = [];
       deepScalars((s as { value: unknown }).value, scalars, k);
-      for (const { value, path } of scalars) checkScalar(n.id, path, value, false);
+      for (const { value, path } of scalars) checkScalar(n.id, path, value, false, { mirror, bound: false });
     }
     for (const c of n.constraints ?? []) {
       const cc = c as Constraint;
@@ -113,7 +147,12 @@ export function auditFixedValues(input: {
       if (cc.kind === "file_exists" && typeof specPath === "string" && specPath.startsWith("fixtures/")) continue;
       const scalars: Scalar[] = [];
       deepScalars((c as unknown as { spec?: unknown }).spec, scalars, `constraints.${(c as Constraint).id}`);
-      for (const { value, path } of scalars) checkScalar(n.id, path, value, true);
+      for (const { value, path } of scalars) {
+        // R1: numeric_match 검사값 필드는 녹화 수치 일치에서 면제
+        const field = path.split(".").pop() ?? "";
+        const bound = cc.kind === "numeric_match" && NUMERIC_BOUND_FIELDS.has(field);
+        checkScalar(n.id, path, value, true, { mirror, bound });
+      }
     }
   }
   return findings;
