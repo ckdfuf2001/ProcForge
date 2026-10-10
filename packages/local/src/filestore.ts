@@ -37,13 +37,19 @@ export class FileStore implements Store {
   getSession(id: string): Session | undefined {
     assertSessionId(id);
     const p = join(this.sessionDir(id), "session.json");
-    if (!existsSync(p)) return undefined;
     // M4.2-0.5-2: 읽기는 순수 조회 (구 세션 revision 기본값은 파서가 적용).
     // M4.2-2.5.1-1: pending이 있으면 파일 쓰기 없이 메모리 뷰에 반영.
-    const raw = JSON.parse(readFileSync(p, "utf8")) as Record<string, unknown>;
+    // M4.2-4-0-3: session.json 부재 시 적용 가능 pending에서 뷰 구성.
+    const raw: Record<string, unknown> = {};
+    if (existsSync(p)) Object.assign(raw, JSON.parse(readFileSync(p, "utf8")) as Record<string, unknown>);
+    let found = existsSync(p);
     for (const change of this.readPendings(id)) {
-      if (change.session) Object.assign(raw, change.session);
+      if (change.session) {
+        Object.assign(raw, change.session);
+        found = true;
+      }
     }
+    if (!found) return undefined;
     return SessionSchema.parse(raw);
   }
 

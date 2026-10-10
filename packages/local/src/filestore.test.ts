@@ -355,6 +355,25 @@ describe("M4.2-3-0 pending 정리 (낡은 revision)", () => {
     }
   });
 
+  it("M4.2-4-0-3 session.json 부재 시 pending 뷰 + 다음 커밋 복구", () => {
+    // 생성 중단 주입: pending-1만 기록, session.json 없음
+    const sessDir = join(dir, "sessions", sid);
+    mkdirSync(sessDir, { recursive: true });
+    writeFileSync(join(sessDir, "pending-1.json"), JSON.stringify({
+      revision: 1, session: sess(1), nodes: [nd("1", "root")], events: [evt(1)],
+    }));
+    expect(existsSync(join(sessDir, "session.json"))).toBe(false);
+    // 읽기: pending 뷰 정상
+    expect(store.getSession(sid)?.revision).toBe(1);
+    expect(store.getNode(sid, "1")?.goal).toBe("root");
+    expect(store.readEvents(sid).map((e) => e.seq)).toEqual([1]);
+    // 다음 커밋으로 파일 복구
+    store.commitChange(sid, { session: sess(2), nodes: [], events: [evt(2)] });
+    expect(existsSync(join(sessDir, "session.json"))).toBe(true);
+    expect(new FileStore(dir).getSession(sid)?.revision).toBe(2);
+    expect(new FileStore(dir).readEvents(sid).map((e) => e.seq)).toEqual([1, 2]);
+  });
+
   it("M4.2-4-0-1 손상 → 거부 2회 → CLI repair → 성공 + human 이벤트", () => {
     store.saveSession(sess(4));
     const sessDir = join(dir, "sessions", sid);
