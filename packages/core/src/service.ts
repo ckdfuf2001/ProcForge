@@ -49,7 +49,7 @@ function err(code: ErrorCode, message: string): ProcForgeError {
 
 import { checkUnknownKeys, selfAndAncestors, similarKey, varRefNodeId } from "@procforge/shared/args-schema.js";
 import { checkFixedAgainstInputSchema } from "@procforge/shared/validator.js";
-import { maskParamsValues, restoreParamsPlaceholders } from "@procforge/shared/normalize.js";
+import { maskParamsValues } from "@procforge/shared/normalize.js";
 import { PROCEDURE_NAME_RE, type ProcedureDoc } from "@procforge/shared/procedure.js";
 import { validateTree } from "@procforge/shared/validator.js";
 import { combineHashes } from "@procforge/shared/hash.js";
@@ -991,9 +991,12 @@ export class CoreService implements CoreClient {
         }
       }
       if (n.golden) {
-        const restored = restoreParamsPlaceholders(n.golden.output, session.params);
+        // M4.1.1-5: 자리표시자 복원 전 원문 기준. 자리표시자 있으면 경고 없음,
+        // 실제 값이 박혀 있으면 경고.
+        const raw = n.golden.output;
         for (const [pk, pv] of paramEntries) {
-          if (restored.includes(pv)) warnings.push(`${n.id}.golden.output: params "${pk}" 값을 포함 (재바인딩 확인)`);
+          if (raw.includes(`\${params.${pk}}`)) continue;
+          if (raw.includes(pv)) warnings.push(`${n.id}.golden.output: params "${pk}" 값을 포함 (재바인딩 확인)`);
         }
       }
     }
