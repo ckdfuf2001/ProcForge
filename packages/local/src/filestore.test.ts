@@ -1,10 +1,11 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { mkdtempSync, writeFileSync, existsSync, readFileSync, mkdirSync, readdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { FileStore } from "../src/filestore.js";
+import * as fsutil from "../src/fsutil.js";
 import type { Node, Session } from "@procforge/shared/schema.js";
 import type { EventEntry } from "@procforge/shared/dto.js";
 
@@ -228,8 +229,57 @@ describe("FileStore ID 이중 검증 (M2.6-2)", () => {
   });
 });
 
-describe("세션 lockfile (M2.6-7)", () => {
-  it("acquire → release 왕복", () => {
+describe("M4.2-3-0 pending 정리 (낡은 revision)", () => {
+  function sess(rev: number): Session {
+    return {
+      id: sid, request: "r", params: {}, toolCatalog: [], rootId: "1",
+      limits: { maxDepth: 3, maxRetries: 2, maxNodes: 10 },
+      createdAt: new Date().toISOString(), revision: rev,
+    };
+  }
+
+  function nd(id: string, goal: string): Node {
+    return {
+      id, parentId: "1", goal, status: "leaf", depth: 1, dependsOn: [], children: [],
+      tool: { server: "t", name: "x", schemaHash: "h" }, args: {}, sideEffect: "none",
+      constraints: [], advice: [], attempts: [], retries: 0, hash: `h-${id}`, locked: false,
+    };
+  }
+
+  function evt(seq: number): EventEntry {
+    return {
+      seq, revision: seq, at: "2026-10-10T00:00:00Z", actor: "host", method: "pfReport",
+      nodeIds: ["1.1"], beforeHash: "a", afterHash: "b", summary: "r",
+    };
+  }
+
+  it("M4.2-3-0-1 반영 후 unlink 실패 → 낡은 pending은 정리만 (재적용 금지)", () => {
+    store.saveSession(sess(5));
+    store.saveNode(sid, nd("1.1", "five"));
+    // unlink 1회 실패 주입 (반영은 성공, pending-6 잔류)
+    const spy = vi.spyOn(fsutil, "unlinkRetrySync");
+    spy.mockImplementationOnce(() => {
+      throw Object.assign(new Error("EPERM"), { code: "EPERM" });
+    });
+    store.commitChange(sid, { session: sess(6), nodes: [nd("1.1", "six")], events: [evt(6)] });
+    spy.mockRestore();
+    const sessDir = join(dir, "sessions", sid);
+    expect(existsSync(join(sessDir, "pending-6.json"))).toBe(true);
+    // 읽기: rev6 메모리 뷰
+    expect(store.getSession(sid)?.revision).toBe(6);
+    expect(store.getNode(sid, "1.1")?.goal).toBe("six");
+    // 복구: 낡은 pending은 적용 없이 정리만
+    expect(store.recoverSession(sid)).toEqual({ applied: [], failed: [] });
+    expect(existsSync(join(sessDir, "pending-6.json"))).toBe(false);
+    // 다음 커밋 후에도 rev6 내용 유지 (이벤트 중복 없음)
+    store.commitChange(sid, { session: sess(7), nodes: [nd("1.1", "seven")], events: [evt(7)] });
+    expect(store.getSession(sid)?.revision).toBe(7);
+    expect(store.getNode(sid, "1.1")?.goal).toBe("seven");
+    expect(store.readEvents(sid).map((e) => e.seq)).toEqual([6, 7]);
+  });
+});
+
+describe("세션 lockfile (M2.6-7)", () => {  it("acquire → release 왕복", () => {
     const release = store.acquireLock(sid);
     expect(existsSync(join(dir, "sessions", sid, ".lock"))).toBe(true);
     expect(() => store.acquireLock(sid)).toThrow(/locked/);

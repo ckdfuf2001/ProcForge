@@ -1,4 +1,4 @@
-import { mkdirSync, renameSync, writeFileSync } from "node:fs";
+import { mkdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { logger } from "./logger.js";
 
@@ -16,8 +16,7 @@ function isRetryable(e: unknown): boolean {
   return code === "EPERM" || code === "EBUSY" || code === "EACCES";
 }
 
-export function writeAtomicFile(path: string, data: string, warnBytes = 1_000_000): void {
-  if (data.length > warnBytes) logger.warn(`large session file: ${path} (${data.length} bytes)`);
+export function writeAtomicFile(path: string, data: string, warnBytes = 1_000_000): void {  if (data.length > warnBytes) logger.warn(`large session file: ${path} (${data.length} bytes)`);
   mkdirSync(dirname(path), { recursive: true });
   const tmp = `${path}.${process.pid}.tmp`;
   writeFileSync(tmp, data);
@@ -25,6 +24,22 @@ export function writeAtomicFile(path: string, data: string, warnBytes = 1_000_00
   for (let i = 0; i < 5; i++) {
     try {
       renameSync(tmp, path);
+      return;
+    } catch (e) {
+      last = e;
+      if (!isRetryable(e) || i === 4) throw e;
+      sleepSync(50);
+    }
+  }
+  throw last;
+}
+
+/** 삭제 재시도 (M4.2-3-0-1). Windows EPERM/EBUSY 대응 최대 5회, 50ms. */
+export function unlinkRetrySync(path: string): void {
+  let last: unknown;
+  for (let i = 0; i < 5; i++) {
+    try {
+      unlinkSync(path);
       return;
     } catch (e) {
       last = e;

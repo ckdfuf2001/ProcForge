@@ -7,8 +7,10 @@ import { pfError } from "@procforge/shared/errors.js";
 import type { EventEntry } from "@procforge/shared/dto.js";
 import { EventEntrySchema } from "@procforge/shared/dto.js";
 import { NodeIdSchema, NodeSchema, SessionIdSchema, SessionSchema } from "@procforge/shared/schema.js";
+import { CommitChangeSchema } from "@procforge/shared/store.js";
+import type { CommitChange } from "@procforge/shared/store.js";
 import { logger } from "./logger.js";
-import { writeAtomicFile } from "./fsutil.js";
+import * as fsutil from "./fsutil.js";
 
 /** ID 이중 검증 (M2.6-2). 서버 zod에 더해 저장소 진입부에서도 검사. */
 export function assertSessionId(sid: string): void {
@@ -28,7 +30,7 @@ export class FileStore implements Store {
   }
 
   private writeAtomic(path: string, data: string): void {
-    writeAtomicFile(path, data);
+    fsutil.writeAtomicFile(path, data);
   }
 
   // 동기 I/O + 싱글 스레드이므로 세션 단위 쓰기는 원자적.
@@ -143,13 +145,20 @@ export class FileStore implements Store {
       .map((f) => join(dir, f));
   }
 
-  /** pending 파싱 (읽기 경로용, 쓰기 없음. 손상은 건너뜀) */
+  /**
+   * pending 파싱 (읽기 경로용, 쓰기 없음).
+   * M4.2-3-0-1: zod 파싱 실패·낡은 revision(<= 파일 session.revision)은 제외.
+   * 낡은 pending 정리는 recoverSession·commitChange 진입 시 수행.
+   */
   private readPendings(sid: string): CommitChange[] {
     const out: CommitChange[] = [];
+    const curRev = this.readSessionRaw(sid)?.revision;
     for (const f of this.pendingFiles(sid)) {
       try {
-        const parsed = JSON.parse(readFileSync(f, "utf8")) as CommitChange | null;
-        if (parsed && typeof parsed === "object") out.push(parsed);
+        const parsed = CommitChangeSchema.safeParse(JSON.parse(readFileSync(f, "utf8")));
+        if (!parsed.success) continue;
+        if (parsed.data.revision !== undefined && curRev !== undefined && parsed.data.revision <= curRev) continue;
+        out.push(parsed.data);
       } catch {
         // 손상 pending은 읽기에서 건너뜀 (쓰기 경로에서 .corrupt로 이동)
       }
@@ -159,18 +168,30 @@ export class FileStore implements Store {
 
   /**
    * 남은 pending 재반영 (M4.2-2.5-3, 2.5.1-2). 숫자 revision 순 적용.
-   * 손상 파일은 .corrupt-<ts>로 이동 (삭제 금지). 적용 실패분은 failed에 기록.
+   * M4.2-3-0-1: 낡은 revision(<= 파일 session.revision)은 적용 없이 정리만.
+   * 손상 파일은 .corrupt-<ts>로 이동 (삭제 금지). 삭제는 fsutil 재시도 사용.
    */
   recoverSession(sid: string): { applied: string[]; failed: string[] } {
     const applied: string[] = [];
     const failed: string[] = [];
     for (const f of this.pendingFiles(sid)) {
+      const curRev = this.readSessionRaw(sid)?.revision;
       let change: CommitChange | undefined;
       try {
-        const parsed = JSON.parse(readFileSync(f, "utf8")) as CommitChange | null;
-        if (parsed && typeof parsed === "object") change = parsed;
+        const parsed = CommitChangeSchema.safeParse(JSON.parse(readFileSync(f, "utf8")));
+        if (parsed.success) {
+          if (parsed.data.revision !== undefined && curRev !== undefined && parsed.data.revision <= curRev) {
+            try {
+              fsutil.unlinkRetrySync(f);
+            } catch {
+              // 정리 실패 무시 (다음 진입 시 재시도)
+            }
+            continue;
+          }
+          change = parsed.data;
+        }
       } catch {
-        // 손상 pending은 .corrupt로 이동 (삭제 금지)
+        // 손상 pending은 아래에서 .corrupt로 이동
       }
       if (!change) {
         try {
@@ -188,9 +209,9 @@ export class FileStore implements Store {
         continue;
       }
       try {
-        unlinkSync(f);
+        fsutil.unlinkRetrySync(f);
       } catch {
-        // 무시
+        // 삭제 실패 무시 (다음 진입 시 재반영, 멱등)
       }
     }
     return { applied, failed };
@@ -223,7 +244,7 @@ export class FileStore implements Store {
     );
     this.applyPending(sid, c);
     try {
-      unlinkSync(join(this.sessionDir(sid), `pending-${rev}.json`));
+      fsutil.unlinkRetrySync(join(this.sessionDir(sid), `pending-${rev}.json`));
     } catch {
       // 삭제 실패 무시 (다음 진입 시 재반영, 멱등)
     }

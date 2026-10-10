@@ -248,6 +248,9 @@
   revision 전달. App 호출-읽기 사이 끼어든 변경은 conflict (호스트 재시도).
 - 2.5.1-5: filestore withLock은 잠금 중이면 25ms×20회 재시도 후
   conflict. Store.withLock/service.change 비동기로 전환.
+- 3-0-1: pending에 커밋 revision 기록(CommitChangeSchema). 낡은 pending
+  (revision<=파일 session.revision)은 읽기·복구에서 적용 없이 정리만.
+  pending 삭제는 fsutil.unlinkRetrySync 재시도 사용.
 
 ## M3.2
 
