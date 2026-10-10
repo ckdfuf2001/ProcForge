@@ -15,6 +15,7 @@ import { findRecording, loadCassette, recordKey, saveRecording, toToolResponse, 
 import { resolveArgs } from "./resolve.js";
 import { inferPathRole, rewritePaths, type InferredRole, type PathRole } from "./paths.js";
 import { setupRunFs } from "./workdir.js";
+import { writeRunState } from "../services/run-state.js";
 import type { NodeResult, RunMode, RunOptions, RunReport, ToolResponse } from "./types.js";
 
 function orderNodes(nodes: Node[]): Node[] {
@@ -74,7 +75,7 @@ export function toJUnit(report: RunReport): string {
       if (r.status === "fail") {
         return `    <testcase classname="procforge" name="${esc(r.nodeId)}" time="${(r.durationMs / 1000).toFixed(3)}"><failure message="${esc(r.detail ?? "failed")}">${esc(r.failedConstraints.join(","))}</failure></testcase>`;
       }
-      if (r.status === "unverified" || r.status === "skipped" || r.status === "blocked") {
+      if (r.status === "unverified" || r.status === "skipped" || r.status === "blocked" || r.status === "suspended") {
         return `    <testcase classname="procforge" name="${esc(r.nodeId)}" time="${(r.durationMs / 1000).toFixed(3)}"><skipped message="${esc(r.detail ?? r.status)}"/></testcase>`;
       }
       return `    <testcase classname="procforge" name="${esc(r.nodeId)}" time="${(r.durationMs / 1000).toFixed(3)}"/>`;
@@ -86,9 +87,6 @@ export function toJUnit(report: RunReport): string {
 
 export async function runSession(opts: RunOptions): Promise<RunReport> {
   const mode: RunMode = opts.mode ?? "replay";
-  if (mode === "live") {
-    throw Object.assign(new Error("live 모드(generated 재생성)는 M5에서 구현"), { code: "unimplemented" });
-  }
   if (mode === "replay" && opts.updateGolden) {
     throw Object.assign(new Error("--update-golden은 record/passthrough에서만 허용 (replay 불가)"), { code: "bad_request" });
   }
@@ -130,6 +128,9 @@ export async function runSession(opts: RunOptions): Promise<RunReport> {
     }
     const ordered = orderNodes(all);
     const byIdAll = new Map(all.map((x) => [x.id, x]));
+    // M5: 이미 완료분은 재실행 제외 (golden 출력으로 의존 공급)
+    const doneSet = new Set(opts.skipNodeIds ?? []);
+    for (const id of doneSet) targets.delete(id);
     const outputs = new Map<string, unknown>();
     // 범위 밖 의존 출력만 golden에서 공급 (M3.1-4: 범위 내 선주입 금지)
     for (const n of all) {
@@ -146,6 +147,12 @@ export async function runSession(opts: RunOptions): Promise<RunReport> {
     const resultOf = new Map<string, NodeResult>();
     for (const n of ordered) {
       const start = Date.now();
+      if (doneSet.has(n.id)) {
+        const r: NodeResult = { nodeId: n.id, status: "skipped", failedConstraints: [], detail: "already done (run state)", durationMs: 0 };
+        results.push(r);
+        resultOf.set(n.id, r);
+        continue;
+      }
       if (!targets.has(n.id)) {
         const r: NodeResult = { nodeId: n.id, status: "skipped", failedConstraints: [], detail: "scope/changes 제외", durationMs: 0 };
         results.push(r);
@@ -189,6 +196,19 @@ export async function runSession(opts: RunOptions): Promise<RunReport> {
         const r = await execNode(opts, session.params, outputs, pool, fsDir, n, mode, new Map(all.map((x) => [x.id, x])), runId);
         results.push(r);
         resultOf.set(n.id, r);
+        if (r.status === "suspended") {
+          // M5: 첫 suspend에서 중단. 나머지는 대기 표시.
+          const seen = new Set(results.map((x) => x.nodeId));
+          for (const m of ordered) {
+            if (seen.has(m.id)) continue;
+            const s: NodeResult = doneSet.has(m.id)
+              ? { nodeId: m.id, status: "skipped", failedConstraints: [], detail: "already done (run state)", durationMs: 0 }
+              : { nodeId: m.id, status: "skipped", failedConstraints: [], detail: `suspended: ${r.detail ?? ""}`, durationMs: 0 };
+            results.push(s);
+            resultOf.set(m.id, s);
+          }
+          break;
+        }
       } catch (e) {
         const r: NodeResult = {
           nodeId: n.id,
@@ -208,6 +228,7 @@ export async function runSession(opts: RunOptions): Promise<RunReport> {
       unverified: results.filter((r) => r.status === "unverified").length,
       skipped: results.filter((r) => r.status === "skipped").length,
       blocked: results.filter((r) => r.status === "blocked").length,
+      suspended: results.filter((r) => r.status === "suspended").length,
     };
     const report: RunReport = {
       runId,
@@ -220,6 +241,31 @@ export async function runSession(opts: RunOptions): Promise<RunReport> {
     };
     mkdirSync(runDir, { recursive: true });
     writeAtomicFile(join(runDir, "report.json"), JSON.stringify(report, null, 2));
+    // M5: suspend 시 run state 저장 (재개용)
+    const suspended = results.find((r) => r.status === "suspended");
+    if (suspended) {
+      const doneIds = [...doneSet, ...results.filter((r) => r.status === "pass").map((r) => r.nodeId)];
+      const pending = ordered.map((n) => n.id).filter((id) => !doneIds.includes(id));
+      const m = /^need_generated:(.*)$/.exec(suspended.detail ?? "");
+      writeRunState(opts.procforgeDir, {
+        version: 1,
+        runId,
+        sessionId: opts.sessionId,
+        procedure: opts.procedure ?? "",
+        params: session.params,
+        pending,
+        done: doneIds,
+        supplied: opts.supplied ?? {},
+        approved: opts.approvedNodeIds ?? [],
+        suspended: {
+          nodeId: suspended.nodeId,
+          kind: m ? "need_generated" : "need_approval",
+          ...(m ? { missing: m[1].split(",").filter((s) => s.length > 0) } : {}),
+        },
+        status: "suspended",
+        updatedAt: new Date().toISOString(),
+      });
+    }
     // lastPassHash 병합 저장 (M3.3-5): pass만 갱신, 미실행 유지, fail/blocked 삭제
     const prevPass = readLastPass(opts.procforgeDir, opts.sessionId).hashes;
     const merged: Record<string, string> = { ...prevPass };
@@ -257,6 +303,16 @@ async function execNode(
   });
   if (normSpecs.warnings.length > 0) logger.warn("absolute path kept", { nodeId: n.id, warnings: normSpecs.warnings });
   const specs = normSpecs.specs;
+  // M5: live에서 generated 미공급이면 suspended (runner가 만들지 않음)
+  if (mode === "live") {
+    const supplied = opts.supplied?.[n.id] ?? {};
+    const missing = Object.entries(specs)
+      .filter(([k, s]) => (s as { kind?: string }).kind === "generated" && !Object.prototype.hasOwnProperty.call(supplied, k))
+      .map(([k]) => k);
+    if (missing.length > 0) {
+      return { nodeId: n.id, status: "suspended", failedConstraints: [], detail: `need_generated:${missing.join(",")}`, durationMs: Date.now() - start };
+    }
+  }
   const inputSchema = catalogInputSchema(opts, n);
   const readOnly = catalogReadOnly(opts, n);
   const roles: Record<string, PathRole | InferredRole | undefined> = {};
@@ -286,6 +342,7 @@ async function execNode(
       attempts: n.attempts,
       goldenAttemptId: n.golden?.attemptId,
       live: mode === "live",
+      supplied: opts.supplied?.[n.id],
       topo: {
         isSplit: (id) => byId.get(id)?.status === "split",
         childrenOf: (id) => byId.get(id)?.children ?? [],
@@ -300,8 +357,8 @@ async function execNode(
   let resp: ToolResponse;
   let mocked = false;
 
-  if (n.sideEffect === "external") {
-    // 모든 모드에서 실제 호출 금지 (M3)
+  if (n.sideEffect === "external" && mode !== "live") {
+    // record/replay/passthrough에서 실제 호출 금지 (M3)
     const rec = findRecording(loadCassette(opts.procforgeDir, opts.sessionId, n.id), key);
     if (rec) {
       resp = toToolResponse(rec, fsDir);
@@ -309,6 +366,9 @@ async function execNode(
       mocked = true;
       resp = { resultText: "[mock external]", resultJson: { mock: true } };
     }
+  } else if (mode === "live" && n.sideEffect === "external" && !(opts.approvedNodeIds ?? []).includes(n.id)) {
+    // M5: live에서도 사람 승인 없이는 실행 금지
+    return { nodeId: n.id, status: "suspended", failedConstraints: [], detail: "need_approval", durationMs: Date.now() - start };
   } else if (mode === "replay") {
     // M3.1-1: replay는 녹화 적중 + constraints만. golden 비교 없음.
     const rec = findRecording(loadCassette(opts.procforgeDir, opts.sessionId, n.id), key);

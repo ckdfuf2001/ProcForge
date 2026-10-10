@@ -16,9 +16,17 @@ export type RunOptions = {
   /** hash 변경 노드+하류만 실행 */
   changed?: boolean;
   runId?: string;
+  /** 재실행 제외 (M5 run 스텝, golden 출력으로 의존 공급) */
+  skipNodeIds?: string[];
+  /** generated 인자 공급값 (M5, nodeId → 키→값) */
+  supplied?: Record<string, Record<string, unknown>>;
+  /** 승인된 external 노드 (M5) */
+  approvedNodeIds?: string[];
+  /** 절차서 이름 (M5 run state 기록용) */
+  procedure?: string;
 };
 
-export type NodeResultStatus = "pass" | "fail" | "unverified" | "skipped" | "blocked";
+export type NodeResultStatus = "pass" | "fail" | "unverified" | "skipped" | "blocked" | "suspended";
 
 export type NodeResult = {
   nodeId: string;
@@ -35,7 +43,7 @@ export type RunReport = {
   mode: RunMode;
   at: string;
   results: NodeResult[];
-  summary: { pass: number; fail: number; unverified: number; skipped: number; blocked: number };
+  summary: { pass: number; fail: number; unverified: number; skipped: number; blocked: number; suspended: number };
   nodeHashes: Record<string, string>;
 };
 

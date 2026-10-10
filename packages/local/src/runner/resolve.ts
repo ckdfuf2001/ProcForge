@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import type { ArgSpec, Attempt } from "@procforge/shared/schema.js";
 
 // 인자 해석 (M3): fixed 그대로, var는 params+이전 출력, generated는 replay 기록값/live 에러.
+// M5: supplied 값이 있으면 우선 사용.
 
 export type OutputTopo = {
   isSplit: (id: string) => boolean;
@@ -19,6 +20,8 @@ export function resolveArgs(input: {
   live: boolean;
   /** split 출력 조립용 토폴로지 (M3.3-6) */
   topo?: OutputTopo;
+  /** M5 공급값 (이 노드 키→값, generated 우선) */
+  supplied?: Record<string, unknown>;
 }): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [k, spec] of Object.entries(input.specs)) {
@@ -27,6 +30,10 @@ export function resolveArgs(input: {
     } else if (spec.kind === "var") {
       out[k] = resolveVar((spec as { ref: string }).ref, input.params, input.outputs, input.topo);
     } else {
+      if (input.supplied && Object.prototype.hasOwnProperty.call(input.supplied, k)) {
+        out[k] = input.supplied[k];
+        continue;
+      }
       if (input.live) throw new Error(`generated 인자 '${k}'는 live 모드 미지원 (M5 이후)`);
       out[k] = resolveGenerated(k, input.attempts, input.goldenAttemptId);
     }

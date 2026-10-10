@@ -477,9 +477,10 @@ describe("M3.2 runner", () => {
     });
     expect(rep.summary.fail).toBe(0);
     expect(rep.results.find((r) => r.nodeId === "1.1")?.status).toBe("pass");
-    await expect(
-      runSession({ procforgeDir: pfdir, projectRoot: root, sessionId: sid, mode: "live", nodeId: "1.1" }),
-    ).rejects.toThrow(/M5/);
+    // M5: live에서 generated 미공급이면 suspended (throw 아님)
+    const live = await runSession({ procforgeDir: pfdir, projectRoot: root, sessionId: sid, mode: "live", nodeId: "1.1" });
+    expect(live.results.find((r) => r.nodeId === "1.1")?.status).toBe("suspended");
+    expect(live.results.find((r) => r.nodeId === "1.1")?.detail).toMatch(/need_generated:month/);
   }, 30000);
 
   it("내장 write로 새 파일 생성 (runFs에만)", async () => {
