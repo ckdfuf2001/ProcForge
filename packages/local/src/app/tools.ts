@@ -24,4 +24,7 @@ export const APP_METHODS = {
   pf_refresh_catalog: "refreshCatalog",
   pf_test: "test",
   pf_finalize: "finalize",
+  pf_run_start: "runStart",
+  pf_run_next: "runNext",
+  pf_run_supply: "runSupply",
 } as const satisfies Record<string, string>;

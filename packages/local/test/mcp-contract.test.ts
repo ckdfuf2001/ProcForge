@@ -64,6 +64,9 @@ const EXPECTED_ANNOTATIONS: Record<string, Record<string, boolean>> = {
   pf_edit_node: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
   pf_refresh_catalog: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
   pf_finalize: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+  pf_run_start: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+  pf_run_next: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+  pf_run_supply: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
 };
 
 describe("tools/list 스냅샷 (결정적 순서·annotations)", () => {

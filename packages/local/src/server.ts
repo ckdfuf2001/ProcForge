@@ -17,6 +17,9 @@ import {
   ReopenInputSchema,
   ReportInputSchema,
   RetryInputSchema,
+  RunNextInputSchema,
+  RunStartInputSchema,
+  RunSupplyInputSchema,
   SplitInputSchema,
   StartInputSchema,
   TestInputSchema,
@@ -26,6 +29,7 @@ import { errorCodeOf } from "@procforge/shared/errors.js";
 import { logger } from "./logger.js";
 import { OUTPUT_SCHEMAS } from "./app/surface.js";
 import { logEvent } from "./app/surface.js";
+import { PfRunNextMcpOutputSchema, PfRunSupplyMcpOutputSchema } from "./app/surface.js";
 import { APP_METHODS } from "./app/tools.js";
 import type { ProcForgeApp } from "./app/app.js";
 import { PROMPT_TEXT, DEFAULT_SESSION_TTL_MS } from "./app/app.js";
@@ -58,6 +62,9 @@ export const TOOL_NAMES = [
   "pf_refresh_catalog",
   "pf_test",
   "pf_finalize",
+  "pf_run_start",
+  "pf_run_next",
+  "pf_run_supply",
 ] as const;
 
 export const READ_ONLY_TOOLS = ["pf_tree", "pf_get_node"] as const;
@@ -440,6 +447,54 @@ export function buildServer(deps: ServerDeps): McpServer {
       annotations: WRITE_ANN,
     },
     H("pf_finalize"),
+  );
+
+  R(
+    "pf_run_start",
+    {
+      title: "live 실행 시작",
+      description: [
+        "확정 절차서를 새 데이터로 live 실행한다.",
+        "procedure(필수, 절차서 이름), params(선택, 재바인딩 값).",
+        "runId·세션 반환. 다음: pf_run_next(runId)로 단계 진행.",
+      ].join("\n"),
+      inputSchema: RunStartInputSchema,
+      outputSchema: OUTPUT_SCHEMAS["pf_run_start"] as never,
+      annotations: WRITE_ANN,
+    },
+    H("pf_run_start"),
+  );
+
+  R(
+    "pf_run_next",
+    {
+      title: "live 실행 다음 단계",
+      description: [
+        "run을 다음 결정 지점까지 진행한다.",
+        "runId(필수). 생성값 필요 시 need_generated, 승인 필요 시 need_approval,",
+        "완료 시 done, 실패 시 failed + 수정 힌트 반환.",
+      ].join("\n"),
+      inputSchema: RunNextInputSchema,
+      outputSchema: PfRunNextMcpOutputSchema as never,
+      annotations: WRITE_ANN,
+    },
+    H("pf_run_next"),
+  );
+
+  R(
+    "pf_run_supply",
+    {
+      title: "live 생성값 공급",
+      description: [
+        "대기 중인 노드에 생성값을 공급하고 자동 진행한다.",
+        "runId(필수), nodeId(필수), value(생성값, 여러 키면 객체).",
+        "승인 대기는 value=true로 승인.",
+      ].join("\n"),
+      inputSchema: RunSupplyInputSchema,
+      outputSchema: PfRunSupplyMcpOutputSchema as never,
+      annotations: WRITE_ANN,
+    },
+    H("pf_run_supply"),
   );
 
   server.registerPrompt(

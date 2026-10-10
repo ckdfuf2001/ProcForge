@@ -204,6 +204,69 @@ export const PfFinalizeOutputSchema = z.object({
   files: z.array(z.string()),
   commandFile: z.string().optional(),
 });
+export const PfRunStartOutputSchema = z.object({
+  runId: z.string(),
+  sessionId: z.string(),
+  procedure: z.string(),
+  params: z.record(z.string()),
+});
+export const PfRunNextOutputSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("need_generated"),
+    runId: z.string(),
+    sessionId: z.string(),
+    nodeId: z.string(),
+    instruction: z.string(),
+    inputs: z.record(z.unknown()),
+  }),
+  z.object({
+    kind: z.literal("need_approval"),
+    runId: z.string(),
+    sessionId: z.string(),
+    nodeId: z.string(),
+    instruction: z.string(),
+    approvalHint: z.string(),
+  }),
+  z.object({
+    kind: z.literal("done"),
+    runId: z.string(),
+    sessionId: z.string(),
+    pass: z.number(),
+    fail: z.number(),
+    unverified: z.number(),
+    skipped: z.number(),
+    blocked: z.number(),
+    suspended: z.number(),
+  }),
+  z.object({
+    kind: z.literal("failed"),
+    runId: z.string(),
+    sessionId: z.string(),
+    nodeId: z.string(),
+    detail: z.string(),
+    hint: z.string(),
+  }),
+]);
+export const PfRunSupplyOutputSchema = PfRunNextOutputSchema;
+/** MCP 등록용 loose 형태 (SDK는 union outputSchema 미지원 — 목록 노출·호출 검증용) */
+export const PfRunNextMcpOutputSchema = z.object({
+  kind: z.enum(["need_generated", "need_approval", "done", "failed"]),
+  runId: z.string(),
+  sessionId: z.string(),
+  nodeId: z.string().optional(),
+  instruction: z.string().optional(),
+  inputs: z.record(z.unknown()).optional(),
+  approvalHint: z.string().optional(),
+  pass: z.number().optional(),
+  fail: z.number().optional(),
+  unverified: z.number().optional(),
+  skipped: z.number().optional(),
+  blocked: z.number().optional(),
+  suspended: z.number().optional(),
+  detail: z.string().optional(),
+  hint: z.string().optional(),
+});
+export const PfRunSupplyMcpOutputSchema = PfRunNextMcpOutputSchema;
 
 export const OUTPUT_SCHEMAS: Record<string, z.ZodTypeAny> = {
   pf_start: PfStartOutputSchema,
@@ -224,4 +287,7 @@ export const OUTPUT_SCHEMAS: Record<string, z.ZodTypeAny> = {
   pf_refresh_catalog: PfRefreshCatalogOutputSchema,
   pf_test: PfTestOutputSchema,
   pf_finalize: PfFinalizeOutputSchema,
+  pf_run_start: PfRunStartOutputSchema,
+  pf_run_next: PfRunNextOutputSchema,
+  pf_run_supply: PfRunSupplyOutputSchema,
 };

@@ -176,6 +176,23 @@ export const FinalizeInputSchema = z.object({
 });
 export type FinalizeInput = z.infer<typeof FinalizeInputSchema>;
 
+export const RunStartInputSchema = z.object({
+  procedure: z.string().regex(PROCEDURE_NAME_RE, "procedure 이름 규칙 위반"),
+  params: z.record(z.string()).optional(),
+});
+export type RunStartInput = z.infer<typeof RunStartInputSchema>;
+
+export const RunNextInputSchema = z.object({
+  runId: z.string().uuid(),
+});
+export type RunNextInput = z.infer<typeof RunNextInputSchema>;
+
+export const RunSupplyInputSchema = z.object({
+  runId: z.string().uuid(),
+  nodeId: NodeIdSchema,
+  value: z.unknown(),
+});
+export type RunSupplyInput = z.infer<typeof RunSupplyInputSchema>;
 export const EditArgsInputSchema = z.object({
   sessionId: SessionIdSchema,
   nodeId: NodeIdSchema,

@@ -314,6 +314,12 @@
 - M5-1: `procforge run <procedure> --param k=v [--out dir] [--force]` 신설
   (App.runProcedure 경유). 출력은 runs/<runId>/fs, --out 지정 시에만 완료 후
   프로젝트 안으로 복사 (기존 파일은 --force 없이 거부).
+- M5-2: live에서 generated 미공급·external 미승인은 suspended로 중단하고
+  state.json 저장 (재개용). supplied/approved/skipNodeIds로 단계 재실행.
+  live 게이트 제거.
+- M5-3: pf_run_start/next/supply (App 1:1, TOOL_NAMES·APP_METHODS·계약 갱신).
+  supply는 생성값 저장·승인(true) 후 자동 진행. CLI approve는 상태 표시만.
+  MCP SDK는 union outputSchema 미지원 → 등록용 loose 스키마 분리.
 - 4-1/4-2 수정: check-deps가 Windows에서 빈 스캔(항상 통과)이던 결함
   수정 (fileURLToPath). 멀티라인 import 여는 행 제외, *.test.ts는
   저장 범위 검사에서 제외 (저장소 직접 검증 목적).
