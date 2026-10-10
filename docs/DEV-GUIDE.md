@@ -381,8 +381,8 @@ C4 CI E2E에도 C2·C3를 fake 서버로 추가. M5-dogfood.md 3절을 실제 �
 | M3.5.1 | dogfood 후속 수정 (M5 전) | [x] | `98e99d5` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38055900040 | file_exists pin·drift 기준·resultJson 대조·카탈로그 타임아웃·스크립트 leaf 결정·dogfood 보정 |
 | M3.5.2 | 잠금 원자화 (M5 전) | [x] | `5eb43b8` | (아래 run) | openSync wx·token release·부하 테스트·클린 클론 |
 | M5.1 | 잠금 회수 정정·감사·진짜 10월 검증 | [x] | `00661cf` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38067485259 | A 회수 정정(9c0171b)·B 감사·상대조건·템플릿(c56a7c1·935df1b·725c9f3·75b7cc5)·C 10월 검증(00661cf) |
-| M5 | 검증/실행 분리 | [~] | `78e6514` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38067485259 | M5.2 완료 후 재확정 (사유: M5.1-C1은 10월 데이터로 분해한 절차서를 10월에 실행 — 교차 기간 재사용 미증명) |
-| M5.2 | 교차 기간 재사용 | [ ] | | | 입력 바인딩·스크립트 leaf·값 흐름·수락 a~d |
+| M5 | 검증/실행 분리 | [x] | `78e6514` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38067485259 | M5.2 수락 a~d로 재확정 (입력 바인딩·값 흐름 실증) |
+| M5.2 | 교차 기간 재사용 | [x] | `52a2518` | (아래 run) | 입력 바인딩·스크립트 leaf·값 흐름·수락 a~d·단가 통일 |
 | M5.5 | 반복 노드 | [ ] | | | |
 | M5.6 | 상태 / sideEffect | [ ] | | | |
 | - | 크롤링 테스트 | [ ] | | | 사람 진행 |
@@ -408,3 +408,4 @@ C4 CI E2E에도 C2·C3를 fake 서버로 추가. M5-dogfood.md 3절을 실제 �
 | 2026-10-11 | 6, 8 | M5.1 신설 + M5 미완료로 환원: A 잠금 회수 정정 (pid 생존·하트비트·원위치·계측·50회) · B 파라미터화 감사·C 진짜 10월 검증 | dogfood에서 드러난 회수 경합 잔재·절차서 하드코딩·요약-비교 한계를 M5 확정 전에 해소 |
 | 2026-10-11 | 6, 8 | M5.1 완료 + M5 재확정: A 회수 정정·B1 감사(R1/R2 정밀화)·B2 상대조건·B3 템플릿var·C1 10월 분해(감사 0)·C2 live pass 3·C3 음성(c-total fail+blocked)·C4 CI E2E·A4 m25 50회·양 모드 37+61+183 | fixture-sealed 규명·MCP UTF-8 stdio·한계 문구 삭제 |
 | 2026-10-11 | 6, 8 | M5.2 신설 + M5 미완료로 재환원: 11월 실행 실험(pass 3·표지 2026-11·표 10월 수치, run 52ff17ab)으로 교차 기간 재사용 미증명 확정 | 입력 바인딩·스크립트 leaf·값 흐름·수락 a~d |
+| 2026-10-11 | 6, 8 | M5.2 완료 + M5 재확정: 입력 바인딩·스크립트 leaf(kind script)·교차 경고·expected 감사·약식 ref·수락 a~d(CI+실측)·runner UTF-8·단가 통일·양 모드 38+61+200 | 절차서 monthly (기간 없음) |
