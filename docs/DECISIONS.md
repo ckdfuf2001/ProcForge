@@ -283,6 +283,8 @@
   PROCFORGE_CLIENT 양쪽 실행, CI 매트릭스에 client 축 추가.
 - 4-5: test/parity.test.ts — App 직접 호출과 MCP 전송 동일 시나리오,
   uuid·시각 정규화 후 session·nodes·확정 응답 일치.
+- 4-6: test/arg-schema.test.ts — server 소스 정적 파싱으로 도구↔
+  inputSchema 대응, 핸들러 a.*·설명서 (필수/선택) 인자는 스키마 키.
 - 3-2: junitPath는 프로젝트 안만 허용(탈출 bad_request), 생략 시
   runs/<runId>/junit.xml 항상 기록. 응답에 junitPath 포함.
 - 3-3: pf_test.procedure에 PROCEDURE_NAME_RE zod 적용 (MCP 입력은
