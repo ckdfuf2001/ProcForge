@@ -299,8 +299,8 @@ server.registerTool("pf_report", spec, async (a) => {
 | M4.2 | 2.5.1 보정 1~5 | [x] | `caf8b18` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38023996163 | 읽기 메모리뷰·pending 정렬/손상/거부·enteredProbing·revision 전달·잠금대기 |
 | M4.2 | 3-0 (2.5.1 잔여) | [x] | `2532523` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38027160130 | 낡은 pending 정리만·recover 중단/실패·commitChange session 필수·읽기 zod |
 | M4.2 | 3단계 M4.1.1 버그 1~7 | [x] | `307bcd6` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38027160130 | 6번은 2.5-4에서 해소됨 |
-| M4.2 | 4-0 (3-0 잔여) | [ ] | | | corrupt 잔류 거부·CLI repair·planPendings 공용·무세션 pending 뷰 |
-| M4.2 | 4단계 강제 장치 1~6 | [ ] | | | |
+| M4.2 | 4-0 (3-0 잔여) | [x] | `49a649b` | (4단계와 함께 확인) | corrupt 잔류 거부·CLI repair·planPendings 공용·무세션 pending 뷰 |
+| M4.2 | 4단계 강제 장치 1~6 | [~] | `ab72516` | (진행 중) | 1~6 전부 구현·테스트 |
 | M3.5 | PPT 실사용 테스트 | [ ] | | | 사람 진행 |
 | M5 | 검증/실행 분리 | [ ] | | | |
 | M5.5 | 반복 노드 | [ ] | | | |
@@ -322,3 +322,4 @@ server.registerTool("pf_report", spec, async (a) => {
 | 2026-10-10 | 6, 8 | 3-0 (2.5.1 잔여) 신설: 낡은 pending 정리만·recover 첫 실패 중단/손상 실패·commitChange session 필수·읽기 경로 zod | pending 재반영이 낡은 변경을 되살리거나 손상을 넘기면 3단계 스냅샷·확정 로직의 전제가 무너짐 — 3단계 진입 전 해소 |
 | 2026-10-10 | 3, 4, 8 | 3단계 1·2·3·4·5·7 완료 (6번은 2.5-4 해소): inout 분류+pre-copy/seed 원본·junit 경로·procedure 이름·pf_test nodeId·golden 원문 경고·advise summary | 확정·실행의 입력 완전성(원본)·출력 위치·재실행 범위를 4단계 강제 장치 전에 고정 |
 | 2026-10-10 | 6, 8 | 4-0 (3-0 잔여) 신설: corrupt 잔류 시 커밋 거부·CLI repair --discard·planPendings 읽기/복구 공용·연속 revision만 적용·무세션 pending 뷰 | 손상·불연속 pending이 읽기와 복구에서 다르게 보이면 4단계 강제 장치의 전제가 무너짐 — 4단계 진입 전 해소 |
+| 2026-10-10 | 5, 8 | 4단계 1~6 완료: 어댑터 import/fs/save 검사·1:1 매핑·loopback+매트릭스·parity·인자-스키마 | 계층 위반·직렬화 불가·표면 드리프트를 CI에서 강제 |
