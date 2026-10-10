@@ -1321,3 +1321,32 @@ describe("M4.2-1 pfBuildProcedure", () => {  it("검증·경고·문서 조립",
     expect(w2.some((w) => w.includes('golden.output: params "month"'))).toBe(true);
   });
 });
+
+describe("M5.3-0-1 confirm required 강제", () => {
+  const bashCat: Session["toolCatalog"] = [
+    {
+      server: "opencode",
+      name: "bash",
+      inputSchema: { type: "object", properties: { command: { type: "string" } }, required: ["command"] } as unknown as Record<string, unknown>,
+      schemaHash: "b1",
+    },
+  ];
+  it("required 누락 → bad_request + 목록, 충족 시 확정", async () => {
+    const svc = new CoreService(createMemoryStore(), passEval);
+    const { session } = await svc.pfStart({ request: "r", toolCatalog: bashCat });
+    await svc.pfReport({ ...rep(), sessionId: session.id, tool: { server: "opencode", name: "bash" }, args: { lang: "ko" } });
+    await expect(
+      svc.pfResolve({ sessionId: session.id, nodeId: "1", decision: "leaf", tool: { server: "opencode", name: "bash" }, argSpecs: { lang: { kind: "fixed", value: "ko" } } as never }),
+    ).rejects.toThrow(/missing required: command/);
+    const ok = await svc.pfResolve({ sessionId: session.id, nodeId: "1", decision: "leaf", tool: { server: "opencode", name: "bash" }, argSpecs: { lang: { kind: "fixed", value: "ko" }, command: { kind: "fixed", value: "ls" } } as never });
+    expect(ok.node.status).toBe("leaf");
+  });
+  it("required 없는 스키마 → 확정 + 경고", async () => {
+    const svc = new CoreService(createMemoryStore(), passEval);
+    const { session } = await svc.pfStart({ request: "r", toolCatalog: catalog });
+    await svc.pfReport({ ...rep(), sessionId: session.id });
+    const ok = await svc.pfResolve({ sessionId: session.id, nodeId: "1", decision: "leaf", tool: { server: "fs", name: "read" }, argSpecs: {} as never });
+    expect(ok.node.status).toBe("leaf");
+    expect(ok.instruction).toMatch(/required 없음/);
+  });
+});

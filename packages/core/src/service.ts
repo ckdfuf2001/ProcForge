@@ -47,7 +47,7 @@ function err(code: ErrorCode, message: string): ProcForgeError {
   return pfError(code, message);
 }
 
-import { checkUnknownKeys, selfAndAncestors, similarKey, varRefNodeId } from "@procforge/shared/args-schema.js";
+import { checkUnknownKeys, readSchemaProps, selfAndAncestors, similarKey, varRefNodeId } from "@procforge/shared/args-schema.js";
 import { checkFixedAgainstInputSchema } from "@procforge/shared/validator.js";
 import { maskParamsValues } from "@procforge/shared/normalize.js";
 import { PROCEDURE_NAME_RE, type ProcedureDoc } from "@procforge/shared/procedure.js";
@@ -720,6 +720,14 @@ export class CoreService implements CoreClient {
           throw err("bad_args", `argSpecs unknown: ${hints.join("; ")}. 등록된 인자만 사용하라.`);
         }
         const warnings: string[] = [];
+        // M5.3-0-1: required 키 강제 (누락 → bad_request + 목록).
+        // 스키마에 required가 없으면 확정 시 경고 (검증 불가).
+        const required = readSchemaProps(cat.inputSchema).required ?? [];
+        const missingRequired = required.filter((r) => !(r in input.argSpecs!));
+        if (missingRequired.length > 0)
+          throw err("bad_request", `argSpecs missing required: ${missingRequired.join(",")}`);
+        if (required.length === 0)
+          warnings.push(`스키마 required 없음 (${input.tool!.server}/${input.tool!.name}) — 필수 인자 검증 불가`);
         for (const [k, spec] of Object.entries(input.argSpecs)) {
           if (spec.kind === "fixed") {
             const v = (spec as { value: unknown }).value;
