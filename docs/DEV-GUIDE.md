@@ -191,7 +191,11 @@ server.registerTool("pf_report", spec, async (a) => {
 2. 세션 잠금을 core `change()` 안으로 이동. Store 인터페이스에 `withLock(sid, fn)` 추가,
    FileStore는 lockfile, MemoryStore는 no-op. App의 `locked()` 제거.
 3. 커밋 원자화: `pending-<rev>.json`에 전체 변경을 먼저 원자 저장 → 노드 → 세션 → 이벤트
-   반영 → pending 삭제. 세션을 열 때 pending이 남아 있으면 재반영.
+   반영 → pending 삭제. pending에는 커밋 revision을 함께 기록한다.
+   세션을 열 때 pending이 남아 있으면 숫자 revision 순으로 재반영하되,
+   `pending.revision <= 파일 session.revision`인 낡은 pending은 적용 없이
+   정리만 한다. 재반영은 첫 실패·손상에서 중단하고 손상도 실패로 처리
+   (새 커밋 거부). 손상 파일은 `.corrupt-<rev>-<ts>.json`으로 이동 (삭제 금지).
    테스트: 두 번째 노드 저장 실패 주입 → 재로드 시 전부 반영 또는 전부 미반영.
 4. `pf_next`: READ_ONLY_TOOLS에서 제거, WRITE_ANN, 잠금 적용. 읽기 전용 모드에서 비노출.
 5. `confirmLeaf`: 결과물 수정과 leaf 확정을 core 변경 1회로 통합 (pfResolve leaf 입력에
@@ -288,7 +292,8 @@ server.registerTool("pf_report", spec, async (a) => {
 | M4.2 | 2단계 신규 CoreClient 메서드 | [x] | `55a93d1` | https://github.com/ckdfuf2001/ProcForge/actions/runs/37983222893 | edit×2·catalog·events·MCP 2종 |
 | M4.2 | 2.5단계 App 직접 접근 제거 | [x] | `7c72b2f` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38010705021 | 8항목 + 분리 실증 |
 | M4.2 | 2.5.1 보정 1~5 | [x] | `caf8b18` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38023996163 | 읽기 메모리뷰·pending 정렬/손상/거부·enteredProbing·revision 전달·잠금대기 |
-| M4.2 | 3단계 M4.1.1 버그 1~7 | [ ] | | | |
+| M4.2 | 3-0 (2.5.1 잔여) | [ ] | | | 낡은 pending 정리만·recover 중단/실패·commitChange session 필수·읽기 zod |
+| M4.2 | 3단계 M4.1.1 버그 1~7 | [ ] | | | 6번은 2.5-4에서 해소됨 |
 | M4.2 | 4단계 강제 장치 1~6 | [ ] | | | |
 | M3.5 | PPT 실사용 테스트 | [ ] | | | 사람 진행 |
 | M5 | 검증/실행 분리 | [ ] | | | |
@@ -308,3 +313,4 @@ server.registerTool("pf_report", spec, async (a) => {
 | 2026-10-09 | 0, 1, 6, 8 | 0.1 진행표 기록 규칙 보완(docs: 허용), R6 revision core 책임 명시, R7 events.jsonl 분리·seq=revision, 0.5단계 신설 | 1단계에서 옮기는 메서드마다 revision·이벤트를 자동 획득하도록 순서 조정 (전체 작업량 감소) |
 | 2026-10-09 | 1, 6, 8 | R1 App 직접 접근 금지 명시 + 2.5단계 신설 (core getSession/getNode·withLock·pending 원자 커밋·응답 revision·DTO) | 3단계 전에 core·파일 저장소 분리 가능성을 실증하면 이후 작업이 설정 변경 수준으로 축소 |
 | 2026-10-10 | 8 | 2.5.1 보정 1~5 진행 (읽기 메모리뷰·pending 정렬/손상/복구/거부·enteredProbing 스냅샷·report 판정 메모리/호출경계·revision 전달·withLock 25ms×20회 대기; App isLocked 제거·getEvent 메모리뷰·주석 //→///) | 0.5~2.5 구현 중 발견된 예외 5종이 3단계 진입 전 해소 필요 (멈춤 없는 read·복구 순서·스냅샷 경합·revision 전달·잠금 대기) |
+| 2026-10-10 | 6, 8 | 3-0 (2.5.1 잔여) 신설: 낡은 pending 정리만·recover 첫 실패 중단/손상 실패·commitChange session 필수·읽기 경로 zod | pending 재반영이 낡은 변경을 되살리거나 손상을 넘기면 3단계 스냅샷·확정 로직의 전제가 무너짐 — 3단계 진입 전 해소 |
