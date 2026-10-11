@@ -2,12 +2,18 @@ name: ci
 on:
   push:
   pull_request:
+# M5.6: 같은 브랜치 연속 푸시는 이전 run 취소 (fail-fast와 함께 최신만 검증).
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   build-test:
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest]
         client: [inprocess, loopback]
+      # 경로별 잡 분리 없음 (전체 스위트 단일 매트릭스).
+      fail-fast: true
     runs-on: ${{ matrix.os }}
     defaults:
       run:
@@ -18,7 +24,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: pnpm
+      - name: pnpm store path
+        id: pnpm-store
+        run: echo "path=$(pnpm store path)" >> $GITHUB_OUTPUT
+      - name: pnpm store cache (M5.6)
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-store-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: pnpm-store-${{ runner.os }}-
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"

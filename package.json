@@ -9,7 +9,8 @@
     "test": "pnpm -r test",
     "lint": "pnpm -r lint",
     "check:deps": "node scripts/check-deps.mjs",
-    "check:env": "node scripts/check-env.mjs"
+    "check:env": "node scripts/check-env.mjs",
+    "fast": "pnpm --filter @procforge/shared --filter @procforge/core exec vitest run && pnpm --filter @procforge/local exec vitest run src/artifacts.test.ts src/catalog.test.ts src/checker.test.ts src/paths.test.ts src/trace.test.ts src/runner/workdir.test.ts src/runner/resolve.test.ts src/app/cli-args.test.ts test/app-tools.test.ts test/arg-schema.test.ts test/m351-contrast.test.ts test/m351-pin.test.ts test/m530-confirm-required.test.ts test/m531-monthly-grep.test.ts test/m544-hashable.test.ts test/instruction-host.test.ts test/mcp-contract.test.ts test/parity.test.ts"
   },
   "devDependencies": {
     "typescript": "^5.6.2",
