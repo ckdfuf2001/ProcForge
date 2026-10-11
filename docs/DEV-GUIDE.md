@@ -346,6 +346,26 @@ C4 CI E2E에도 C2·C3를 fake 서버로 추가. M5-dogfood.md 3절을 실제 �
 4. golden.output은 녹화 원문 그대로(템플릿 치환 금지). replay 전용임을 DECISIONS에 기록.
 5. 푸시 전 `pnpm -r build` 필수 + 로컬 @types/node가 lockfile 버전과 같은지 확인 (0.2 보강).
 
+### M5.5 (반복·상태, 크롤링용)
+0. 정리: (a) 보고하는 CI run URL은 API로 head_sha 일치 확인 후 기재.
+   (b) render 계열 노드 검증: 산출 pptx 표 셀을 직접 읽어 합산하는 checker(kind "pptx_table_sum" 또는 script constraint),
+   monthly c-sum을 이것으로 교체. 테스트: 스크립트가 total만 맞게 내고 표를 틀리게 그리면 fail.
+1. map 노드: Node.kind "map", spec {over: "$1.1.items", as: "item", maxItems}.
+   자식 템플릿을 항목별로 실행, 출력은 배열. ${item.x} 참조 허용. 항목별 실패는 집계(failedItems) 후 정책(all|any|threshold)으로 판정.
+   분해 중에는 첫 1~2개 항목으로만 probing, 확정 후 run에서 전체 실행. constraint kind "count"로 집계 검사.
+2. 반복(until) 노드: 페이지네이션용. spec {until: <constraint>, maxIterations, carry: "$self.nextCursor"}.
+   maxIterations 도달 시 fail (조용한 절단 금지).
+3. 실행 간 상태: procedures/<name>/state.json. 노드 출력의 일부를 run 성공 종료 시에만 원자 저장
+   (spec: stateWrites [{key, from:"$1.3.lastId"}]). 참조 ${state.key}, 첫 실행은 state 부재 → params.stateDefaults 또는 bad_request.
+   실패 run은 state 불변. 테스트: 2회 연속 run에서 두 번째가 첫 번째 이후 데이터만 처리.
+4. 무인 실행: `procforge run --unattended`. external 노드는 procedures/<name>/approvals.json에 사전 승인된
+   (tool, 인자 패턴) 일치 시에만 실행, 아니면 run 실패(exit 3). exit code 표 문서화(0 성공/1 검사 실패/2 입력 오류/3 승인 필요).
+   docs/scheduling.md에 Windows 작업 스케줄러·cron 예시. 스케줄러 내장 금지.
+5. dogfood 시나리오 (CI E2E, fake 서버): "목록 페이지 → 상세 N개 → 신규만 CSV 누적".
+   fake 서버가 날짜별 다른 목록 반환, 2회 run에서 중복 0·신규만 추가, 3페이지 페이지네이션, 상세 1건 실패 시 threshold 정책 동작.
+   실제 웹 크롤링 도구 연동은 범위 밖(DECISIONS 기록).
+6. 분해 instruction에 "항목 반복은 map, 페이지는 until, 지난 실행 기억은 state" 문구 추가, 계약 테스트 유지.
+
 ### M5 검증과 실행 분리
 - `procforge test <proc>`: replay 전용, drift 검출만.
 - `procforge run <procedure> --param k=v ... [--out <dir>]`: live 실행 전용.
@@ -365,13 +385,10 @@ C4 CI E2E에도 C2·C3를 fake 서버로 추가. M5-dogfood.md 3절을 실제 �
 - 완료 기준: fake MCP E2E에서 9월 절차서를 `--param month=2026-10`으로 실행해 10월 산출물 생성 + constraints 통과.
 
 ### M5.5 반복 노드
-- `kind: "map"`, `over: "$1.2.output.items"`, 본문 서브트리 템플릿, `maxItems`, 기본 동시 실행 1.
-- 집계 검사 `count_min`, `pass_ratio`.
-- 페이지네이션용 `loop`: `until` 조건, `maxIter`.
-- validator, runner, core 상태, hash, stale을 반복 노드에 맞게 확장.
+- 위 "M5.5 (반복·상태, 크롤링용)" 1~2로 대체됨 (map·until 상세).
 
 ### M5.6 실행 간 상태와 sideEffect
-- 절차서별 `state/` 폴더, `${state.lastRun}`, `${state.seen}` 참조. 전체 성공 시에만 원자 기록.
+- 위 "M5.5 (반복·상태, 크롤링용)" 3으로 대체됨 (state.json 상세).
 - external 노드는 run 모드에서 `--allow-external` 없으면 dry-run. 멱등성 키.
 
 ### 크롤링 테스트 (사람 진행)
@@ -429,6 +446,7 @@ C4 CI E2E에도 C2·C3를 fake 서버로 추가. M5-dogfood.md 3절을 실제 �
 | M5.3-0 | 확정 게이트 선행 | [x] | `18e0b44` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38082174797 | confirm required 강제·회귀·에러 계약·증거 경고·관찰 기록 |
 | M5.3 | 절차서 신뢰성 마무리 | [x] | `a107ade` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38107570434 | 감사 확장·S2 템플릿·실행 제한·실물 커밋·게이트 범위·에러 계약·검증 규율 |
 | M5.3.1 | 확정 산출물 정합성 | [x] | `7beb2a4` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38113634838 | file_exists 논리 경로·auto 감사·기간 params·원문 golden·0.2 보강 |
+| M5.5 | 반복·상태, 크롤링용 | [ ] | | | 0 정리·1 map·2 until·3 state·4 무인 실행·5 dogfood·6 문구 |
 | M5.5 | 반복 노드 | [ ] | | | |
 | M5.6 | 상태 / sideEffect | [ ] | | | |
 | - | 크롤링 테스트 | [ ] | | | 사람 진행 |
@@ -458,3 +476,4 @@ C4 CI E2E에도 C2·C3를 fake 서버로 추가. M5-dogfood.md 3절을 실제 �
 | 2026-10-11 | 6, 8 | M5.3-0 신설: BC 실사용 세션 finalize 실패(가짜 leaf + -32602 마스킹) → 확정 게이트 0-1~0-5 | M5.3 진입 전 확정 단계 결함 해소 |
 | 2026-10-11 | 6, 8 | M5.3 신설 (절차서 신뢰성 마무리 1~7): 감사 확장·S2 템플릿·실행 제한·실물 커밋·게이트 범위·에러 계약·검증 규율 | M5.3-0 완료 후속 |
 | 2026-10-11 | 6, 8 | M5.3.1 신설 (확정 산출물 정합성 1~5): file_exists 논리 경로·auto 감사·기간 params·원문 golden·0.2 보강 | M5.3 완료 후속 |
+| 2026-10-11 | 6, 8 | M5.5 신설 (반복·상태, 크롤링용 0~6): CI URL 검증·pptx_table_sum·map·until·state·무인 실행·dogfood·문구 | M5.3.1 완료 후속 |
