@@ -359,15 +359,18 @@
   R2 미러 면제는 attempts resultJson이 있을 때만 동작 (단위 계약).
   auto constraint 강제는 경로가 있어야 가능하므로 미적용 (경고로 대체).
 - M5.2-5: 수락 테스트. CI E2E m52-monthly.test.ts (절차서 monthly):
+  1.1 script 집계 + period==${params.month}, 1.2 script 렌더 +
+  total==$1.1.total. a 9월 분해 strict 0, b 10월 실행·독립 계산 일치,
+  c 11월 부재 bad_request, d 데이터 교체 period fail+blocked.
+  CI에 setup-python + openpyxl (+ M5.3-2부터 python-pptx).
 - M5.3-1: 파일 내용 감사. script-kind 스크립트 + 고정(in/inout) 템플릿 파일
   (var/템플릿 경로 제외, pptx는 무의존 zip 텍스트 추출)에서 날짜·params값·
   녹화 수치(4자리+) 검사, 면제 없음. strict 시 bad_request.
   상한: 스크립트 200KB, 템플릿 8MB (초과·판독 불가 조용히 제외).
-- M5.2-5: 수락 테스트. CI E2E m52-monthly.test.ts (절차서 monthly):
-  1.1 script 집계 + period==${params.month}, 1.2 script 렌더 +
-  total==$1.1.total. a 9월 분해 strict 0, b 10월 실행·독립 계산 일치,
-  c 11월 부재 bad_request, d 데이터 교체 period fail+blocked.
-  CI에 setup-python + openpyxl.
+- M5.3-2: S2 제목 템플릿 (`${params.month} 실적 요약`). 템플릿은 빈 껍데기
+  (shell.pptx)로 유지 — 작업 사본 렌더가 아니라 template→output 복사로 생성.
+  python-pptx 1.0.2 테이블은 행 고정이라 표 전체 교체 (기하 유지).
+  CI+실측 모두 10월 산출 전체 텍스트 9월 잔재 0건 단언.
 - M5-1: `procforge run <procedure> --param k=v [--out dir] [--force]` 신설
   (App.runProcedure 경유). 출력은 runs/<runId>/fs, --out 지정 시에만 완료 후
   프로젝트 안으로 복사 (기존 파일은 --force 없이 거부).

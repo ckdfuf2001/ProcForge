@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, copyFileSync, existsSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, copyFileSync, existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
@@ -9,10 +9,10 @@ import { ingestArtifacts } from "../src/artifacts.js";
 import { runProcedureTest } from "../src/runner/procedure-run.js";
 import { testStack } from "./client-mode.js";
 
-// M5.2-5 수락 테스트 CI E2E (a~d). 절차서 "monthly" (기간 없음).
+// M5.3-2 수락 테스트 CI E2E (a~d). 절차서 "monthly" (기간 없음).
 // - 1.1 script agg.py: sales-${params.month}.xlsx 집계 → {rows, total, period}.
-// - 1.2 script render.mjs: template + $1.1.rows → output/report.txt.
-// 값 흐름: 표 값은 전부 ref, 고정 숫자 없음. period == ${params.month}.
+// - 1.2 script render_pptx.py: 빈 껍데기 shell.pptx + $1.1.rows → output/rendered.pptx.
+//   표지·S2 제목은 var 템플릿. 10월 산출 전체 텍스트에 "9월"·"2026-09" 0건.
 
 let root: string;
 let pfdir: string;
@@ -22,6 +22,7 @@ let oldProfile: string | undefined;
 
 const SEPT_XLSX = resolve(__dirname, "../../../examples/dogfood/sales-2026-09.xlsx");
 const OCT_XLSX = resolve(__dirname, "../../../examples/dogfood/sales-2026-10.xlsx");
+const PY_ENV = { ...process.env, PYTHONUTF8: "1", PYTHONIOENCODING: "utf-8" };
 
 const AGG_PY = `import json,sys
 import openpyxl
@@ -40,17 +41,51 @@ rows=[{"item":k,"qty":v["qty"],"ex":round(v["incl"]/1.1)} for k,v in sorted(agg.
 total=sum(r["ex"] for r in rows)
 print(json.dumps({"summary":"agg %s total %d"%(period,total),"json":{"rows":rows,"total":total,"period":period}}))`;
 
-const RENDER_MJS = `import fs from "node:fs";
-import path from "node:path";
-let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{
-const a=JSON.parse(s);
-const tpl=fs.readFileSync(a.template,"utf8");
-const body=a.rows.map(r=>r.item+" "+r.qty+" "+r.ex).join("\\n");
-const text=tpl.replace("{month}",a.month).replace("{body}",body);
-fs.mkdirSync(path.dirname(a.output),{recursive:true});
-fs.writeFileSync(a.output,text);
-const total=a.rows.reduce((x,r)=>x+r.ex,0);
-console.log(JSON.stringify({summary:"render "+a.month,json:{total:total,lines:a.rows.length,month:a.month}}));});`;
+const RENDER_PY = `import json,sys,shutil
+from pptx import Presentation
+from pptx.util import Inches
+a=json.load(sys.stdin)
+shutil.copyfile(a["template"],a["output"])
+prs=Presentation(a["output"])
+prs.slides[0].shapes.title.text=a["cover"]
+s=prs.slides[a["slide"]]
+s.shapes.title.text=a["tableTitle"]
+old=next(sh for sh in s.shapes if sh.has_table)
+left,top,width,height=old.left,old.top,old.width,old.height
+old._element.getparent().remove(old._element)
+rows=[["\\uc81c\\ud488","\\uc218\\ub7c9","\\ub9e4\\ucd9c(\\uc138\\uc804)"]]+[[r["item"],str(r["qty"]),"{:,}".format(r["ex"])] for r in a["rows"]]
+newtbl=s.shapes.add_table(len(rows),len(rows[0]),left,top,width,height).table
+for i,r in enumerate(rows):
+    for j,v in enumerate(r): newtbl.cell(i,j).text=v
+prs.save(a["output"])
+total=sum(r["ex"] for r in a["rows"])
+print(json.dumps({"summary":"render %s total %d"%(a["cover"],total),"json":{"total":total,"title":a["cover"]}}))`;
+
+const BLANK_PY = `from pptx import Presentation
+from pptx.util import Inches
+prs=Presentation()
+prs.slide_width=Inches(13.33)
+prs.slide_height=Inches(7.5)
+prs.slides.add_slide(prs.slide_layouts[5])
+s2=prs.slides.add_slide(prs.slide_layouts[5])
+tbl=s2.shapes.add_table(1,3,Inches(1),Inches(1.5),Inches(8),Inches(1)).table
+tbl.cell(0,0).text=""
+tbl.cell(0,1).text=""
+tbl.cell(0,2).text=""
+prs.slides.add_slide(prs.slide_layouts[5])
+prs.save("shell.pptx")`;
+
+const DUMP_PY = `from pptx import Presentation
+import json,sys
+prs=Presentation(sys.argv[1])
+texts=[]
+for s in prs.slides:
+    for sh in s.shapes:
+        if sh.has_text_frame: texts.append(sh.text_frame.text)
+        if sh.has_table:
+            for r in sh.table.rows:
+                for c in r.cells: texts.append(c.text)
+print(json.dumps({"texts":texts}))`;
 
 const HOST_CAT = [{ server: "host", name: "script", inputSchema: {}, schemaHash: "script" }] as never;
 
@@ -58,32 +93,50 @@ type Agg = { rows: { item: string; qty: number; ex: number }[]; total: number; p
 
 function aggOf(xlsx: string): Agg {
   const script = join(root, "scripts", "agg.py");
-  const raw = execFileSync("python", [script], { input: JSON.stringify({ xlsx }), encoding: "utf-8" });
+  const raw = execFileSync("python", [script], { input: JSON.stringify({ xlsx }), encoding: "utf-8", env: PY_ENV });
   return (JSON.parse(raw) as { json: Agg }).json;
 }
 
-function renderHost(rows: Agg["rows"], month: string): void {
+function renderPptx(month: string, rows: Agg["rows"]): void {
   mkdirSync(join(root, "output"), { recursive: true });
-  const input = {
-    template: join(root, "template.j2"), rows, month, output: join(root, "output", "report.txt"),
-  };
-  execFileSync(process.execPath, [join(root, "scripts", "render.mjs")], { input: JSON.stringify(input) });
+  execFileSync("python", [join(root, "scripts", "render_pptx.py")], {
+    input: JSON.stringify({
+      template: join(root, "shell.pptx"), output: join(root, "output", "rendered.pptx"),
+      cover: `월간보고서 ${month} (최종)`, tableTitle: `${month} 실적 요약`, rows, slide: 1,
+    }),
+    encoding: "utf-8", env: PY_ENV,
+  });
+}
+
+function fullText(abs: string): string[] {
+  const raw = execFileSync("python", ["-c", DUMP_PY, abs], { encoding: "utf-8", env: PY_ENV });
+  return (JSON.parse(raw) as { texts: string[] }).texts;
+}
+
+function requirePyLibs(): void {
+  for (const lib of ["openpyxl", "pptx"]) {
+    try {
+      execFileSync("python", ["-c", `import ${lib}`], { timeout: 15000, env: PY_ENV });
+    } catch {
+      throw new Error(`${lib} 필요: pip install ${lib}`);
+    }
+  }
 }
 
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), "pf-m52-"));
+  root = mkdtempSync(join(tmpdir(), "pf-m53-"));
   pfdir = join(root, ".procforge");
-  home = mkdtempSync(join(tmpdir(), "pf-m52home-"));
+  home = mkdtempSync(join(tmpdir(), "pf-m53home-"));
   oldHome = process.env.HOME;
   oldProfile = process.env.USERPROFILE;
   process.env.HOME = home;
   process.env.USERPROFILE = home;
-  // a: 9월 xlsx만
+  // a: 9월 xlsx만 + 빈 껍데기 템플릿
   copyFileSync(SEPT_XLSX, join(root, "sales-2026-09.xlsx"));
-  writeFileSync(join(root, "template.j2"), "월간보고서 {month}\n{body}\n");
   mkdirSync(join(root, "scripts"), { recursive: true });
   writeFileSync(join(root, "scripts", "agg.py"), AGG_PY);
-  writeFileSync(join(root, "scripts", "render.mjs"), RENDER_MJS);
+  writeFileSync(join(root, "scripts", "render_pptx.py"), RENDER_PY);
+  execFileSync("python", ["-c", BLANK_PY], { cwd: root, env: PY_ENV });
 });
 
 afterEach(() => {
@@ -94,25 +147,19 @@ afterEach(() => {
 });
 
 async function buildMonthly(): Promise<void> {
-  const { client, app } = (() => {
-    const { client } = testStack(pfdir);
-    return { client, app: new ProcForgeApp({ core: client, procforgeDir: pfdir, projectRoot: root }) };
-  })();
-  try {
-    execFileSync("python", ["-c", "import openpyxl"], { timeout: 15000 });
-  } catch {
-    throw new Error("openpyxl 필요: pip install openpyxl");
-  }
+  const { client } = testStack(pfdir);
+  const app = new ProcForgeApp({ core: client, procforgeDir: pfdir, projectRoot: root });
+  requirePyLibs();
   const started = await client.pfStart({ request: "월간보고서", params: { month: "2026-09" }, toolCatalog: HOST_CAT });
   const sid = started.session.id;
   await client.pfResolve({
     sessionId: sid, nodeId: "1", decision: "split",
     children: [
       { goal: "월별 xlsx를 집계한다" },
-      { goal: "보고서 텍스트를 생성한다", dependsOn: ["1.1"], sideEffect: "local_write" },
+      { goal: "보고서 pptx를 생성한다", dependsOn: ["1.1"], sideEffect: "local_write" },
     ],
   });
-  // ---- 1.1: 9월 실측 앵커 (A 120/1200000, B 80/800000, 합계 2000000) ----
+  // ---- 1.1: 9월 실측 앵커 ----
   const agg = aggOf(join(root, "sales-2026-09.xlsx"));
   expect(agg.period).toBe("2026-09");
   expect(agg.total).toBe(2000000);
@@ -154,11 +201,13 @@ async function buildMonthly(): Promise<void> {
     } as never,
   });
   // ---- 1.2 ----
-  renderHost(agg.rows, "2026-09");
-  const reportTxt = readFileSync(join(root, "output", "report.txt"), "utf-8");
-  expect(reportTxt).toContain("2026-09");
-  const args12 = { template: "template.j2", rows: agg.rows, month: "2026-09", output: "output/report.txt" };
-  const json12 = { total: agg.total, lines: agg.rows.length, month: "2026-09" };
+  renderPptx("2026-09", agg.rows);
+  const args12 = {
+    template: "shell.pptx", output: "output/rendered.pptx",
+    cover: "월간보고서 2026-09 (최종)", tableTitle: "2026-09 실적 요약",
+    rows: agg.rows, slide: 1,
+  };
+  const json12 = { total: agg.total, title: "월간보고서 2026-09 (최종)" };
   const r12 = await client.pfReport({
     sessionId: sid, nodeId: "1.2", tool: { server: "host", name: "script" },
     args: args12, resultSummary: `render 2026-09 total ${agg.total}`, resultJson: json12,
@@ -171,7 +220,7 @@ async function buildMonthly(): Promise<void> {
     addConstraints: [{ id: "c-sum", kind: "numeric_match", spec: { path: "total", expected: "$1.1.total" }, source: "human" }],
   });
   const attempt2 = randomUUID();
-  const ing2 = ingestArtifacts({ procforgeDir: pfdir, sessionId: sid, nodeId: "1.2", attemptId: attempt2, baseDir: root, paths: ["template.j2", "output/report.txt"] });
+  const ing2 = ingestArtifacts({ procforgeDir: pfdir, sessionId: sid, nodeId: "1.2", attemptId: attempt2, baseDir: root, paths: ["shell.pptx", "output/rendered.pptx"] });
   const r12b = await client.pfReport({
     sessionId: sid, nodeId: "1.2", tool: { server: "host", name: "script" },
     args: args12, resultSummary: `render 2026-09 total ${agg.total}`, resultJson: json12,
@@ -183,20 +232,22 @@ async function buildMonthly(): Promise<void> {
     sessionId: sid, nodeId: "1.2", decision: "leaf",
     tool: { server: "host", name: "script" },
     argSpecs: {
-      template: { kind: "fixed", value: "template.j2", path: "in" },
+      template: { kind: "fixed", value: "shell.pptx", path: "in" },
+      output: { kind: "fixed", value: "output/rendered.pptx", path: "out" },
+      cover: { kind: "var", ref: "월간보고서 ${params.month} (최종)" },
+      tableTitle: { kind: "var", ref: "${params.month} 실적 요약" },
       rows: { kind: "var", ref: "$1.1.rows" },
-      month: { kind: "var", ref: "${params.month}" },
-      output: { kind: "fixed", value: "output/report.txt", path: "out" },
-      render: { kind: "script", file: "scripts/render.mjs", runtime: "node" },
+      slide: { kind: "fixed", value: 1 },
+      render: { kind: "script", file: "scripts/render_pptx.py" },
     } as never,
-    goldenIgnore: ["output"],
+    goldenIgnore: ["title"],
   });
   const fin = await app.finalize({ sessionId: sid, name: "monthly", strict: true });
   expect(fin.warnings).toEqual([]);
 }
 
-describe("M5.2-5 수락 테스트", () => {
-  it("a: 9월만 분해·strict finalize 감사 0 + b: 10월 실행·독립 계산 일치", async () => {
+describe("M5.3-2 수락 테스트", () => {
+  it("a: 9월만 분해·strict 0 + b: 10월 실행·9월 잔재 0건", async () => {
     await buildMonthly();
     copyFileSync(OCT_XLSX, join(root, "sales-2026-10.xlsx"));
     const want = aggOf(join(root, "sales-2026-10.xlsx"));
@@ -206,11 +257,16 @@ describe("M5.2-5 수락 테스트", () => {
     });
     expect(report.summary.fail).toBe(0);
     expect(report.summary.pass).toBe(2);
-    const out = readFileSync(join(pfdir, "runs", report.runId, "fs", "output", "report.txt"), "utf8");
-    expect(out).toContain("2026-10");
-    expect(out).not.toContain("2026-09");
+    const texts = fullText(join(pfdir, "runs", report.runId, "fs", "output", "rendered.pptx"));
+    const all = texts.join("\n");
+    expect(all).not.toContain("9월");
+    expect(all).not.toContain("2026-09");
+    expect(all).toContain("월간보고서 2026-10 (최종)");
+    expect(all).toContain("2026-10 실적 요약");
     for (const r of want.rows) {
-      expect(out).toContain(`${r.item} ${r.qty} ${r.ex}`);
+      expect(all).toContain(`${r.item}`);
+      expect(all).toContain(`${r.qty}`);
+      expect(all).toContain(r.ex.toLocaleString("en-US"));
     }
   }, 180000);
 
