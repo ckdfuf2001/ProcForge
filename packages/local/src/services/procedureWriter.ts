@@ -1,4 +1,4 @@
-import { mkdirSync, copyFileSync, existsSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, copyFileSync, existsSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { compareNodeIds } from "@procforge/shared/ids.js";
@@ -42,6 +42,59 @@ export type WriteProcedureResult = {
   files: string[];
   commandFile: string;
 };
+
+/**
+ * M5.3.1-1: auto file_exists 경로를 논리 경로로 변환.
+ * fixtures/<id>/<attempt>/ 형태 → manifest 역조회(source rel). source가
+ * 바인딩 인자(var 템플릿)의 확정값과 같으면 템플릿 문자열로, 아니면 source rel.
+ * 변환 후에도 fixtures/ 형태가 남으면 finalize 실패(bad_request).
+ */
+export function rewriteAutoFileExists(doc: ProcedureDoc, manifestFile: string): ProcedureDoc {
+  let manifest: Record<string, string> = {};
+  try {
+    if (existsSync(manifestFile)) manifest = JSON.parse(readFileSync(manifestFile, "utf8")) as Record<string, string>;
+  } catch {
+    manifest = {};
+  }
+  for (const n of doc.nodes as (ProcedureDoc["nodes"][number] & {
+    args?: Record<string, ArgSpec>;
+    goldenArgs?: Record<string, unknown>;
+  })[]) {
+    for (const c of (n.constraints ?? []) as (Constraint & { source?: string })[]) {
+      if (c.kind !== "file_exists" || (c as { source?: string }).source !== "auto") continue;
+      const spec = (c as unknown as { spec?: { path?: unknown } }).spec;
+      const p = typeof spec?.path === "string" ? spec.path : null;
+      if (!p || !p.startsWith("fixtures/")) continue;
+      const src = manifest[p];
+      if (!src) continue; // 매핑 없음 → 게이트에서 거부
+      const goldenArgs = n.goldenArgs ?? {};
+      const boundKey = Object.keys(goldenArgs).find((k) => {
+        if ((goldenArgs as Record<string, unknown>)[k] !== src) return false;
+        const s = (n.args ?? {})[k] as ArgSpec | undefined;
+        return !!s && s.kind === "var" && typeof (s as { ref?: unknown }).ref === "string" &&
+          ((s as { ref: string }).ref.includes("${params."));
+      });
+      (spec as { path: string }).path = boundKey
+        ? ((n.args as Record<string, ArgSpec>)[boundKey] as unknown as { ref: string }).ref
+        : src;
+    }
+  }
+  const leftover: string[] = [];
+  for (const n of doc.nodes) {
+    for (const c of (n.constraints ?? []) as (Constraint & { source?: string })[]) {
+      if (c.kind !== "file_exists" || (c as { source?: string }).source !== "auto") continue;
+      const p = (c as unknown as { spec?: { path?: unknown } }).spec?.path;
+      if (typeof p === "string" && p.startsWith("fixtures/")) leftover.push(`${n.id}:${p}`);
+    }
+  }
+  if (leftover.length > 0) {
+    throw Object.assign(
+      new Error(`procedure.json에 시스템 fixture 경로 잔류: ${leftover.join(", ")}`),
+      { code: "bad_request" },
+    );
+  }
+  return doc;
+}
 
 /**
  * M5.2-2: script-kind 인자의 호스트 스크립트 수집.
@@ -119,7 +172,17 @@ export function writeProcedure(input: {
     writeFileSync(p, data);
     files.push(rel.replace(/\\/g, "/"));
   };
-  put("procedure.json", JSON.stringify(collectScripts(doc, projectRoot, buildDir, files), null, 2));
+  put(
+    "procedure.json",
+    JSON.stringify(
+      rewriteAutoFileExists(
+        collectScripts(doc, projectRoot, buildDir, files),
+        join(procforgeDir, "sessions", input.sessionId, "fixtures-manifest.json"),
+      ),
+      null,
+      2,
+    ),
+  );
   put("PROCEDURE.md", renderProcedureMd(doc, input.auditFindings ?? []));
   put("SKILL.md", renderSkillMd(doc));
   const commandMd = renderCommandMd(doc);

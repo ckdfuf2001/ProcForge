@@ -364,6 +364,11 @@
   c 11월 부재 bad_request, d 데이터 교체 period fail+blocked.
   CI에 setup-python + openpyxl (+ M5.3-2부터 python-pptx).
 - M5.3-1: 파일 내용 감사. script-kind 스크립트 + 고정(in/inout) 템플릿 파일
+- M5.3.1-1: file_exists 논리 경로. export 시 auto file_exists의
+  fixtures/ 경로를 manifest 역조회로 논리 경로로 변환 (바인딩 인자는 템플릿
+  문자열, 고정은 source rel). 잔류 시 finalize bad_request.
+  runner file_exists는 run fs를 먼저 본다 (실행 입력·산출 검사).
+  출력 미생성 시 해당 제약 fail (10월 출력 부재와 동등).
 - M5.3-5: policy grep 범위 확정. src/** 중 *.test.ts 제외.
   사유: 테스트는 checker·제약 종류 문자열을 테스트 데이터로 정식 포함
   (checker.test.ts 등)하므로 스캔 대상에서 제외.

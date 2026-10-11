@@ -9,10 +9,10 @@ import { FileStore } from "../filestore.js";
 import { evaluateAll } from "../checker.js";
 import { logger } from "../logger.js";
 import { writeAtomicFile } from "../fsutil.js";
-import { normalizeArgSpecs, fixtureFileExists, readManifest } from "../artifacts.js";
+import { normalizeArgSpecs, fixtureFileExists, isEscapeRel, readManifest } from "../artifacts.js";
 import { ConnectionPool } from "./connections.js";
 import { findRecording, loadCassette, recordKey, saveRecording, toToolResponse, compareToolResponses } from "./recordings.js";
-import { resolveArgs } from "./resolve.js";
+import { resolveArgs, substituteParams } from "./resolve.js";
 import { runScript } from "./script-run.js";
 import { inferPathRole, rewritePaths, type InferredRole, type PathRole } from "./paths.js";
 import { setupRunFs } from "./workdir.js";
@@ -472,6 +472,16 @@ async function execNode(
   const manifest = readManifest(opts.procforgeDir, opts.sessionId);
   const sessDir = join(opts.procforgeDir, "sessions", opts.sessionId);
   const fileExists = (p: string) => {
+    // M5.3.1-1: 논리 경로는 run fs를 먼저 본다 (실행 입력·산출 검사).
+    // ${params.}는 실행 params로 치환. 탈출·절대경로는 실패로 닫는다.
+    const rel = substituteParams(p, params).split("\\").join("/");
+    if (!isEscapeRel(rel, "/") && !rel.startsWith("/") && !/^[a-zA-Z]:/.test(rel)) {
+      try {
+        if (existsSync(join(fsDir, rel))) return true;
+      } catch {
+        // 무시하고 세션 저장소로 폴백
+      }
+    }
     if (fixtureFileExists(join(sessDir, p))) return true;
     for (const [fx, src] of Object.entries(manifest)) {
       if (src === p && fixtureFileExists(join(sessDir, fx))) return true;

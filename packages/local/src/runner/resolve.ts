@@ -77,8 +77,7 @@ function getByDot(root: unknown, path: string): unknown {
   return cur;
 }
 
-export function resolveVar(
-  ref: string,
+export function resolveVar(  ref: string,
   params: Record<string, string>,
   outputs: Map<string, unknown>,
   topo?: OutputTopo,
@@ -117,4 +116,15 @@ export function resolveVar(
   if (rest.startsWith(".output.")) return getByDot(base, rest.slice(".output.".length));
   if (/^\.[A-Za-z][A-Za-z0-9_.-]*$/.test(rest)) return getByDot(base, rest.slice(1));
   throw new Error(`지원하지 않는 참조: ${ref}`);
+}
+
+/**
+ * M5.3.1-1: ${params.k} 치환 (알려진 키만, 나머지는 원문 유지, throw 없음).
+ * file_exists 등 경로 스펙의 실행 시점 해석용.
+ */
+export function substituteParams(text: string, params: Record<string, string>): string {
+  if (!text.includes("${params.")) return text;
+  return text.replace(/\$\{params\.([A-Za-z0-9_.-]+)\}/g, (m, k: string) =>
+    Object.prototype.hasOwnProperty.call(params, k) ? (params[k] as string) : m,
+  );
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, mkdirSync, writeFileSync, copyFileSync, existsSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, copyFileSync, existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
@@ -244,6 +244,18 @@ async function buildMonthly(): Promise<void> {
   });
   const fin = await app.finalize({ sessionId: sid, name: "monthly", strict: true });
   expect(fin.warnings).toEqual([]);
+  // M5.3.1-1: auto file_exists는 논리 경로 (fixtures/ 잔류 없음)
+  const doc = JSON.parse(readFileSync(join(pfdir, "procedures", "monthly", "procedure.json"), "utf-8")) as {
+    nodes: { id: string; constraints: { kind: string; source: string; spec: { path: string } }[] }[];
+  };
+  const autoPaths = doc.nodes.flatMap((n) =>
+    n.constraints.filter((c) => c.kind === "file_exists" && c.source === "auto").map((c) => `${n.id}:${c.spec.path}`),
+  );
+  expect(autoPaths.length).toBeGreaterThan(0);
+  expect(autoPaths.every((p) => !p.includes("fixtures/"))).toBe(true);
+  expect(autoPaths).toContain("1.1:sales-${params.month}.xlsx");
+  expect(autoPaths).toContain("1.2:shell.pptx");
+  expect(autoPaths).toContain("1.2:output/rendered.pptx");
 }
 
 describe("M5.3-2 수락 테스트", () => {
@@ -278,8 +290,41 @@ describe("M5.3-2 수락 테스트", () => {
     })).rejects.toThrow(/입력 바인딩 실패/);
   }, 120000);
 
-  it("d: 10월 파일에 9월 데이터 → period fail + 하류 blocked", async () => {
+  it("M5.3.1-1 출력 미생성 시 file_exists fail (10월 출력 부재와 동등)", async () => {
     await buildMonthly();
+    copyFileSync(OCT_XLSX, join(root, "sales-2026-10.xlsx"));
+    const procDir = join(pfdir, "procedures", "monthly");
+    const proc = JSON.parse(readFileSync(join(procDir, "procedure.json"), "utf-8")) as {
+      nodes: { id: string; golden?: { fixtures?: string[] } }[];
+    };
+    const fxRel = proc.nodes.find((n) => n.id === "1.2")?.golden?.fixtures?.find((f) => f.endsWith("rendered.pptx")) as string;
+    expect(fxRel).toBeTruthy();
+    const fx = join(procDir, "tests", fxRel);
+    const scriptP = join(procDir, "scripts", "1_2.py");
+    const fxBackup = readFileSync(fx);
+    const scriptBackup = readFileSync(scriptP, "utf-8");
+    const { rmSync } = await import("node:fs");
+    rmSync(fx);
+    writeFileSync(scriptP, 'import json\nprint(json.dumps({"summary":"noop","json":{"total":1500000,"title":"x"}}))');
+    try {
+      const { report } = await runProcedureTest(pfdir, root, "monthly", {
+        procforgeDir: pfdir, projectRoot: root, mode: "live", params: { month: "2026-10" },
+      });
+      expect(report.summary.fail).toBeGreaterThanOrEqual(1);
+      const n12 = (report.results as { nodeId: string; status: string; failedConstraints: string[] }[]).find(
+        (r) => r.nodeId === "1.2",
+      );
+      expect(n12?.status).toBe("fail");
+      // c-sum은 통과(total 일치)하고 file_exists auto가 실패해야 한다
+      expect(n12?.failedConstraints).not.toContain("c-sum");
+      expect(n12?.failedConstraints.some((f) => f.startsWith("auto-"))).toBe(true);
+    } finally {
+      writeFileSync(fx, fxBackup);
+      writeFileSync(scriptP, scriptBackup);
+    }
+  }, 180000);
+
+  it("d: 10월 파일에 9월 데이터 → period fail + 하류 blocked", async () => {    await buildMonthly();
     copyFileSync(OCT_XLSX, join(root, "sales-2026-10.xlsx"));
     copyFileSync(SEPT_XLSX, join(root, "sales-2026-10.xlsx"));
     try {
