@@ -493,3 +493,4 @@ C4 CI E2E에도 C2·C3를 fake 서버로 추가. M5-dogfood.md 3절을 실제 �
 | 2026-10-11 | 6, 8 | M5.5-4 완료: 무인 실행·approvals.json·exit 표·docs/scheduling.md (양 모드 m55-unattended 7/7) | M5.5-3 완료 후속 |
 | 2026-10-11 | 6, 8 | M5.5-4.1 신설 (무인 실행 보강 0~6): CI 경위·exit 확장·args 정확일치·nodeHash 승인·generated 거부·run 잠금·Windows 예시 | M5.5-4 완료 후속 |
 | 2026-10-11 | 6, 8 | M5.5-4.1 완료 (1~6): exit 4종·정확일치·nodeHash+approve CLI·generated 거부·.run.lock+exit 4·Windows 예시 (양 모드 m55-unattended·filestore) | M5.5-5 dogfood 전 |
+| 2026-10-11 | 6, 8 | M5.5-5 완료: dogfood daily-crawl E2E (run1·run2 누적 + stale exit 3 + 겹침 conflict, 양 모드 m55-dogfood 3/3) | M5.5-6 문구 전 |

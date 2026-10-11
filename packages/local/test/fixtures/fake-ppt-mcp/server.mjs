@@ -95,4 +95,34 @@ server.tool(
   },
 );
 
+// M5.5-5 dogfood: 날짜별 3페이지 목록. d1: x1,x2/x3/빈칸, d2: x1,x2/x3/x4.
+server.tool(
+  "board",
+  "Date-scoped paginated board (M5.5-5)",
+  { day: z.string(), cursor: z.string().optional() },
+  async ({ day, cursor }) => {
+    const last = day === "d2" ? [{ id: "x4" }] : [];
+    if (!cursor) {
+      return { content: [{ type: "text", text: JSON.stringify({ items: [{ id: "x1" }, { id: "x2" }], nextCursor: "p2" }) }] };
+    }
+    if (cursor === "p2") {
+      return { content: [{ type: "text", text: JSON.stringify({ items: [{ id: "x3" }], nextCursor: "p3" }) }] };
+    }
+    if (cursor === "p3") {
+      return { content: [{ type: "text", text: JSON.stringify({ items: last, nextCursor: null }) }] };
+    }
+    return { content: [{ type: "text", text: JSON.stringify({ items: [], nextCursor: null }) }] };
+  },
+);
+
+server.tool(
+  "detail",
+  "Item detail (M5.5-5). x3 always fails.",
+  { id: z.string() },
+  async ({ id }) => {
+    if (id === "x3") throw new Error("detail unavailable: x3");
+    return { content: [{ type: "text", text: JSON.stringify({ id, title: `t-${id}` }) }] };
+  },
+);
+
 await server.connect(new StdioServerTransport());

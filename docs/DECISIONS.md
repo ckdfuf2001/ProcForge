@@ -380,6 +380,10 @@
   (gh 없음 → api.github.com repos/.../actions/runs?head_sha=...).
   중간 커밋은 run이 생기지 않음(푸시 head만 실행). M5.5-4(a75a3c5)는
   run 38127197074 success로 M5.5-3 회귀까지 해소됨.
+- M5.5-5: dogfood daily-crawl (fake board 날짜별 3페이지 + detail x3 실패).
+  until 수집 → script 평탄화 → map 상세(external·threshold 0.5) → script 누적.
+  run1(d1) x1,x2·run2(d2) x4 신규만, state seenIds 누적. (a) stale hash → fail
+  ["approval"] + exit 3, (b) 겹친 실행 → conflict + exit 4.
 - M5.5-4: 무인 실행. --unattended에서 external은 approvals.json 일치 시만 실행,
   불일치 시 suspended 대신 fail ["approval"] (exit 3). map 거부 항목은 map 실패에
   ["approval"] 전파, until은 그대로 전파. 매칭은 해석된 인자 기준, "*" 와일드카드.
