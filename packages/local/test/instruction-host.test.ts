@@ -53,6 +53,11 @@ describe("M2.6-1 instruction 도구명 일치", () => {
       expect((TOOL_NAMES as readonly string[]), m).toContain(m);
     }
   });
+
+  it("M5.5-6 분해 문구 고정", () => {
+    const src = readFileSync(resolve(__dirname, "../../core/src/service.ts"), "utf8");
+    expect(src).toContain("항목 반복은 map, 페이지는 until, 지난 실행 기억은 state");
+  });
 });
 
 describe("instruction-following host E2E", () => {
