@@ -30,9 +30,14 @@
 - `node.id` + `node.hash` 필수. 절차서를 수정하면 해시가 바뀌어 기존 승인은
   거부된다 (`approval: 승인 갱신 필요`). 항목 생성은 CLI로 한다
   (MCP 도구 추가 없음):
-  `procforge approve procedures/<name> --node <id>`
+  `procforge approve procedures/<name> --node <id> [--allow-wildcard <key> ...]`
   (같은 노드 항목이 있으면 갱신).
-- `args` 생략 = 해당 tool 전체 승인.
+- `args` 생략 = 해당 tool 전체 승인 (노드 pin은 유지).
+- 생성된 패턴은 fixed 값 그대로다. var/generated 키는 `--allow-wildcard <key>`로
+  명시한 것만 `"*"`가 되고, 미지정 키가 있으면 `bad_request`(exit 2) + 키 목록으로
+  거부된다 (암묵적 전체 허용 금지).
+- 패턴 값에 접두 와일드카드를 쓸 수 있다 (`"https://a.com/*"`, 끝 `*`만.
+  정규식은 없다). 중간에 `*`가 있으면 리터럴(정확 일치)로 취급한다.
 - `args`가 있으면 실제 호출 인자의 키 집합과 정확히 일치해야 한다
   (추가 키가 하나라도 있으면 거부).
 - 패턴 값 `"*"` = 임의 값 허용 (하나의 키에 대해).

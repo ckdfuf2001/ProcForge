@@ -55,6 +55,11 @@ export function loadApprovals(procedureDir: string): ApprovalEntry[] {
 }
 
 function matchValue(pattern: unknown, actual: unknown): boolean {
+  // M5.5-4.2-2: 접두 와일드카드 ("https://a.com/*", 끝 *만. 정규식 없음).
+  // "*" 단독은 임의 값, "*"가 중간에 있으면 리터럴(정확 일치).
+  if (typeof pattern === "string" && pattern.length > 1 && pattern.endsWith("*") && !pattern.slice(0, -1).includes("*")) {
+    return typeof actual === "string" && actual.startsWith(pattern.slice(0, -1));
+  }
   if (pattern === "*") return true;
   if (typeof pattern !== "object" || pattern === null || typeof actual !== "object" || actual === null) {
     return JSON.stringify(pattern) === JSON.stringify(actual);
@@ -92,23 +97,40 @@ export function isApproved(
 
 // M5.5-4.1-3: 절차서 노드에서 승인 항목 생성.
 // 해시는 importProcedure와 동일 공식 (goal·args·constraints·dependsOn []).
-// 패턴: fixed 값 그대로, var/generated은 "*", script-kind는 제외 (tool 인자 아님).
-export function buildApprovalEntry(docNode: {
-  id: string;
-  goal: string;
-  tool?: { server: string; name: string };
-  args?: Record<string, ArgSpec>;
-  constraints?: Constraint[];
-  sideEffect?: string;
-}): ApprovalEntry {
+// 패턴: fixed 값 그대로, script-kind는 제외 (tool 인자 아님).
+// M5.5-4.2-2: var/generated 키는 allowWildcardKeys에 명시된 것만 "*" 생성.
+// 미지정은 bad_request + 키 목록 (암묵적 전체 허용 금지).
+export function buildApprovalEntry(
+  docNode: {
+    id: string;
+    goal: string;
+    tool?: { server: string; name: string };
+    args?: Record<string, ArgSpec>;
+    constraints?: Constraint[];
+    sideEffect?: string;
+  },
+  allowWildcardKeys: string[] = [],
+): ApprovalEntry {
   if (!docNode.tool) throw pfError("bad_request", `승인은 tool 노드만 가능: ${docNode.id}`);
   if (docNode.sideEffect !== undefined && docNode.sideEffect !== "external") {
     throw pfError("bad_request", `승인은 external 노드만: ${docNode.id} (sideEffect=${docNode.sideEffect})`);
   }
+  const allowed = new Set(allowWildcardKeys);
+  const denied: string[] = [];
   const pattern: Record<string, unknown> = {};
   for (const [k, s] of Object.entries(docNode.args ?? {})) {
-    if ((s as { kind?: string }).kind === "script") continue;
-    pattern[k] = (s as { kind?: string }).kind === "fixed" ? (s as { value?: unknown }).value : "*";
+    const kind = (s as { kind?: string }).kind;
+    if (kind === "script") continue;
+    if (kind === "fixed") {
+      pattern[k] = (s as { value?: unknown }).value;
+    } else if (allowed.has(k)) {
+      pattern[k] = "*";
+    } else {
+      denied.push(k);
+    }
+  }
+  if (denied.length > 0) {
+    throw pfError("bad_request", `승인 불가: 와일드카드 미지정 키 (${denied.join(",")}). --allow-wildcard <key>로 명시`);
   }
   return {
     node: {

@@ -22,6 +22,7 @@ export type CliValues = {
   discard?: string;
   force?: boolean;
   unattended?: boolean;
+  "allow-wildcard"?: string[];
 };
 
 export function parseCliArgs(argv: string[]): { values: CliValues; positionals: string[] } {
@@ -46,6 +47,7 @@ export function parseCliArgs(argv: string[]): { values: CliValues; positionals: 
       discard: { type: "string" },
       force: { type: "boolean", default: false },
       unattended: { type: "boolean", default: false },
+      "allow-wildcard": { type: "string", multiple: true },
     },
     allowPositionals: true,
   });

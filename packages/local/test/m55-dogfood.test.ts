@@ -242,7 +242,7 @@ function baseOpts(day: string, extraParams: Record<string, string> = {}) {
 describe("M5.5-5 dogfood", () => {
   it("run1 전체 + run2 신규만 (중복 0)", async () => {
     const app = await buildDogfood();
-    await app.approveProcedureNode({ procedure: "daily-crawl", nodeId: "1.3" });
+    await app.approveProcedureNode({ procedure: "daily-crawl", nodeId: "1.3", allowWildcard: ["id"] });
     const r1 = await runProcedureTest(pfdir, root, "daily-crawl", baseOpts("d1", { stateDefaults: '{"seenIds":[]}' }));
     expect(r1.report.summary.fail).toBe(0);
     expect(r1.report.results.find((r) => r.nodeId === "1.3")?.failedItems).toEqual([2]);
@@ -256,7 +256,7 @@ describe("M5.5-5 dogfood", () => {
 
   it("(a) 승인 해시 불일치 → fail [approval] + exit 3", async () => {
     const app = await buildDogfood();
-    const ap = await app.approveProcedureNode({ procedure: "daily-crawl", nodeId: "1.3" });
+    const ap = await app.approveProcedureNode({ procedure: "daily-crawl", nodeId: "1.3", allowWildcard: ["id"] });
     const { writeFileSync: wfs } = await import("node:fs");
     wfs(
       join(pfdir, "procedures", "daily-crawl", "approvals.json"),
@@ -271,7 +271,7 @@ describe("M5.5-5 dogfood", () => {
 
   it("(b) 겹친 실행 → 두 번째 conflict", async () => {
     const app = await buildDogfood();
-    await app.approveProcedureNode({ procedure: "daily-crawl", nodeId: "1.3" });
+    await app.approveProcedureNode({ procedure: "daily-crawl", nodeId: "1.3", allowWildcard: ["id"] });
     const o1 = baseOpts("d1", { stateDefaults: '{"seenIds":[]}' });
     const o2 = baseOpts("d1", { stateDefaults: '{"seenIds":[]}' });
     const [a, b] = await Promise.allSettled([

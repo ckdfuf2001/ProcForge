@@ -173,7 +173,9 @@ async function cmdApprove(): Promise<number> {
     // M5.5-4.1-3: 절차서 사전 승인 (procforge approve procedures/<name> --node <id>).
     const targetIsProc = (target ?? "").startsWith("procedures/") || (target ?? "").endsWith(".json");
     if (targetIsProc) {
-      const r = await app.approveProcedureNode({ procedure: target, nodeId: values.node ?? nodeId });
+      const r = await app.approveProcedureNode({
+        procedure: target, nodeId: values.node ?? nodeId, allowWildcard: values["allow-wildcard"] ?? [],
+      });
       console.log(`approved: ${r.nodeId} (hash ${r.hash.slice(0, 12)}…) → ${r.path}${r.replaced ? " (갱신)" : ""}`);
       return 0;
     }
@@ -221,7 +223,7 @@ async function main(): Promise<number> {
   if (cmd === "run") return cmdRun();
   if (cmd === "approve") return cmdApprove();
   console.error("usage: procforge <test|trace|export|repair|run|approve> ...");
-  console.error("  approve <runId> <nodeId> | approve procedures/<name> --node <id>");
+  console.error("  approve <runId> <nodeId> | approve procedures/<name> --node <id> [--allow-wildcard <key> ...]");
   return 2;
 }
 

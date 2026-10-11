@@ -126,11 +126,37 @@ describe("M5.5-4 approvals 매칭", () => {
         c: { kind: "script", file: "scripts/s.py", runtime: "python" },
       } as never,
       constraints: [],
-    });
+    }, ["b"]);
     expect(built.node.id).toBe("1.1");
     expect(built.node.hash.length).toBeGreaterThan(0);
     expect(built.args).toEqual({ a: "x", b: "*" });
     expect(() => buildApprovalEntry({ id: "1", goal: "g", sideEffect: "none" })).toThrow();
+  });
+
+  it("M5.5-4.2-2: var 미지정 → bad_request + 키 목록 / 접두 와일드카드", () => {
+    const doc = {
+      id: "1.1", goal: "g", tool: { server: "s", name: "t" }, sideEffect: "external",
+      args: { u: { kind: "var", ref: "${params.u}" } }, constraints: [],
+    } as never;
+    let code = "";
+    try {
+      buildApprovalEntry(doc);
+    } catch (e) {
+      code = (e as { code?: string }).code ?? "";
+      expect(String(e instanceof Error ? e.message : e)).toContain("u");
+    }
+    expect(code).toBe("bad_request");
+    expect(buildApprovalEntry(doc, ["u"]).args).toEqual({ u: "*" });
+    // 접두 와일드카드 매칭.
+    const e = { node: { id: "1.1", hash: "h" }, tool: { server: "s", name: "t" }, args: { url: "https://a.com/*" } };
+    expect(matchApproval(e, "s", "t", { url: "https://a.com/list" })).toBe(true);
+    expect(matchApproval(e, "s", "t", { url: "https://evil.com/list" })).toBe(false);
+    expect(matchApproval(e, "s", "t", { url: "https://a.com.evil.com/" })).toBe(false);
+    expect(matchApproval(e, "s", "t", { url: 123 })).toBe(false);
+    // "*"가 중간이면 리터럴.
+    const lit = { node: { id: "1.1", hash: "h" }, tool: { server: "s", name: "t" }, args: { v: "a*b" } };
+    expect(matchApproval(lit, "s", "t", { v: "a*b" })).toBe(true);
+    expect(matchApproval(lit, "s", "t", { v: "aXb" })).toBe(false);
   });
 
   it("loadApprovals: 없음→빈 목록", () => {
@@ -247,6 +273,74 @@ describe("M5.5-4 무인 실행 E2E", () => {
     // M5.5-4.1-5: conflict → exit 4.
     expect(runErrorExit(err)).toBe(4);
   }, 120000);
+});
+
+describe("M5.5-4.2-2 접두 와일드카드 E2E", () => {
+  async function buildUrlEcho(): Promise<ProcForgeApp> {
+    const { client } = testStack(pfdir);
+    const app = new ProcForgeApp({ core: client, procforgeDir: pfdir, projectRoot: root });
+    const started = await client.pfStart({
+      request: "fetch", params: { url: "https://a.com/list" }, toolCatalog: ECHO_CAT,
+    });
+    const sid = started.session.id;
+    await client.pfResolve({
+      sessionId: sid, nodeId: "1", decision: "split", children: [{ goal: "가져오기" }],
+    });
+    const r1 = await client.pfReport({
+      sessionId: sid, nodeId: "1.1", tool: { server: "fake-ppt", name: "echo" },
+      args: { url: "https://a.com/list" }, resultSummary: "fetch",
+      resultJson: { url: "https://a.com/list" },
+      selfVerdict: "pass", selfReason: "ok",
+    });
+    expect(r1.verdict).toBe("pass");
+    await client.pfEditNode({
+      sessionId: sid, nodeId: "1.1",
+      addConstraints: [{ id: "c-u", kind: "json_path_exists", spec: { path: "url" }, source: "human" }],
+    });
+    const r2 = await client.pfReport({
+      sessionId: sid, nodeId: "1.1", tool: { server: "fake-ppt", name: "echo" },
+      args: { url: "https://a.com/list" }, resultSummary: "fetch",
+      resultJson: { url: "https://a.com/list" },
+      selfVerdict: "pass", selfReason: "ok",
+    });
+    expect(r2.verdict).toBe("pass");
+    await client.pfResolve({
+      sessionId: sid, nodeId: "1.1", decision: "leaf",
+      tool: { server: "fake-ppt", name: "echo" },
+      argSpecs: { url: { kind: "var", ref: "${params.url}" } } as never,
+      sideEffect: "external",
+    });
+    const fin = await app.finalize({ sessionId: sid, name: "m55-url" });
+    expect(fin.warnings.filter((w) => w.includes("bad_"))).toEqual([]);
+    return app;
+  }
+
+  function prefixApprovals(): void {
+    const p = join(pfdir, "procedures", "m55-url", "approvals.json");
+    const list = JSON.parse(readFileSync(p, "utf8")) as { args?: Record<string, unknown> }[];
+    expect(list[0].args).toEqual({ url: "*" });
+    list[0].args = { url: "https://a.com/*" };
+    writeFileSync(p, JSON.stringify(list));
+  }
+
+  function urlOpts(url: string) {
+    return {
+      procforgeDir: pfdir, projectRoot: root, mode: "live" as const,
+      params: { url }, unattended: true,
+    };
+  }
+
+  it("같은 호스트 → 통과, 다른 호스트 → exit 3", async () => {
+    const app = await buildUrlEcho();
+    await app.approveProcedureNode({ procedure: "m55-url", nodeId: "1.1", allowWildcard: ["url"] });
+    prefixApprovals();
+    const same = await runProcedureTest(pfdir, root, "m55-url", urlOpts("https://a.com/other"));
+    expect(same.report.summary.fail).toBe(0);
+    const evil = await runProcedureTest(pfdir, root, "m55-url", urlOpts("https://evil.com/"));
+    expect(evil.report.summary.fail).toBe(1);
+    expect(evil.report.results.find((r) => r.nodeId === "1.1")?.failedConstraints).toContain("approval");
+    expect(runExitCode({ failed: evil.report.summary.fail, suspended: 0, approvalBlocked: true })).toBe(3);
+  }, 180000);
 });
 
 describe("M5.5-4.2-1 논리 경로 매칭", () => {

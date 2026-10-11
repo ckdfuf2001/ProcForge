@@ -990,12 +990,13 @@ export class ProcForgeApp {
 
   /** 절차서 노드 사전 승인 항목 생성 (M5.5-4.1-3, CLI approve 절차서 모드). */
   async approveProcedureNode(a: {
-    procedure: unknown; nodeId: unknown;
+    procedure: unknown; nodeId: unknown; allowWildcard?: unknown;
   }): Promise<{ procedureDir: string; path: string; nodeId: string; hash: string; replaced: boolean }> {
     const procRef = a.procedure as string;
     const nodeId = a.nodeId as string;
     if (!procRef) throw pfError("bad_request", "procedure가 필요하다.");
     if (!nodeId) throw pfError("bad_request", "node가 필요하다 (--node <id>).");
+    const allowWildcard = Array.isArray(a.allowWildcard) ? (a.allowWildcard as string[]) : [];
     const { doc, dir } = loadProcedureDoc(this.procforgeDir, procRef);
     const n = doc.nodes.find((x) => x.id === nodeId);
     if (!n) throw pfError("not_found", `노드 없음: ${nodeId} (${procRef})`);
@@ -1004,7 +1005,7 @@ export class ProcForgeApp {
       args: n.args as Record<string, import("@procforge/shared/schema.js").ArgSpec> | undefined,
       constraints: n.constraints as import("@procforge/shared/schema.js").Constraint[] | undefined,
       sideEffect: n.sideEffect,
-    });
+    }, allowWildcard);
     const { path, replaced } = saveApproval(dir, entry);
     return { procedureDir: dir, path, nodeId, hash: entry.node.hash, replaced };
   }
