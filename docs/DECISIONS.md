@@ -380,6 +380,12 @@
   (gh 없음 → api.github.com repos/.../actions/runs?head_sha=...).
   중간 커밋은 run이 생기지 않음(푸시 head만 실행). M5.5-4(a75a3c5)는
   run 38127197074 success로 M5.5-3 회귀까지 해소됨.
+- M5.5-4.2-3: 런타임 node hash는 procedure.json 파일 내용에서 재계산
+  (importProcedure가 computeNodeHash(goal·args·constraints·dependsOn []) 호출,
+  세션 노드 파일의 hash와 일치 확인). 텍스트 1글자 수정(args "hi"→"ho")만으로
+  stale → fail ["approval"] + "승인 갱신 필요" (exit 3). dependsOn은 항상 []이므로
+  순서 변경은 해시에 영향 없음. map/until 템플릿 변경도 현 공식에는 미반영
+  (부모 pin 승인 시 템플릿은 args 패턴으로만 통제).
 - M5.5-5: dogfood daily-crawl (fake board 날짜별 3페이지 + detail x3 실패).
   until 수집 → script 평탄화 → map 상세(external·threshold 0.5) → script 누적.
   run1(d1) x1,x2·run2(d2) x4 신규만, state seenIds 누적. (a) stale hash → fail

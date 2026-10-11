@@ -7,6 +7,7 @@ import { runProcedureTest } from "../src/runner/procedure-run.js";
 import { isApproved, loadApprovals, matchApproval, approvalPins, checkApproval, buildApprovalEntry } from "../src/services/approvals.js";
 import { runExitCode, cliErrorExit, runErrorExit } from "../src/app/run-exit.js";
 import { testStack } from "./client-mode.js";
+import { computeNodeHash } from "@procforge/shared/schema.js";
 
 // M5.5-4 무인 실행 + approvals.json + 종료 코드 E2E (fake echo, external 노드).
 
@@ -341,6 +342,36 @@ describe("M5.5-4.2-2 접두 와일드카드 E2E", () => {
     expect(evil.report.results.find((r) => r.nodeId === "1.1")?.failedConstraints).toContain("approval");
     expect(runExitCode({ failed: evil.report.summary.fail, suspended: 0, approvalBlocked: true })).toBe(3);
   }, 180000);
+});
+
+describe("M5.5-4.2-3 procedure.json 직접 수정", () => {
+  it("args 1글자 수정 → stale + 갱신 안내 + exit 3, 해시는 파일 재계산", async () => {
+    const app = await buildUnatt();
+    const ap = await app.approveProcedureNode({ procedure: "m55-unatt", nodeId: "1.1" });
+    const procFile = join(pfdir, "procedures", "m55-unatt", "procedure.json");
+    const text = readFileSync(procFile, "utf8");
+    expect(text).toContain('"value": "hi"');
+    writeFileSync(procFile, text.replace('"value": "hi"', '"value": "ho"'));
+    // 런타임 hash는 수정된 파일 내용에서 재계산 (importProcedure computeNodeHash).
+    const doc = JSON.parse(readFileSync(procFile, "utf8")) as {
+      nodes: { id: string; goal: string; args: Record<string, never>; constraints: never[] }[];
+    };
+    const n11 = doc.nodes.find((n) => n.id === "1.1")!;
+    const recomputed = computeNodeHash({ goal: n11.goal, args: n11.args, constraints: n11.constraints, dependsOn: [] });
+    expect(recomputed).not.toBe(ap.hash);
+    const r = await runProcedureTest(pfdir, root, "m55-unatt", {
+      procforgeDir: pfdir, projectRoot: root, mode: "live", params: {}, unattended: true,
+    });
+    const sessNode = JSON.parse(
+      readFileSync(join(pfdir, "sessions", r.sessionId, "nodes", "1.1.json"), "utf8"),
+    ) as { hash: string };
+    expect(sessNode.hash).toBe(recomputed);
+    const n = r.report.results.find((x) => x.nodeId === "1.1")!;
+    expect(n.status).toBe("fail");
+    expect(n.failedConstraints).toContain("approval");
+    expect(n.detail ?? "").toContain("갱신");
+    expect(runExitCode({ failed: r.report.summary.fail, suspended: 0, approvalBlocked: true })).toBe(3);
+  }, 120000);
 });
 
 describe("M5.5-4.2-1 논리 경로 매칭", () => {
