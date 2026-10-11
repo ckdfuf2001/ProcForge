@@ -165,20 +165,27 @@ async function cmdRun(): Promise<number> {
 }
 
 async function cmdApprove(): Promise<number> {
-  const [, runId, nodeId] = positionals;
-  if (!runId || !nodeId) {
-    console.error("usage: procforge approve <runId> <nodeId>");
-    return 2;
-  }
+  const [, target, nodeId] = positionals;
   const { projectRoot, procforgeDir } = resolveDirs(values, process.env);
   try {
     const { app } = createApp({ procforgeDir, projectRoot });
-    const r = await app.runApprove({ runId, nodeId });
+    // M5.5-4.1-3: 절차서 사전 승인 (procforge approve procedures/<name> --node <id>).
+    const targetIsProc = (target ?? "").startsWith("procedures/") || (target ?? "").endsWith(".json");
+    if (targetIsProc) {
+      const r = await app.approveProcedureNode({ procedure: target, nodeId: values.node ?? nodeId });
+      console.log(`approved: ${r.nodeId} (hash ${r.hash.slice(0, 12)}…) → ${r.path}${r.replaced ? " (갱신)" : ""}`);
+      return 0;
+    }
+    if (!target || !nodeId) {
+      console.error("usage: procforge approve <runId> <nodeId> | procforge approve procedures/<name> --node <id>");
+      return 2;
+    }
+    const r = await app.runApprove({ runId: target, nodeId });
     console.log(`approved: run ${r.runId} node ${r.nodeId}`);
     return 0;
   } catch (e) {
     console.error(`error: ${e instanceof Error ? e.message : String(e)}`);
-    return 1;
+    return cliErrorExit(e);
   }
 }
 
@@ -213,6 +220,7 @@ async function main(): Promise<number> {
   if (cmd === "run") return cmdRun();
   if (cmd === "approve") return cmdApprove();
   console.error("usage: procforge <test|trace|export|repair|run|approve> ...");
+  console.error("  approve <runId> <nodeId> | approve procedures/<name> --node <id>");
   return 2;
 }
 

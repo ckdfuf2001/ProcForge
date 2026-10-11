@@ -13,7 +13,7 @@ import { ConnectionPool } from "./connections.js";
 import { findRecording, loadCassette, recordKey, saveRecording, toToolResponse, compareToolResponses } from "./recordings.js";
 import { getByDot, resolveArgs, resolveVar, substituteItemSpecs, substituteParams } from "./resolve.js";
 import { loadProcedureState, procedureStatePath, saveProcedureState } from "../services/procedure-state.js";
-import { isApproved, loadApprovals } from "../services/approvals.js";
+import { approvalPins, checkApproval, loadApprovals } from "../services/approvals.js";
 import { runScript } from "./script-run.js";
 import { inferPathRole, rewritePaths, type InferredRole, type PathRole } from "./paths.js";
 import { setupRunFs } from "./workdir.js";
@@ -463,8 +463,18 @@ async function execNode(
   } else if (mode === "live" && n.sideEffect === "external" && !(opts.approvedNodeIds ?? []).includes(n.id)) {
     // M5: live에서도 사람 승인 없이는 실행 금지. M5.5-4: 무인 실행은
     // approvals.json 일치 시 실행, 불일치 시 중단 대신 fail ["approval"].
+    // M5.5-4.1-3: node pin(id+hash) 판정. 해시 불일치(stale)는 갱신 안내.
     if (opts.unattended) {
-      if (!isApproved(opts.approvals ?? [], server, tool, args as Record<string, unknown>)) {
+      const parent = n.parentId ? byId.get(n.parentId) : undefined;
+      const verdict = checkApproval(
+        opts.approvals ?? [],
+        approvalPins(n, parent ? { id: parent.id, hash: parent.hash, kind: (parent as { kind?: string }).kind } : undefined),
+        server, tool, args as Record<string, unknown>,
+      );
+      if (verdict === "stale") {
+        return { nodeId: n.id, status: "fail", failedConstraints: ["approval"], detail: `approval: 승인 갱신 필요 (노드 ${n.id} 해시 변경). procforge approve <procedure> --node ${n.id}로 갱신`, durationMs: Date.now() - start };
+      }
+      if (verdict !== "ok") {
         return { nodeId: n.id, status: "fail", failedConstraints: ["approval"], detail: `approval: 무인 실행 미승인 external (${server}/${tool}). procedures/<name>/approvals.json에 tool·인자 등록 필요`, durationMs: Date.now() - start };
       }
       // 승인 일치 → 아래 실제 호출로 진행하지 않고 여기서 직접 호출 (live는 녹화 없음).

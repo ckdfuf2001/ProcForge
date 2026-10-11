@@ -18,15 +18,27 @@
 
 ```json
 [
-  { "tool": { "server": "web", "name": "fetch" }, "args": { "url": "https://example.com/list", "mode": "*" } }
+  {
+    "node": { "id": "1.1", "hash": "a3f9…" },
+    "tool": { "server": "web", "name": "fetch" },
+    "args": { "url": "https://example.com/list", "mode": "*" }
+  }
 ]
 ```
 
+- `node.id` + `node.hash` 필수. 절차서를 수정하면 해시가 바뀌어 기존 승인은
+  거부된다 (`approval: 승인 갱신 필요`). 항목 생성은 CLI로 한다
+  (MCP 도구 추가 없음):
+  `procforge approve procedures/<name> --node <id>`
+  (같은 노드 항목이 있으면 갱신).
 - `args` 생략 = 해당 tool 전체 승인.
 - `args`가 있으면 실제 호출 인자의 키 집합과 정확히 일치해야 한다
   (추가 키가 하나라도 있으면 거부).
 - 패턴 값 `"*"` = 임의 값 허용 (하나의 키에 대해).
+- 생성된 패턴은 fixed 값 그대로, var/generated는 `"*"`다.
+  path 인자는 실행 시 절대경로로 바뀌므로 `"*"`로 직접 고쳐 써라.
 - 매칭 기준은 해석된(resolved) 실제 호출 인자다.
+- map/until external 노드는 부모 노드 id+hash로 승인한다 (항목별 해시는 불안정).
 
 ## Windows 작업 스케줄러 예시
 

@@ -4,7 +4,7 @@ import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { ProcForgeApp } from "../src/app/app.js";
 import { runProcedureTest } from "../src/runner/procedure-run.js";
-import { isApproved, loadApprovals, matchApproval } from "../src/services/approvals.js";
+import { isApproved, loadApprovals, matchApproval, approvalPins, checkApproval, buildApprovalEntry } from "../src/services/approvals.js";
 import { runExitCode, cliErrorExit } from "../src/app/run-exit.js";
 import { testStack } from "./client-mode.js";
 
@@ -40,7 +40,7 @@ afterEach(() => {
   else process.env.USERPROFILE = oldProfile;
 });
 
-async function buildUnatt(): Promise<void> {
+async function buildUnatt(): Promise<ProcForgeApp> {
   const { client } = testStack(pfdir);
   const app = new ProcForgeApp({ core: client, procforgeDir: pfdir, projectRoot: root });
   const started = await client.pfStart({ request: "echo", params: {}, toolCatalog: ECHO_CAT });
@@ -74,6 +74,7 @@ async function buildUnatt(): Promise<void> {
   expect((c.node as { sideEffect?: string }).sideEffect).toBe("external");
   const fin = await app.finalize({ sessionId: sid, name: "m55-unatt" });
   expect(fin.warnings.filter((w) => w.includes("bad_"))).toEqual([]);
+  return app;
 }
 
 function writeApprovals(entries: unknown): void {
@@ -82,7 +83,7 @@ function writeApprovals(entries: unknown): void {
 
 describe("M5.5-4 approvals 매칭", () => {
   it("일치·와일드카드·불일치", () => {
-    const e = { tool: { server: "s", name: "t" }, args: { a: "x", b: "*" } };
+    const e = { node: { id: "1.1", hash: "h1" }, tool: { server: "s", name: "t" }, args: { a: "x", b: "*" } };
     expect(matchApproval(e, "s", "t", { a: "x", b: "anything" })).toBe(true);
     expect(matchApproval(e, "s", "t", { a: "x", b: "z" })).toBe(true);
     expect(matchApproval(e, "s", "t", { a: "y", b: "z" })).toBe(false);
@@ -91,12 +92,44 @@ describe("M5.5-4 approvals 매칭", () => {
     // M5.5-4.1-2: 추가 키 → 거부 (키 집합 정확히 일치).
     expect(matchApproval(e, "s", "t", { a: "x", b: "z", c: 1 })).toBe(false);
     expect(matchApproval(
-      { tool: { server: "s", name: "t" }, args: { o: { x: 1 } } },
+      { node: { id: "1.1", hash: "h1" }, tool: { server: "s", name: "t" }, args: { o: { x: 1 } } },
       "s", "t", { o: { x: 1, y: 2 } },
     )).toBe(false);
-    expect(matchApproval({ tool: { server: "s", name: "t" } }, "s", "t", { whatever: 1 })).toBe(true);
+    expect(matchApproval({ node: { id: "1.1", hash: "h1" }, tool: { server: "s", name: "t" } }, "s", "t", { whatever: 1 })).toBe(true);
     expect(isApproved([e], "s", "t", { a: "x", b: 1 })).toBe(true);
     expect(isApproved([], "s", "t", { a: "x", b: 1 })).toBe(false);
+  });
+
+  it("pin 판정 ok·stale·denied + map 부모 pin", () => {
+    const e = { node: { id: "1.1", hash: "h1" }, tool: { server: "s", name: "t" }, args: { a: "x" } };
+    expect(checkApproval([e], approvalPins({ id: "1.1", hash: "h1" }), "s", "t", { a: "x" })).toBe("ok");
+    expect(checkApproval([e], approvalPins({ id: "1.1", hash: "h2" }), "s", "t", { a: "x" })).toBe("stale");
+    expect(checkApproval([e], approvalPins({ id: "9.9", hash: "h1" }), "s", "t", { a: "x" })).toBe("denied");
+    expect(checkApproval([e], approvalPins({ id: "1.1", hash: "h1" }), "s", "t", { a: "y" })).toBe("denied");
+    // map 인스턴스(1.2.1)는 부모 pin으로 판정.
+    const me = { node: { id: "1.2", hash: "mh" }, tool: { server: "s", name: "t" }, args: { f: "*" } };
+    const pins = approvalPins(
+      { id: "1.2.1", hash: "1.2-hash#0", parentId: "1.2" },
+      { id: "1.2", hash: "mh", kind: "map" },
+    );
+    expect(checkApproval([me], pins, "s", "t", { f: "a.csv" })).toBe("ok");
+    expect(checkApproval([me], [{ id: "1.2.1", hash: "1.2-hash#0" }], "s", "t", { f: "a.csv" })).toBe("denied");
+  });
+
+  it("buildApprovalEntry: fixed 값·var *·script 제외", () => {
+    const built = buildApprovalEntry({
+      id: "1.1", goal: "g", tool: { server: "s", name: "t" }, sideEffect: "external",
+      args: {
+        a: { kind: "fixed", value: "x" },
+        b: { kind: "var", ref: "${params.p}" },
+        c: { kind: "script", file: "scripts/s.py", runtime: "python" },
+      } as never,
+      constraints: [],
+    });
+    expect(built.node.id).toBe("1.1");
+    expect(built.node.hash.length).toBeGreaterThan(0);
+    expect(built.args).toEqual({ a: "x", b: "*" });
+    expect(() => buildApprovalEntry({ id: "1", goal: "g", sideEffect: "none" })).toThrow();
   });
 
   it("loadApprovals: 없음→빈 목록", () => {
@@ -123,8 +156,11 @@ describe("M5.5-4 종료 코드", () => {
 
 describe("M5.5-4 무인 실행 E2E", () => {
   it("승인 일치 → 실행·통과", async () => {
-    await buildUnatt();
-    writeApprovals([{ tool: { server: "fake-ppt", name: "echo" }, args: { note: "hi" } }]);
+    const app = await buildUnatt();
+    // M5.5-4.1-3: approve 명령과 같은 경로로 항목 생성 (node pin 포함).
+    const ap = await app.approveProcedureNode({ procedure: "m55-unatt", nodeId: "1.1" });
+    expect(ap.nodeId).toBe("1.1");
+    expect(ap.replaced).toBe(false);
     const { report } = await runProcedureTest(pfdir, root, "m55-unatt", {
       procforgeDir: pfdir, projectRoot: root, mode: "live", params: {}, unattended: true,
     });
@@ -141,11 +177,27 @@ describe("M5.5-4 무인 실행 E2E", () => {
     const n = report.results.find((r) => r.nodeId === "1.1")!;
     expect(n.status).toBe("fail");
     expect(n.failedConstraints).toContain("approval");
+    expect(n.detail ?? "").not.toContain("갱신");
+  }, 120000);
+
+  it("해시 불일치 → fail [approval] + 갱신 안내", async () => {
+    const app = await buildUnatt();
+    const ap = await app.approveProcedureNode({ procedure: "m55-unatt", nodeId: "1.1" });
+    expect(ap.hash.length).toBeGreaterThan(0);
+    writeApprovals([{ node: { id: "1.1", hash: "stale-hash" }, tool: { server: "fake-ppt", name: "echo" }, args: { note: "hi" } }]);
+    const { report } = await runProcedureTest(pfdir, root, "m55-unatt", {
+      procforgeDir: pfdir, projectRoot: root, mode: "live", params: {}, unattended: true,
+    });
+    expect(report.summary.fail).toBe(1);
+    const n = report.results.find((r) => r.nodeId === "1.1")!;
+    expect(n.failedConstraints).toContain("approval");
+    expect(n.detail ?? "").toContain("갱신");
   }, 120000);
 
   it("인자 불일치 → fail [approval]", async () => {
-    await buildUnatt();
-    writeApprovals([{ tool: { server: "fake-ppt", name: "echo" }, args: { note: "other" } }]);
+    const app = await buildUnatt();
+    const ap = await app.approveProcedureNode({ procedure: "m55-unatt", nodeId: "1.1" });
+    writeApprovals([{ node: { id: "1.1", hash: ap.hash }, tool: { server: "fake-ppt", name: "echo" }, args: { note: "other" } }]);
     const { report } = await runProcedureTest(pfdir, root, "m55-unatt", {
       procforgeDir: pfdir, projectRoot: root, mode: "live", params: {}, unattended: true,
     });
@@ -155,12 +207,18 @@ describe("M5.5-4 무인 실행 E2E", () => {
   }, 120000);
 
   it("일반 live(대화형) → suspended 유지", async () => {
-    await buildUnatt();
-    writeApprovals([{ tool: { server: "fake-ppt", name: "echo" }, args: { note: "hi" } }]);
+    const app = await buildUnatt();
+    await app.approveProcedureNode({ procedure: "m55-unatt", nodeId: "1.1" });
     const { report } = await runProcedureTest(pfdir, root, "m55-unatt", {
       procforgeDir: pfdir, projectRoot: root, mode: "live", params: {},
     });
     expect(report.summary.suspended).toBe(1);
     expect(report.results.find((r) => r.nodeId === "1.1")?.detail).toBe("need_approval");
+  }, 120000);
+
+  it("approve 오류: 없는 노드·비external", async () => {
+    const app = await buildUnatt();
+    await expect(app.approveProcedureNode({ procedure: "m55-unatt", nodeId: "9.9" })).rejects.toThrow();
+    await expect(app.approveProcedureNode({ procedure: "m55-unatt", nodeId: "1" })).rejects.toThrow();
   }, 120000);
 });

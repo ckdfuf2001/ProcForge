@@ -38,6 +38,7 @@ import { runSession } from "../runner/index.js";
 import { loadCassette, recordKey } from "../runner/index.js";
 import { runProcedureTest } from "../runner/procedure-run.js";
 import { loadProcedureDoc } from "../runner/procedure-run.js";
+import { buildApprovalEntry, saveApproval } from "../services/approvals.js";
 import { importProcedure } from "../procedure.js";
 import { readRunState, writeRunState } from "../services/run-state.js";
 import { writeJUnitFile, resolveJUnitPath, copyRunFsToOut } from "../services/runner.js";
@@ -985,6 +986,27 @@ export class ProcForgeApp {
     const approved = [...new Set([...st.approved, nodeId])];
     writeRunState(this.procforgeDir, { ...st, approved, suspended: undefined, status: "ready" });
     return { runId, nodeId, approved: true };
+  }
+
+  /** 절차서 노드 사전 승인 항목 생성 (M5.5-4.1-3, CLI approve 절차서 모드). */
+  async approveProcedureNode(a: {
+    procedure: unknown; nodeId: unknown;
+  }): Promise<{ procedureDir: string; path: string; nodeId: string; hash: string; replaced: boolean }> {
+    const procRef = a.procedure as string;
+    const nodeId = a.nodeId as string;
+    if (!procRef) throw pfError("bad_request", "procedure가 필요하다.");
+    if (!nodeId) throw pfError("bad_request", "node가 필요하다 (--node <id>).");
+    const { doc, dir } = loadProcedureDoc(this.procforgeDir, procRef);
+    const n = doc.nodes.find((x) => x.id === nodeId);
+    if (!n) throw pfError("not_found", `노드 없음: ${nodeId} (${procRef})`);
+    const entry = buildApprovalEntry({
+      id: n.id, goal: n.goal, tool: n.tool,
+      args: n.args as Record<string, import("@procforge/shared/schema.js").ArgSpec> | undefined,
+      constraints: n.constraints as import("@procforge/shared/schema.js").Constraint[] | undefined,
+      sideEffect: n.sideEffect,
+    });
+    const { path, replaced } = saveApproval(dir, entry);
+    return { procedureDir: dir, path, nodeId, hash: entry.node.hash, replaced };
   }
 
   /** 절차서 live 일괄 실행 (M5, CLI run용). 일시정지면 suspended 포함 반환. */
