@@ -217,7 +217,7 @@ async function buildMonthly(): Promise<void> {
   expect(r12.verdict).toBe("pass");
   await client.pfEditNode({
     sessionId: sid, nodeId: "1.2",
-    addConstraints: [{ id: "c-sum", kind: "numeric_match", spec: { path: "total", expected: "$1.1.total" }, source: "human" }],
+    addConstraints: [{ id: "c-sum", kind: "pptx_table_sum", spec: { path: "output/rendered.pptx", slide: 1, column: 2, expected: "$1.1.total" }, source: "human" }],
   });
   const attempt2 = randomUUID();
   const ing2 = ingestArtifacts({ procforgeDir: pfdir, sessionId: sid, nodeId: "1.2", attemptId: attempt2, baseDir: root, paths: ["shell.pptx", "output/rendered.pptx"] });
@@ -294,6 +294,30 @@ describe("M5.3-2 수락 테스트", () => {
     })).rejects.toThrow(/필수 params 누락: month/);
   }, 120000);
 
+  it("M5.5-0 total만 맞고 표가 틀리면 c-sum fail", async () => {
+    await buildMonthly();
+    copyFileSync(OCT_XLSX, join(root, "sales-2026-10.xlsx"));
+    // 거짓 렌더: JSON total은 맞게 보고하되 표 금액은 절반으로 그림
+    const procDir = join(pfdir, "procedures", "monthly");
+    const scriptP = join(procDir, "scripts", "1_2.py");
+    const scriptBackup = readFileSync(scriptP, "utf-8");
+    expect(scriptBackup).toContain('"{:,}".format(r["ex"])');
+    writeFileSync(scriptP, scriptBackup.replace('"{:,}".format(r["ex"])', '"{:,}".format(r["ex"]//2)'));
+    try {
+      const { report } = await runProcedureTest(pfdir, root, "monthly", {
+        procforgeDir: pfdir, projectRoot: root, mode: "live", params: { month: "2026-10" },
+      });
+      expect(report.summary.fail).toBeGreaterThanOrEqual(1);
+      const n12 = (report.results as { nodeId: string; status: string; failedConstraints: string[] }[]).find(
+        (r) => r.nodeId === "1.2",
+      );
+      expect(n12?.status).toBe("fail");
+      expect(n12?.failedConstraints).toContain("c-sum");
+    } finally {
+      writeFileSync(scriptP, scriptBackup);
+    }
+  }, 180000);
+
   it("c: 11월 파일 없음 → 실행 전 bad_request", async () => {
     await buildMonthly();
     expect(existsSync(join(root, "sales-2026-11.xlsx"))).toBe(false);
@@ -327,9 +351,8 @@ describe("M5.3-2 수락 테스트", () => {
         (r) => r.nodeId === "1.2",
       );
       expect(n12?.status).toBe("fail");
-      // c-sum은 통과(total 일치)하고 file_exists auto가 실패해야 한다
-      expect(n12?.failedConstraints).not.toContain("c-sum");
-      expect(n12?.failedConstraints.some((f) => f.startsWith("auto-"))).toBe(true);
+      // 출력 파일이 없으면 c-sum(표 읽기)이 실패한다
+      expect(n12?.failedConstraints).toContain("c-sum");
     } finally {
       writeFileSync(fx, fxBackup);
       writeFileSync(scriptP, scriptBackup);

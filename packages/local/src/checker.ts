@@ -1,5 +1,10 @@
 import type { Constraint } from "@procforge/shared/schema.js";
 import type { EvaluateFn } from "@procforge/shared/core-client.js";
+import { existsSync, readFileSync } from "node:fs";
+import { isAbsolute, join } from "node:path";
+import { isEscapeRel } from "./artifacts.js";
+import { extractPptxTables } from "./services/audit-content.js";
+import { substituteParams } from "./runner/resolve.js";
 
 export type CheckContext = {
   resultSummary?: string;
@@ -10,6 +15,8 @@ export type CheckContext = {
   nodeOutputs?: Record<string, unknown>;
   /** params 참조 해결용 (M5.1-B2. runner만 제공) */
   params?: Record<string, string>;
+  /** run fs 기준 파일 읽기용 (M5.5-0 pptx_table_sum. runner만 제공) */
+  fsDir?: string;
 };
 
 export type CheckResult = {
@@ -19,6 +26,48 @@ export type CheckResult = {
   /** core가 아닌 runner에서 판정 (M4) */
   deferred?: boolean;
 };
+
+/** numeric expected/expectedRef 해결 (M5.5-0: numeric_match + pptx_table_sum 공용) */
+export function resolveNumericExpected(
+  spec: { expected?: unknown; expectedRef?: unknown },
+  ctx: CheckContext,
+): { expected?: number; deferred?: boolean; reason?: string } {
+  let expected: number | undefined = typeof spec.expected === "number" ? (spec.expected as number) : undefined;
+  if (typeof spec.expected === "string") {
+    // M5.1-B2: expected에 ref 허용 ("$노드[.경로]", "${params.x}")
+    const ref = spec.expected as string;
+    const pm = /^\$\{params\.([A-Za-z0-9_.-]+)\}$/.exec(ref);
+    if (pm) {
+      if (ctx.params === undefined || !(pm[1] in ctx.params)) {
+        return { reason: `deferred to runner (params ref): ${ref}`, deferred: true };
+      }
+      const pv = Number(ctx.params[pm[1]]);
+      if (!Number.isFinite(pv)) return { reason: `params ref is not a number: ${ref}` };
+      expected = pv;
+    } else {
+      if (ctx.nodeOutputs === undefined) {
+        return { reason: `deferred to runner (expected ref): ${ref}`, deferred: true };
+      }
+      const r = resolveNodeRef(ref, ctx.nodeOutputs);
+      if (!r.found) return { reason: `ref not found: ${ref}`, deferred: true };
+      if (typeof r.value !== "number" || Number.isNaN(r.value as number)) {
+        return { reason: `ref is not a number: ${ref}` };
+      }
+      expected = r.value as number;
+    }
+  } else if (spec.expectedRef !== undefined) {
+    if (ctx.nodeOutputs === undefined) {
+      return { reason: "deferred to runner (expectedRef)", deferred: true };
+    }
+    const r = resolveNodeRef(spec.expectedRef as string, ctx.nodeOutputs);
+    if (!r.found) return { reason: `ref not found: ${spec.expectedRef}`, deferred: true };
+    if (typeof r.value !== "number" || Number.isNaN(r.value as number)) {
+      return { reason: `ref is not a number: ${spec.expectedRef}` };
+    }
+    expected = r.value as number;
+  }
+  return { expected };
+}
 
 /** "$<id>.output[.path]" 참조 해결. ".output" 생략 약식도 허용 (M5.1-B2) */
 export function resolveNodeRef(ref: string, outputs: Record<string, unknown>): { found: boolean; value: unknown } {
@@ -288,40 +337,10 @@ export function evaluateConstraint(c: Constraint, ctx: CheckContext): CheckResul
       }
       if (typeof v !== "number" || Number.isNaN(v)) return { pass: false, reason: "target is not a number" };
       // expectedRef는 runner에서만 판정 (M4). core에는 nodeOutputs이 없어 deferred.
-      let expected: number | undefined = typeof c.spec.expected === "number" ? c.spec.expected : undefined;
-      if (typeof c.spec.expected === "string") {
-        // M5.1-B2: expected에 ref 허용 ("$노드[.경로]", "${params.x}")
-        const ref = c.spec.expected as string;
-        const pm = /^\$\{params\.([A-Za-z0-9_.-]+)\}$/.exec(ref);
-        if (pm) {
-          if (ctx.params === undefined || !(pm[1] in ctx.params)) {
-            return { pass: false, reason: `deferred to runner (params ref): ${ref}`, deferred: true };
-          }
-          const pv = Number(ctx.params[pm[1]]);
-          if (!Number.isFinite(pv)) return { pass: false, reason: `params ref is not a number: ${ref}` };
-          expected = pv;
-        } else {
-          if (ctx.nodeOutputs === undefined) {
-            return { pass: false, reason: `deferred to runner (expected ref): ${ref}`, deferred: true };
-          }
-          const r = resolveNodeRef(ref, ctx.nodeOutputs);
-          if (!r.found) return { pass: false, reason: `ref not found: ${ref}`, deferred: true };
-          if (typeof r.value !== "number" || Number.isNaN(r.value as number)) {
-            return { pass: false, reason: `ref is not a number: ${ref}` };
-          }
-          expected = r.value as number;
-        }
-      } else if (c.spec.expectedRef !== undefined) {
-        if (ctx.nodeOutputs === undefined) {
-          return { pass: false, reason: "deferred to runner (expectedRef)", deferred: true };
-        }
-        const r = resolveNodeRef(c.spec.expectedRef, ctx.nodeOutputs);
-        if (!r.found) return { pass: false, reason: `ref not found: ${c.spec.expectedRef}`, deferred: true };
-        if (typeof r.value !== "number" || Number.isNaN(r.value as number)) {
-          return { pass: false, reason: `ref is not a number: ${c.spec.expectedRef}` };
-        }
-        expected = r.value as number;
-      }
+      const re = resolveNumericExpected(c.spec, ctx);
+      if (re.deferred) return { pass: false, reason: re.reason, deferred: true };
+      if (re.reason) return { pass: false, reason: re.reason };
+      const expected = re.expected;
       if (expected !== undefined) {
         const tol = c.spec.tolerance ?? 0;
         if (Math.abs(v - expected) > tol)
@@ -332,6 +351,47 @@ export function evaluateConstraint(c: Constraint, ctx: CheckContext): CheckResul
       if (c.spec.max !== undefined && v > c.spec.max) return { pass: false, reason: `${v} > max ${c.spec.max}` };
       if (expected === undefined && c.spec.min === undefined && c.spec.max === undefined)
         return { pass: false, reason: "no expected/min/max given" };
+      return { pass: true };
+    }
+    case "pptx_table_sum": {
+      // M5.5-0: 산출 pptx 표를 직접 합산 (보고값이 아닌 그려진 값 검증).
+      // fsDir 없으면 deferred (빌드/조언 시점). core에는 fsDir이 없어 deferred.
+      if (!ctx.fsDir) return { pass: false, reason: "deferred to runner (no fs)", deferred: true };
+      const raw = typeof c.spec.path === "string" ? c.spec.path : "";
+      const rel = substituteParams(raw, ctx.params ?? {}).split("\\").join("/");
+      if (rel === "" || isEscapeRel(rel, "/") || isAbsolute(rel) || /^[a-zA-Z]:/.test(rel)) {
+        return { pass: false, reason: `bad table path: ${raw}` };
+      }
+      const abs = join(ctx.fsDir, rel);
+      let buf: Buffer;
+      try {
+        buf = readFileSync(abs);
+      } catch {
+        return { pass: false, reason: `table file not found: ${rel}` };
+      }
+      const tables = extractPptxTables(buf);
+      const pick = typeof c.spec.slide === "number"
+        ? tables.find((t) => t.slide === c.spec.slide)
+        : tables.find((t) => t.rows.length > 0);
+      if (!pick) return { pass: false, reason: `no table in ${rel}` };
+      const col = typeof c.spec.column === "number" ? c.spec.column : pick.rows[0].length - 1;
+      const body = (c.spec.skipHeader ?? true) ? pick.rows.slice(1) : pick.rows;
+      if (body.length === 0) return { pass: false, reason: `empty table in ${rel}` };
+      let sum = 0;
+      for (let i = 0; i < body.length; i++) {
+        const cell = body[i][col];
+        if (cell === undefined) return { pass: false, reason: `no column ${col} at row ${i} in ${rel}` };
+        const num = Number(cell.replace(/,/g, "").trim());
+        if (!Number.isFinite(num)) return { pass: false, reason: `not a number at row ${i}: "${cell}"` };
+        sum += num;
+      }
+      const re2 = resolveNumericExpected(c.spec, ctx);
+      if (re2.deferred) return { pass: false, reason: re2.reason, deferred: true };
+      if (re2.reason) return { pass: false, reason: re2.reason };
+      if (re2.expected === undefined) return { pass: false, reason: "no expected given" };
+      const tol = typeof c.spec.tolerance === "number" ? c.spec.tolerance : 0;
+      if (Math.abs(sum - re2.expected) > tol)
+        return { pass: false, reason: `table sum ${sum} != ${re2.expected}±${tol} (${rel})` };
       return { pass: true };
     }
     case "schema": {

@@ -365,6 +365,11 @@
   CI에 setup-python + openpyxl (+ M5.3-2부터 python-pptx).
 - M5.3-1: 파일 내용 감사. script-kind 스크립트 + 고정(in/inout) 템플릿 파일
 - M5.3.1-1: file_exists 논리 경로. export 시 auto file_exists의
+- M5.5-0: pptx_table_sum checker. 산출 pptx 표 셀을 직접 합산 (보고값이
+  아닌 그려진 값). expected는 numeric과 같은 ref 규칙 ($노드·${params}).
+  fsDir 없으면 deferred. numeric expected 해결을 resolveNumericExpected로
+  공용화. python-pptx 1.0.2 XML은 태그에 속성이 붙으므로 정규식에 속성 허용.
+  monthly c-sum을 이것으로 교체 (거짓 표 검출).
 - M5.3.1-2: auto 감사 구멍 봉합. fixtures/ 형태 file_exists는 시스템 경로라
   건너뛰므로, manifest source 문자열을 finalize에서 직접 감사 (바인딩 해석분
   제외). examples/procedures/monthly는 정의부 기간 0건 (golden·goldenArgs·

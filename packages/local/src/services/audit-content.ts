@@ -24,6 +24,46 @@ export type AuditContentItem = {
  */
 export function extractPptxText(buf: Buffer): string {
   const texts: string[] = [];
+  for (const xml of slideXmls(buf)) {
+    for (const m of xml.matchAll(/<a:t\b[^>]*>([\s\S]*?)<\/a:t>/g)) texts.push(unescapeXml(m[1]));
+  }
+  return texts.join("\n");
+}
+
+export type PptxTable = {
+  /** zip 순회 순서 기준 슬라이드 인덱스 */
+  slide: number;
+  rows: string[][];
+};
+
+/** pptx 표 구조 추출 (슬라이드 순서대로). 셀 텍스트는 <a:t> 연결. */
+export function extractPptxTables(buf: Buffer): PptxTable[] {
+  const out: PptxTable[] = [];
+  slideXmls(buf).forEach((xml, slide) => {
+    for (const tm of xml.matchAll(/<a:tbl\b[^>]*>([\s\S]*?)<\/a:tbl>/g)) {
+      const rows: string[][] = [];
+      for (const rm of tm[1].matchAll(/<a:tr\b[^>]*>([\s\S]*?)<\/a:tr>/g)) {
+        const cells: string[] = [];
+        for (const cm of rm[1].matchAll(/<a:tc\b[^>]*>([\s\S]*?)<\/a:tc>/g)) {
+          const texts: string[] = [];
+          for (const t of cm[1].matchAll(/<a:t\b[^>]*>([\s\S]*?)<\/a:t>/g)) texts.push(unescapeXml(t[1]));
+          cells.push(texts.join(""));
+        }
+        rows.push(cells);
+      }
+      out.push({ slide, rows });
+    }
+  });
+  return out;
+}
+
+function unescapeXml(s: string): string {
+  return s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&").replace(/&quot;/g, '"');
+}
+
+/** slide XML 목록 (ppt/slides/slideN.xml, zip 순서) */
+function slideXmls(buf: Buffer): string[] {
+  const out: string[] = [];
   let off = 0;
   while (off + 30 <= buf.length) {
     if (buf.readUInt32LE(off) !== 0x04034b50) break;
@@ -35,21 +75,15 @@ export function extractPptxText(buf: Buffer): string {
     const dataStart = off + 30 + nameLen + extraLen;
     if (/^ppt\/slides\/slide\d+\.xml$/.test(name) && compSize > 0) {
       const raw = buf.subarray(dataStart, dataStart + compSize);
-      let xml = "";
       try {
-        xml = method === 0 ? raw.toString("utf8") : method === 8 ? inflateRawSync(raw).toString("utf8") : "";
+        out.push(method === 0 ? raw.toString("utf8") : method === 8 ? inflateRawSync(raw).toString("utf8") : "");
       } catch {
-        xml = "";
-      }
-      for (const m of xml.matchAll(/<a:t>([\s\S]*?)<\/a:t>/g)) {
-        texts.push(
-          m[1].replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&").replace(/&quot;/g, '"'),
-        );
+        out.push("");
       }
     }
     off = dataStart + compSize;
   }
-  return texts.join("\n");
+  return out;
 }
 
 function readTextFile(abs: string, cap: number): string | null {

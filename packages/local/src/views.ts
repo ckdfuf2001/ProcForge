@@ -18,6 +18,8 @@ export function constraintSummary(c: Constraint): string {
       return s["exact"] !== undefined ? `exact=${s["exact"]}` : `min=${s["min"] ?? "-"} max=${s["max"] ?? "-"}`;
     case "numeric_match":
       return s["expected"] !== undefined ? `expected=${s["expected"]}` : `min=${s["min"] ?? "-"} max=${s["max"] ?? "-"}`;
+    case "pptx_table_sum":
+      return `path=${s["path"]} expected=${s["expected"]}`;
     case "schema":
       return "json-schema";
     case "llm_rubric":

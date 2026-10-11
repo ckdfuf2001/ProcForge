@@ -1,4 +1,8 @@
 import { describe, it, expect } from "vitest";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { deflateRawSync } from "node:zlib";
 import { evaluateConstraint, evaluateAll } from "../src/checker.js";
 import type { Constraint } from "@procforge/shared/schema.js";
 
@@ -191,6 +195,48 @@ describe("checker kinds", () => {
     expect(all.unverified).toEqual(["b"]);
   });
 
+  it("M5.5-0 pptx_table_sum: 표 합산·ref·deferred", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pf-ptsum-"));
+    const cell = (t: string) => `<a:tc><a:txBody><a:p><a:r><a:t>${t}</a:t></a:r></a:p></a:txBody></a:tc>`;
+    const row = (cs: string[]) => `<a:tr>${cs.map(cell).join("")}</a:tr>`;
+    const table = (rows: string[][]) => `<a:tbl>${rows.map(row).join("")}</a:tbl>`;
+    const slide = (body: string) => `<p:sld>${body}</p:sld>`;
+    const toPptx = (slides: string[]): Buffer => {
+      const parts: Buffer[] = [];
+      slides.forEach((xml, i) => {
+        const name = Buffer.from(`ppt/slides/slide${i + 1}.xml`, "utf8");
+        const data = deflateRawSync(Buffer.from(xml, "utf8"));
+        const head = Buffer.alloc(30);
+        head.writeUInt32LE(0x04034b50, 0);
+        head.writeUInt16LE(8, 8);
+        head.writeUInt32LE(data.length, 18);
+        head.writeUInt16LE(name.length, 26);
+        parts.push(head, name, data);
+      });
+      return Buffer.concat(parts);
+    };
+    const good = toPptx([slide(table([["제품", "수량", "금액"], ["A", "100", "1,000,000"], ["B", "50", "500,000"]]))]);
+    writeFileSync(join(dir, "r.pptx"), good);
+    const base = { id: "t", kind: "pptx_table_sum", spec: { path: "r.pptx", slide: 0, column: 2, expected: 1500000 }, source: "human" } as never;
+    expect(evaluateConstraint(base, { fsDir: dir }).pass).toBe(true);
+    // 그려진 값이 틀리면 fail (보고 total이 맞아도)
+    const bad = toPptx([slide(table([["제품", "수량", "금액"], ["A", "100", "500,000"], ["B", "50", "250,000"]]))]);
+    writeFileSync(join(dir, "w.pptx"), bad);
+    const badC = { ...base, spec: { ...(base as { spec: Record<string, unknown> }).spec, path: "w.pptx" } } as never;
+    const wb = evaluateConstraint(badC, { fsDir: dir });
+    expect(wb.pass).toBe(false);
+    expect(wb.reason ?? "").toMatch(/table sum/);
+    // ref + deferred
+    const refC = { ...base, spec: { path: "r.pptx", slide: 0, column: 2, expected: "$1.1.total" } } as never;
+    expect(evaluateConstraint(refC, { fsDir: dir, nodeOutputs: { "1.1": { total: 1500000 } } }).pass).toBe(true);
+    const dd = evaluateConstraint(refC, { fsDir: dir });
+    expect(dd.pass).toBe(false);
+    expect(dd.deferred).toBe(true);
+    // fsDir 없으면 deferred, 파일 없으면 fail, 탈출 fail
+    expect(evaluateConstraint(base, {}).deferred).toBe(true);
+    expect(evaluateConstraint({ ...base, spec: { path: "no.pptx", expected: 1 } } as never, { fsDir: dir }).pass).toBe(false);
+    expect(evaluateConstraint({ ...base, spec: { path: "../x.pptx", expected: 1 } } as never, { fsDir: dir }).pass).toBe(false);
+  });
   it("M5.2-4 equals expected의 ${params.k} 해결", () => {
     const c = { id: "p", kind: "equals", spec: { path: "period", expected: "${params.month}" }, source: "human" } as never;
     expect(evaluateConstraint(c, { resultJson: { period: "2026-10" }, params: { month: "2026-10" } }).pass).toBe(true);

@@ -77,6 +77,7 @@ export const ConstraintKindSchema = z.enum([
   "regex",
   "count",
   "numeric_match",
+  "pptx_table_sum",
   "schema",
   "llm_rubric",
 ]);
@@ -147,6 +148,22 @@ export const ConstraintLlmRubricSchema = ConstraintBase.extend({
   spec: z.object({ rubric: z.string().min(1) }),
 });
 
+export const ConstraintPptxTableSumSchema = ConstraintBase.extend({
+  kind: z.literal("pptx_table_sum"),
+  spec: z.object({
+    /** run fs 기준 pptx 경로 (${params.} 템플릿 허용) */
+    path: z.string().min(1),
+    /** 0-based 슬라이드. 생략 시 표가 있는 첫 슬라이드 */
+    slide: z.number().int().min(0).optional(),
+    /** 0-based 합산 열. 생략 시 마지막 열 */
+    column: z.number().int().min(0).optional(),
+    /** 첫 행(헤더) 제외. 기본 true */
+    skipHeader: z.boolean().optional(),
+    /** 고정값 또는 ref ("$노드[.경로]", "${params.x}") (M5.5-0) */
+    expected: z.union([z.number(), z.string()]),
+    tolerance: z.number().min(0).optional(),
+  }),
+});
 export const ConstraintSchema = z.discriminatedUnion("kind", [
   ConstraintFileExistsSchema,
   ConstraintJsonPathExistsSchema,
@@ -154,6 +171,7 @@ export const ConstraintSchema = z.discriminatedUnion("kind", [
   ConstraintRegexSchema,
   ConstraintCountSchema,
   ConstraintNumericMatchSchema,
+  ConstraintPptxTableSumSchema,
   ConstraintSchemaKindSchema,
   ConstraintLlmRubricSchema,
 ]);

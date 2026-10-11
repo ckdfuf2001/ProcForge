@@ -496,6 +496,7 @@ async function execNode(
     fileExists,
     nodeOutputs,
     params,
+    fsDir,
   });
   const durationMs = Date.now() - start;
   if (r.failedConstraints.length > 0) {
