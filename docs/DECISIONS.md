@@ -370,6 +370,11 @@
   참조 ${state.k} (var 전용, resolve/checker/validator 지원).
   첫 실행 state 부재 → params.stateDefaults(JSON) 또는 bad_request.
   절대경로 var는 입력 바인딩 제외 (rewritePaths가 처리).
+- M5.5-4: 무인 실행. --unattended에서 external은 approvals.json 일치 시만 실행,
+  불일치 시 suspended 대신 fail ["approval"] (exit 3). map 거부 항목은 map 실패에
+  ["approval"] 전파, until은 그대로 전파. 매칭은 해석된 인자 기준, "*" 와일드카드.
+  exit: 0 성공 / 1 실패·중단 / 2 입력 오류(bad_request) / 3 승인 필요.
+  스케줄러 내장 금지, docs/scheduling.md 예시만.
 - M5.5-2: until 노드. Node kind:"until" + until{until, maxIterations, carry?,
   template{tool,args,constraints}} (인라인, 자식 금지).
   $self = 이전 반복 출력의 carry 경로 값 (없으면 undefined=첫 페이지 관례).

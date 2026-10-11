@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { parseCliArgs, resolveDirs } from "./app/cli-args.js";
 import { createApp } from "./app/bootstrap.js";
+import { cliErrorExit, runExitCode } from "./app/run-exit.js";
 
 // CLI 어댑터 (M4.2-4-1). 파일·저장소 작업은 App 메서드로만 수행한다
 // (check-deps: app/ 외 local 내부·node:fs import 금지).
@@ -120,7 +121,7 @@ async function cmdRun(): Promise<number> {
   const positional = positionals[1];
   const procRef = (!values.session ? positional : undefined) ?? values.procedure;
   if (!procRef) {
-    console.error("procedure 실행: procforge run procedures/<name> [--param k=v] [--out dir] [--force]");
+    console.error("procedure 실행: procforge run procedures/<name> [--param k=v] [--out dir] [--force] [--unattended]");
     return 2;
   }
   const params: Record<string, string> = {};
@@ -142,18 +143,24 @@ async function cmdRun(): Promise<number> {
       force: values.force ?? false,
       allowBash: values["allow-bash"] ?? false,
       allowProjectRead: values["allow-project-read"] ?? false,
+      unattended: values.unattended ?? false,
     });
     console.log(`run ${out.runId} (session ${out.sessionId}): pass=${out.passed} fail=${out.failed} unverified=${out.unverified} skipped=${out.skipped} blocked=${out.blocked} suspended=${out.suspended}`);
     console.log(`report: ${out.reportPath}`);
     if (out.outDir) console.log(`out: ${out.outDir}`);
+    // M5.5-4: 종료 코드 0 성공 / 1 실패·중단 / 2 입력 오류 / 3 승인 필요.
+    if (out.approvalBlocked) {
+      console.error("approval 필요: 무인 실행 미승인 external. approvals.json에 tool·인자 등록 후 재실행");
+      return 3;
+    }
     if (out.suspended > 0) {
       console.error("suspended: pf_run_next로 재개 (MCP) — 생성값·승인 필요");
       return 1;
     }
-    return out.failed > 0 ? 1 : 0;
+    return runExitCode({ failed: out.failed, suspended: out.suspended, approvalBlocked: out.approvalBlocked });
   } catch (e) {
     console.error(`error: ${e instanceof Error ? e.message : String(e)}`);
-    return 1;
+    return cliErrorExit(e);
   }
 }
 

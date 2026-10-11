@@ -18,6 +18,8 @@ export type ProcedureRunOptions = {
   allowProjectRead?: boolean;
   nodeId?: string;
   changed?: boolean;
+  /** 무인 실행 (M5.5-4. external은 approvals.json 일치 시에만 실행) */
+  unattended?: boolean;
 };
 
 export function resolveProcedureRef(procforgeDir: string, ref: string): { dir: string; file: string } {
@@ -62,6 +64,7 @@ export async function runProcedureTest(
     allowProjectRead: o.allowProjectRead ?? false,
     changed: o.changed ?? false,
     procedureDir: dir,
+    unattended: o.unattended ?? false,
   });
   return { report, sessionId, procedureDir: dir };
 }

@@ -477,3 +477,4 @@ C4 CI E2E에도 C2·C3를 fake 서버로 추가. M5-dogfood.md 3절을 실제 �
 | 2026-10-11 | 6, 8 | M5.3 신설 (절차서 신뢰성 마무리 1~7): 감사 확장·S2 템플릿·실행 제한·실물 커밋·게이트 범위·에러 계약·검증 규율 | M5.3-0 완료 후속 |
 | 2026-10-11 | 6, 8 | M5.3.1 신설 (확정 산출물 정합성 1~5): file_exists 논리 경로·auto 감사·기간 params·원문 golden·0.2 보강 | M5.3 완료 후속 |
 | 2026-10-11 | 6, 8 | M5.5 신설 (반복·상태, 크롤링용 0~6): CI URL 검증·pptx_table_sum·map·until·state·무인 실행·dogfood·문구 | M5.3.1 완료 후속 |
+| 2026-10-11 | 6, 8 | M5.5-4 완료: 무인 실행·approvals.json·exit 표·docs/scheduling.md (양 모드 m55-unattended 7/7) | M5.5-3 완료 후속 |

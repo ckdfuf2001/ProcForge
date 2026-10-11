@@ -13,6 +13,7 @@ import { ConnectionPool } from "./connections.js";
 import { findRecording, loadCassette, recordKey, saveRecording, toToolResponse, compareToolResponses } from "./recordings.js";
 import { getByDot, resolveArgs, resolveVar, substituteItemSpecs, substituteParams } from "./resolve.js";
 import { loadProcedureState, procedureStatePath, saveProcedureState } from "../services/procedure-state.js";
+import { isApproved, loadApprovals } from "../services/approvals.js";
 import { runScript } from "./script-run.js";
 import { inferPathRole, rewritePaths, type InferredRole, type PathRole } from "./paths.js";
 import { setupRunFs } from "./workdir.js";
@@ -110,6 +111,10 @@ export async function runSession(opts: RunOptions): Promise<RunReport> {
         procedureStatePath(procedureDir),
         session.params as Record<string, string>,
       );
+    }
+    // M5.5-4: 무인 실행 사전 승인 로드 (없으면 빈 목록 = external 전부 거부).
+    if (opts.unattended && opts.approvals === undefined) {
+      opts.approvals = loadApprovals(procedureDir);
     }
   }
   const runId = opts.runId ?? randomUUID();
@@ -456,8 +461,17 @@ async function execNode(
       resp = { resultText: "[mock external]", resultJson: { mock: true } };
     }
   } else if (mode === "live" && n.sideEffect === "external" && !(opts.approvedNodeIds ?? []).includes(n.id)) {
-    // M5: live에서도 사람 승인 없이는 실행 금지
-    return { nodeId: n.id, status: "suspended", failedConstraints: [], detail: "need_approval", durationMs: Date.now() - start };
+    // M5: live에서도 사람 승인 없이는 실행 금지. M5.5-4: 무인 실행은
+    // approvals.json 일치 시 실행, 불일치 시 중단 대신 fail ["approval"].
+    if (opts.unattended) {
+      if (!isApproved(opts.approvals ?? [], server, tool, args as Record<string, unknown>)) {
+        return { nodeId: n.id, status: "fail", failedConstraints: ["approval"], detail: `approval: 무인 실행 미승인 external (${server}/${tool}). procedures/<name>/approvals.json에 tool·인자 등록 필요`, durationMs: Date.now() - start };
+      }
+      // 승인 일치 → 아래 실제 호출로 진행하지 않고 여기서 직접 호출 (live는 녹화 없음).
+      resp = await pool.call(server, tool, args);
+    } else {
+      return { nodeId: n.id, status: "suspended", failedConstraints: [], detail: "need_approval", durationMs: Date.now() - start };
+    }
   } else if (mode === "replay") {
     // M3.1-1: replay는 녹화 적중 + constraints만. golden 비교 없음.
     const rec = findRecording(loadCassette(opts.procforgeDir, opts.sessionId, n.id), key);
@@ -653,8 +667,11 @@ async function execMap(
   const itemOutputs: unknown[] = [];
   const failedItems: number[] = [];
   const failedDetails: string[] = [];
-  // live external 게이트: map 단위 중단 (인스턴스는 map sideEffect 상속)
-  if (mode === "live" && n.sideEffect === "external" && !(opts.approvedNodeIds ?? []).includes(n.id)) {
+  // M5.5-4: 무인 실행 승인 거부 항목 추적 (map 실패 시 ["approval"] 전파·exit 3).
+  let approvalDenied = false;
+  // live external 게이트: map 단위 중단 (인스턴스는 map sideEffect 상속).
+  // M5.5-4: 무인 실행은 중단하지 않고 항목별로 execNode 승인 검사에 맡긴다.
+  if (mode === "live" && n.sideEffect === "external" && !(opts.approvedNodeIds ?? []).includes(n.id) && !opts.unattended) {
     return done({ nodeId: n.id, status: "suspended", failedConstraints: [], detail: "need_approval" });
   }
   const supplied: Record<string, unknown> = (opts.supplied?.[n.id] ?? {}) as Record<string, unknown>;
@@ -727,6 +744,7 @@ async function execMap(
       itemOutputs.push(v ?? null);
     } else {
       outputs.delete(instanceId);
+      if (r.failedConstraints.includes("approval")) approvalDenied = true;
       failedItems.push(i);
       failedDetails.push(`${i}:${r.detail ?? r.failedConstraints.join(",")}`);
       itemOutputs.push({ error: r.detail ?? r.failedConstraints.join(",") });
@@ -763,7 +781,7 @@ async function execMap(
     return done({
       nodeId: n.id,
       status: "fail",
-      failedConstraints: ["policy", ...cr.failedConstraints],
+      failedConstraints: [...(approvalDenied ? ["approval"] : []), "policy", ...cr.failedConstraints],
       failedItems,
       detail: `map policy ${kind} 실패: ${failedDetails.slice(0, 5).join("; ")}`,
     });
@@ -828,8 +846,10 @@ async function execUntil(
       return done({ nodeId: n.id, status: "suspended", failedConstraints: [], detail: `need_generated:${missing.join(",")}` });
     }
   }
-  // live external 게이트: until 단위 중단 (인스턴스는 until sideEffect 상속)
-  if (mode === "live" && n.sideEffect === "external" && !(opts.approvedNodeIds ?? []).includes(n.id)) {
+  // live external 게이트: until 단위 중단 (인스턴스는 until sideEffect 상속).
+  // M5.5-4: 무인 실행은 중단하지 않고 반복별로 execNode 승인 검사에 맡긴다
+  // (거부는 execNode fail ["approval"] → 아래 r.failedConstraints 그대로 전파).
+  if (mode === "live" && n.sideEffect === "external" && !(opts.approvedNodeIds ?? []).includes(n.id) && !opts.unattended) {
     return done({ nodeId: n.id, status: "suspended", failedConstraints: [], detail: "need_approval" });
   }
   const pages: unknown[] = [];

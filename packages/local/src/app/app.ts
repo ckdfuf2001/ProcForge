@@ -990,10 +990,11 @@ export class ProcForgeApp {
   /** 절차서 live 일괄 실행 (M5, CLI run용). 일시정지면 suspended 포함 반환. */
   async runProcedure(a: {
     procedure: unknown; params?: unknown; out?: unknown; force?: unknown;
-    allowBash?: unknown; allowProjectRead?: unknown;
+    allowBash?: unknown; allowProjectRead?: unknown; unattended?: unknown;
   }): Promise<{
     runId: string; sessionId: string; mode: "live";
     passed: number; failed: number; unverified: number; skipped: number; blocked: number; suspended: number;
+    approvalBlocked: boolean;
     reportPath: string; outDir?: string;
   }> {
     const procRef = a.procedure as string;
@@ -1007,6 +1008,7 @@ export class ProcForgeApp {
       updateGolden: false,
       allowBash: a.allowBash === true,
       allowProjectRead: a.allowProjectRead === true,
+      unattended: a.unattended === true,
     });
     let outDir: string | undefined;
     const outOpt = a.out as string | undefined;
@@ -1019,6 +1021,7 @@ export class ProcForgeApp {
       passed: report.summary.pass, failed: report.summary.fail,
       unverified: report.summary.unverified, skipped: report.summary.skipped,
       blocked: report.summary.blocked, suspended: report.summary.suspended,
+      approvalBlocked: report.results.some((r) => r.failedConstraints.includes("approval")),
       reportPath: join(this.procforgeDir, "runs", report.runId, "report.json"),
       ...(outDir ? { outDir } : {}),
     };

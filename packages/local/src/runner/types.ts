@@ -22,6 +22,10 @@ export type RunOptions = {
   supplied?: Record<string, Record<string, unknown>>;
   /** 승인된 external 노드 (M5) */
   approvedNodeIds?: string[];
+  /** 무인 실행 (M5.5-4. external은 approvals 일치 시에만 실행, 불일치 시 fail ["approval"]) */
+  unattended?: boolean;
+  /** 사전 승인 목록 (M5.5-4. runSession이 procedures/<name>/approvals.json에서 로드) */
+  approvals?: import("../services/approvals.js").ApprovalEntry[];
   /** 절차서 이름 (M5 run state 기록용) */
   procedure?: string;
   /** 절차서 디렉터리 (M5.5-3 state.json 위치. 미지정 시 procedures/<name>) */
