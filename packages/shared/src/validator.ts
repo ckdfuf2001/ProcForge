@@ -310,9 +310,13 @@ export function validateTree(session: Session, nodes: Node[], opts: ValidateOpti
           if (msg) errors.push({ code: "bad_args", nodeId: n.id, message: msg });
         }
       }
-      // (10-9) leaf 확정 조건: 마지막 attempt verdict=pass
+      // (10-9) leaf 확정 조건: 마지막 attempt verdict=pass.
+      // M5.6-e: 승인된 external dry-run 계획 leaf는 면제 (attempt verdict 없음,
+      // core M2.6-4 확정과 정합. n.approval 존재 + sideEffect external).
       const last = n.attempts[n.attempts.length - 1];
-      if (!last || last.verdict !== "pass")
+      const approvedExternal =
+        n.sideEffect === "external" && (n as { approval?: unknown }).approval !== undefined;
+      if (!approvedExternal && (!last || last.verdict !== "pass"))
         errors.push({ code: "leaf_not_confirmed", nodeId: n.id, message: "leaf without passing attempt" });
     }
 
