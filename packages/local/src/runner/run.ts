@@ -400,20 +400,37 @@ export async function runSession(opts: RunOptions): Promise<RunReport> {
 }
 
 // M5.6-f: 일시 네트워크 오류 판별 (재시도 대상. 검증·입력 오류는 제외).
+// M5.6.1-2: 숫자·코드는 \b 경계 (15020 오탐 방지). 10013은 기본 제외 (설정으로만).
 const TRANSIENT_RES = [
   /timed? ?out/i,
-  /ECONNRESET|ECONNREFUSED|ENOTFOUND|EAI_AGAIN|EPIPE|EHOSTUNREACH|ENETUNREACH/i,
+  /\bECONNRESET\b|\bECONNREFUSED\b|\bENOTFOUND\b|\bEAI_AGAIN\b|\bEPIPE\b|\bEHOSTUNREACH\b|\bENETUNREACH\b/i,
   /fetch failed/i,
   /connection (closed|reset|refused|aborted)/i,
-  /status (429|502|503|504)\b/,
-  /10013|10054|10060/,
+  /\b429\b|\b502\b|\b503\b|\b504\b/,
+  /\b10054\b|\b10060\b/,
   /temporar/i,
 ];
 
-export function isTransientToolError(e: unknown): boolean {
+export function isTransientToolError(e: unknown, extraRes: RegExp[] = []): boolean {
   const msg = e instanceof Error ? e.message : String(e);
   if (/bad_request|bad_args|not_found|validation|invalid arg/i.test(msg)) return false;
-  return TRANSIENT_RES.some((re) => re.test(msg));
+  return TRANSIENT_RES.some((re) => re.test(msg)) || extraRes.some((re) => re.test(msg));
+}
+
+// M5.6.1-2: Retry-After(초) 파싱. 없으면 undefined.
+export function parseRetryAfterMs(msg: string): number | undefined {
+  const m = /retry-after:\s*(\d+)/i.exec(msg);
+  if (!m) return undefined;
+  return Number(m[1]) * 1000;
+}
+
+// M5.6.1-2: 대기 계산 (순수). 지수 백오프 + baseMs 비례 jitter, 1회 30s 상한.
+// Retry-After가 있으면 그만큼은 보장 (상한 내).
+export function retryDelayMs(baseMs: number, attempt: number, retryAfterMs?: number): number {
+  const grown = baseMs * 2 ** attempt;
+  const jitter = Math.floor(Math.random() * Math.max(0, baseMs));
+  const want = Math.max(grown, retryAfterMs ?? 0) + jitter;
+  return Math.min(30000, Math.max(0, want));
 }
 
 export type ToolCaller = {
@@ -439,10 +456,15 @@ export async function callWithRetry(
   server: string,
   tool: string,
   args: Record<string, unknown>,
-  opts: { retry: boolean; attempts?: number; baseMs?: number },
+  opts: { retry: boolean; attempts?: number; baseMs?: number; extraTransient?: string[] },
 ): Promise<{ resp: ToolResponse; attempts: number }> {
-  const attempts = Math.max(1, Math.floor(opts.attempts ?? 3));
+  // M5.6.1-2: attempts 상한 10. extraTransient는 추가 정규식 (예: ["\\b10013\\b"]).
+  const attempts = Math.min(10, Math.max(1, Math.floor(opts.attempts ?? 3)));
   const baseMs = Math.max(0, opts.baseMs ?? 500);
+  const extraRes = (opts.extraTransient ?? []).map((s) => new RegExp(s, "i"));
+  const transient = (e: unknown): boolean => isTransientToolError(e, extraRes);
+  const sleepFor = (msg: string, i: number): Promise<void> =>
+    new Promise((r) => setTimeout(r, retryDelayMs(baseMs, i, parseRetryAfterMs(msg))));
   let pendingError: unknown;
   let pendingResp: ToolResponse | undefined;
   for (let i = 0; i < attempts; i++) {
@@ -450,16 +472,16 @@ export async function callWithRetry(
     try {
       resp = await pool.call(server, tool, args);
     } catch (e) {
-      if (!opts.retry || i + 1 >= attempts || !isTransientToolError(e)) throw e;
+      if (!opts.retry || i + 1 >= attempts || !transient(e)) throw e;
       pendingError = e;
-      await new Promise((r) => setTimeout(r, baseMs * 2 ** i));
+      await sleepFor(e instanceof Error ? e.message : String(e), i);
       continue;
     }
     // M5.6.1-1: ok:false 일시 상태 응답도 재시도 (isError 텍스트와 동일 판별).
     if (opts.retry && isTransientResult(resp)) {
       pendingResp = resp;
       if (i + 1 >= attempts) break;
-      await new Promise((r) => setTimeout(r, baseMs * 2 ** i));
+      await sleepFor(resp.resultText, i);
       continue;
     }
     return { resp, attempts: i + 1 };

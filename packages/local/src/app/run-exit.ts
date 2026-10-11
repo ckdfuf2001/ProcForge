@@ -24,6 +24,23 @@ export function runErrorExit(e: unknown): number {
   return cliErrorExit(e);
 }
 
+// M5.6.1-2: --retry-attempts/--retry-base-ms 파싱. attempts 1..10, baseMs 0 이상.
+// 벗어나면 bad_request (CLI exit 2).
+export function parseRetryOptions(
+  attemptsRaw: string | undefined,
+  baseMsRaw: string | undefined,
+): { attempts: number; baseMs: number } {
+  const attempts = attemptsRaw === undefined ? 3 : Number(attemptsRaw);
+  const baseMs = baseMsRaw === undefined ? 500 : Number(baseMsRaw);
+  if (!Number.isInteger(attempts) || attempts < 1 || attempts > 10) {
+    throw Object.assign(new Error("bad --retry-attempts (1 이상 10 이하 정수)"), { code: "bad_request" });
+  }
+  if (!Number.isInteger(baseMs) || baseMs < 0) {
+    throw Object.assign(new Error("bad --retry-base-ms (0 이상 정수)"), { code: "bad_request" });
+  }
+  return { attempts, baseMs };
+}
+
 // M5.5-4.1-1: 입력 오류 코드 (exit 2). scheduling.md 표와 일치 고정.
 const INPUT_ERROR_CODES: readonly string[] = [
   "bad_request",

@@ -112,6 +112,7 @@ Register-ScheduledTask -TaskName "procforge-daily" -Action $action -Trigger $tri
   다시 시도한다.
 - readOnly + 부작용 없음(none) 도구 호출은 일시 네트워크 오류 시 자동 재시도된다
   (지수 백오프, 기본 3회·500ms, `--retry-attempts`·`--retry-base-ms`로 설정).
+  attempts 상한 10, 1회 대기는 30초 상한+jitter, `Retry-After`는 상한 내에서 존중.
   external·쓰기 노드는 재시도하지 않는다 (중복 부작용 방지).
 - 같은 절차서의 실행이 겹치면 `procedures/<name>/.run.lock`으로 두 번째가
   `conflict`(exit 4)로 거부된다. 앞선 실행이 비정상 종료된 지 60초가 지나면

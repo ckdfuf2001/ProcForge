@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { parseCliArgs, resolveDirs, normalizeCliPath } from "./app/cli-args.js";
 import { createApp } from "./app/bootstrap.js";
-import { cliErrorExit, runErrorExit, runExitCode } from "./app/run-exit.js";
+import { cliErrorExit, parseRetryOptions, runErrorExit, runExitCode } from "./app/run-exit.js";
 
 // CLI 어댑터 (M4.2-4-1). 파일·저장소 작업은 App 메서드로만 수행한다
 // (check-deps: app/ 외 local 내부·node:fs import 금지).
@@ -136,18 +136,15 @@ async function cmdRun(): Promise<number> {
   const { projectRoot, procforgeDir } = resolveDirs(values, process.env);
   try {
     const { app } = createApp({ procforgeDir, projectRoot });
-    // M5.6-f: 재시도 설정 (숫자 아니면 입력 오류).
+    // M5.6-f: 재시도 설정. M5.6.1-2: parseRetryOptions로 검증 (숫자 아니면 입력 오류).
     let toolRetry: { attempts?: number; baseMs?: number } | undefined;
-    const ra = values["retry-attempts"];
-    const rb = values["retry-base-ms"];
-    if (ra !== undefined || rb !== undefined) {
-      const attempts = ra === undefined ? 3 : Number(ra);
-      const baseMs = rb === undefined ? 500 : Number(rb);
-      if (!Number.isInteger(attempts) || attempts < 1 || !Number.isInteger(baseMs) || baseMs < 0) {
-        console.error("bad --retry-attempts (1 이상 정수) / --retry-base-ms (0 이상 정수)");
-        return 2;
+    if (values["retry-attempts"] !== undefined || values["retry-base-ms"] !== undefined) {
+      try {
+        toolRetry = parseRetryOptions(values["retry-attempts"], values["retry-base-ms"]);
+      } catch (e) {
+        console.error(`error: ${e instanceof Error ? e.message : String(e)}`);
+        return cliErrorExit(e);
       }
-      toolRetry = { attempts, baseMs };
     }
     const out = await app.runProcedure({
       procedure: procRef,

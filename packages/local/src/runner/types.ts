@@ -25,7 +25,7 @@ export type RunOptions = {
   /** 무인 실행 (M5.5-4. external은 approvals 일치 시에만 실행, 불일치 시 fail ["approval"]) */
   unattended?: boolean;
   /** 도구 호출 재시도 (M5.6-f. readOnly + sideEffect none만, 지수 백오프). */
-  toolRetry?: { attempts?: number; baseMs?: number };
+  toolRetry?: { attempts?: number; baseMs?: number; extraTransient?: string[] };
   /** 사전 승인 목록 (M5.5-4. runSession이 procedures/<name>/approvals.json에서 로드) */
   approvals?: import("../services/approvals.js").ApprovalEntry[];
   /** 절차서 이름 (M5 run state 기록용) */
