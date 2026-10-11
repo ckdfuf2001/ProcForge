@@ -34,9 +34,9 @@
   (`"*"` → `$any`, 끝 `*` 문자열 → `$prefix`) 후 경고가 남는다.
   node pin 없는 v1은 재생성해야 한다 (`approve`로 다시 생성).
 - `node.id` + `node.hash` 필수. `approve` 생성분에는 `approvalHash`도 들어간다
-  (nodeHash + tool + sideEffect + map/until 전체 스펙 + var 참조 상류 노드
-  재귀. 상류·템플릿 변경도 stale). 절차서를 수정하면 기존 승인은 거부된다
-  (`approval: 승인 갱신 필요`). 항목 생성은 CLI로 한다
+  (nodeHash + tool + sideEffect + map/until 전체 스펙 + script 파일 내용 +
+  var 참조 상류 노드 재귀. 상류·템플릿·스크립트 변경도 stale). 절차서를 수정하면
+  기존 승인은 거부된다 (`approval: 승인 갱신 필요`). 항목 생성은 CLI로 한다
   (MCP 도구 추가 없음):
   `procforge approve procedures/<name> --node <id> [--allow-wildcard <key> ...]`
   (같은 노드 항목이 있으면 갱신).

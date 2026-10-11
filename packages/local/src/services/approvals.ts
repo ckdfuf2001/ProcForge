@@ -62,10 +62,27 @@ function collectArgNodeRefs(specs: Record<string, unknown> | undefined): string[
   return out;
 }
 
+function collectScriptFiles(specs: Record<string, unknown> | undefined): string[] {
+  const out: string[] = [];
+  for (const s of Object.values(specs ?? {})) {
+    if (typeof s === "object" && s !== null && (s as { kind?: unknown }).kind === "script") {
+      const f = (s as { file?: unknown }).file;
+      if (typeof f === "string") out.push(f);
+    }
+  }
+  return out;
+}
+
+export type ApprovalHashOpts = {
+  /** script-kind 파일 내용 읽기 (rel → 내용. 없으면 undefined). */
+  readScript?: (rel: string) => string | undefined;
+};
+
 export function computeApprovalHash(
   n: HashableNode,
   byId: Map<string, HashableNode>,
   seen: Set<string> = new Set(),
+  opts: ApprovalHashOpts = {},
 ): string {
   const base = computeNodeHash({
     goal: n.goal,
@@ -76,8 +93,18 @@ export function computeApprovalHash(
   const tool = n.tool ? `${n.tool.server}/${n.tool.name}` : "";
   const se = n.sideEffect ?? "";
   const specs = [n.map !== undefined ? stable(n.map) : "", n.until !== undefined ? stable(n.until) : ""];
+  // M5.5-4.4-1: script-kind 파일 내용 sha256 (인자 + map/until 템플릿).
+  const scriptRels: string[] = [...collectScriptFiles(n.args as Record<string, unknown> | undefined)];
+  for (const k of ["map", "until"] as const) {
+    const spec = n[k] as { template?: { args?: Record<string, unknown> } } | undefined;
+    scriptRels.push(...collectScriptFiles(spec?.template?.args));
+  }
+  const scripts = [...new Set(scriptRels)].sort().map((rel) => {
+    const content = opts.readScript?.(rel);
+    return content === undefined ? `missing:${rel}` : createHash("sha256").update(content, "utf8").digest("hex");
+  });
   const fold = (up: string[]): string =>
-    createHash("sha256").update(stable({ base, tool, se, specs, up })).digest("hex").slice(0, 32);
+    createHash("sha256").update(stable({ base, tool, se, specs, scripts, up })).digest("hex").slice(0, 32);
   if (seen.has(n.id)) return fold([`cycle:${n.id}`]);
   seen.add(n.id);
   const refs: string[] = [...collectArgNodeRefs(n.args as Record<string, unknown> | undefined)];
@@ -88,7 +115,7 @@ export function computeApprovalHash(
   }
   const up = [...new Set(refs)]
     .filter((id) => id !== n.id && byId.has(id))
-    .map((id) => computeApprovalHash(byId.get(id) as HashableNode, byId, seen))
+    .map((id) => computeApprovalHash(byId.get(id) as HashableNode, byId, seen, opts))
     .sort();
   seen.delete(n.id);
   return fold(up);
@@ -298,6 +325,7 @@ export function buildApprovalEntry(
   },
   allowWildcardKeys: string[] = [],
   docById: Map<string, HashableNode> = new Map(),
+  readScript?: (rel: string) => string | undefined,
 ): ApprovalEntry {
   if (!docNode.tool) throw pfError("bad_request", `승인은 tool 노드만 가능: ${docNode.id}`);
   if (docNode.sideEffect !== undefined && docNode.sideEffect !== "external") {
@@ -332,6 +360,7 @@ export function buildApprovalEntry(
   };
   const nodes = new Map(docById);
   nodes.set(hashable.id, hashable);
+  const hashOpts = readScript ? { readScript } : {};
   return {
     node: {
       id: docNode.id,
@@ -342,7 +371,7 @@ export function buildApprovalEntry(
         dependsOn: [],
       }),
     },
-    approvalHash: computeApprovalHash(hashable, nodes),
+    approvalHash: computeApprovalHash(hashable, nodes, new Set(), hashOpts),
     tool: { server: docNode.tool.server, name: docNode.tool.name },
     args: pattern,
   };
@@ -367,14 +396,16 @@ export function approvalPins(
   node: { id: string; hash?: string; parentId?: string | null },
   parent?: { id: string; hash?: string; kind?: string },
   byId?: Map<string, HashableNode>,
+  readScript?: (rel: string) => string | undefined,
 ): ApprovalPin[] {
   const nodes = byId ?? new Map<string, HashableNode>();
+  const opts = readScript ? { readScript } : {};
   const pin = (id: string, hash: string): ApprovalPin => {
     const full = nodes.get(id);
     return {
       id,
       hash,
-      approvalHash: full ? computeApprovalHash(full, nodes) : computeApprovalHash({ id, goal: "", args: {} }, nodes),
+      approvalHash: full ? computeApprovalHash(full, nodes, new Set(), opts) : computeApprovalHash({ id, goal: "", args: {} }, nodes, new Set(), opts),
     };
   };
   const pins: ApprovalPin[] = [pin(node.id, node.hash ?? "")];

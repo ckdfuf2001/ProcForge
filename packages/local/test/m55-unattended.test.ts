@@ -697,6 +697,21 @@ describe("M5.5-4.3-3 approvalHash", () => {
     return app;
   }
 
+  it("M5.5-4.4-1 단위: script 내용 변경에 민감, 부재 시 결정적", () => {
+    const S = {
+      id: "1.4", goal: "s", tool: { server: "host", name: "script" },
+      args: { acc: { kind: "script", file: "scripts/acc.py" } }, constraints: [], sideEffect: "none",
+    };
+    const byId = new Map([[S.id, S as never]]);
+    const r1 = () => computeApprovalHash(S as never, byId, new Set(), { readScript: () => "v1" });
+    const r2 = () => computeApprovalHash(S as never, byId, new Set(), { readScript: () => "v2" });
+    const r3 = () => computeApprovalHash(S as never, byId, new Set(), {});
+    expect(r1()).toBe(r1());
+    expect(r2()).not.toBe(r1());
+    expect(r3()).toBe(r3());
+    expect(r3()).not.toBe(r1());
+  });
+
   it("상류 1.1 수정 → 1.2 stale exit 3 (1.2 자체 hash 불변)", async () => {
     const app = await buildChain();
     const ap = await app.approveProcedureNode({ procedure: "m55-chain", nodeId: "1.2", allowWildcard: ["note"] });

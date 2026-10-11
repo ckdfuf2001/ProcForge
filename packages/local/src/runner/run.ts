@@ -526,12 +526,20 @@ async function execNode(
     // M5.5-4.1-3: node pin(id+hash) 판정. 해시 불일치(stale)는 갱신 안내.
     if (opts.unattended) {
       const parent = n.parentId ? byId.get(n.parentId) : undefined;
+      const readScript = (rel: string): string | undefined => {
+        try {
+          return readFileSync(join(opts.procforgeDir, "sessions", opts.sessionId, rel), "utf8");
+        } catch {
+          return undefined;
+        }
+      };
       const verdict = checkApproval(
         opts.approvals ?? [],
         approvalPins(
           n,
           parent ? { id: parent.id, hash: parent.hash, kind: (parent as { kind?: string }).kind } : undefined,
           byId as unknown as Map<string, import("../services/approvals.js").HashableNode>,
+          readScript,
         ),
         server, tool, logicalArgs as Record<string, unknown>,
       );

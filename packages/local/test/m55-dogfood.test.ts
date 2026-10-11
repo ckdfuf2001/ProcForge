@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, writeFileSync, readFileSync, mkdirSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync, mkdirSync, existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
@@ -293,6 +293,23 @@ describe("M5.5-5 dogfood", () => {
     const text = readFileSync(procFile, "utf8");
     expect(text).toContain('"maxItems": 10');
     writeFileSync(procFile, text.replace('"maxItems": 10', '"maxItems": 11'));
+    const r = await runProcedureTest(pfdir, root, "daily-crawl", {
+      procforgeDir: pfdir, projectRoot: root, mode: "live",
+      params: { day: "d1", stateDefaults: '{"seenIds":[]}' }, unattended: true,
+    });
+    const n = r.report.results.find((x) => x.nodeId === "1.3")!;
+    expect(n.status).toBe("fail");
+    expect(n.failedConstraints).toContain("approval");
+    expect(n.detail ?? "").toContain("갱신");
+    expect(runExitCode({ failed: r.report.summary.fail, suspended: 0, approvalBlocked: true })).toBe(3);
+  }, 180000);
+
+  it("M5.5-4.4-1 평탄화 스크립트 1줄 수정 → 하류 map stale exit 3", async () => {
+    const app = await buildDogfood();
+    await app.approveProcedureNode({ procedure: "daily-crawl", nodeId: "1.3", allowWildcard: ["id"] });
+    const scriptFile = join(pfdir, "procedures", "daily-crawl", "scripts", "1_2.py");
+    expect(existsSync(scriptFile)).toBe(true);
+    writeFileSync(scriptFile, readFileSync(scriptFile, "utf8") + "\n# tweak\n");
     const r = await runProcedureTest(pfdir, root, "daily-crawl", {
       procforgeDir: pfdir, projectRoot: root, mode: "live",
       params: { day: "d1", stateDefaults: '{"seenIds":[]}' }, unattended: true,

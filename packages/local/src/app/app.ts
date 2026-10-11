@@ -1022,7 +1022,13 @@ export class ProcForgeApp {
       sideEffect: n.sideEffect,
       map: (n as { map?: unknown }).map,
       until: (n as { until?: unknown }).until,
-    }, allowWildcard, docById as Map<string, import("../services/approvals.js").HashableNode>);
+    }, allowWildcard, docById as Map<string, import("../services/approvals.js").HashableNode>, (rel: string) => {
+      try {
+        return readFileSync(join(dir, rel), "utf8");
+      } catch {
+        return undefined;
+      }
+    });
     const { path, replaced } = saveApproval(dir, entry);
     return { procedureDir: dir, path, nodeId, hash: entry.node.hash, replaced };
   }
