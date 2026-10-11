@@ -37,6 +37,33 @@ export type HashableNode = {
   until?: unknown;
 };
 
+// M5.5-4.4-5: doc·세션 노드 단일 변환 (호출자 캐스팅 제거).
+export function toHashable(n: {
+  id: string;
+  goal?: unknown;
+  tool?: { server: string; name: string } | undefined;
+  args?: Record<string, unknown> | undefined;
+  constraints?: unknown[] | undefined;
+  sideEffect?: unknown;
+  map?: unknown;
+  until?: unknown;
+}): HashableNode {
+  return {
+    id: n.id,
+    goal: typeof n.goal === "string" ? n.goal : "",
+    ...(n.tool ? { tool: { server: n.tool.server, name: n.tool.name } } : {}),
+    ...(n.args ? { args: n.args } : {}),
+    ...(n.constraints ? { constraints: n.constraints } : {}),
+    ...(typeof n.sideEffect === "string" ? { sideEffect: n.sideEffect } : {}),
+    ...(n.map !== undefined ? { map: n.map } : {}),
+    ...(n.until !== undefined ? { until: n.until } : {}),
+  };
+}
+
+export function toHashableMap(byId: Map<string, Parameters<typeof toHashable>[0]>): Map<string, HashableNode> {
+  return new Map([...byId.entries()].map(([id, n]) => [id, toHashable(n)] as const));
+}
+
 function stable(v: unknown): string {
   if (Array.isArray(v)) return `[${v.map(stable).join(",")}]`;
   if (typeof v === "object" && v !== null) {
@@ -344,8 +371,8 @@ export function buildApprovalEntry(
     id: string;
     goal: string;
     tool?: { server: string; name: string };
-    args?: Record<string, ArgSpec>;
-    constraints?: Constraint[];
+    args?: Record<string, unknown>;
+    constraints?: unknown[];
     sideEffect?: string;
     map?: unknown;
     until?: unknown;
@@ -362,7 +389,7 @@ export function buildApprovalEntry(
   const denied: string[] = [];
   const pattern: Record<string, unknown> = {};
   for (const [k, s] of Object.entries(docNode.args ?? {})) {
-    const kind = (s as { kind?: string }).kind;
+    const kind = (s as { kind?: unknown }).kind;
     if (kind === "script") continue;
     if (kind === "fixed") {
       pattern[k] = (s as { value?: unknown }).value;
@@ -375,16 +402,8 @@ export function buildApprovalEntry(
   if (denied.length > 0) {
     throw pfError("bad_request", `승인 불가: 와일드카드 미지정 키 (${denied.join(",")}). --allow-wildcard <key>로 명시`);
   }
-  const hashable: HashableNode = {
-    id: docNode.id,
-    goal: docNode.goal,
-    tool: docNode.tool,
-    args: docNode.args,
-    constraints: docNode.constraints,
-    sideEffect: docNode.sideEffect,
-    map: docNode.map,
-    until: docNode.until,
-  };
+  // M5.5-4.4-5: toHashable 단일 변환.
+  const hashable = toHashable(docNode);
   const nodes = new Map(docById);
   nodes.set(hashable.id, hashable);
   const hashOpts = readScript ? { readScript } : {};
@@ -393,8 +412,8 @@ export function buildApprovalEntry(
       id: docNode.id,
       hash: computeNodeHash({
         goal: docNode.goal,
-        args: docNode.args,
-        constraints: docNode.constraints ?? [],
+        args: (docNode.args ?? {}) as Record<string, ArgSpec>,
+        constraints: (docNode.constraints ?? []) as Constraint[],
         dependsOn: [],
       }),
     },

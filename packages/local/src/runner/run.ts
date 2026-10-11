@@ -13,7 +13,7 @@ import { ConnectionPool } from "./connections.js";
 import { findRecording, loadCassette, recordKey, saveRecording, toToolResponse, compareToolResponses } from "./recordings.js";
 import { getByDot, resolveArgs, resolveVar, substituteItemSpecs, substituteParams } from "./resolve.js";
 import { loadProcedureState, procedureStatePath, saveProcedureState } from "../services/procedure-state.js";
-import { approvalPins, checkApproval, loadApprovals } from "../services/approvals.js";
+import { approvalPins, checkApproval, loadApprovals, toHashableMap } from "../services/approvals.js";
 import { runScript } from "./script-run.js";
 import { inferPathRole, rewritePaths, type InferredRole, type PathRole } from "./paths.js";
 import { setupRunFs } from "./workdir.js";
@@ -538,7 +538,7 @@ async function execNode(
         approvalPins(
           n,
           parent ? { id: parent.id, hash: parent.hash, kind: (parent as { kind?: string }).kind } : undefined,
-          byId as unknown as Map<string, import("../services/approvals.js").HashableNode>,
+          toHashableMap(byId),
           readScript,
         ),
         server, tool, logicalArgs as Record<string, unknown>,
