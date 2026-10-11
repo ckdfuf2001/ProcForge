@@ -428,7 +428,7 @@ C4 CI E2E에도 C2·C3를 fake 서버로 추가. M5-dogfood.md 3절을 실제 �
 | M5.2 | 교차 기간 재사용 | [x] | `adf6ae7` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38074263388 | 입력 바인딩·스크립트 leaf·값 흐름·수락 a~d·단가 통일 |
 | M5.3-0 | 확정 게이트 선행 | [x] | `18e0b44` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38082174797 | confirm required 강제·회귀·에러 계약·증거 경고·관찰 기록 |
 | M5.3 | 절차서 신뢰성 마무리 | [x] | `a107ade` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38107570434 | 감사 확장·S2 템플릿·실행 제한·실물 커밋·게이트 범위·에러 계약·검증 규율 |
-| M5.3.1 | 확정 산출물 정합성 | [ ] | | | file_exists 논리 경로·auto 감사·기간 params·원문 golden·0.2 보강 |
+| M5.3.1 | 확정 산출물 정합성 | [x] | `7beb2a4` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38113634838 | file_exists 논리 경로·auto 감사·기간 params·원문 golden·0.2 보강 |
 | M5.5 | 반복 노드 | [ ] | | | |
 | M5.6 | 상태 / sideEffect | [ ] | | | |
 | - | 크롤링 테스트 | [ ] | | | 사람 진행 |
