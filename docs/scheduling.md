@@ -54,7 +54,10 @@
   path 세그먼트 접두로 비교한다. 패턴은 origin 뒤 `/`가 필수
   (`"https://a.com"`은 로드 시 `bad_request`). 패턴에 query/fragment가
   있으면 로드 시 `bad_request`, 실제 값에 username/password가 있으면 거부한다.
-- 생성된 패턴은 fixed 값 그대로다. var/generated 키는 `--allow-wildcard <key>`로
+- 생성된 패턴은 fixed 값 그대로다. 단 fixed 값에 `${...}`가 있으면 리터럴
+  앞부분으로 `$prefix`를 생성한다 (URL이면 URL 모드 규칙 적용, 리터럴이
+  비어 있으면 `$any`). URL 리터럴이 origin 뒤 `/` 없으면 생성 거부.
+  var/generated 키는 `--allow-wildcard <key>`로
   명시한 것만 `{"$any": true}`가 되고, 미지정 키가 있으면 `bad_request`(exit 2) +
   키 목록으로 거부된다 (암묵적 전체 허용 금지).
 - 매칭 기준은 논리 경로다 (rewritePaths 전 해석 인자). path 인자는 고정

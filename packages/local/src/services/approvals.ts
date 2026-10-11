@@ -360,7 +360,17 @@ export function matchApproval(
 // M5.5-4.3-4: pin 없는 isApproved 삭제 (node pin 없는 매칭 금지).
 // 외부 호출은 checkApproval만 사용.
 
-// M5.5-4.1-3: 절차서 노드에서 승인 항목 생성.
+// M5.6-b: fixed 템플릿 값 → $prefix 생성. 리터럴 앞부분을 사용.
+// URL이면 URL 모드 규칙 적용 (origin 뒤 "/" 없으면 bad_request).
+// 리터럴이 비어 있으면 $any.
+export function fixedTemplatePrefix(key: string, value: string): { $prefix: string } | { $any: true } {
+  const literal = value.split("${")[0];
+  if (literal === "") return { $any: true };
+  if (SCHEME_RE.test(literal) && !URL_PREFIX_RE.test(literal)) {
+    throw pfError("bad_request", `승인 불가: $prefix 무효 (${key} 리터럴 "${literal}"). URL은 origin 뒤 "/" 필요 — $prefix 수기 작성`);
+  }
+  return { $prefix: literal };
+}
 // 해시는 importProcedure와 동일 공식 (goal·args·constraints·dependsOn []).
 // 패턴: fixed 값 그대로, script-kind는 제외 (tool 인자 아님).
 // M5.5-4.2-2: var/generated 키는 allowWildcardKeys에 명시된 것만 와일드카드 생성.
@@ -391,8 +401,14 @@ export function buildApprovalEntry(
   for (const [k, s] of Object.entries(docNode.args ?? {})) {
     const kind = (s as { kind?: unknown }).kind;
     if (kind === "script") continue;
+    // M5.6-b: fixed 값에 ${...}가 있으면 리터럴 앞부분을 $prefix로 생성.
     if (kind === "fixed") {
-      pattern[k] = (s as { value?: unknown }).value;
+      const v = (s as { value?: unknown }).value;
+      if (typeof v === "string" && v.includes("${")) {
+        pattern[k] = fixedTemplatePrefix(k, v);
+        continue;
+      }
+      pattern[k] = v;
     } else if (allowed.has(k)) {
       pattern[k] = { $any: true };
     } else {

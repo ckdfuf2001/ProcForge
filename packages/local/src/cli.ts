@@ -185,6 +185,8 @@ async function cmdApprove(): Promise<number> {
         procedure: target, nodeId: values.node ?? nodeId, allowWildcard: values["allow-wildcard"] ?? [],
       });
       console.log(`approved: ${r.nodeId} (hash ${r.hash.slice(0, 12)}…) → ${r.path}${r.replaced ? " (갱신)" : ""}`);
+      // M5.6-b: 생성 패턴 표시 ($prefix/$any 확인용).
+      console.log(`pattern: ${JSON.stringify(r.args)}`);
       return 0;
     }
     if (!target || !nodeId) {

@@ -4,7 +4,7 @@ import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { ProcForgeApp } from "../src/app/app.js";
 import { runProcedureTest } from "../src/runner/procedure-run.js";
-import { loadApprovals, matchApproval, approvalPins, checkApproval, buildApprovalEntry, migrateV1Value, computeApprovalHash } from "../src/services/approvals.js";
+import { loadApprovals, matchApproval, approvalPins, checkApproval, buildApprovalEntry, migrateV1Value, computeApprovalHash, fixedTemplatePrefix } from "../src/services/approvals.js";
 import { runExitCode, cliErrorExit, runErrorExit } from "../src/app/run-exit.js";
 import { testStack } from "./client-mode.js";
 import { computeNodeHash } from "@procforge/shared/schema.js";
@@ -825,5 +825,87 @@ describe("M5.5-4.4-2 url 템플릿 상류 참조", () => {
     expect(n.failedConstraints).toContain("approval");
     expect(n.detail ?? "").toContain("갱신");
     expect(runExitCode({ failed: r.report.summary.fail, suspended: 0, approvalBlocked: true })).toBe(3);
+  }, 180000);
+});
+
+describe("M5.6-b approve $prefix 생성", () => {
+  it("단위: 리터럴 앞부분·URL 규칙·빈 리터럴", () => {
+    expect(fixedTemplatePrefix("u", "https://h/x/${i}")).toEqual({ $prefix: "https://h/x/" });
+    expect(fixedTemplatePrefix("p", "output/${f}")).toEqual({ $prefix: "output/" });
+    expect(fixedTemplatePrefix("u", "${i}")).toEqual({ $any: true });
+    expect(() => fixedTemplatePrefix("u", "https://a.com${p}")).toThrow(/origin/);
+    // buildApprovalEntry 통합: fixed 템플릿은 allow-wildcard 없이 $prefix.
+    const built = buildApprovalEntry({
+      id: "1.2", goal: "m", tool: { server: "s", name: "t" }, sideEffect: "external",
+      args: { url: { kind: "fixed", value: "https://h/x/${item.id}" } }, constraints: [],
+    }, []);
+    expect(built.args).toEqual({ url: { $prefix: "https://h/x/" } });
+  });
+
+  async function buildUrlMap(): Promise<ProcForgeApp> {
+    const { client } = testStack(pfdir);
+    const app = new ProcForgeApp({ core: client, procforgeDir: pfdir, projectRoot: root });
+    const started = await client.pfStart({ request: "urlmap", params: {}, toolCatalog: ECHO_CAT });
+    const sid = started.session.id;
+    await client.pfResolve({
+      sessionId: sid, nodeId: "1", decision: "split",
+      children: [{ goal: "목록" }, { goal: "가져오기", dependsOn: ["1.1"] }],
+    });
+    const items = [{ id: "a" }, { id: "b" }];
+    await client.pfReport({
+      sessionId: sid, nodeId: "1.1", tool: { server: "fake-ppt", name: "echo" },
+      args: { snapshot: { items } }, resultSummary: "2 items", resultJson: { snapshot: { items } },
+      selfVerdict: "pass", selfReason: "ok",
+    });
+    await client.pfResolve({
+      sessionId: sid, nodeId: "1.1", decision: "leaf",
+      tool: { server: "fake-ppt", name: "echo" },
+      argSpecs: { snapshot: { kind: "fixed", value: { items } } } as never,
+    });
+    const probe = [{ id: "a" }, { id: "b" }];
+    await client.pfReport({
+      sessionId: sid, nodeId: "1.2", tool: { server: "fake-ppt", name: "echo" },
+      args: { url: "https://h/x/a" }, resultSummary: "probe", resultJson: probe,
+      selfVerdict: "pass", selfReason: "ok",
+    });
+    await client.pfEditNode({
+      sessionId: sid, nodeId: "1.2",
+      addConstraints: [{ id: "c-n", kind: "count", spec: { min: 1 }, source: "human" }],
+      map: {
+        over: "$1.1.snapshot.items", as: "item", maxItems: 10, policy: { kind: "all" },
+        template: {
+          tool: { server: "fake-ppt", name: "echo" },
+          args: { url: { kind: "fixed", value: "https://h/x/${item.id}" } },
+          constraints: [],
+        },
+      } as never,
+    });
+    const r2 = await client.pfReport({
+      sessionId: sid, nodeId: "1.2", tool: { server: "fake-ppt", name: "echo" },
+      args: { url: "https://h/x/a" }, resultSummary: "probe", resultJson: probe,
+      selfVerdict: "pass", selfReason: "ok",
+    });
+    expect(r2.verdict).toBe("pass");
+    await client.pfResolve({
+      sessionId: sid, nodeId: "1.2", decision: "leaf",
+      tool: { server: "fake-ppt", name: "echo" },
+      argSpecs: { url: { kind: "fixed", value: "https://h/x/${item.id}" } } as never,
+      sideEffect: "external",
+    });
+    const fin = await app.finalize({ sessionId: sid, name: "m55-urlmap" });
+    expect(fin.warnings.filter((w) => w.includes("bad_"))).toEqual([]);
+    return app;
+  }
+
+  it("수락: approve 무수정 → run --unattended exit 0", async () => {
+    const app = await buildUrlMap();
+    const ap = await app.approveProcedureNode({ procedure: "m55-urlmap", nodeId: "1.2" });
+    expect(ap.args).toEqual({ url: { $prefix: "https://h/x/" } });
+    const { report } = await runProcedureTest(pfdir, root, "m55-urlmap", {
+      procforgeDir: pfdir, projectRoot: root, mode: "live", params: {}, unattended: true,
+    });
+    expect(report.summary.fail).toBe(0);
+    expect(report.results.find((r) => r.nodeId === "1.2")?.status).toBe("pass");
+    expect(runExitCode({ failed: 0, suspended: 0, approvalBlocked: false })).toBe(0);
   }, 180000);
 });
