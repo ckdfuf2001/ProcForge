@@ -1014,15 +1014,9 @@ export class CoreService implements CoreClient {
           }
         }
       }
-      if (n.golden) {
-        // M4.1.1-5: 자리표시자 복원 전 원문 기준. 자리표시자 있으면 경고 없음,
-        // 실제 값이 박혀 있으면 경고.
-        const raw = n.golden.output;
-        for (const [pk, pv] of paramEntries) {
-          if (raw.includes(`\${params.${pk}}`)) continue;
-          if (raw.includes(pv)) warnings.push(`${n.id}.golden.output: params "${pk}" 값을 포함 (재바인딩 확인)`);
-        }
-      }
+      // M5.3.1-4: golden.output은 녹화 원문 그대로 두므로 (replay 전용)
+      // params 값 포함 경고를 하지 않는다. 재바인딩 안전은 비교 시점
+      // 마스킹 + required params가 담당.
     }
     const doc: ProcedureDoc = {
       format: "procforge-procedure",

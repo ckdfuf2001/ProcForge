@@ -209,7 +209,8 @@ describe("pf_finalize", () => {
     });
     const out = await appFor().finalize({ sessionId: sid, name: "substr-test" });
     expect(out.warnings.some((w) => w.includes("부분 포함"))).toBe(true);
-    expect(out.warnings.some((w) => w.includes("golden.output"))).toBe(true);
+    // M5.3.1-4: golden.output 경고는 발생하지 않는다 (원문·replay 전용)
+    expect(out.warnings.some((w) => w.includes("golden.output"))).toBe(false);
   }, 30000);
 
   it("M4.1-5 재-finalize: 원자 교체, 잔재 없음", async () => {
@@ -246,6 +247,37 @@ describe("pf_finalize", () => {
     expect(cmd).toContain("procforge run");
     expect(cmd).not.toContain("미지원(M5");
     expect(skill).not.toContain("그대로 실행");
+  }, 30000);
+
+  it("M5.3.1-2 고정 날짜 템플릿 → fixture-source 감사 / strict 거부", async () => {
+    const collected = await collectCatalog(root);
+    const started = await client.pfStart({
+      request: "고정 템플릿", params: { month: "2026-09" },
+      toolCatalog: collected.entries,
+      limits: { maxDepth: 3, maxRetries: 2, maxNodes: 20 },
+    });
+    const sid = started.session.id;
+    await client.pfResolve({ sessionId: sid, nodeId: "1", decision: "split", children: [{ goal: "읽기" }] });
+    writeFileSync(join(root, "data-2026-09.pptx"), "x");
+    const { ingestArtifacts } = await import("../src/artifacts.js");
+    const { randomUUID } = await import("node:crypto");
+    const attemptId = randomUUID();
+    const ing = ingestArtifacts({ procforgeDir: pfdir, sessionId: sid, nodeId: "1.1", attemptId, baseDir: root, paths: ["data-2026-09.pptx"] });
+    await client.pfReport({
+      sessionId: sid, nodeId: "1.1",
+      tool: { server: "fake-ppt", name: "list_slides" }, args: { file: "data-2026-09.pptx" },
+      resultSummary: "1 slide", resultJson: { slides: ["a"] },
+      artifacts: ing.stored, artifactContents: ing.contents,
+      selfVerdict: "pass", selfReason: "ok", attemptId,
+    });
+    await client.pfResolve({
+      sessionId: sid, nodeId: "1.1", decision: "leaf",
+      tool: { server: "fake-ppt", name: "list_slides" },
+      argSpecs: { file: { kind: "fixed", value: "data-2026-09.pptx" } } as never,
+    });
+    const out = await appFor().finalize({ sessionId: sid, name: "fixed-date-test" });
+    expect(out.warnings.some((w) => w.includes("(fixture)") && w.includes("날짜 표현"))).toBe(true);
+    await expect(appFor().finalize({ sessionId: sid, name: "fixed-date-test", strict: true })).rejects.toThrow(/고정값 감사 실패/);
   }, 30000);
 
   it("M5.3-1 스크립트 하드코딩 → 경고 / strict 거부", async () => {

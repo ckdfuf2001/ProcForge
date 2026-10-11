@@ -369,6 +369,8 @@
   비교 시점 마스킹(recordings)은 유지 — passthrough 재바인딩 비교는 그대로 통과.
   golden.output은 replay 전용 (drift 기준 아님, 표시용). 원문 포함 시
   golden.output 경고는 정상 (재바인딩 확인용).
+  → M5.3.1-4 후속: 원문 정책과 모순되므로 golden.output 경고 자체를 제거.
+  재바인딩 안전은 비교 시점 마스킹 + required params가 담당.
 - M5.3.1-3: 기간성 params. finalize가 session 값 중 감사가 날짜로 판정한 값을
   default 없이 required로 기록. 미지정 run(import 시점)은 bad_request.
   renderProcedureMd/command.md는 required 표기.

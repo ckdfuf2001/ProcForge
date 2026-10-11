@@ -1300,7 +1300,7 @@ describe("M4.2-1 pfBuildProcedure", () => {  it("검증·경고·문서 조립",
     await expect(svc.pfBuildProcedure(s.session.id, "Bad_Name")).rejects.toThrow(/bad procedure name/);
   });
 
-  it("M5.3.1-4 golden.output은 원문 그대로 (마스킹 없음, replay 전용)", async () => {
+  it("M5.3.1-4 golden.output은 원문 그대로 + 경고 없음 (replay 전용)", async () => {
     const backing = createMemoryStore();
     const svc = new CoreService(backing, passEval);
     const s = await svc.pfStart({ request: "r", params: { month: "2026-09" }, toolCatalog: catalog });
@@ -1309,11 +1309,11 @@ describe("M4.2-1 pfBuildProcedure", () => {  it("검증·경고·문서 조립",
       sessionId: s.session.id, nodeId: "1", decision: "leaf",
       tool: { server: "fs", name: "read" }, argSpecs: {},
     });
-    // 원문 그대로 저장 → golden.output 경고 발생 (재바인딩 확인용)
+    // 원문 그대로 저장되고, golden.output 경고는 발생하지 않는다
     const raw = (await svc.pfTree(s.session.id)).nodes[0].golden?.output ?? "";
     expect(raw).toBe("report for 2026-09");
     const w = (await svc.pfBuildProcedure(s.session.id, "raw-doc")).warnings;
-    expect(w.some((x) => x.includes('golden.output: params "month"'))).toBe(true);
+    expect(w.some((x) => x.includes("golden.output"))).toBe(false);
   });
 });
 
