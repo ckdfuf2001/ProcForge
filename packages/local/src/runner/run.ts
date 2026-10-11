@@ -115,6 +115,19 @@ export function missingGeneratedArgNodes(
   return out;
 }
 
+// M5.5-4.2-5: run 보유 잠금 하트비트 (세션 + 절차서). 20s 주기, best-effort.
+export function startRunHeartbeat(store: FileStore, sessionId: string, procLockPath?: string): () => void {
+  const beat = setInterval(() => {
+    try {
+      store.refreshLock(sessionId);
+      if (procLockPath) store.refreshFileLock(procLockPath);
+    } catch {
+      // 무시
+    }
+  }, 20000);
+  return () => clearInterval(beat);
+}
+
 export async function runSession(opts: RunOptions): Promise<RunReport> {
   const mode: RunMode = opts.mode ?? "replay";
   if (mode === "replay" && opts.updateGolden) {
@@ -162,19 +175,19 @@ export async function runSession(opts: RunOptions): Promise<RunReport> {
   });
   const release = store.acquireLock(opts.sessionId, 60000);
   // M5.5-4.1-5: 절차서 단위 run 잠금 (겹친 스케줄 실행 방지). 세션 락과 함께 보유.
+  // M5.5-4.2-5: 절차서 잠금 실패 시 세션 잠금도 해제 (누수 금지).
   const procLockPath = procedureDir ? join(procedureDir, ".run.lock") : undefined;
-  const releaseProcLock = procLockPath
-    ? store.acquireFileLock(procLockPath, `procedure run locked: ${basename(procedureDir as string)}`, 60000)
-    : undefined;
-  // M5.1-A1: 장기 보유 중 하트비트 (20s 주기)
-  const beat = setInterval(() => {
-    try {
-      store.refreshLock(opts.sessionId);
-      if (procLockPath) store.refreshFileLock(procLockPath);
-    } catch {
-      // 무시
-    }
-  }, 20000);
+  let releaseProcLock: (() => void) | undefined;
+  try {
+    releaseProcLock = procLockPath
+      ? store.acquireFileLock(procLockPath, `procedure run locked: ${basename(procedureDir as string)}`, 60000)
+      : undefined;
+  } catch (e) {
+    release();
+    throw e;
+  }
+  // M5.1-A1: 장기 보유 중 하트비트 (20s 주기, startRunHeartbeat).
+  const stopBeat = startRunHeartbeat(store, opts.sessionId, procLockPath);
   const pool = new ConnectionPool(opts.projectRoot, fsDir, opts.allowBash ?? false);
   const t0 = Date.now();
   try {
@@ -379,7 +392,7 @@ export async function runSession(opts: RunOptions): Promise<RunReport> {
     logger.info("run complete", { runId, ...summary, durationMs: Date.now() - t0 });
     return report;
   } finally {
-    clearInterval(beat);
+    stopBeat();
     release();
     if (releaseProcLock) releaseProcLock();
     await pool.close();

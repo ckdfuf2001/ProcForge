@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, writeFileSync, rmSync, readFileSync, existsSync } from "node:fs";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { mkdtempSync, writeFileSync, rmSync, readFileSync, existsSync, utimesSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { ProcForgeApp } from "../src/app/app.js";
@@ -8,6 +8,10 @@ import { isApproved, loadApprovals, matchApproval, approvalPins, checkApproval, 
 import { runExitCode, cliErrorExit, runErrorExit } from "../src/app/run-exit.js";
 import { testStack } from "./client-mode.js";
 import { computeNodeHash } from "@procforge/shared/schema.js";
+import { FileStore } from "../src/filestore.js";
+import { loadProcedureDoc } from "../src/runner/procedure-run.js";
+import { importProcedure } from "../src/procedure.js";
+import { runSession, startRunHeartbeat } from "../src/runner/run.js";
 
 // M5.5-4 무인 실행 + approvals.json + 종료 코드 E2E (fake echo, external 노드).
 
@@ -477,4 +481,82 @@ describe("M5.5-4.1-4 unattended generated 사전 거부", () => {
     });
     expect(report.summary.suspended).toBe(1);
   }, 120000);
+});
+
+describe("M5.5-4.2-5 절차서 잠금", () => {
+  const PROC = "m55-unatt";
+  function procDir(): string {
+    return join(pfdir, "procedures", PROC);
+  }
+  async function directSession(): Promise<{ sessionId: string; store: FileStore }> {
+    const store = new FileStore(pfdir);
+    const { doc } = loadProcedureDoc(pfdir, PROC);
+    const { sessionId } = importProcedure(pfdir, doc, {});
+    return { sessionId, store };
+  }
+  function sessOpts(sessionId: string) {
+    return {
+      procforgeDir: pfdir, projectRoot: root, sessionId, mode: "live" as const,
+      params: {}, unattended: true, procedureDir: procDir(),
+    };
+  }
+
+  it("절차서 잠금 실패 → conflict + 세션 잠금 해제", async () => {
+    const app = await buildUnatt();
+    await app.approveProcedureNode({ procedure: PROC, nodeId: "1.1" });
+    const { sessionId, store } = await directSession();
+    const held = store.acquireFileLock(join(procDir(), ".run.lock"), `procedure run locked: ${PROC}`, 60000);
+    let code = "";
+    try {
+      await runSession(sessOpts(sessionId));
+    } catch (e) {
+      code = (e as { code?: string }).code ?? "";
+    }
+    expect(code).toBe("conflict");
+    // finally에서 세션 잠금이 해제되어 재획득 가능.
+    store.acquireLock(sessionId)();
+    held();
+    // 절차서 잠금 해제 후에는 실행 성공.
+    const report = await runSession(sessOpts(sessionId));
+    expect(report.summary.fail).toBe(0);
+  }, 120000);
+
+  it("staleMs 60s 문서 일치: 45초 잠금은 fresh(conflict), 61초는 회수", async () => {
+    const app = await buildUnatt();
+    await app.approveProcedureNode({ procedure: PROC, nodeId: "1.1" });
+    const lockPath = join(procDir(), ".run.lock");
+    const plant = (secAgo: number): void => {
+      writeFileSync(lockPath, JSON.stringify({ pid: 999999999, token: "dead", at: new Date().toISOString() }));
+      const t = new Date(Date.now() - secAgo * 1000);
+      utimesSync(lockPath, t, t);
+    };
+    const { sessionId } = await directSession();
+    plant(45);
+    await expect(runSession(sessOpts(sessionId))).rejects.toThrow(/procedure run locked/);
+    plant(61);
+    const { sessionId: sid2 } = await directSession();
+    const report = await runSession(sessOpts(sid2));
+    expect(report.summary.fail).toBe(0);
+    expect(existsSync(lockPath)).toBe(false);
+  }, 180000);
+
+  it("하트비트가 세션+절차서 잠금을 갱신", async () => {
+    vi.useFakeTimers();
+    try {
+      const store = new FileStore(pfdir);
+      const lockSpy = vi.spyOn(store, "refreshLock").mockImplementation(() => {});
+      const fileSpy = vi.spyOn(store, "refreshFileLock").mockImplementation(() => {});
+      const stop = startRunHeartbeat(store, "sid-x", "/proc/.run.lock");
+      expect(lockSpy).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(20000);
+      expect(lockSpy).toHaveBeenCalledTimes(1);
+      expect(fileSpy).toHaveBeenCalledTimes(1);
+      expect(fileSpy).toHaveBeenCalledWith("/proc/.run.lock");
+      stop();
+      await vi.advanceTimersByTimeAsync(60000);
+      expect(lockSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
