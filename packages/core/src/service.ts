@@ -49,7 +49,7 @@ function err(code: ErrorCode, message: string): ProcForgeError {
 
 import { checkUnknownKeys, readSchemaProps, selfAndAncestors, similarKey, varRefNodeId } from "@procforge/shared/args-schema.js";
 import { checkFixedAgainstInputSchema } from "@procforge/shared/validator.js";
-import { maskParamsValues } from "@procforge/shared/normalize.js";
+
 import { PROCEDURE_NAME_RE, type ProcedureDoc } from "@procforge/shared/procedure.js";
 import { validateTree } from "@procforge/shared/validator.js";
 import { combineHashes } from "@procforge/shared/hash.js";
@@ -773,7 +773,8 @@ export class CoreService implements CoreClient {
           args: input.argSpecs,
           attempts,
           // M3.6-4: golden 출력 안의 params 값은 자리표시자로 저장 (재바인딩 대비)
-          golden: { fixtures: [...finalArtifacts], output: maskParamsValues(last!.resultSummary, s.params), attemptId: last!.id, ignore: input.goldenIgnore ?? [] },
+          // M5.3.1-4: golden.output은 녹화 원문 그대로 (템플릿 치환 금지, replay 전용).
+          golden: { fixtures: [...finalArtifacts], output: last!.resultSummary, attemptId: last!.id, ignore: input.goldenIgnore ?? [] },
         };
         if (input.sideEffect) next.sideEffect = input.sideEffect;
         next.hash = this.hashFor(s.id, next);

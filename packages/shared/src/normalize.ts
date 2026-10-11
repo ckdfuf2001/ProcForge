@@ -5,7 +5,8 @@ const ISO_RE = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:?\d{2})?
 const PARAM_REF_RE = /\$\{params\.([A-Za-z0-9_.-]+)\}/g;
 
 /**
- * 확정 시 golden.output 안의 params 값을 ${params.key} 자리표시자로 저장 (M3.6-4).
+ * params 값 마스킹 (drift 비교 시점 전용, M5.3.1-4).
+ * 저장 시점 마스킹은 하지 않는다: golden.output은 녹화 원문 그대로 (replay 전용).
  * - JSON이면 파싱 후 문자열 값의 완전 일치만 치환 (부분 문자열 치환 금지).
  * - JSON이 아니면 길이가 4 이상인 값의 모든 출현을 치환.
  */

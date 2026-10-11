@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { maskParamsValues } from "@procforge/shared/normalize.js";
 import { compareNodeIds } from "@procforge/shared/ids.js";
 import { effectiveDeps, expandDepLeafs, rawDepSources } from "@procforge/shared/deps.js";
 import type { Node } from "@procforge/shared/schema.js";
@@ -532,8 +531,7 @@ function updateNodeGolden(opts: RunOptions, n: Node, resp: ToolResponse): void {
   const cur = store.getNode(opts.sessionId, n.id);
   if (!cur) return;
   // updateGolden은 golden.output만 갱신 (fixtures는 pf_report 소유). (DECISIONS M3)
-  // M3.6-4: 갱신 시에도 params 자리표시자로 저장
-  const params = store.getSession(opts.sessionId)?.params ?? {};
-  const next: Node = { ...cur, golden: { fixtures: [...(cur.golden?.fixtures ?? [])], output: maskParamsValues(resp.resultText, params), attemptId: cur.golden?.attemptId, ignore: cur.golden?.ignore ?? [] } };
+  // M5.3.1-4: 갱신 시에도 녹화 원문 그대로 (템플릿 치환 금지, replay 전용)
+  const next: Node = { ...cur, golden: { fixtures: [...(cur.golden?.fixtures ?? [])], output: resp.resultText, attemptId: cur.golden?.attemptId, ignore: cur.golden?.ignore ?? [] } };
   store.saveNode(opts.sessionId, next);
 }

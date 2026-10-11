@@ -243,13 +243,13 @@ describe("M3 runner", () => {
     }
   }, 30000);
 
-  it("M3.6-4 golden params 치환: --param 변경해도 passthrough 통과", async () => {
+  it("M5.3.1-4 golden 원문 + 비교 시점 마스킹: --param 변경해도 passthrough 통과", async () => {
     const sid = await scriptedSession();
     await runSession({ procforgeDir: pfdir, projectRoot: root, allowProjectRead: true, sessionId: sid, mode: "record" });
-    // 확정 시 params 값이 자리표시자로 저장됨
+    // 확정 시 원문 그대로 저장됨 (자리표시자 없음)
     const store = new FileStore(pfdir);
-    expect(store.getNode(sid, "1.3")!.golden?.output).toContain("${params.month}");
-    // params 변경 후 passthrough: 복원 비교로 통과
+    expect(store.getNode(sid, "1.3")!.golden?.output).not.toContain("${params.month}");
+    // params 변경 후 passthrough: 비교 시점 마스킹으로 통과
     const sess = store.getSession(sid)!;
     store.saveSession({ ...sess, params: { month: "2026-10" } });
     const pass = await runSession({ procforgeDir: pfdir, projectRoot: root, allowProjectRead: true, sessionId: sid, mode: "passthrough" });

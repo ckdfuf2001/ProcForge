@@ -1300,7 +1300,7 @@ describe("M4.2-1 pfBuildProcedure", () => {  it("검증·경고·문서 조립",
     await expect(svc.pfBuildProcedure(s.session.id, "Bad_Name")).rejects.toThrow(/bad procedure name/);
   });
 
-  it("M4.1.1-5 golden 경고는 복원 전 원문 기준", async () => {
+  it("M5.3.1-4 golden.output은 원문 그대로 (마스킹 없음, replay 전용)", async () => {
     const backing = createMemoryStore();
     const svc = new CoreService(backing, passEval);
     const s = await svc.pfStart({ request: "r", params: { month: "2026-09" }, toolCatalog: catalog });
@@ -1309,16 +1309,11 @@ describe("M4.2-1 pfBuildProcedure", () => {  it("검증·경고·문서 조립",
       sessionId: s.session.id, nodeId: "1", decision: "leaf",
       tool: { server: "fs", name: "read" }, argSpecs: {},
     });
-    // 마스킹된 golden (자리표시자) → 경고 없음 (복원하면 값이 나타나도)
-    const masked = (await svc.pfTree(s.session.id)).nodes[0].golden?.output ?? "";
-    expect(masked).toContain("${params.month}");
-    const w1 = (await svc.pfBuildProcedure(s.session.id, "masked-doc")).warnings;
-    expect(w1.some((w) => w.includes("golden.output"))).toBe(false);
-    // 원문 값 박힌 golden (레거시) → 경고
-    const n = (await svc.pfTree(s.session.id)).nodes[0];
-    backing.saveNode(s.session.id, { ...n, golden: { ...n.golden!, output: "report for 2026-09" } });
-    const w2 = (await svc.pfBuildProcedure(s.session.id, "raw-doc")).warnings;
-    expect(w2.some((w) => w.includes('golden.output: params "month"'))).toBe(true);
+    // 원문 그대로 저장 → golden.output 경고 발생 (재바인딩 확인용)
+    const raw = (await svc.pfTree(s.session.id)).nodes[0].golden?.output ?? "";
+    expect(raw).toBe("report for 2026-09");
+    const w = (await svc.pfBuildProcedure(s.session.id, "raw-doc")).warnings;
+    expect(w.some((x) => x.includes('golden.output: params "month"'))).toBe(true);
   });
 });
 
