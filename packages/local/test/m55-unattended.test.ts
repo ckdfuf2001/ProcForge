@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, rmSync, readFileSync, existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { ProcForgeApp } from "../src/app/app.js";
@@ -18,6 +18,7 @@ let oldProfile: string | undefined;
 
 const serverMjs = resolve(__dirname, "fixtures/fake-ppt-mcp/server.mjs");
 const ECHO_CAT = [{ server: "fake-ppt", name: "echo", inputSchema: {}, schemaHash: "h" }] as never;
+const SAVE_CAT = [{ server: "fake-ppt", name: "save", inputSchema: {}, schemaHash: "h" }] as never;
 
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), "pf-m554-"));
@@ -245,6 +246,63 @@ describe("M5.5-4 무인 실행 E2E", () => {
     expect(String(err.message ?? "")).toContain("procedure run locked");
     // M5.5-4.1-5: conflict → exit 4.
     expect(runErrorExit(err)).toBe(4);
+  }, 120000);
+});
+
+describe("M5.5-4.2-1 논리 경로 매칭", () => {
+  async function buildPathSave(): Promise<ProcForgeApp> {
+    const { client } = testStack(pfdir);
+    const app = new ProcForgeApp({ core: client, procforgeDir: pfdir, projectRoot: root });
+    const started = await client.pfStart({ request: "save", params: {}, toolCatalog: SAVE_CAT });
+    const sid = started.session.id;
+    await client.pfResolve({
+      sessionId: sid, nodeId: "1", decision: "split", children: [{ goal: "파일 저장" }],
+    });
+    const r1 = await client.pfReport({
+      sessionId: sid, nodeId: "1.1", tool: { server: "fake-ppt", name: "save" },
+      args: { file_path: "output/n.txt", content: "hi" },
+      resultSummary: "saved", resultJson: { saved: "output/n.txt" },
+      selfVerdict: "pass", selfReason: "ok",
+    });
+    expect(r1.verdict).toBe("pass");
+    await client.pfEditNode({
+      sessionId: sid, nodeId: "1.1",
+      addConstraints: [{ id: "c-s", kind: "json_path_exists", spec: { path: "saved" }, source: "human" }],
+    });
+    const r2 = await client.pfReport({
+      sessionId: sid, nodeId: "1.1", tool: { server: "fake-ppt", name: "save" },
+      args: { file_path: "output/n.txt", content: "hi" },
+      resultSummary: "saved", resultJson: { saved: "output/n.txt" },
+      selfVerdict: "pass", selfReason: "ok",
+    });
+    expect(r2.verdict).toBe("pass");
+    await client.pfResolve({
+      sessionId: sid, nodeId: "1.1", decision: "leaf",
+      tool: { server: "fake-ppt", name: "save" },
+      argSpecs: {
+        file_path: { kind: "fixed", value: "output/n.txt", path: "out" },
+        content: { kind: "fixed", value: "hi" },
+      } as never,
+      sideEffect: "external",
+    });
+    const fin = await app.finalize({ sessionId: sid, name: "m55-pathsave" });
+    expect(fin.warnings.filter((w) => w.includes("bad_"))).toEqual([]);
+    return app;
+  }
+
+  it("approve 생성 → 수정 없이 run --unattended → exit 0", async () => {
+    const app = await buildPathSave();
+    await app.approveProcedureNode({ procedure: "m55-pathsave", nodeId: "1.1" });
+    const { report } = await runProcedureTest(pfdir, root, "m55-pathsave", {
+      procforgeDir: pfdir, projectRoot: root, mode: "live", params: {}, unattended: true,
+    });
+    expect(report.summary.fail).toBe(0);
+    expect(report.results.find((r) => r.nodeId === "1.1")?.status).toBe("pass");
+    // 실제 파일은 run fs 안에 기록 (논리 경로 그대로 승인됐어도 실행은 절대경로).
+    const out = join(pfdir, "runs", report.runId, "fs", "output", "n.txt");
+    expect(existsSync(out)).toBe(true);
+    expect(readFileSync(out, "utf8")).toBe("hi");
+    expect(runExitCode({ failed: 0, suspended: 0, approvalBlocked: false })).toBe(0);
   }, 120000);
 });
 

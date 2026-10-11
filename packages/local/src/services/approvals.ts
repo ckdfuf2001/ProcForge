@@ -7,8 +7,10 @@ import { writeAtomicFile } from "../fsutil.js";
 // M5.5-4: 무인 실행 사전 승인 (procedures/<name>/approvals.json).
 // M5.5-4.1-3: 항목에 node pin 필수. 형식:
 // [{ node: { id, hash }, tool: { server, name }, args?: { 키: 값 패턴 } }]
-// args 생략 = tool 전체 승인. 패턴 값 "*" = 임의 값 허용 (문자열 비교는 해석된 인자 기준).
+// args 생략 = tool 전체 승인. 패턴 값 "*" = 임의 값 허용.
 // args가 있으면 실제 호출 인자와 키 집합 정확히 일치 (M5.5-4.1-2).
+// M5.5-4.2-1: 매칭 기준은 논리 경로 (rewritePaths 전 해석 인자). path 인자는
+// 고정 상대경로 그대로 승인하면 된다.
 
 export type ApprovalEntry = {
   node: { id: string; hash: string };

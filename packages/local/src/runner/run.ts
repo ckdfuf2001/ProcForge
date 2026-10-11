@@ -452,22 +452,24 @@ async function execNode(
     // M3.4-1: readOnly는 확정 아님. infer 결과 그대로 (weakIn 포함).
     roles[k] = inferPathRole(k, inputSchema);
   }
+  // M5.5-4.2-1: 승인 매칭은 논리 경로 기준 (rewritePaths 전).
+  const logicalArgs = resolveArgs({
+    specs: toolSpecs,
+    params,
+    outputs,
+    attempts: n.attempts,
+    goldenAttemptId: n.golden?.attemptId,
+    live: mode === "live",
+    supplied: opts.supplied?.[n.id],
+    selfCarry,
+    state: opts.state,
+    topo: {
+      isSplit: (id) => byId.get(id)?.status === "split",
+      childrenOf: (id) => byId.get(id)?.children ?? [],
+    },
+  });
   const args = rewritePaths(
-    resolveArgs({
-      specs: toolSpecs,
-      params,
-      outputs,
-      attempts: n.attempts,
-      goldenAttemptId: n.golden?.attemptId,
-      live: mode === "live",
-      supplied: opts.supplied?.[n.id],
-      selfCarry,
-      state: opts.state,
-      topo: {
-        isSplit: (id) => byId.get(id)?.status === "split",
-        childrenOf: (id) => byId.get(id)?.children ?? [],
-      },
-    }),
+    logicalArgs,
     roles,
     { fsDir, projectRoot: opts.projectRoot, allowProjectRead: opts.allowProjectRead ?? false, toolReadOnly: readOnly },
   );
@@ -514,7 +516,7 @@ async function execNode(
       const verdict = checkApproval(
         opts.approvals ?? [],
         approvalPins(n, parent ? { id: parent.id, hash: parent.hash, kind: (parent as { kind?: string }).kind } : undefined),
-        server, tool, args as Record<string, unknown>,
+        server, tool, logicalArgs as Record<string, unknown>,
       );
       if (verdict === "stale") {
         return { nodeId: n.id, status: "fail", failedConstraints: ["approval"], detail: `approval: 승인 갱신 필요 (노드 ${n.id} 해시 변경). procforge approve <procedure> --node ${n.id}로 갱신`, durationMs: Date.now() - start };
