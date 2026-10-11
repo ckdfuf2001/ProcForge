@@ -99,11 +99,11 @@ server.tool(
 let unstableCalls = 0;
 server.tool(
   "unstable",
-  "Flaky read (M5.6-f). First call per process fails transient.",
+  "Flaky read (M5.6-f, M5.6.1-1). First TWO calls per process fail transient.",
   { note: z.string().optional() },
   async ({ note }) => {
     unstableCalls += 1;
-    if (unstableCalls === 1) throw new Error("fetch failed: simulated ECONNRESET");
+    if (unstableCalls <= 2) throw new Error("fetch failed: simulated ECONNRESET");
     return { content: [{ type: "text", text: JSON.stringify({ note: note ?? null, calls: unstableCalls }) }] };
   },
 );

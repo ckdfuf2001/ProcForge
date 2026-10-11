@@ -4,7 +4,7 @@ import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { ProcForgeApp } from "../src/app/app.js";
 import { runProcedureTest } from "../src/runner/procedure-run.js";
-import { callWithRetry, isTransientToolError } from "../src/runner/run.js";
+import { callWithRetry, isTransientToolError, isTransientResult } from "../src/runner/run.js";
 import { testStack } from "./client-mode.js";
 
 // M5.6-f: readOnly 도구 호출만 재시도 (지수 백오프, 설정화). external 재시도 금지.
@@ -42,13 +42,14 @@ afterEach(() => {
   else process.env.USERPROFILE = oldProfile;
 });
 
-function stubPool(script: ("ok" | Error)[]): { calls: number; call: () => Promise<{ resultText: string; resultJson: unknown }> } {
+function stubPool(script: ("ok" | Error | { json: unknown })[]): { calls: number; call: () => Promise<{ resultText: string; resultJson: unknown }> } {
   const st = {
     calls: 0,
     async call(): Promise<{ resultText: string; resultJson: unknown }> {
       st.calls += 1;
       const s = script[Math.min(st.calls - 1, script.length - 1)];
       if (s instanceof Error) throw s;
+      if (s !== "ok") return { resultText: JSON.stringify(s), resultJson: (s as { json: unknown }).json };
       return { resultText: "ok", resultJson: {} };
     },
   };
@@ -83,6 +84,21 @@ describe("M5.6-f 재시도 단위", () => {
     const p3 = stubPool([new Error("ECONNRESET")]);
     await expect(callWithRetry(p3, "s", "t", {}, { retry: true, attempts: 2, baseMs: 1 })).rejects.toThrow(/ECONNRESET/);
     expect(p3.calls).toBe(2);
+  });
+
+  it("M5.6.1-1: ok:false 일시 상태도 재시도", async () => {
+    expect(isTransientResult({ resultText: "x", resultJson: { ok: false, status: 503 } })).toBe(true);
+    expect(isTransientResult({ resultText: "x", resultJson: { ok: false, status: 400 } })).toBe(false);
+    expect(isTransientResult({ resultText: "x", resultJson: { ok: true } })).toBe(false);
+    expect(isTransientResult({ resultText: "x", resultJson: null })).toBe(false);
+    const p = stubPool([{ json: { ok: false, status: 503 } }, { json: { ok: false, status: 503 } }, "ok"]);
+    const r = await callWithRetry(p, "s", "t", {}, { retry: true, baseMs: 1 });
+    expect(r.resp.resultText).toBe("ok");
+    expect(r.attempts).toBe(3);
+    // 소진 시 마지막 응답이 아니라 throw.
+    const q = stubPool([{ json: { ok: false, status: 503 } }]);
+    await expect(callWithRetry(q, "s", "t", {}, { retry: true, attempts: 2, baseMs: 1 })).rejects.toThrow(/일시 오류 응답 지속/);
+    expect(q.calls).toBe(2);
   });
 });
 

@@ -420,6 +420,16 @@ export type ToolCaller = {
   call(server: string, tool: string, args: Record<string, unknown>): Promise<ToolResponse>;
 };
 
+// M5.6.1-1: ok:false 일시 상태 응답 (fetch형 {ok, status}). throw 경로와 동일 취급.
+export function isTransientResult(resp: ToolResponse): boolean {
+  const j = resp.resultJson;
+  if (typeof j !== "object" || j === null || Array.isArray(j)) return false;
+  const o = j as Record<string, unknown>;
+  if (o.ok !== false) return false;
+  const st = o.status;
+  return typeof st === "number" && (st === 429 || st === 502 || st === 503 || st === 504);
+}
+
 /**
  * M5.6-f: 도구 호출 (readOnly + sideEffect none만 재시도, 지수 백오프).
  * external·쓰기 노드는 재시도 금지 (중복 부작용 방지). 호출자가 retry 여부 결정.
@@ -433,17 +443,31 @@ export async function callWithRetry(
 ): Promise<{ resp: ToolResponse; attempts: number }> {
   const attempts = Math.max(1, Math.floor(opts.attempts ?? 3));
   const baseMs = Math.max(0, opts.baseMs ?? 500);
-  let last: unknown;
+  let pendingError: unknown;
+  let pendingResp: ToolResponse | undefined;
   for (let i = 0; i < attempts; i++) {
+    let resp: ToolResponse;
     try {
-      return { resp: await pool.call(server, tool, args), attempts: i + 1 };
+      resp = await pool.call(server, tool, args);
     } catch (e) {
-      last = e;
       if (!opts.retry || i + 1 >= attempts || !isTransientToolError(e)) throw e;
+      pendingError = e;
       await new Promise((r) => setTimeout(r, baseMs * 2 ** i));
+      continue;
     }
+    // M5.6.1-1: ok:false 일시 상태 응답도 재시도 (isError 텍스트와 동일 판별).
+    if (opts.retry && isTransientResult(resp)) {
+      pendingResp = resp;
+      if (i + 1 >= attempts) break;
+      await new Promise((r) => setTimeout(r, baseMs * 2 ** i));
+      continue;
+    }
+    return { resp, attempts: i + 1 };
   }
-  throw last;
+  if (pendingError !== undefined) throw pendingError;
+  throw new Error(
+    `일시 오류 응답 지속(${attempts}회): ${(pendingResp?.resultText ?? "").slice(0, 200)}`,
+  );
 }
 
 async function execNode(
