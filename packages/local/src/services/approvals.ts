@@ -294,7 +294,12 @@ export function matchPathPrefix(prefix: string, actual: string): boolean {
   // 끝 "/"는 하위만 (자기 자신 불일치). "/" 자체는 origin 전체.
   if (toPosix(prefix).endsWith("/") && toPosix(prefix) !== "/" && ap.length <= pp.length) return false;
   if (pp.length > ap.length) return false;
-  return pp.every((s, i) => s === ap[i]);
+  // M5.6.1-4: 마지막 패턴 세그먼트는 문자열 접두, 나머지는 정확 일치.
+  for (let i = 0; i < pp.length - 1; i++) {
+    if (pp[i] !== ap[i]) return false;
+  }
+  if (pp.length === 0) return true;
+  return ap[pp.length - 1].startsWith(pp[pp.length - 1]);
 }
 
 const SCHEME_RE = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//;
@@ -315,11 +320,25 @@ export function matchUrlPrefix(prefix: string, actual: string): boolean {
   if (a.origin !== p.origin) return false;
   // M5.5-4.4-4: 실제 값에 자격(username/password)이 있으면 거부.
   if (a.username !== "" || a.password !== "") return false;
-  // 빈 세그먼트 제외 후 접두 비교 ("/" = origin 전체, "/public/" = public 하위).
-  const pp = p.pathname.split("/").filter((s) => s !== "");
-  const ap = a.pathname.split("/").filter((s) => s !== "");
+  // M5.6.1-4: 마지막 패턴 세그먼트는 문자열 접두로 비교 (나머지는 정확 일치).
+  if (prefix.endsWith("/") && p.pathname !== "/") {
+    const segs = (s: string): string[] => s.split("/").filter((x) => x !== "");
+    if (segs(a.pathname).length <= segs(p.pathname).length) return false;
+  }
+  return segmentPrefix(p.pathname, a.pathname);
+}
+
+// M5.6.1-4: 세그먼트 접두 비교. 마지막 패턴 세그먼트만 문자열 접두 허용.
+function segmentPrefix(patternPath: string, actualPath: string): boolean {
+  const segs = (p: string): string[] => p.split("/").filter((s) => s !== "");
+  const pp = segs(patternPath);
+  const ap = segs(actualPath);
+  if (pp.length === 0) return true;
   if (pp.length > ap.length) return false;
-  return pp.every((s, i) => s === ap[i]);
+  for (let i = 0; i < pp.length - 1; i++) {
+    if (pp[i] !== ap[i]) return false;
+  }
+  return ap[pp.length - 1].startsWith(pp[pp.length - 1]);
 }
 
 function matchValue(pattern: unknown, actual: unknown): boolean {
@@ -371,6 +390,24 @@ export function fixedTemplatePrefix(key: string, value: string): { $prefix: stri
   }
   return { $prefix: literal };
 }
+
+// M5.6.1-4: ${} 2개 이상 fixed 템플릿 범위 경고 (앞부분만으로 승인됨).
+export function scopeWarnings(docNode: { id: string; args?: Record<string, unknown> }): string[] {
+  const out: string[] = [];
+  for (const [k, s] of Object.entries(docNode.args ?? {})) {
+    if (typeof s !== "object" || s === null || (s as { kind?: unknown }).kind !== "fixed") continue;
+    const v = (s as { value?: unknown }).value;
+    if (typeof v !== "string") continue;
+    const n = (v.match(/\$\{/g) ?? []).length;
+    if (n >= 2) {
+      out.push(
+        `범위 경고: ${docNode.id}.${k}에 \${} ${n}개 — 앞부분 "${v.split("${")[0]}"만으로 승인됨. 의도한 범위인지 확인하라.`,
+      );
+    }
+  }
+  return out;
+}
+
 // 해시는 importProcedure와 동일 공식 (goal·args·constraints·dependsOn []).
 // 패턴: fixed 값 그대로, script-kind는 제외 (tool 인자 아님).
 // M5.5-4.2-2: var/generated 키는 allowWildcardKeys에 명시된 것만 와일드카드 생성.

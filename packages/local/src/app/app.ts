@@ -38,7 +38,7 @@ import { runSession } from "../runner/index.js";
 import { loadCassette, recordKey } from "../runner/index.js";
 import { runProcedureTest } from "../runner/procedure-run.js";
 import { loadProcedureDoc } from "../runner/procedure-run.js";
-import { buildApprovalEntry, saveApproval, toHashable } from "../services/approvals.js";
+import { buildApprovalEntry, saveApproval, scopeWarnings, toHashable } from "../services/approvals.js";
 import { importProcedure } from "../procedure.js";
 import { readRunState, writeRunState } from "../services/run-state.js";
 import { writeJUnitFile, resolveJUnitPath, copyRunFsToOut } from "../services/runner.js";
@@ -996,7 +996,7 @@ export class ProcForgeApp {
   /** 절차서 노드 사전 승인 항목 생성 (M5.5-4.1-3, CLI approve 절차서 모드). */
   async approveProcedureNode(a: {
     procedure: unknown; nodeId: unknown; allowWildcard?: unknown;
-  }): Promise<{ procedureDir: string; path: string; nodeId: string; hash: string; replaced: boolean; args: Record<string, unknown> }> {
+  }): Promise<{ procedureDir: string; path: string; nodeId: string; hash: string; replaced: boolean; args: Record<string, unknown>; warnings: string[] }> {
     const procRef = a.procedure as string;
     const nodeId = a.nodeId as string;
     if (!procRef) throw pfError("bad_request", "procedure가 필요하다.");
@@ -1019,7 +1019,9 @@ export class ProcForgeApp {
       }
     });
     const { path, replaced } = saveApproval(dir, entry);
-    return { procedureDir: dir, path, nodeId, hash: entry.node.hash, replaced, args: entry.args ?? {} };
+    // M5.6.1-4: 범위 경고를 함께 반환 (CLI 출력).
+    const scope = scopeWarnings({ id: n.id, args: n.args as Record<string, unknown> | undefined });
+    return { procedureDir: dir, path, nodeId, hash: entry.node.hash, replaced, args: entry.args ?? {}, warnings: scope };
   }
 
   /** 절차서 live 일괄 실행 (M5, CLI run용). 일시정지면 suspended 포함 반환. */

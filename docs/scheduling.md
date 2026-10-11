@@ -47,13 +47,15 @@
   불일치). 와일드카드는 `{"$any": true}`, 접두는 `{"$prefix": "..."}`만 쓴다.
 - `$prefix`가 `scheme://`로 시작하면 URL 모드다 (아래 참조).
   `/`를 포함한 그 외 접두는 경로 모드다: posix 정규화 후 `".."`·절대경로를
-  패턴·실제 모두 거부하고 세그먼트 접두로 비교한다. 끝 `/`는 하위만 일치
+  패턴·실제 모두 거부하고 세그먼트 비교 (마지막 패턴 세그먼트만 문자열 접두,
+  나머지 정확 일치). 끝 `/`는 하위만 일치
   (`"output/"`에 `"output"` 자체는 불일치). `/` 없는 접두는 문자열 접두 유지.
 - `$prefix`가 `scheme://`로 시작하면 URL 모드다. 실제 값을 `new URL()`로
   정규화 (호스트 소문자·기본 포트·dot 세그먼트 해소) 후 origin 정확 일치 +
-  path 세그먼트 접두로 비교한다. 패턴은 origin 뒤 `/`가 필수
-  (`"https://a.com"`은 로드 시 `bad_request`). 패턴에 query/fragment가
-  있으면 로드 시 `bad_request`, 실제 값에 username/password가 있으면 거부한다.
+  path 세그먼트 비교 (마지막 패턴 세그먼트만 문자열 접두, 나머지 정확 일치).
+  패턴은 origin 뒤 `/`가 필수 (`"https://a.com"`은 로드 시 `bad_request`).
+  패턴에 query/fragment가 있으면 로드 시 `bad_request`, 실제 값에
+  username/password가 있으면 거부한다.
 - 생성된 패턴은 fixed 값 그대로다. 단 fixed 값에 `${...}`가 있으면 리터럴
   앞부분으로 `$prefix`를 생성한다 (URL이면 URL 모드 규칙 적용, 리터럴이
   비어 있으면 `$any`). URL 리터럴이 origin 뒤 `/` 없으면 생성 거부.

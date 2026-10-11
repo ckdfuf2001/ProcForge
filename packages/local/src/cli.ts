@@ -198,6 +198,8 @@ async function cmdApprove(): Promise<number> {
       console.log(`approved: ${r.nodeId} (hash ${r.hash.slice(0, 12)}…) → ${r.path}${r.replaced ? " (갱신)" : ""}`);
       // M5.6-b: 생성 패턴 표시 ($prefix/$any 확인용).
       console.log(`pattern: ${JSON.stringify(r.args)}`);
+      // M5.6.1-4: 범위 경고 표시.
+      for (const w of r.warnings) console.error(`warning: ${w}`);
       return 0;
     }
     if (!target || !nodeId) {

@@ -4,7 +4,7 @@ import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { ProcForgeApp } from "../src/app/app.js";
 import { runProcedureTest } from "../src/runner/procedure-run.js";
-import { loadApprovals, matchApproval, approvalPins, checkApproval, buildApprovalEntry, migrateV1Value, computeApprovalHash, fixedTemplatePrefix } from "../src/services/approvals.js";
+import { loadApprovals, matchApproval, approvalPins, checkApproval, buildApprovalEntry, migrateV1Value, computeApprovalHash, fixedTemplatePrefix, scopeWarnings } from "../src/services/approvals.js";
 import { runExitCode, cliErrorExit, runErrorExit } from "../src/app/run-exit.js";
 import { testStack } from "./client-mode.js";
 import { computeNodeHash } from "@procforge/shared/schema.js";
@@ -842,7 +842,7 @@ describe("M5.6-b approve $prefix 생성", () => {
     expect(built.args).toEqual({ url: { $prefix: "https://h/x/" } });
   });
 
-  async function buildUrlMap(): Promise<ProcForgeApp> {
+  async function buildUrlMap(tpl = "https://h/x/${item.id}", procName = "m55-urlmap"): Promise<ProcForgeApp> {
     const { client } = testStack(pfdir);
     const app = new ProcForgeApp({ core: client, procforgeDir: pfdir, projectRoot: root });
     const started = await client.pfStart({ request: "urlmap", params: {}, toolCatalog: ECHO_CAT });
@@ -875,7 +875,7 @@ describe("M5.6-b approve $prefix 생성", () => {
         over: "$1.1.snapshot.items", as: "item", maxItems: 10, policy: { kind: "all" },
         template: {
           tool: { server: "fake-ppt", name: "echo" },
-          args: { url: { kind: "fixed", value: "https://h/x/${item.id}" } },
+          args: { url: { kind: "fixed", value: tpl } },
           constraints: [],
         },
       } as never,
@@ -889,10 +889,10 @@ describe("M5.6-b approve $prefix 생성", () => {
     await client.pfResolve({
       sessionId: sid, nodeId: "1.2", decision: "leaf",
       tool: { server: "fake-ppt", name: "echo" },
-      argSpecs: { url: { kind: "fixed", value: "https://h/x/${item.id}" } } as never,
+      argSpecs: { url: { kind: "fixed", value: tpl } } as never,
       sideEffect: "external",
     });
-    const fin = await app.finalize({ sessionId: sid, name: "m55-urlmap" });
+    const fin = await app.finalize({ sessionId: sid, name: procName });
     expect(fin.warnings.filter((w) => w.includes("bad_"))).toEqual([]);
     return app;
   }
@@ -907,5 +907,25 @@ describe("M5.6-b approve $prefix 생성", () => {
     expect(report.summary.fail).toBe(0);
     expect(report.results.find((r) => r.nodeId === "1.2")?.status).toBe("pass");
     expect(runExitCode({ failed: 0, suspended: 0, approvalBlocked: false })).toBe(0);
+  }, 180000);
+
+  it("M5.6.1-4: 세그먼트 중간 리터럴 + ${} 2개 경고", async () => {
+    expect(scopeWarnings({ id: "1", args: { u: { kind: "fixed", value: "https://h/${a}/${b}" } } })).toHaveLength(1);
+    expect(scopeWarnings({ id: "1", args: { u: { kind: "fixed", value: "https://h/x/${i}" } } })).toHaveLength(0);
+    expect(scopeWarnings({ id: "1", args: {} })).toHaveLength(0);
+    const app = await buildUrlMap("https://h/x/item-${item.id}", "m55-urlmap2");
+    const ap = await app.approveProcedureNode({ procedure: "m55-urlmap2", nodeId: "1.2" });
+    expect(ap.args).toEqual({ url: { $prefix: "https://h/x/item-" } });
+    expect(ap.warnings).toHaveLength(0);
+    const { report } = await runProcedureTest(pfdir, root, "m55-urlmap2", {
+      procforgeDir: pfdir, projectRoot: root, mode: "live", params: {}, unattended: true,
+    });
+    expect(report.summary.fail).toBe(0);
+    expect(report.results.find((r) => r.nodeId === "1.2")?.status).toBe("pass");
+    // h/y 거부 (단위).
+    expect(matchApproval(
+      { node: { id: "1", hash: "h" }, tool: { server: "s", name: "t" }, args: { url: { $prefix: "https://h/x/item-" } } },
+      "s", "t", { url: "https://h/y/z" },
+    )).toBe(false);
   }, 180000);
 });

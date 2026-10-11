@@ -399,6 +399,11 @@
   실행될 수 있다. 완화: local_write·external은 힌트와 무관하게 재시도 제외,
   external은 approvals 정확 일치까지 요구. 잔여 신뢰(카탈로그 정직성)는 도구 구현과
   동일 선상 (별도 검증 없음).
+- M5.6.1-4 세그먼트 중간 리터럴: 자르지 않고 마지막 세그먼트 문자열 접두로 비교
+  (URL·경로 공통, 나머지 세그먼트는 정확 일치). "https://h/x/item-" 패턴은
+  "https://h/x/item-123"에 통과, "https://h/y/..."·"https://h/x/other"에 거부.
+  마지막 "/"까지 자르는 안은 과승인이라 기각. ${} 2개 이상은 앞부분 과승인
+  위험을 approve 출력 경고로 알림.
 - M5.5-5: dogfood daily-crawl (fake board 날짜별 3페이지 + detail x3 실패).
   until 수집 → script 평탄화 → map 상세(external·threshold 0.5) → script 누적.
   run1(d1) x1,x2·run2(d2) x4 신규만, state seenIds 누적. (a) stale hash → fail
