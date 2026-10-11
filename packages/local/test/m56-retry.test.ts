@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { ProcForgeApp } from "../src/app/app.js";
@@ -171,9 +171,15 @@ describe("M5.6-f readOnly E2E (unstable 첫 호출 실패 → 재시도 통과)"
     });
     const fin = await app.finalize({ sessionId: sid, name: "m56-retry" });
     expect(fin.warnings.filter((w) => w.includes("bad_"))).toEqual([]);
+    // M5.6.1-3: sideEffect 미지정 노드는 "none" 기본값 → readOnly 재시도 대상.
+    const stored = JSON.parse(
+      readFileSync(join(pfdir, "sessions", sid, "nodes", "1.1.json"), "utf8"),
+    ) as { sideEffect?: string };
+    expect(stored.sideEffect).toBe("none");
     const { report } = await runProcedureTest(pfdir, root, "m56-retry", {
       procforgeDir: pfdir, projectRoot: root, mode: "live", params: {},
     });
+    // 첫 호출 실패가 확정적이므로 pass는 재시도(2회 실패 후 3회차 성공) 증거.
     expect(report.summary.fail).toBe(0);
     expect(report.results.find((r) => r.nodeId === "1.1")?.status).toBe("pass");
   }, 120000);

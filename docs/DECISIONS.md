@@ -394,6 +394,11 @@
     seedFiles는 시작 시에만 있고 중반 추가 수단 없음.
   - j: 토큰 사용량이 모델에게 비가시. pf 호출 수가 유일한 대리 지표.
     계측 노출은 하네스 과제.
+- M5.6.1-3 readOnly 신뢰 한계: 재시도는 카탈로그 readOnlyHint + 노드 sideEffect none을
+  신뢰한다. 카탈로그는 세션(작성자) 제공이라 쓰기 도구를 readOnly로 속이면 중복
+  실행될 수 있다. 완화: local_write·external은 힌트와 무관하게 재시도 제외,
+  external은 approvals 정확 일치까지 요구. 잔여 신뢰(카탈로그 정직성)는 도구 구현과
+  동일 선상 (별도 검증 없음).
 - M5.5-5: dogfood daily-crawl (fake board 날짜별 3페이지 + detail x3 실패).
   until 수집 → script 평탄화 → map 상세(external·threshold 0.5) → script 누적.
   run1(d1) x1,x2·run2(d2) x4 신규만, state seenIds 누적. (a) stale hash → fail
