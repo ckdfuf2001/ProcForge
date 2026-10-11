@@ -28,6 +28,17 @@
 ### 0.2 작업 규칙
 
 - 커밋은 항목별로 `M<x>-<n> 요약` 형식. 회귀 테스트를 반드시 같이 넣는다.
+- 검증 3단계:
+  - L1: `pnpm fast` = shared/core 단위 + local 비spawn 테스트, 30초 목표.
+  - L2: 항목 완료 시 L1 + vitest related(변경 파일) 1모드.
+  - L3: 묶음 완료 시 `scripts/dev-verify.mjs` 전체(dist 삭제, 클린 빌드, 양 모드,
+    클린 클론) 후 푸시, head_sha 일치 CI success → 그때 묶음 내 항목 완료 선언.
+    항목별 커밋은 유지.
+- 커밋 직전 `git diff --check` + `--stat` 확인 의무
+  (의도 밖 파일·대량 줄 변화 시 중단).
+- `scripts/dev-verify.mjs`: NODE_ENV 해제, `--dns-result-order=ipv4first`,
+  git push/clone만 재시도(3회 백오프), 테스트 재시도 금지.
+  테스트가 외부 네트워크를 쓰면 실패로 간주 (스위트는 hermetic 유지).
 - 푸시 전 `git status --porcelain`이 비어 있어야 한다. 클린 클론에서 `pnpm install --frozen-lockfile` → build → test 통과를 확인한다.
   클린 클론 검증은 NODE_ENV 미설정 상태로 한다 (`production`이면 devDependencies가
   스킵되어 tsc/vitest가 없다. `check:env`가 경고).
@@ -423,6 +434,20 @@ C4 CI E2E에도 C2·C3를 fake 서버로 추가. M5-dogfood.md 3절을 실제 �
 5. toHashable(node) 단일 변환(doc·세션 공용, 캐스팅 제거).
    테스트: examples/procedures/* 전 노드에서 doc approvalHash == 세션 approvalHash.
 
+### M5.6 (dogfood-real repo 대상, 한 묶음)
+a. resolveProcedureRef .json/bare name/디렉터리 3형식 통일 + approve 판별 + 문서 문구.
+   3형식 모두 같은 dir·해시 테스트.
+b. approve: fixed 값에 ${...}가 있으면 리터럴 앞부분을 $prefix로 생성하고 출력에 표시
+   (URL이면 URL 모드 규칙 적용). 수락: hn형 map 템플릿에서 approve 무수정 → run --unattended exit 0.
+e. MCP 경로 external 생성: pf_split/pf_confirm_leaf에 sideEffect 입력,
+   external은 기존 ask_human(plan)→approve 흐름 강제.
+g. 누적/stateWrites 노드는 출력 단언 constraint(count 등) 필수, 없으면 finalize 경고
+   (strict면 거부).
+h. instruction에 "offset/cursor 증가 연산은 until 본문을 script로" 명시 + 문구 계약 테스트.
+f. 재시도는 readOnly 도구 호출만(일시 네트워크 오류, 지수 백오프, 설정화).
+   external은 재시도 금지 테스트.
+c·d·j는 하네스 과제로 DECISIONS에 기록만.
+
 ### M5 검증과 실행 분리
 - `procforge test <proc>`: replay 전용, drift 검출만.
 - `procforge run <procedure> --param k=v ... [--out <dir>]`: live 실행 전용.
@@ -543,4 +568,5 @@ C4 CI E2E에도 C2·C3를 fake 서버로 추가. M5-dogfood.md 3절을 실제 �
 | 2026-10-11 | 6, 8 | 병렬 세션 기록 복원: docs/M5.5-dogfood-real-hn-trend.md (동일 파일 충돌로 덮여서 복구, §5 repo/harness 귀속 검증 포함) | — |
 | 2026-10-11 | 6, 8 | M5.5-4.3 신설 (승인 패턴 명시화 1~5): $any/$prefix·URL 모드·approvalHash·직접호출 금지·NODE_ENV 미설정 | M5.5-6 완료 후속 |
 | 2026-10-11 | 6, 8 | M5.5-4.4 신설 (승인 해시·패턴 보강 1~5): script 내용·파서 통일·경로 모드·URL 자격·toHashable | 승인 보강 마지막 |
+| 2026-10-11 | 6, 8 | M5.6 신설 (dogfood-real repo 대상 한 묶음 a~h): ref 통일·$prefix 생성·external 입력·출력 단언·offset 문구·readOnly 재시도 | 0.2 개정 후속 |
 | 2026-10-11 | 6, 8 | M5.5-4.2 신설 (승인 정합성 보강 1~6): 논리경로 매칭·wildcard 명시·해시 재계산·경로 정규화·잠금 finally·NODE_ENV 경고 | M5.5-6보다 먼저 |
