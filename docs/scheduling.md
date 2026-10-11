@@ -18,30 +18,34 @@
 일치하는 항목이 있을 때만 실행된다. 파일이 없으면 빈 목록(= 전부 거부).
 
 ```json
-[
-  {
-    "node": { "id": "1.1", "hash": "a3f9…" },
-    "tool": { "server": "web", "name": "fetch" },
-    "args": { "url": "https://example.com/list", "mode": "*" }
-  }
-]
+{
+  "version": 2,
+  "entries": [
+    {
+      "node": { "id": "1.1", "hash": "a3f9…" },
+      "tool": { "server": "web", "name": "fetch" },
+      "args": { "url": { "$prefix": "https://example.com/" }, "mode": { "$any": true } }
+    }
+  ]
+}
 ```
 
+- 형식은 `{version: 2, entries}`. 옛 배열 형식(v1)은 로드 시 1회 변환된다
+  (`"*"` → `$any`, 끝 `*` 문자열 → `$prefix`) 후 경고가 남는다.
+  node pin 없는 v1은 재생성해야 한다 (`approve`로 다시 생성).
 - `node.id` + `node.hash` 필수. 절차서를 수정하면 해시가 바뀌어 기존 승인은
   거부된다 (`approval: 승인 갱신 필요`). 항목 생성은 CLI로 한다
   (MCP 도구 추가 없음):
   `procforge approve procedures/<name> --node <id> [--allow-wildcard <key> ...]`
   (같은 노드 항목이 있으면 갱신).
 - `args` 생략 = 해당 tool 전체 승인 (노드 pin은 유지).
-- 생성된 패턴은 fixed 값 그대로다. var/generated 키는 `--allow-wildcard <key>`로
-  명시한 것만 `"*"`가 되고, 미지정 키가 있으면 `bad_request`(exit 2) + 키 목록으로
-  거부된다 (암묵적 전체 허용 금지).
-- 패턴 값에 접두 와일드카드를 쓸 수 있다 (`"https://a.com/*"`, 끝 `*`만.
-  정규식은 없다). 중간에 `*`가 있으면 리터럴(정확 일치)로 취급한다.
 - `args`가 있으면 실제 호출 인자의 키 집합과 정확히 일치해야 한다
   (추가 키가 하나라도 있으면 거부).
-- 패턴 값 `"*"` = 임의 값 허용 (하나의 키에 대해).
-- 생성된 패턴은 fixed 값 그대로, var/generated는 `"*"`다.
+- 패턴 값은 명시적이다. 문자열은 항상 정확 일치 (`"SELECT *"`는 `"SELECT x"`와
+  불일치). 와일드카드는 `{"$any": true}`, 접두는 `{"$prefix": "..."}`만 쓴다.
+- 생성된 패턴은 fixed 값 그대로다. var/generated 키는 `--allow-wildcard <key>`로
+  명시한 것만 `{"$any": true}`가 되고, 미지정 키가 있으면 `bad_request`(exit 2) +
+  키 목록으로 거부된다 (암묵적 전체 허용 금지).
 - 매칭 기준은 논리 경로다 (rewritePaths 전 해석 인자). path 인자는 고정
   상대경로 그대로 승인하면 실행 시 run fs 절대경로로 바뀌어도 일치한다.
 - map/until external 노드는 부모 노드 id+hash로 승인한다 (항목별 해시는 불안정).

@@ -4,7 +4,7 @@ import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { ProcForgeApp } from "../src/app/app.js";
 import { runProcedureTest } from "../src/runner/procedure-run.js";
-import { isApproved, loadApprovals, matchApproval, approvalPins, checkApproval, buildApprovalEntry } from "../src/services/approvals.js";
+import { isApproved, loadApprovals, matchApproval, approvalPins, checkApproval, buildApprovalEntry, migrateV1Value } from "../src/services/approvals.js";
 import { runExitCode, cliErrorExit, runErrorExit } from "../src/app/run-exit.js";
 import { testStack } from "./client-mode.js";
 import { computeNodeHash } from "@procforge/shared/schema.js";
@@ -84,12 +84,16 @@ async function buildUnatt(): Promise<ProcForgeApp> {
 }
 
 function writeApprovals(entries: unknown): void {
-  writeFileSync(join(pfdir, "procedures", "m55-unatt", "approvals.json"), JSON.stringify(entries));
+  // M5.5-4.3-1: v2 형식으로 기록.
+  writeFileSync(
+    join(pfdir, "procedures", "m55-unatt", "approvals.json"),
+    JSON.stringify({ version: 2, entries }),
+  );
 }
 
 describe("M5.5-4 approvals 매칭", () => {
   it("일치·와일드카드·불일치", () => {
-    const e = { node: { id: "1.1", hash: "h1" }, tool: { server: "s", name: "t" }, args: { a: "x", b: "*" } };
+    const e = { node: { id: "1.1", hash: "h1" }, tool: { server: "s", name: "t" }, args: { a: "x", b: { $any: true } } };
     expect(matchApproval(e, "s", "t", { a: "x", b: "anything" })).toBe(true);
     expect(matchApproval(e, "s", "t", { a: "x", b: "z" })).toBe(true);
     expect(matchApproval(e, "s", "t", { a: "y", b: "z" })).toBe(false);
@@ -113,7 +117,7 @@ describe("M5.5-4 approvals 매칭", () => {
     expect(checkApproval([e], approvalPins({ id: "9.9", hash: "h1" }), "s", "t", { a: "x" })).toBe("denied");
     expect(checkApproval([e], approvalPins({ id: "1.1", hash: "h1" }), "s", "t", { a: "y" })).toBe("denied");
     // map 인스턴스(1.2.1)는 부모 pin으로 판정.
-    const me = { node: { id: "1.2", hash: "mh" }, tool: { server: "s", name: "t" }, args: { f: "*" } };
+    const me = { node: { id: "1.2", hash: "mh" }, tool: { server: "s", name: "t" }, args: { f: { $any: true } } };
     const pins = approvalPins(
       { id: "1.2.1", hash: "1.2-hash#0", parentId: "1.2" },
       { id: "1.2", hash: "mh", kind: "map" },
@@ -134,7 +138,7 @@ describe("M5.5-4 approvals 매칭", () => {
     }, ["b"]);
     expect(built.node.id).toBe("1.1");
     expect(built.node.hash.length).toBeGreaterThan(0);
-    expect(built.args).toEqual({ a: "x", b: "*" });
+    expect(built.args).toEqual({ a: "x", b: { $any: true } });
     expect(() => buildApprovalEntry({ id: "1", goal: "g", sideEffect: "none" })).toThrow();
   });
 
@@ -151,9 +155,9 @@ describe("M5.5-4 approvals 매칭", () => {
       expect(String(e instanceof Error ? e.message : e)).toContain("u");
     }
     expect(code).toBe("bad_request");
-    expect(buildApprovalEntry(doc, ["u"]).args).toEqual({ u: "*" });
+    expect(buildApprovalEntry(doc, ["u"]).args).toEqual({ u: { $any: true } });
     // 접두 와일드카드 매칭.
-    const e = { node: { id: "1.1", hash: "h" }, tool: { server: "s", name: "t" }, args: { url: "https://a.com/*" } };
+    const e = { node: { id: "1.1", hash: "h" }, tool: { server: "s", name: "t" }, args: { url: { $prefix: "https://a.com/" } } };
     expect(matchApproval(e, "s", "t", { url: "https://a.com/list" })).toBe(true);
     expect(matchApproval(e, "s", "t", { url: "https://evil.com/list" })).toBe(false);
     expect(matchApproval(e, "s", "t", { url: "https://a.com.evil.com/" })).toBe(false);
@@ -166,6 +170,36 @@ describe("M5.5-4 approvals 매칭", () => {
 
   it("loadApprovals: 없음→빈 목록", () => {
     expect(loadApprovals(join(root, "nope"))).toEqual([]);
+  });
+
+  it("M5.5-4.3-1: 문자열은 항상 정확 일치 (SELECT */*)", () => {
+    const sel = { node: { id: "1", hash: "h" }, tool: { server: "s", name: "t" }, args: { q: "SELECT *" } };
+    expect(matchApproval(sel, "s", "t", { q: "SELECT *" })).toBe(true);
+    expect(matchApproval(sel, "s", "t", { q: "SELECT x" })).toBe(false);
+    const star = { node: { id: "1", hash: "h" }, tool: { server: "s", name: "t" }, args: { q: "*" } };
+    expect(matchApproval(star, "s", "t", { q: "*" })).toBe(true);
+    expect(matchApproval(star, "s", "t", { q: "other" })).toBe(false);
+  });
+
+  it("M5.5-4.3-1: v1 변환 (*→$any, 끝*→$prefix)", () => {
+    expect(migrateV1Value("*")).toEqual({ $any: true });
+    expect(migrateV1Value("https://a.com/*")).toEqual({ $prefix: "https://a.com/" });
+    // 끝 *는 규칙대로 $prefix로 변환된다 (v1의 "SELECT *"는 변환 후 검토 대상).
+    expect(migrateV1Value("SELECT *")).toEqual({ $prefix: "SELECT " });
+    expect(migrateV1Value("a*b")).toBe("a*b");
+    expect(migrateV1Value({ u: "*", p: { x: "a/*" }, n: 1 })).toEqual({ u: { $any: true }, p: { x: { $prefix: "a/" } }, n: 1 });
+    // v1 파일 로드 → 변환 적용.
+    const d = mkdtempSync(join(tmpdir(), "pf-m543v1-"));
+    writeFileSync(join(d, "approvals.json"), JSON.stringify([
+      { node: { id: "1.1", hash: "h" }, tool: { server: "s", name: "t" }, args: { u: "*", p: "https://a.com/*" } },
+    ]));
+    expect(loadApprovals(d)).toEqual([
+      { node: { id: "1.1", hash: "h" }, tool: { server: "s", name: "t" }, args: { u: { $any: true }, p: { $prefix: "https://a.com/" } } },
+    ]);
+    // node pin 없는 v1 → bad_request.
+    const d2 = mkdtempSync(join(tmpdir(), "pf-m543v1b-"));
+    writeFileSync(join(d2, "approvals.json"), JSON.stringify([{ tool: { server: "s", name: "t" } }]));
+    expect(() => loadApprovals(d2)).toThrow(/재생성/);
   });
 });
 
@@ -322,10 +356,13 @@ describe("M5.5-4.2-2 접두 와일드카드 E2E", () => {
 
   function prefixApprovals(): void {
     const p = join(pfdir, "procedures", "m55-url", "approvals.json");
-    const list = JSON.parse(readFileSync(p, "utf8")) as { args?: Record<string, unknown> }[];
-    expect(list[0].args).toEqual({ url: "*" });
-    list[0].args = { url: "https://a.com/*" };
-    writeFileSync(p, JSON.stringify(list));
+    const file = JSON.parse(readFileSync(p, "utf8")) as {
+      version: number; entries: { args?: Record<string, unknown> }[];
+    };
+    expect(file.version).toBe(2);
+    expect(file.entries[0].args).toEqual({ url: { $any: true } });
+    file.entries[0].args = { url: { $prefix: "https://a.com/" } };
+    writeFileSync(p, JSON.stringify(file));
   }
 
   function urlOpts(url: string) {
