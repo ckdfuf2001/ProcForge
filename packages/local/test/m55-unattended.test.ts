@@ -83,10 +83,17 @@ function writeApprovals(entries: unknown): void {
 describe("M5.5-4 approvals 매칭", () => {
   it("일치·와일드카드·불일치", () => {
     const e = { tool: { server: "s", name: "t" }, args: { a: "x", b: "*" } };
-    expect(matchApproval(e, "s", "t", { a: "x", b: "anything", c: 1 })).toBe(true);
+    expect(matchApproval(e, "s", "t", { a: "x", b: "anything" })).toBe(true);
+    expect(matchApproval(e, "s", "t", { a: "x", b: "z" })).toBe(true);
     expect(matchApproval(e, "s", "t", { a: "y", b: "z" })).toBe(false);
     expect(matchApproval(e, "s", "other", { a: "x", b: "z" })).toBe(false);
     expect(matchApproval(e, "s", "t", { a: "x" })).toBe(false);
+    // M5.5-4.1-2: 추가 키 → 거부 (키 집합 정확히 일치).
+    expect(matchApproval(e, "s", "t", { a: "x", b: "z", c: 1 })).toBe(false);
+    expect(matchApproval(
+      { tool: { server: "s", name: "t" }, args: { o: { x: 1 } } },
+      "s", "t", { o: { x: 1, y: 2 } },
+    )).toBe(false);
     expect(matchApproval({ tool: { server: "s", name: "t" } }, "s", "t", { whatever: 1 })).toBe(true);
     expect(isApproved([e], "s", "t", { a: "x", b: 1 })).toBe(true);
     expect(isApproved([], "s", "t", { a: "x", b: 1 })).toBe(false);

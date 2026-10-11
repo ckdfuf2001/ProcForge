@@ -49,11 +49,12 @@ function matchValue(pattern: unknown, actual: unknown): boolean {
   if (Array.isArray(pattern) || Array.isArray(actual)) {
     return JSON.stringify(pattern) === JSON.stringify(actual);
   }
-  return Object.entries(pattern as Record<string, unknown>).every(
-    ([k, v]) =>
-      Object.prototype.hasOwnProperty.call(actual, k) &&
-      matchValue(v, (actual as Record<string, unknown>)[k]),
-  );
+  // M5.5-4.1-2: 키 집합 정확히 일치 (실제 인자에 추가 키가 있으면 거부).
+  const p = pattern as Record<string, unknown>;
+  const a = actual as Record<string, unknown>;
+  const pk = Object.keys(p);
+  if (pk.length !== Object.keys(a).length) return false;
+  return pk.every((k) => Object.prototype.hasOwnProperty.call(a, k) && matchValue(p[k], a[k]));
 }
 
 export function matchApproval(
