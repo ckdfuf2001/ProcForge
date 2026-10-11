@@ -365,6 +365,9 @@
   CI에 setup-python + openpyxl (+ M5.3-2부터 python-pptx).
 - M5.3-1: 파일 내용 감사. script-kind 스크립트 + 고정(in/inout) 템플릿 파일
 - M5.3.1-1: file_exists 논리 경로. export 시 auto file_exists의
+- M5.3.1-3: 기간성 params. finalize가 session 값 중 감사가 날짜로 판정한 값을
+  default 없이 required로 기록. 미지정 run(import 시점)은 bad_request.
+  renderProcedureMd/command.md는 required 표기.
   fixtures/ 경로를 manifest 역조회로 논리 경로로 변환 (바인딩 인자는 템플릿
   문자열, 고정은 source rel). 잔류 시 finalize bad_request.
   runner file_exists는 run fs를 먼저 본다 (실행 입력·산출 검사).

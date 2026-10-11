@@ -256,6 +256,10 @@ async function buildMonthly(): Promise<void> {
   expect(autoPaths).toContain("1.1:sales-${params.month}.xlsx");
   expect(autoPaths).toContain("1.2:shell.pptx");
   expect(autoPaths).toContain("1.2:output/rendered.pptx");
+  // M5.3.1-3: 기간성 params는 default 금지 → required
+  const params = (doc as { params: Record<string, { default?: string; required?: boolean }> }).params;
+  expect(params["month"].default).toBe(undefined);
+  expect(params["month"].required).toBe(true);
 }
 
 describe("M5.3-2 수락 테스트", () => {
@@ -281,6 +285,14 @@ describe("M5.3-2 수락 테스트", () => {
       expect(all).toContain(r.ex.toLocaleString("en-US"));
     }
   }, 180000);
+
+  it("M5.3.1-3 month 미지정 run → bad_request", async () => {
+    await buildMonthly();
+    copyFileSync(OCT_XLSX, join(root, "sales-2026-10.xlsx"));
+    await expect(runProcedureTest(pfdir, root, "monthly", {
+      procforgeDir: pfdir, projectRoot: root, mode: "live", params: {},
+    })).rejects.toThrow(/필수 params 누락: month/);
+  }, 120000);
 
   it("c: 11월 파일 없음 → 실행 전 bad_request", async () => {
     await buildMonthly();

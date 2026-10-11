@@ -90,8 +90,9 @@ describe("pf_finalize", () => {
     const md = readFileSync(join(out.dir, "PROCEDURE.md"), "utf8");
     expect(md).toContain("## 단계");
     // procedure.json만으로 replay (fake 서버 차단, 입력은 프로젝트 폴백 허용)
+    // M5.3.1-3: month required이므로 명시
     writeOpencodeConfig(["nonexistent-procforge-tool-xyz"]);
-    const { report } = await runProcedureTest(pfdir, root, "monthly-test", { procforgeDir: pfdir, projectRoot: root, mode: "replay", allowProjectRead: true });
+    const { report } = await runProcedureTest(pfdir, root, "monthly-test", { procforgeDir: pfdir, projectRoot: root, mode: "replay", allowProjectRead: true, params: { month: "2026-09" } });
     expect(report.summary.fail).toBe(0);
     expect(report.summary.pass).toBe(2);
   }, 30000);
@@ -138,14 +139,18 @@ describe("pf_finalize", () => {
     expect(existsSync(again.commandFile)).toBe(true);
   }, 30000);
 
-  it("params 재바인딩: --param month=2026-10", async () => {
+  it("params 재바인딩: --param month=2026-10 + 기간성 required", async () => {
     const sid = await scripted();
     await appFor().finalize({ sessionId: sid, name: "rebind-test" });
     const { doc } = loadProcedureDoc(pfdir, "rebind-test");
-    expect(doc.params["month"].default).toBe("2026-09");
+    // 기간성 값(2026-09)은 default 금지 → required
+    expect(doc.params["month"].default).toBe(undefined);
+    expect(doc.params["month"].required).toBe(true);
     const { sessionId } = importProcedure(pfdir, doc, { month: "2026-10" });
     const store = new FileStore(pfdir);
     expect(store.getSession(sessionId)!.params["month"]).toBe("2026-10");
+    // 미지정 run은 bad_request
+    expect(() => importProcedure(pfdir, doc, {})).toThrow(/필수 params 누락: month/);
   }, 30000);
 
   it("M4.1-2 PROCEDURE.md는 노드 숫자 정렬 (1.2 < 1.10)", async () => {

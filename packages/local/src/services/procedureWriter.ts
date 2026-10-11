@@ -234,7 +234,10 @@ function renderProcedureMd(doc: ProcedureDoc, auditFindings: string[] = []): str
   const L: string[] = [];
   L.push(`# ${doc.name}`, ``, `원본 세션: ${doc.sourceSession} / 생성: ${doc.createdAt}`, ``);
   L.push(`## 파라미터`, ``);
-  for (const [k, v] of Object.entries(doc.params)) L.push(`- \`${k}\` (기본값: \`${v.default}\`)`);
+  for (const [k, v] of Object.entries(doc.params)) {
+    const vv = v as { default?: string; required?: boolean };
+    L.push(`- \`${k}\`${vv.required === true ? " (필수, --param 지정)" : ` (기본값: \`${vv.default}\`)`}`);
+  }
   L.push(``, `## 목차`, ``);
   const chapters = order.filter((n) => n.depth <= 1);
   chapters.forEach((c, i) => L.push(`${i + 1}. ${c.goal} (\`${c.id}\`)`));
@@ -306,7 +309,10 @@ function renderCommandMd(doc: ProcedureDoc): string {
     ``,
     `이 절차를 검증(replay)하거나 새 데이터로 실행(run)한다. 탐색 금지, 실패 시 단계 번호 보고.`,
     ``,
-    `파라미터: ${Object.entries(doc.params).map(([k, v]) => `${k}="${v.default}"`).join(" ") || "없음"}`,
+    `파라미터: ${Object.entries(doc.params).map(([k, v]) => {
+      const vv = v as { default?: string; required?: boolean };
+      return vv.required === true ? `${k}=(필수)` : `${k}="${vv.default}"`;
+    }).join(" ") || "없음"}`,
     `검증: \`procforge test procedures/${doc.name}\` + --param 전달.`,
     `실행: \`procforge run procedures/${doc.name}\` + --param 전달.`,
     ``,

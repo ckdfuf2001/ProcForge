@@ -42,7 +42,7 @@ import { importProcedure } from "../procedure.js";
 import { readRunState, writeRunState } from "../services/run-state.js";
 import { writeJUnitFile, resolveJUnitPath, copyRunFsToOut } from "../services/runner.js";
 import { repairDiscard } from "../services/repair.js";
-import { auditFixedValues } from "../services/finalize-audit.js";
+import { auditFixedValues, findDateSample } from "../services/finalize-audit.js";
 import { auditContentTexts, collectAuditContent } from "../services/audit-content.js";
 import { buildTrace, formatTraceMarkdown } from "../trace.js";
 import { exportSession } from "../export.js";
@@ -745,6 +745,14 @@ export class ProcForgeApp {
     const sid = a.sessionId as string;
     await this.core.getSession(sid);
     const { doc, warnings } = await this.core.pfBuildProcedure(sid, a.name as string);
+    // M5.3.1-3: 기간성 params(감사가 날짜로 판정한 default 값)는 default 금지 → required.
+    for (const [k, entry] of Object.entries(doc.params)) {
+      const e = entry as { default?: string; required?: boolean };
+      if (e.default !== undefined && findDateSample(e.default) !== null) {
+        delete e.default;
+        e.required = true;
+      }
+    }
     // M5.1-B1: 고정값 감사 (params·날짜·녹화 수치). strict면 실패 시 거부.
     const sess = await this.core.getSession(sid);
     const { nodes } = await this.core.pfTree(sid);

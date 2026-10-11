@@ -12,7 +12,12 @@ export const ProcedureDocSchema = z.object({
   name: z.string().min(1),
   sourceSession: z.string(),
   createdAt: z.string(),
-  params: z.record(z.object({ type: z.string(), default: z.string(), description: z.string() })),
+  params: z.record(z.object({
+    type: z.string(),
+    default: z.string().optional(),
+    required: z.boolean().optional(),
+    description: z.string(),
+  })),
   toolCatalog: z.array(z.object({
     server: z.string(),
     name: z.string(),

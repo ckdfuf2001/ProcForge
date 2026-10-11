@@ -21,10 +21,23 @@ export function importProcedure(
   const parsed = ProcedureDocSchema.parse(doc);
   const store = new FileStore(procforgeDir);
   const sessionId = randomUUID();
+  const defaults: Record<string, string> = {};
+  for (const [k, v] of Object.entries(parsed.params)) {
+    if (v.default !== undefined) defaults[k] = v.default;
+  }
+  // M5.3.1-3: required params 미지정 시 실행 전 bad_request.
+  const missing = Object.entries(parsed.params)
+    .filter(([k, v]) => v.required === true && v.default === undefined && !(k in params))
+    .map(([k]) => k);
+  if (missing.length > 0) {
+    throw Object.assign(new Error(`필수 params 누락: ${missing.join(",")} (--param으로 지정하라)`), {
+      code: "bad_request",
+    });
+  }
   const session: Session = {
     id: sessionId,
     request: `import:${parsed.name}`,
-    params: { ...Object.fromEntries(Object.entries(parsed.params).map(([k, v]) => [k, v.default])), ...params },
+    params: { ...defaults, ...params },
     toolCatalog: parsed.toolCatalog as Session["toolCatalog"],
     rootId: parsed.nodes.find((n) => n.parentId === null)?.id ?? parsed.nodes[0]?.id ?? "1",
     limits: { maxDepth: 20, maxRetries: 2, maxNodes: 500 },
