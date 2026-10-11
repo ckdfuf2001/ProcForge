@@ -399,6 +399,53 @@ export async function runSession(opts: RunOptions): Promise<RunReport> {
   }
 }
 
+// M5.6-f: 일시 네트워크 오류 판별 (재시도 대상. 검증·입력 오류는 제외).
+const TRANSIENT_RES = [
+  /timed? ?out/i,
+  /ECONNRESET|ECONNREFUSED|ENOTFOUND|EAI_AGAIN|EPIPE|EHOSTUNREACH|ENETUNREACH/i,
+  /fetch failed/i,
+  /connection (closed|reset|refused|aborted)/i,
+  /status (429|502|503|504)\b/,
+  /10013|10054|10060/,
+  /temporar/i,
+];
+
+export function isTransientToolError(e: unknown): boolean {
+  const msg = e instanceof Error ? e.message : String(e);
+  if (/bad_request|bad_args|not_found|validation|invalid arg/i.test(msg)) return false;
+  return TRANSIENT_RES.some((re) => re.test(msg));
+}
+
+export type ToolCaller = {
+  call(server: string, tool: string, args: Record<string, unknown>): Promise<ToolResponse>;
+};
+
+/**
+ * M5.6-f: 도구 호출 (readOnly + sideEffect none만 재시도, 지수 백오프).
+ * external·쓰기 노드는 재시도 금지 (중복 부작용 방지). 호출자가 retry 여부 결정.
+ */
+export async function callWithRetry(
+  pool: ToolCaller,
+  server: string,
+  tool: string,
+  args: Record<string, unknown>,
+  opts: { retry: boolean; attempts?: number; baseMs?: number },
+): Promise<{ resp: ToolResponse; attempts: number }> {
+  const attempts = Math.max(1, Math.floor(opts.attempts ?? 3));
+  const baseMs = Math.max(0, opts.baseMs ?? 500);
+  let last: unknown;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return { resp: await pool.call(server, tool, args), attempts: i + 1 };
+    } catch (e) {
+      last = e;
+      if (!opts.retry || i + 1 >= attempts || !isTransientToolError(e)) throw e;
+      await new Promise((r) => setTimeout(r, baseMs * 2 ** i));
+    }
+  }
+  throw last;
+}
+
 async function execNode(
   opts: RunOptions,
   params: Record<string, string>,
@@ -560,8 +607,17 @@ async function execNode(
     if (!rec) throw new Error(`녹화 없음: ${server}/${tool} (키 ${key}). record 모드로 먼저 녹화하라.`);
     resp = toToolResponse(rec, fsDir);
   } else {
-    // record / passthrough: 실제 호출
-    resp = await pool.call(server, tool, args);
+    // record / passthrough: 실제 호출.
+    // M5.6-f: readOnly + sideEffect none만 재시도 (external·쓰기는 중복 부작용 방지).
+    const retried = await callWithRetry(pool, server, tool, args, {
+      retry: readOnly && n.sideEffect === "none",
+      attempts: opts.toolRetry?.attempts,
+      baseMs: opts.toolRetry?.baseMs,
+    });
+    resp = retried.resp;
+    if (retried.attempts > 1) {
+      logger.info("tool retry success", { nodeId: n.id, server, tool, attempts: retried.attempts });
+    }
     if (mode === "record") {
       saveRecording(opts.procforgeDir, opts.sessionId, n.id, {
         key,

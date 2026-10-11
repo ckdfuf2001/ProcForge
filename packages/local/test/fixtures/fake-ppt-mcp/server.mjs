@@ -95,6 +95,19 @@ server.tool(
   },
 );
 
+// M5.6-f: 일시 실패 후 성공 (프로세스당 첫 호출은 transient 실패).
+let unstableCalls = 0;
+server.tool(
+  "unstable",
+  "Flaky read (M5.6-f). First call per process fails transient.",
+  { note: z.string().optional() },
+  async ({ note }) => {
+    unstableCalls += 1;
+    if (unstableCalls === 1) throw new Error("fetch failed: simulated ECONNRESET");
+    return { content: [{ type: "text", text: JSON.stringify({ note: note ?? null, calls: unstableCalls }) }] };
+  },
+);
+
 // M5.5-5 dogfood: 날짜별 3페이지 목록. d1: x1,x2/x3/빈칸, d2: x1,x2/x3/x4.
 server.tool(
   "board",

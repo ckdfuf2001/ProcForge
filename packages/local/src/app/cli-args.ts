@@ -23,6 +23,8 @@ export type CliValues = {
   force?: boolean;
   unattended?: boolean;
   "allow-wildcard"?: string[];
+  "retry-attempts"?: string;
+  "retry-base-ms"?: string;
 };
 
 export function parseCliArgs(argv: string[]): { values: CliValues; positionals: string[] } {
@@ -48,6 +50,8 @@ export function parseCliArgs(argv: string[]): { values: CliValues; positionals: 
       force: { type: "boolean", default: false },
       unattended: { type: "boolean", default: false },
       "allow-wildcard": { type: "string", multiple: true },
+      "retry-attempts": { type: "string" },
+      "retry-base-ms": { type: "string" },
     },
     allowPositionals: true,
   });

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ToolAnnotationsSchema } from "./schema.js";
 
 // 절차서 문서 DTO (M4.2-1, core pfBuildProcedure ↔ local procedureWriter 공용).
 // JSON 직렬화 가능 (R5).
@@ -23,6 +24,8 @@ export const ProcedureDocSchema = z.object({
     name: z.string(),
     inputSchema: z.record(z.unknown()),
     schemaHash: z.string(),
+    // M5.6-f: readOnlyHint 등 실행 시점 힌트 유지 (runSession catalogReadOnly용).
+    annotations: ToolAnnotationsSchema.optional(),
   })),
   nodes: z.array(z.object({
     id: z.string(),

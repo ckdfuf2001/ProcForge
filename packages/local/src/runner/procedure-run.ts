@@ -20,6 +20,8 @@ export type ProcedureRunOptions = {
   changed?: boolean;
   /** 무인 실행 (M5.5-4. external은 approvals.json 일치 시에만 실행) */
   unattended?: boolean;
+  /** 도구 호출 재시도 (M5.6-f) */
+  toolRetry?: { attempts?: number; baseMs?: number };
 };
 
 export function resolveProcedureRef(procforgeDir: string, ref: string): { dir: string; file: string } {
@@ -80,6 +82,7 @@ export async function runProcedureTest(
     changed: o.changed ?? false,
     procedureDir: dir,
     unattended: o.unattended ?? false,
+    ...(o.toolRetry ? { toolRetry: o.toolRetry } : {}),
   });
   return { report, sessionId, procedureDir: dir };
 }

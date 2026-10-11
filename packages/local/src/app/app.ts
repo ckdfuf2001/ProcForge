@@ -1026,6 +1026,7 @@ export class ProcForgeApp {
   async runProcedure(a: {
     procedure: unknown; params?: unknown; out?: unknown; force?: unknown;
     allowBash?: unknown; allowProjectRead?: unknown; unattended?: unknown;
+    toolRetry?: unknown;
   }): Promise<{
     runId: string; sessionId: string; mode: "live";
     passed: number; failed: number; unverified: number; skipped: number; blocked: number; suspended: number;
@@ -1044,6 +1045,7 @@ export class ProcForgeApp {
       allowBash: a.allowBash === true,
       allowProjectRead: a.allowProjectRead === true,
       unattended: a.unattended === true,
+      ...((a.toolRetry as { attempts?: number; baseMs?: number } | undefined) ? { toolRetry: a.toolRetry as { attempts?: number; baseMs?: number } } : {}),
     });
     let outDir: string | undefined;
     const outOpt = a.out as string | undefined;

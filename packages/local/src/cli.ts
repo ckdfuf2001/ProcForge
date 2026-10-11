@@ -121,7 +121,7 @@ async function cmdRun(): Promise<number> {
   const positional = positionals[1];
   const procRef = (!values.session ? positional : undefined) ?? values.procedure;
   if (!procRef) {
-    console.error("procedure 실행: procforge run procedures/<name> [--param k=v] [--out dir] [--force] [--unattended]");
+    console.error("procedure 실행: procforge run procedures/<name> [--param k=v] [--out dir] [--force] [--unattended] [--retry-attempts n] [--retry-base-ms ms]");
     return 2;
   }
   const params: Record<string, string> = {};
@@ -136,6 +136,19 @@ async function cmdRun(): Promise<number> {
   const { projectRoot, procforgeDir } = resolveDirs(values, process.env);
   try {
     const { app } = createApp({ procforgeDir, projectRoot });
+    // M5.6-f: 재시도 설정 (숫자 아니면 입력 오류).
+    let toolRetry: { attempts?: number; baseMs?: number } | undefined;
+    const ra = values["retry-attempts"];
+    const rb = values["retry-base-ms"];
+    if (ra !== undefined || rb !== undefined) {
+      const attempts = ra === undefined ? 3 : Number(ra);
+      const baseMs = rb === undefined ? 500 : Number(rb);
+      if (!Number.isInteger(attempts) || attempts < 1 || !Number.isInteger(baseMs) || baseMs < 0) {
+        console.error("bad --retry-attempts (1 이상 정수) / --retry-base-ms (0 이상 정수)");
+        return 2;
+      }
+      toolRetry = { attempts, baseMs };
+    }
     const out = await app.runProcedure({
       procedure: procRef,
       params,
@@ -144,6 +157,7 @@ async function cmdRun(): Promise<number> {
       allowBash: values["allow-bash"] ?? false,
       allowProjectRead: values["allow-project-read"] ?? false,
       unattended: values.unattended ?? false,
+      ...(toolRetry ? { toolRetry } : {}),
     });
     console.log(`run ${out.runId} (session ${out.sessionId}): pass=${out.passed} fail=${out.failed} unverified=${out.unverified} skipped=${out.skipped} blocked=${out.blocked} suspended=${out.suspended}`);
     console.log(`report: ${out.reportPath}`);
