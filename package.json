@@ -8,7 +8,8 @@
     "build": "pnpm -r build",
     "test": "pnpm -r test",
     "lint": "pnpm -r lint",
-    "check:deps": "node scripts/check-deps.mjs"
+    "check:deps": "node scripts/check-deps.mjs",
+    "check:env": "node scripts/check-env.mjs"
   },
   "devDependencies": {
     "typescript": "^5.6.2",

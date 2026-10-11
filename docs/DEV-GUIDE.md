@@ -30,6 +30,7 @@
 - 커밋은 항목별로 `M<x>-<n> 요약` 형식. 회귀 테스트를 반드시 같이 넣는다.
 - 푸시 전 `git status --porcelain`이 비어 있어야 한다. 클린 클론에서 `pnpm install --frozen-lockfile` → build → test 통과를 확인한다.
 - 로컬 검증은 dist 삭제(clean) 후 build → test. 로컬 vitest는 패키지 간 import를 dist로 해결하므로, core/shared 변경분은 빌드 없이 검증되지 않는다. 클린 클론 결과만 완료 증거로 인정한다.
+- 푸시 전 `pnpm -r build` 필수. 로컬 @types/node가 lockfile과 같은지 `pnpm check:env`로 확인한다 (tsc 결과가 환경에 따라 달라짐).
 - 완료 기준: GitHub Actions에서 ubuntu-latest, windows-latest 둘 다 success. run URL을 보고한다.
 - 보고는 `git diff --stat <base>..<head>` 기준으로, 실제로 바뀐 것만 쓴다.
 - 테스트 명령: `pnpm -r run test -- --run --testTimeout=20000 --hookTimeout=20000`
