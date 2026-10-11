@@ -1,0 +1,6 @@
+{
+  "fixtures/1.1/408880fa-1195-480d-ae16-e79a5b5cd463/0-sales-2026-09.xlsx": "sales-2026-09.xlsx",
+  "fixtures/1.1/be242f08-1f1a-4fc9-83c1-5eacb9833875/0-sales-2026-09.xlsx": "sales-2026-09.xlsx",
+  "fixtures/1.2/97345bd9-1653-4350-bbb6-0f2a8d3fac17/0-shell.pptx": "shell.pptx",
+  "fixtures/1.2/97345bd9-1653-4350-bbb6-0f2a8d3fac17/1-rendered.pptx": "output/rendered.pptx"
+}

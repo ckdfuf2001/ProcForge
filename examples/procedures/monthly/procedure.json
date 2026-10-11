@@ -1,0 +1,247 @@
+{
+  "format": "procforge-procedure",
+  "version": 1,
+  "name": "monthly",
+  "sourceSession": "08ddcdb0-5145-4d2f-9626-2632c26dc73b",
+  "createdAt": "2026-10-11T02:47:02.307Z",
+  "params": {
+    "month": {
+      "type": "string",
+      "default": "2026-09",
+      "description": ""
+    }
+  },
+  "toolCatalog": [
+    {
+      "server": "host",
+      "name": "script",
+      "inputSchema": {},
+      "schemaHash": "script"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "1.1",
+      "parentId": "1",
+      "goal": "월별 xlsx를 집계한다",
+      "depth": 1,
+      "dependsOn": [],
+      "children": [],
+      "tool": {
+        "server": "host",
+        "name": "script",
+        "schemaHash": "script"
+      },
+      "args": {
+        "xlsx": {
+          "kind": "var",
+          "ref": "sales-${params.month}.xlsx",
+          "path": "in"
+        },
+        "agg": {
+          "kind": "script",
+          "file": "scripts/1_1.py",
+          "runtime": "python"
+        }
+      },
+      "sideEffect": "none",
+      "constraints": [
+        {
+          "id": "c-period",
+          "source": "human",
+          "kind": "equals",
+          "spec": {
+            "path": "period",
+            "expected": "${params.month}"
+          }
+        },
+        {
+          "id": "auto-0",
+          "source": "auto",
+          "note": "auto: first-pass shape",
+          "kind": "file_exists",
+          "spec": {
+            "path": "fixtures/1.1/be242f08-1f1a-4fc9-83c1-5eacb9833875/0-sales-2026-09.xlsx"
+          }
+        },
+        {
+          "id": "auto-1",
+          "source": "auto",
+          "note": "auto: first-pass shape",
+          "kind": "json_path_exists",
+          "spec": {
+            "path": "rows"
+          }
+        },
+        {
+          "id": "auto-2",
+          "source": "auto",
+          "note": "auto: first-pass shape",
+          "kind": "json_path_exists",
+          "spec": {
+            "path": "total"
+          }
+        },
+        {
+          "id": "auto-3",
+          "source": "auto",
+          "note": "auto: first-pass shape",
+          "kind": "json_path_exists",
+          "spec": {
+            "path": "period"
+          }
+        }
+      ],
+      "golden": {
+        "fixtures": [
+          "fixtures/1.1/be242f08-1f1a-4fc9-83c1-5eacb9833875/0-sales-2026-09.xlsx"
+        ],
+        "output": "agg ${params.month} total 2000000",
+        "attemptId": "be242f08-1f1a-4fc9-83c1-5eacb9833875",
+        "ignore": []
+      },
+      "goldenArgs": {
+        "xlsx": "sales-2026-09.xlsx"
+      }
+    },
+    {
+      "id": "1.2",
+      "parentId": "1",
+      "goal": "보고서 pptx를 생성한다",
+      "depth": 1,
+      "dependsOn": [
+        "1.1"
+      ],
+      "children": [],
+      "tool": {
+        "server": "host",
+        "name": "script",
+        "schemaHash": "script"
+      },
+      "args": {
+        "template": {
+          "kind": "fixed",
+          "value": "shell.pptx",
+          "path": "in"
+        },
+        "output": {
+          "kind": "fixed",
+          "value": "output/rendered.pptx",
+          "path": "out"
+        },
+        "cover": {
+          "kind": "var",
+          "ref": "월간보고서 ${params.month} (최종)"
+        },
+        "tableTitle": {
+          "kind": "var",
+          "ref": "${params.month} 실적 요약"
+        },
+        "rows": {
+          "kind": "var",
+          "ref": "$1.1.rows"
+        },
+        "slide": {
+          "kind": "fixed",
+          "value": 1
+        },
+        "render": {
+          "kind": "script",
+          "file": "scripts/1_2.py",
+          "runtime": "python"
+        }
+      },
+      "sideEffect": "local_write",
+      "constraints": [
+        {
+          "id": "c-sum",
+          "source": "human",
+          "kind": "numeric_match",
+          "spec": {
+            "path": "total",
+            "expected": "$1.1.total"
+          }
+        },
+        {
+          "id": "auto-0",
+          "source": "auto",
+          "note": "auto: first-pass shape",
+          "kind": "file_exists",
+          "spec": {
+            "path": "fixtures/1.2/97345bd9-1653-4350-bbb6-0f2a8d3fac17/0-shell.pptx"
+          }
+        },
+        {
+          "id": "auto-1",
+          "source": "auto",
+          "note": "auto: first-pass shape",
+          "kind": "file_exists",
+          "spec": {
+            "path": "fixtures/1.2/97345bd9-1653-4350-bbb6-0f2a8d3fac17/1-rendered.pptx"
+          }
+        },
+        {
+          "id": "auto-2",
+          "source": "auto",
+          "note": "auto: first-pass shape",
+          "kind": "json_path_exists",
+          "spec": {
+            "path": "total"
+          }
+        },
+        {
+          "id": "auto-3",
+          "source": "auto",
+          "note": "auto: first-pass shape",
+          "kind": "json_path_exists",
+          "spec": {
+            "path": "title"
+          }
+        }
+      ],
+      "golden": {
+        "fixtures": [
+          "fixtures/1.2/97345bd9-1653-4350-bbb6-0f2a8d3fac17/0-shell.pptx",
+          "fixtures/1.2/97345bd9-1653-4350-bbb6-0f2a8d3fac17/1-rendered.pptx"
+        ],
+        "output": "render ${params.month} total 2000000",
+        "attemptId": "97345bd9-1653-4350-bbb6-0f2a8d3fac17",
+        "ignore": [
+          "title"
+        ]
+      },
+      "goldenArgs": {
+        "template": "shell.pptx",
+        "output": "output/rendered.pptx",
+        "cover": "월간보고서 2026-09 (최종)",
+        "tableTitle": "2026-09 실적 요약",
+        "rows": [
+          {
+            "item": "A",
+            "qty": 120,
+            "ex": 1200000
+          },
+          {
+            "item": "B",
+            "qty": 80,
+            "ex": 800000
+          }
+        ],
+        "slide": 1
+      }
+    },
+    {
+      "id": "1",
+      "parentId": null,
+      "goal": "월간보고서",
+      "depth": 0,
+      "dependsOn": [],
+      "children": [
+        "1.1",
+        "1.2"
+      ],
+      "sideEffect": "none",
+      "constraints": []
+    }
+  ]
+}
