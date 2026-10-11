@@ -32,7 +32,7 @@ afterEach(() => {
   else process.env.USERPROFILE = oldProfile;
 });
 
-async function buildAcc(): Promise<{ app: ProcForgeApp; sid: string; editCount: () => Promise<void> }> {
+async function buildAcc(withRubric = false): Promise<{ app: ProcForgeApp; sid: string; editCount: () => Promise<void> }> {
   const { client } = testStack(pfdir);
   const app = new ProcForgeApp({ core: client, procforgeDir: pfdir, projectRoot: root });
   const started = await client.pfStart({ request: "acc", params: {}, toolCatalog: ECHO_CAT });
@@ -58,11 +58,15 @@ async function buildAcc(): Promise<{ app: ProcForgeApp; sid: string; editCount: 
   });
   await client.pfEditNode({
     sessionId: sid, nodeId: "1.2",
+    ...(withRubric
+      ? { addConstraints: [{ id: "c-r", kind: "llm_rubric", spec: { rubric: "요약 품질" }, source: "human" }] }
+      : {}),
     stateWrites: [{ key: "seen", from: "$1.2.all" }],
   });
   const r = await client.pfReport({
     sessionId: sid, nodeId: "1.2", tool: { server: "fake-ppt", name: "echo" },
-    args: { v: "a" }, resultSummary: "a", resultJson: { v: "a", all: ["a"] },
+    args: { v: "a" }, resultSummary: "a", resultJson: withRubric ? { v: "a", all: [] } : { v: "a", all: ["a"] },
+    ...(withRubric ? { rubricReasons: { "c-r": "비어 있음 확인" } } : {}),
     selfVerdict: "pass", selfReason: "ok",
   });
   expect(r.verdict).toBe("pass");
@@ -95,5 +99,12 @@ describe("M5.6-g 누적 출력 단언", () => {
     expect(fin.warnings.some((w) => w.includes("stateWrites 출력 단언 없음"))).toBe(false);
     const strict = await app.finalize({ sessionId: sid, name: "m56-acc-ok2", strict: true });
     expect(strict.warnings.filter((w) => w.includes("bad_"))).toEqual([]);
+  }, 60000);
+
+  it("M5.7-1: llm_rubric만 있으면 경고, strict면 거부 (빈 누적)", async () => {
+    const { app, sid } = await buildAcc(true);
+    const fin = await app.finalize({ sessionId: sid, name: "m57-acc-rubric" });
+    expect(fin.warnings.some((w) => w.includes("stateWrites 출력 단언 없음: 1.2"))).toBe(true);
+    await expect(app.finalize({ sessionId: sid, name: "m57-acc-rubric-strict", strict: true })).rejects.toThrow(/stateWrites 출력 단언 없음/);
   }, 60000);
 });

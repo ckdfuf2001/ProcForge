@@ -26,7 +26,7 @@ function isDateLike(s: string): boolean {
 
 export { isDateLike };
 
-/** M5.6-g: 출력 단언 constraint 종류 (결과를 읽는 제약. file_exists 제외). */
+/** M5.7-1: 출력 단언 constraint 종류 (결정적 kind만. llm_rubric 제외). */
 export const OUTPUT_ASSERT_KINDS: ReadonlySet<string> = new Set([
   "equals",
   "count",
@@ -34,7 +34,6 @@ export const OUTPUT_ASSERT_KINDS: ReadonlySet<string> = new Set([
   "json_path_exists",
   "regex",
   "pptx_table_sum",
-  "llm_rubric",
   "schema",
 ]);
 
