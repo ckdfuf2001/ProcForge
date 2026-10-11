@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readdirSync, statSync, type Dirent } from "node:fs";
 import { delimiter, join, resolve } from "node:path";
 
 // 스크립트 leaf 실행 (M5.2-2). runner가 run fs에서 호스트 스크립트를 실행.
@@ -76,7 +76,7 @@ export function snapshotProject(projectRoot: string): Snapshot {
   let skipped = false;
   const walk = (dir: string, rel: string): void => {
     if (skipped) return;
-    let entries: ReturnType<typeof readdirSync>;
+    let entries: Dirent<string>[];
     try {
       entries = readdirSync(dir, { withFileTypes: true });
     } catch {
