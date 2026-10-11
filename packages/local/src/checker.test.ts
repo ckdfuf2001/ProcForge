@@ -237,6 +237,14 @@ describe("checker kinds", () => {
     expect(evaluateConstraint({ ...base, spec: { path: "no.pptx", expected: 1 } } as never, { fsDir: dir }).pass).toBe(false);
     expect(evaluateConstraint({ ...base, spec: { path: "../x.pptx", expected: 1 } } as never, { fsDir: dir }).pass).toBe(false);
   });
+  it("M5.5-3 equals expected의 ${state.k} 해결", () => {
+    const c = { id: "p", kind: "equals", spec: { path: "since", expected: "${state.lastId}" }, source: "human" } as never;
+    expect(evaluateConstraint(c, { resultJson: { since: "b" }, state: { lastId: "b" } }).pass).toBe(true);
+    expect(evaluateConstraint(c, { resultJson: { since: "a" }, state: { lastId: "b" } }).pass).toBe(false);
+    const d = evaluateConstraint(c, { resultJson: { since: "b" } });
+    expect(d.pass).toBe(false);
+    expect(d.deferred).toBe(true);
+  });
   it("M5.2-4 equals expected의 ${params.k} 해결", () => {
     const c = { id: "p", kind: "equals", spec: { path: "period", expected: "${params.month}" }, source: "human" } as never;
     expect(evaluateConstraint(c, { resultJson: { period: "2026-10" }, params: { month: "2026-10" } }).pass).toBe(true);

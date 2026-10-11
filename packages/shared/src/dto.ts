@@ -215,5 +215,7 @@ export const EditNodeInputSchema = z.object({
   map: z.unknown().optional(),
   /** until 실행 명세 (M5.5-2, kind:"until"과 함께 설정) */
   until: z.unknown().optional(),
+  /** 실행 간 상태 기록 선언 (M5.5-3) */
+  stateWrites: z.unknown().optional(),
 }).merge(RevisionOptsSchema);
 export type EditNodeInput = z.infer<typeof EditNodeInputSchema>;

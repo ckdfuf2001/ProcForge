@@ -24,6 +24,10 @@ export type RunOptions = {
   approvedNodeIds?: string[];
   /** 절차서 이름 (M5 run state 기록용) */
   procedure?: string;
+  /** 절차서 디렉터리 (M5.5-3 state.json 위치. 미지정 시 procedures/<name>) */
+  procedureDir?: string;
+  /** 실행 간 상태 (M5.5-3. runSession이 로드, resolveArgs에 전달) */
+  state?: Record<string, unknown>;
 };
 
 export type NodeResultStatus = "pass" | "fail" | "unverified" | "skipped" | "blocked" | "suspended";

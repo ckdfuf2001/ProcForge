@@ -89,13 +89,15 @@ export function resolveArgs(input: {
   supplied?: Record<string, unknown>;
   /** M5.5-2 until 전달값 */
   selfCarry?: { present: boolean; value: unknown };
+  /** M5.5-3 실행 간 상태 */
+  state?: Record<string, unknown>;
 }): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [k, spec] of Object.entries(input.specs)) {
     if (spec.kind === "fixed") {
       out[k] = (spec as { value: unknown }).value;
     } else if (spec.kind === "var") {
-      out[k] = resolveVar((spec as { ref: string }).ref, input.params, input.outputs, input.topo, undefined, input.selfCarry);
+      out[k] = resolveVar((spec as { ref: string }).ref, input.params, input.outputs, input.topo, undefined, input.selfCarry, input.state);
     } else if (spec.kind === "script") {
       // M5.2-2: 스크립트 지정은 해석 대상 아님. 파일 위치는 finalize/import가
       // 절차서 기준으로 재작성하므로 여기서는 원문 유지 (execNode가 처리).
@@ -150,6 +152,8 @@ export function resolveVar(
   topo?: OutputTopo,
   itemCtx?: ItemContext,
   selfCarry?: { present: boolean; value: unknown },
+  /** M5.5-3 실행 간 상태 */
+  state?: Record<string, unknown>,
 ): unknown {
   const pm = /^\$\{params\.([A-Za-z0-9_.-]+)\}$/.exec(ref);
   if (pm) {
@@ -167,6 +171,26 @@ export function resolveVar(
   // M5.5-2: until 전달값 ($self bare). 전달 없으면 undefined (첫 페이지 관례).
   if (ref === "$self") {
     return selfCarry && selfCarry.present ? selfCarry.value : undefined;
+  }
+  // M5.5-3: 실행 간 상태 (${state.k} 전체, 임베디드 치환)
+  if (ref.includes("${state.")) {
+    if (!state) throw new Error("state 없음 (run 시작 시 로드 실패 또는 미지원 경로)");
+    const missing: string[] = [];
+    const out = ref.replace(/\$\{state\.([A-Za-z0-9_.-]+)\}/g, (_m: string, k: string) => {
+      if (!Object.prototype.hasOwnProperty.call(state, k)) {
+        missing.push(k);
+        return "";
+      }
+      const v = (state as Record<string, unknown>)[k];
+      return typeof v === "string" ? v : JSON.stringify(v) ?? "";
+    });
+    if (missing.length > 0) throw new Error(`state 키 없음: ${missing.join(",")}`);
+    // 전체 참조면 원시값 유지
+    const full = /^\$\{state\.([A-Za-z0-9_.-]+)\}$/.exec(ref);
+    if (full && Object.prototype.hasOwnProperty.call(state, full[1])) {
+      return (state as Record<string, unknown>)[full[1]];
+    }
+    return out;
   }
   // M5.1-B3: 문자열 내 템플릿 치환 ("sales-${params.month}.xlsx" 등)
   if (ref.includes("${params.")) {

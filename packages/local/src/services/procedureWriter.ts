@@ -253,6 +253,10 @@ function renderProcedureMd(doc: ProcedureDoc, auditFindings: string[] = []): str
     if ((n as unknown as { kind?: string }).kind === "map" && nmap) {
       L.push(`- 반복(map): over=\`${nmap.over}\` as=\`${nmap.as}\` maxItems=${(nmap.maxItems as number | undefined) ?? "기본 100"} policy=${JSON.stringify(nmap.policy)}`);
     }
+    const nsw = (n as unknown as { stateWrites?: { key: string; from: string }[] }).stateWrites;
+    if (Array.isArray(nsw) && nsw.length > 0) {
+      L.push(`- 상태 기록: ${nsw.map((e) => `\`${e.key}\` ← \`${e.from}\``).join(", ")}`);
+    }
     L.push(`- 인자:`);
     for (const [k, spec] of Object.entries(n.args ?? {})) {
       const s = spec as ArgSpec;

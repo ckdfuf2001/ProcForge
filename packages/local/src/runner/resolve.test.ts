@@ -34,6 +34,13 @@ describe("resolveVar 템플릿", () => {
     expect((specs.c as { value: unknown }).value).toBe(3);
     expect((specs.d as { ref: unknown }).ref).toBe("$1.1.x");
   });
+  it("M5.5-3 ${state.k} 해결", () => {
+    const state = { lastId: "b", n: 3 };
+    expect(resolveVar("${state.lastId}", {}, new Map(), undefined, undefined, undefined, state)).toBe("b");
+    expect(resolveVar("since-${state.lastId}", {}, new Map(), undefined, undefined, undefined, state)).toBe("since-b");
+    expect(() => resolveVar("${state.missing}", {}, new Map(), undefined, undefined, undefined, state)).toThrow(/state 키 없음/);
+    expect(() => resolveVar("${state.lastId}", {}, new Map())).toThrow(/state 없음/);
+  });
   it("M5.2-4 약식 $1.1.rows 해결", () => {
     const outputs = new Map<string, unknown>([["1.1", { rows: [1, 2], total: 5 }]]);
     expect(resolveVar("$1.1.rows", {}, outputs)).toEqual([1, 2]);

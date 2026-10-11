@@ -62,6 +62,7 @@ export function importProcedure(
       ...(n.kind === "until" ? { kind: "until" as const } : {}),
       ...(n.map !== undefined ? { map: n.map as Node["map"] } : {}),
       ...(n.until !== undefined ? { until: n.until as Node["until"] } : {}),
+      ...(n.stateWrites !== undefined ? { stateWrites: n.stateWrites as Node["stateWrites"] } : {}),
       sideEffect: n.sideEffect,
       constraints: (n.constraints ?? []) as Constraint[],
       advice: [],

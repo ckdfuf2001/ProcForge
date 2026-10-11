@@ -146,6 +146,8 @@ export type PfEditNodeInput = {
   map?: unknown;
   /** until 실행 명세 (M5.5-2) */
   until?: unknown;
+  /** 실행 간 상태 기록 선언 (M5.5-3) */
+  stateWrites?: unknown;
   expectedRevision?: number;
   actor?: Actor;
 };

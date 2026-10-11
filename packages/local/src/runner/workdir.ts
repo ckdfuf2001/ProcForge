@@ -100,6 +100,8 @@ export function seedBoundInputs(
           code: "bad_request",
         });
       }
+      // M5.5-3: 절대경로는 바인딩 대상 아님 (실행 시 rewritePaths가 처리)
+      if (resolved.startsWith("/") || /^[a-zA-Z]:/.test(resolved)) continue;
       const rel = resolved.split("\\").join("/");
       if (isEscapeRel(rel, "/")) {
         throw Object.assign(new Error(`입력 바인딩 경로 탈출: ${n.id}.${k}=${resolved}`), { code: "bad_request" });

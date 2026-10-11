@@ -13,6 +13,8 @@ export type RunState = {
   procedure: string;
   params: Record<string, string>;
   /** 미실행 노드 (순서대로) */
+  /** 절차서 디렉터리 (M5.5-3 state.json 위치. 미지정 시 procedures/<procedure>) */
+  procedureDir?: string;
   pending: string[];
   /** 완료 노드 */
   done: string[];

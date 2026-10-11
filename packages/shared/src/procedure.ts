@@ -36,6 +36,7 @@ export const ProcedureDocSchema = z.object({
     kind: z.enum(["map", "until"]).optional(),
     map: z.unknown().optional(),
     until: z.unknown().optional(),
+    stateWrites: z.array(z.object({ key: z.string(), from: z.string() })).optional(),
     sideEffect: z.enum(["none", "local_write", "external"]),
     constraints: z.array(z.unknown()),
     golden: z.object({

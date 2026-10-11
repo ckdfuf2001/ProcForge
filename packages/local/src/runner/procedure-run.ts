@@ -61,6 +61,7 @@ export async function runProcedureTest(
     allowBash: o.allowBash ?? false,
     allowProjectRead: o.allowProjectRead ?? false,
     changed: o.changed ?? false,
+    procedureDir: dir,
   });
   return { report, sessionId, procedureDir: dir };
 }

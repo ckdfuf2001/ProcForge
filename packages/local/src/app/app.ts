@@ -814,11 +814,11 @@ export class ProcForgeApp {
     const ref = a.procedure as string;
     if (!ref) throw pfError("bad_request", "procedure가 필요하다.");
     const params = (a.params ?? {}) as Record<string, string>;
-    const { doc } = loadProcedureDoc(this.procforgeDir, ref);
+    const { doc, dir } = loadProcedureDoc(this.procforgeDir, ref);
     const { sessionId } = importProcedure(this.procforgeDir, doc, params);
     const runId = randomUUID();
     writeRunState(this.procforgeDir, {
-      version: 1, runId, sessionId, procedure: doc.name, params,
+      version: 1, runId, sessionId, procedure: doc.name, procedureDir: dir, params,
       pending: [], done: [], supplied: {}, approved: [],
       status: "ready", updatedAt: new Date().toISOString(),
     });
@@ -850,6 +850,7 @@ export class ProcForgeApp {
       mode: "live",
       runId,
       procedure: st.procedure,
+      procedureDir: (st as { procedureDir?: string }).procedureDir,
       skipNodeIds: st.done,
       supplied: st.supplied,
       approvedNodeIds: st.approved,

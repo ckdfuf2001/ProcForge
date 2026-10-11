@@ -253,6 +253,8 @@ export const NodeSchema = z.object({
   kind: z.enum(["map", "until"]).optional(),
   map: MapSpecSchema.optional(),
   until: UntilSpecSchema.optional(),
+  /** 실행 간 상태 기록 선언 (M5.5-3). 성공 종료 시에만 procedures/<name>/state.json에 저장. */
+  stateWrites: z.array(z.object({ key: z.string().min(1), from: z.string().min(1) })).optional(),
   sideEffect: SideEffectSchema,
   constraints: z.array(ConstraintSchema).default([]),
   advice: z
@@ -337,6 +339,8 @@ export function computeNodeHash(input: {
   constraints: Constraint[];
   dependsOn: string[];
   map?: unknown;
+  until?: unknown;
+  stateWrites?: unknown;
 }): string {
   const canonical = JSON.stringify(
     sortKeysDeep({
@@ -344,8 +348,10 @@ export function computeNodeHash(input: {
       args: input.args ?? {},
       constraints: input.constraints,
       dependsOn: [...input.dependsOn].sort(),
-      // map 미설정 시 기존 해시와 동일 (하위 호환)
+      // 미설정 시 기존 해시와 동일 (하위 호환)
       ...(input.map !== undefined ? { map: input.map } : {}),
+      ...(input.until !== undefined ? { until: input.until } : {}),
+      ...(input.stateWrites !== undefined ? { stateWrites: input.stateWrites } : {}),
     }),
   );
   return createHash("sha256").update(canonical).digest("hex").slice(0, 16);

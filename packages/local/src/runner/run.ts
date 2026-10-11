@@ -12,6 +12,7 @@ import { normalizeArgSpecs, fixtureFileExists, isEscapeRel, readManifest } from 
 import { ConnectionPool } from "./connections.js";
 import { findRecording, loadCassette, recordKey, saveRecording, toToolResponse, compareToolResponses } from "./recordings.js";
 import { getByDot, resolveArgs, resolveVar, substituteItemSpecs, substituteParams } from "./resolve.js";
+import { loadProcedureState, procedureStatePath, saveProcedureState } from "../services/procedure-state.js";
 import { runScript } from "./script-run.js";
 import { inferPathRole, rewritePaths, type InferredRole, type PathRole } from "./paths.js";
 import { setupRunFs } from "./workdir.js";
@@ -93,6 +94,24 @@ export async function runSession(opts: RunOptions): Promise<RunReport> {
   const store = new FileStore(opts.procforgeDir);
   const session = store.getSession(opts.sessionId);
   if (!session) throw Object.assign(new Error(`세션 없음: ${opts.sessionId}`), { code: "session_not_found" });
+  // M5.5-3: 실행 간 상태 로드 (절차서 run + state 사용 시만).
+  // state 미사용 절차서는 기존 동작 그대로 (로드 없음).
+  const procedureDir = opts.procedureDir ??
+    (opts.procedure ? join(opts.procforgeDir, "procedures", opts.procedure) : undefined);
+  if (procedureDir) {
+    const preNodes = [...store.getNodes(opts.sessionId).values()];
+    const needsState = preNodes.some((x) => {
+      const sw = (x as { stateWrites?: unknown }).stateWrites;
+      if (Array.isArray(sw) && sw.length > 0) return true;
+      return JSON.stringify({ a: x.args, c: x.constraints }).includes("${state.");
+    });
+    if (needsState) {
+      opts.state = loadProcedureState(
+        procedureStatePath(procedureDir),
+        session.params as Record<string, string>,
+      );
+    }
+  }
   const runId = opts.runId ?? randomUUID();
   const { runDir, fsDir } = setupRunFs(opts.procforgeDir, opts.sessionId, runId, {
     projectRoot: opts.projectRoot,
@@ -287,6 +306,27 @@ export async function runSession(opts: RunOptions): Promise<RunReport> {
     }
     const latestPath = latestReportPath(opts.procforgeDir, opts.sessionId);
     writeAtomicFile(latestPath, JSON.stringify({ runId, at: report.at, nodeHashes: report.nodeHashes, lastPassHash: merged }));
+    // M5.5-3: 성공 종료 시에만 state 저장 (원자). 실패·중단은 불변.
+    if (procedureDir && summary.fail === 0 && summary.suspended === 0) {
+      const writers = [...store.getNodes(opts.sessionId).values()].filter(
+        (x) => Array.isArray((x as { stateWrites?: unknown }).stateWrites) && ((x as { stateWrites?: unknown[] }).stateWrites as unknown[]).length > 0,
+      );
+      if (writers.length > 0) {
+        const outMap: Record<string, unknown> = {};
+        for (const [k, v] of outputs) outMap[k] = v;
+        const nextState: Record<string, unknown> = { ...(opts.state ?? {}) };
+        for (const w of writers) {
+          for (const e of (w as unknown as { stateWrites: { key: string; from: string }[] }).stateWrites) {
+            try {
+              nextState[e.key] = resolveVar(e.from, session.params as Record<string, string>, outputs);
+            } catch (err) {
+              logger.warn("stateWrite skip", { nodeId: w.id, key: e.key, reason: err instanceof Error ? err.message : String(err) });
+            }
+          }
+        }
+        saveProcedureState(procedureStatePath(procedureDir), nextState);
+      }
+    }
     logger.info("run complete", { runId, ...summary, durationMs: Date.now() - t0 });
     return report;
   } finally {
@@ -371,7 +411,7 @@ async function execNode(
       goldenAttemptId: n.golden?.attemptId,
       live: mode === "live",
       supplied: opts.supplied?.[n.id],
-      selfCarry,
+      state: opts.state,
       topo: {
         isSplit: (id) => byId.get(id)?.status === "split",
         childrenOf: (id) => byId.get(id)?.children ?? [],

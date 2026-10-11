@@ -15,6 +15,8 @@ export type CheckContext = {
   nodeOutputs?: Record<string, unknown>;
   /** params 참조 해결용 (M5.1-B2. runner만 제공) */
   params?: Record<string, string>;
+  /** 실행 간 상태 (M5.5-3. runner만 제공) */
+  state?: Record<string, unknown>;
   /** run fs 기준 파일 읽기용 (M5.5-0 pptx_table_sum. runner만 제공) */
   fsDir?: string;
 };
@@ -268,12 +270,28 @@ export function evaluateConstraint(c: Constraint, ctx: CheckContext): CheckResul
     }
     case "equals": {
       // M5.2-4: expected의 ${params.k} 참조 해결 (전체·임베디드).
+      // M5.5-3: ${state.k} 동일 (state 없으면 deferred).
       const resolveExpected = (e: unknown): { ok: boolean; value: unknown; reason?: string; deferred?: boolean } => {
-        if (typeof e !== "string" || !e.includes("${params.")) return { ok: true, value: e };
+        if (typeof e !== "string" || !e.includes("${")) return { ok: true, value: e };
+        let text = e;
+        if (text.includes("${state.")) {
+          if (!ctx.state) return { ok: false, value: undefined, reason: "deferred to runner (state ref)", deferred: true };
+          const missing: string[] = [];
+          text = text.replace(/\$\{state\.([A-Za-z0-9_.-]+)\}/g, (_m: string, k: string) => {
+            if (!(k in (ctx.state as Record<string, unknown>))) {
+              missing.push(k);
+              return "";
+            }
+            const v = (ctx.state as Record<string, unknown>)[k];
+            return typeof v === "string" ? v : JSON.stringify(v) ?? "";
+          });
+          if (missing.length > 0) return { ok: false, value: undefined, reason: `unknown state: ${missing.join(",")}` };
+        }
+        if (!text.includes("${params.")) return { ok: true, value: text };
         if (!ctx.params) return { ok: false, value: undefined, reason: "deferred to runner (params ref)", deferred: true };
         const params = ctx.params;
         const missing: string[] = [];
-        const out = e.replace(/\$\{params\.([A-Za-z0-9_.-]+)\}/g, (_, k: string) => {
+        const out = text.replace(/\$\{params\.([A-Za-z0-9_.-]+)\}/g, (_, k: string) => {
           if (!(k in params)) {
             missing.push(k);
             return "";

@@ -268,6 +268,25 @@ export function validateTree(session: Session, nodes: Node[], opts: ValidateOpti
       }
     }
 
+    // stateWrites 검사 (M5.5-3)
+    {
+      const sw = (n as unknown as { stateWrites?: unknown }).stateWrites;
+      if (sw !== undefined) {
+        if (!Array.isArray(sw)) {
+          errors.push({ code: "bad_state", nodeId: n.id, message: "stateWrites는 배열" });
+        } else {
+          for (const e of sw) {
+            const ee = e as { key?: unknown; from?: unknown };
+            if (typeof ee?.key !== "string" || ee.key.length === 0 || typeof ee?.from !== "string" || ee.from.length === 0) {
+              errors.push({ code: "bad_state", nodeId: n.id, message: "stateWrites는 {key, from}" });
+            } else if (!(ee.from as string).startsWith("$")) {
+              errors.push({ code: "bad_state", nodeId: n.id, message: `stateWrites.from은 $ 참조: ${ee.from}` });
+            }
+          }
+        }
+      }
+    }
+
     // leaf 검사
     if (n.status === "leaf") {
       if (!n.tool) {
@@ -300,7 +319,7 @@ export function validateTree(session: Session, nodes: Node[], opts: ValidateOpti
     // var 참조 검사 (10-3, 10-4)
     const checkVarArg = (argName: string, spec: { kind: string }): void => {
         if (spec.kind !== "var") return;
-        const ref = (spec as { ref: string }).ref;
+        const ref = (spec as unknown as { ref: string }).ref;
         // M5.5-1: map 범위에서는 ${as...} 참조 허용 (이름 일치 검사).
         // strip 후 남은 부분은 기존 템플릿 검사로 계속 검증한다.
         const asName = mapAsName(n, byId);
@@ -315,6 +334,16 @@ export function validateTree(session: Session, nodes: Node[], opts: ValidateOpti
           }
           const escAs = asName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
           work = ref.replace(new RegExp(`\\$\\{${escAs}(?:\\.[A-Za-z0-9_.-]+)?\\}`, "g"), "");
+          if (work === "") return;
+        }
+        // M5.5-3: ${state.k} 허용 (실행 시점 해결, 키 형식만 검사)
+        if (work.includes("${state.")) {
+          const bad = [...work.matchAll(/\$\{state\.([^}]*)\}/g)].some((m) => !/^[A-Za-z0-9_.-]+$/.test(m[1]));
+          if (bad) {
+            errors.push({ code: "bad_ref_field", nodeId: n.id, message: `arg ${argName}: bad state ref ${ref}` });
+            return;
+          }
+          work = work.replace(/\$\{state\.[A-Za-z0-9_.-]+\}/g, "");
           if (work === "") return;
         }
         // M5.5-2: until 범위에서는 bare "$self" 허용 ("$self.경로"는 인자에서 금지).

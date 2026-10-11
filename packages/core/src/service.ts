@@ -280,6 +280,7 @@ export class CoreService implements CoreClient {
     const depHs = [...new Set(effectiveDeps(n, byId).map((id) => byId.get(id)?.hash ?? `missing:${id}`))].sort();
     const map = (n as { map?: unknown }).map;
     const until = (n as { until?: unknown }).until;
+    const stateWrites = (n as { stateWrites?: unknown }).stateWrites;
     return computeNodeHash({
       goal: n.goal,
       args: n.args,
@@ -287,6 +288,7 @@ export class CoreService implements CoreClient {
       dependsOn: depHs,
       ...(map !== undefined ? { map } : {}),
       ...(until !== undefined ? { until } : {}),
+      ...(stateWrites !== undefined ? { stateWrites } : {}),
     });
   }
 
@@ -933,8 +935,9 @@ export class CoreService implements CoreClient {
       const removes = input.removeConstraintIds ?? [];
       const mapChanged = input.map !== undefined;
       const untilChanged = input.until !== undefined;
-      if (input.goal === undefined && adds.length === 0 && removes.length === 0 && !mapChanged && !untilChanged) {
-        throw err("bad_request", "변경 없음 (goal/addConstraints/removeConstraintIds/map/until 중 하나 필요).");
+      const stateChanged = input.stateWrites !== undefined;
+      if (input.goal === undefined && adds.length === 0 && removes.length === 0 && !mapChanged && !untilChanged && !stateChanged) {
+        throw err("bad_request", "변경 없음 (goal/addConstraints/removeConstraintIds/map/until/stateWrites 중 하나 필요).");
       }
       if (input.goal !== undefined && input.goal.length === 0) throw err("bad_request", "goal이 비었다.");
       let constraints = n.constraints;
@@ -990,10 +993,27 @@ export class CoreService implements CoreClient {
         kind = "until";
         untilSpec = parsed.data;
       }
+      // M5.5-3: stateWrites 선언
+      let stateWritesSpec = (n as { stateWrites?: unknown }).stateWrites;
+      if (stateChanged) {
+        const sw = input.stateWrites;
+        if (!Array.isArray(sw)) throw err("bad_request", "bad stateWrites: 배열 필요");
+        for (const e of sw) {
+          const ee = e as { key?: unknown; from?: unknown };
+          if (typeof ee?.key !== "string" || ee.key.length === 0 || typeof ee?.from !== "string" || ee.from.length === 0) {
+            throw err("bad_request", "bad stateWrites: {key, from} 비어 있음");
+          }
+          if (!(ee.from as string).startsWith("$")) {
+            throw err("bad_request", `bad stateWrites.from: ${ee.from} ($ 참조 필요)`);
+          }
+        }
+        stateWritesSpec = sw;
+      }
       const next: Node = { ...n, goal: input.goal ?? n.goal, constraints, status };
       if (kind !== undefined) (next as { kind?: string }).kind = kind;
       if (mapSpec !== undefined) (next as { map?: unknown }).map = mapSpec;
       if (untilSpec !== undefined) (next as { until?: unknown }).until = untilSpec;
+      if (stateWritesSpec !== undefined) (next as { stateWrites?: unknown }).stateWrites = stateWritesSpec;
       next.hash = this.hashFor(s.id, next);
       this.store.saveNode(s.id, next);
       this.propagateStale(s.id, n.id);
@@ -1104,6 +1124,9 @@ export class CoreService implements CoreClient {
           })(),
           map: (n as { map?: unknown }).map,
           until: (n as { until?: unknown }).until,
+          ...((n as { stateWrites?: { key: string; from: string }[] }).stateWrites !== undefined
+            ? { stateWrites: (n as { stateWrites?: { key: string; from: string }[] }).stateWrites as { key: string; from: string }[] }
+            : {}),
           sideEffect: n.sideEffect,
           constraints: n.constraints as unknown[],
           golden: n.golden ? { ...n.golden, ignore: n.golden.ignore ?? [] } : undefined,

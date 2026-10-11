@@ -189,6 +189,20 @@ describe("validator 10종", () => {
     const errs2 = validateTree(s, [src, badSpec]).filter((e) => e.code === "bad_until");
     expect(errs2.length).toBe(2);
   });
+  it("M5.5-3 ${state.k} 허용 + stateWrites 검사", () => {
+    const s = baseSession();
+    const n = leaf("1", { args: { since: { kind: "var", ref: "${state.lastId}" } } });
+    const errs = validateTree(s, [n]);
+    expect(errs.filter((e) => e.code === "bad_ref" || e.code === "bad_ref_field" || e.code === "bad_state")).toEqual([]);
+    const badKey = leaf("1", { args: { since: { kind: "var", ref: "${state.bad key}" } } });
+    expect(validateTree(s, [badKey]).some((e) => e.code === "bad_ref_field")).toBe(true);
+    const badSw = leaf("1", { ...{ stateWrites: [{ key: "", from: "$1.x" }] } } as Partial<Node>);
+    expect(validateTree(s, [badSw]).some((e) => e.code === "bad_state")).toBe(true);
+    const badFrom = leaf("1", { ...{ stateWrites: [{ key: "k", from: "literal" }] } } as Partial<Node>);
+    expect(validateTree(s, [badFrom]).some((e) => e.code === "bad_state")).toBe(true);
+    const okSw = leaf("1", { ...{ stateWrites: [{ key: "lastId", from: "$1.2.last" }] } } as Partial<Node>);
+    expect(validateTree(s, [okSw]).filter((e) => e.code === "bad_state")).toEqual([]);
+  });
   it("M5.2-4 약식 $1.1.rows 허용 + 미등록 노드 거부", () => {
     const s = baseSession();
     const ok = leaf("2", {

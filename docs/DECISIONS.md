@@ -365,6 +365,11 @@
   CI에 setup-python + openpyxl (+ M5.3-2부터 python-pptx).
 - M5.3-1: 파일 내용 감사. script-kind 스크립트 + 고정(in/inout) 템플릿 파일
 - M5.3.1-1: file_exists 논리 경로. export 시 auto file_exists의
+- M5.5-3: 실행 간 state. procedures/<name>/state.json, 성공 종료 시에만 원자 저장
+  (실패·중단 불변). 노드 stateWrites[{key,from}] (edit_node 설정).
+  참조 ${state.k} (var 전용, resolve/checker/validator 지원).
+  첫 실행 state 부재 → params.stateDefaults(JSON) 또는 bad_request.
+  절대경로 var는 입력 바인딩 제외 (rewritePaths가 처리).
 - M5.5-2: until 노드. Node kind:"until" + until{until, maxIterations, carry?,
   template{tool,args,constraints}} (인라인, 자식 금지).
   $self = 이전 반복 출력의 carry 경로 값 (없으면 undefined=첫 페이지 관례).

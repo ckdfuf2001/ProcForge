@@ -51,6 +51,13 @@ describe("seedBoundInputs", () => {
     }
   });
 
+  it("M5.5-3 절대경로 해석값은 바인딩 제외", () => {
+    const ns = [
+      node("1.1", { f: { kind: "var", ref: "${params.feed}", path: "in" } as never }),
+    ];
+    const abs = process.platform === "win32" ? "D:/data/feed.json" : "/data/feed.json";
+    expect(seedBoundInputs(ns, root, { feed: abs }, fsDir)).toEqual([]);
+  });
   it("fixed 리터럴·$노드 참조·out 역할은 제외", () => {
     const ns = [
       node("1.1", {
