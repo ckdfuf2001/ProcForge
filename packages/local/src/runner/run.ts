@@ -87,6 +87,34 @@ export function toJUnit(report: RunReport): string {
   return `<?xml version="1.0" encoding="UTF-8"?>\n<testsuite name="procforge" tests="${report.results.length}" failures="${failures}">\n${cases}\n</testsuite>\n`;
 }
 
+// M5.5-4.1-4: 무인 실행 전 generated 미공급 노드 수집 (leaf·map/until 템플릿).
+// supplied로 덮인 키는 제외. 반환: ["노드:키,..."].
+export function missingGeneratedArgNodes(
+  nodes: Node[],
+  supplied?: Record<string, Record<string, unknown>>,
+): string[] {
+  const out: string[] = [];
+  for (const n of nodes) {
+    const kind = (n as { kind?: string }).kind;
+    let specs: Record<string, { kind?: string }>;
+    if (kind === "map") {
+      specs = ((n as { map?: { template?: { args?: Record<string, { kind?: string }> } } }).map?.template?.args ?? {}) as Record<string, { kind?: string }>;
+    } else if (kind === "until") {
+      specs = ((n as { until?: { template?: { args?: Record<string, { kind?: string }> } } }).until?.template?.args ?? {}) as Record<string, { kind?: string }>;
+    } else if (n.tool) {
+      specs = ((n.args ?? {}) as Record<string, { kind?: string }>);
+    } else {
+      continue;
+    }
+    const sup = supplied?.[n.id] ?? {};
+    const missing = Object.entries(specs)
+      .filter(([k, s]) => s?.kind === "generated" && !Object.prototype.hasOwnProperty.call(sup, k))
+      .map(([k]) => k);
+    if (missing.length > 0) out.push(`${n.id}:${missing.join(",")}`);
+  }
+  return out;
+}
+
 export async function runSession(opts: RunOptions): Promise<RunReport> {
   const mode: RunMode = opts.mode ?? "replay";
   if (mode === "replay" && opts.updateGolden) {
@@ -95,6 +123,16 @@ export async function runSession(opts: RunOptions): Promise<RunReport> {
   const store = new FileStore(opts.procforgeDir);
   const session = store.getSession(opts.sessionId);
   if (!session) throw Object.assign(new Error(`세션 없음: ${opts.sessionId}`), { code: "session_not_found" });
+  // M5.5-4.1-4: 무인 실행은 generated 값을 공급받을 수 없으므로 실행 전 거부.
+  if (opts.unattended) {
+    const lacking = missingGeneratedArgNodes([...store.getNodes(opts.sessionId).values()], opts.supplied);
+    if (lacking.length > 0) {
+      throw Object.assign(
+        new Error(`무인 실행 불가: generated 인자 미공급 (${lacking.join("; ")}). generated 없는 절차서로 설계하라.`),
+        { code: "bad_request" },
+      );
+    }
+  }
   // M5.5-3: 실행 간 상태 로드 (절차서 run + state 사용 시만).
   // state 미사용 절차서는 기존 동작 그대로 (로드 없음).
   const procedureDir = opts.procedureDir ??

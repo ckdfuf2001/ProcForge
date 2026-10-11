@@ -222,3 +222,51 @@ describe("M5.5-4 무인 실행 E2E", () => {
     await expect(app.approveProcedureNode({ procedure: "m55-unatt", nodeId: "1" })).rejects.toThrow();
   }, 120000);
 });
+
+describe("M5.5-4.1-4 unattended generated 사전 거부", () => {
+  async function buildGen(): Promise<void> {
+    const { client } = testStack(pfdir);
+    const app = new ProcForgeApp({ core: client, procforgeDir: pfdir, projectRoot: root });
+    const started = await client.pfStart({ request: "gen", params: {}, toolCatalog: ECHO_CAT });
+    const sid = started.session.id;
+    await client.pfResolve({
+      sessionId: sid, nodeId: "1", decision: "split", children: [{ goal: "생성값 에코" }],
+    });
+    const r1 = await client.pfReport({
+      sessionId: sid, nodeId: "1.1", tool: { server: "fake-ppt", name: "echo" },
+      args: { note: "probe" }, resultSummary: "probe", resultJson: { note: "probe" },
+      selfVerdict: "pass", selfReason: "ok",
+    });
+    expect(r1.verdict).toBe("pass");
+    const c = await client.pfResolve({
+      sessionId: sid, nodeId: "1.1", decision: "leaf",
+      tool: { server: "fake-ppt", name: "echo" },
+      argSpecs: { note: { kind: "generated", inputs: [], instruction: "메모 생성" } } as never,
+    });
+    expect((c.node as { status?: string }).status).toBe("leaf");
+    await app.finalize({ sessionId: sid, name: "m55-gen" });
+  }
+
+  it("무인 실행 → bad_request 즉시 거부", async () => {
+    await buildGen();
+    let code = "";
+    try {
+      await runProcedureTest(pfdir, root, "m55-gen", {
+        procforgeDir: pfdir, projectRoot: root, mode: "live", params: {}, unattended: true,
+      });
+    } catch (e) {
+      code = (e as { code?: string }).code ?? "";
+      expect(String(e instanceof Error ? e.message : e)).toContain("무인 실행 불가");
+    }
+    // M5.5-4.1-1: bad_request → exit 2.
+    expect(code).toBe("bad_request");
+  }, 120000);
+
+  it("일반 live → suspended 유지 (기존 동작)", async () => {
+    await buildGen();
+    const { report } = await runProcedureTest(pfdir, root, "m55-gen", {
+      procforgeDir: pfdir, projectRoot: root, mode: "live", params: {},
+    });
+    expect(report.summary.suspended).toBe(1);
+  }, 120000);
+});

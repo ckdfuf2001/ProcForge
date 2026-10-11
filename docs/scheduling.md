@@ -60,8 +60,8 @@ Register-ScheduledTask -TaskName "procforge-daily" -Action $action -Trigger $tri
 
 ## 주의
 
-- `--unattended`에서도 `generated` 인자는 suspended로 멈춘다
-  (runner가 값을 만들지 않음). 스케줄 실행 절차서는 generated 없이 설계하라.
+- `--unattended`에서는 `generated` 인자 노드가 하나라도 있으면 실행 전
+  `bad_request`(exit 2)로 거부된다. 스케줄 실행 절차서는 generated 없이 설계하라.
 - 실패한 run은 `state.json`을 갱신하지 않는다. 다음 스케줄 실행이 같은 지점부터
   다시 시도한다.
 - 산출물 복사는 `--out` 지정 시에만, 기존 파일은 `--force` 없으면 거부된다.
