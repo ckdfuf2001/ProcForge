@@ -182,6 +182,20 @@ describe("M5.5-4 approvals 매칭", () => {
     expect(matchApproval(star, "s", "t", { q: "other" })).toBe(false);
   });
 
+  it("M5.5-4.4-3: 경로 모드 (정규화·..·절대경로)", () => {
+    const e = { node: { id: "1", hash: "h" }, tool: { server: "s", name: "t" }, args: { p: { $prefix: "output/" } } };
+    expect(matchApproval(e, "s", "t", { p: "output/a.csv" })).toBe(true);
+    expect(matchApproval(e, "s", "t", { p: "output/sub/b.csv" })).toBe(true);
+    expect(matchApproval(e, "s", "t", { p: "output/../secret.txt" })).toBe(false);
+    expect(matchApproval(e, "s", "t", { p: "/output/a.csv" })).toBe(false);
+    expect(matchApproval(e, "s", "t", { p: "other/a.csv" })).toBe(false);
+    expect(matchApproval(e, "s", "t", { p: "output" })).toBe(false);
+    // 슬래시 없는 접두는 기존 문자열 접두 유지.
+    const s = { node: { id: "1", hash: "h" }, tool: { server: "s", name: "t" }, args: { q: { $prefix: "SELECT " } } };
+    expect(matchApproval(s, "s", "t", { q: "SELECT x" })).toBe(true);
+    expect(matchApproval(s, "s", "t", { q: "DELETE x" })).toBe(false);
+  });
+
   it("M5.5-4.3-2: URL 모드 (origin+세그먼트)", () => {
     const e = (prefix: string) => ({
       node: { id: "1", hash: "h" }, tool: { server: "s", name: "t" }, args: { url: { $prefix: prefix } },

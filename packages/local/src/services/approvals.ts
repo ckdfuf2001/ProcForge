@@ -233,12 +233,32 @@ export function migrateV1Value(v: unknown): unknown {
   return v;
 }
 
-// M5.5-4.3-1: $prefix 비교. scheme:// 시작이면 URL 모드 (4.3-2), 아니면 문자열 접두.
+// M5.5-4.3-1: $prefix 비교. scheme:// 시작이면 URL 모드 (4.3-2),
+// "/" 포함이면 경로 모드 (4.4-3), 아니면 문자열 접두.
 export function matchPrefix(prefix: unknown, actual: unknown): boolean {
   if (typeof prefix !== "string") return false;
   if (typeof actual !== "string") return false;
   if (SCHEME_RE.test(prefix)) return matchUrlPrefix(prefix, actual);
+  if (prefix.includes("/")) return matchPathPrefix(prefix, actual);
   return actual.startsWith(prefix);
+}
+
+// M5.5-4.4-3: 경로 모드. posix 정규화 후 ".."·절대경로를 패턴·실제 모두 거부,
+// 세그먼트 접두로 비교.
+export function matchPathPrefix(prefix: string, actual: string): boolean {
+  const toPosix = (p: string): string => p.split("\\").join("/");
+  for (const raw of [prefix, actual]) {
+    const p = toPosix(raw);
+    if (p.startsWith("/") || /^[a-zA-Z]:(\/|$)/.test(p)) return false;
+    if (p.split("/").some((s) => s === "..")) return false;
+  }
+  const segs = (p: string): string[] => toPosix(p).split("/").filter((s) => s !== "" && s !== ".");
+  const pp = segs(prefix);
+  const ap = segs(actual);
+  // 끝 "/"는 하위만 (자기 자신 불일치). "/" 자체는 origin 전체.
+  if (toPosix(prefix).endsWith("/") && toPosix(prefix) !== "/" && ap.length <= pp.length) return false;
+  if (pp.length > ap.length) return false;
+  return pp.every((s, i) => s === ap[i]);
 }
 
 const SCHEME_RE = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//;
