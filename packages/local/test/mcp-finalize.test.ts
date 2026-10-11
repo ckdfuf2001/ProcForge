@@ -71,7 +71,7 @@ describe("M4 MCP finalize/procedure", () => {
       expect(rec["failed"]).toBe(0);
       const fin = await call("pf_finalize", { sessionId: sid, name: "mcp-proc" });
       expect((fin["files"] as string[]).some((f) => f === "procedure.json")).toBe(true);
-      const tested = await call("pf_test", { procedure: "mcp-proc", allowProjectRead: true });
+      const tested = await call("pf_test", { procedure: "mcp-proc", allowProjectRead: true, params: { month: "2026-09" } });
       expect(tested["failed"]).toBe(0);
       expect(tested["passed"]).toBe(1);
     } finally {
