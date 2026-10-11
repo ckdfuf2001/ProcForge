@@ -43,15 +43,37 @@
 
 ## Windows 작업 스케줄러 예시
 
+스케줄러의 PATH를 믿지 마라. `cmd.exe /c`에 절대경로를 쓴다.
+
+- 프로그램: `C:\Windows\System32\cmd.exe`
+- 인수: `/c ""C:\Tools\nodejs\procforge.cmd" run procedures/daily-crawl --unattended --out out >> D:\logs\procforge.log 2>&1"`
+- 시작 위치: `D:\work\site` (projectRoot. `--project-root`으로 대신 지정 가능)
+
+`procforge.cmd`가 없으면 node 절대경로로 dist 직접 호출:
+
+- 프로그램: `C:\Tools\nodejs\node.exe`
+- 인수: `D:\tools\ProcForge\packages\local\dist\cli.js run procedures/daily-crawl --unattended --out out >> D:\logs\procforge.log 2>&1`
+
+작업 설정에서 반드시 지정:
+
+- 보안 옵션: "사용자 로그온 여부에 관계없이 실행" + "가장 높은 권한으로 실행"
+  (로그 파일·산출물 쓰기 권한 필요).
+- 조건: "컴퓨터의 전원이 켜져 있으면 시작" (필요 시).
+- 실패 판단: "마지막 실행 결과"가 `0x0`이 아니면 실패.
+  `0x1` 검사 실패·중단, `0x2` 입력 오류, `0x3` 승인 필요, `0x4` 겹친 실행.
+
+PowerShell에서 등록할 때 예시:
+
 ```powershell
-$action = New-ScheduledTaskAction -Execute "procforge" `
-  -Argument "run procedures/daily-crawl --unattended --out out" `
+$action = New-ScheduledTaskAction -Execute "C:\Windows\System32\cmd.exe" `
+  -Argument '/c ""C:\Tools\nodejs\procforge.cmd" run procedures/daily-crawl --unattended --out out >> D:\logs\procforge.log 2>&1"' `
   -WorkingDirectory "D:\work\site"
 $trigger = New-ScheduledTaskTrigger -Daily -At "06:00"
-Register-ScheduledTask -TaskName "procforge-daily" -Action $action -Trigger $trigger
+$principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
+Register-ScheduledTask -TaskName "procforge-daily" -Action $action -Trigger $trigger -Principal $principal
 ```
 
-실패 알림은 스케줄러의 종료 코드로 판단한다 (0이 아니면 실패, 3이면 승인 필요).
+실패 알림은 스케줄러의 종료 코드로 판단한다 (0이 아니면 실패, 3이면 승인 필요, 4면 겹침).
 
 ## cron 예시
 
