@@ -392,6 +392,7 @@ async function execNode(
       args,
       cwd: fsDir,
       timeoutMs: spec.timeoutMs,
+      projectRoot: opts.projectRoot,
     });
     resp = { resultText: out.summary, resultJson: out.json };
   } else if (n.sideEffect === "external" && mode !== "live") {

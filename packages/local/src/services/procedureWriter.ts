@@ -226,6 +226,8 @@ function renderSkillMd(doc: ProcedureDoc): string {
     `입력 파일 경로·표지 문구처럼 기간이 들어간 값은 var로 분류한다.`,
     `예: "sales-\${params.month}.xlsx", "월간보고서 \${params.month} (최종)".`,
     `앞 노드 출력과 같은 값은 fixed로 박지 말고 ref로 받아온다. 예: "$1.1.rows".`,
+    `스크립트 leaf는 OS 수준 sandbox가 아니다. 자식 환경은 화이트리스트만,`,
+    `run fs 밖 쓰기는 실행 전후 스냅샷으로 감지해 실패 처리한다.`,
     `파라미터: ${Object.keys(doc.params).map((k) => `\`${k}\``).join(", ") || "없음"}`,
     ``,
     `검증: \`procforge test procedures/${doc.name} --param k=v ...\``,

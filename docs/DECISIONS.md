@@ -364,6 +364,14 @@
   c 11월 부재 bad_request, d 데이터 교체 period fail+blocked.
   CI에 setup-python + openpyxl (+ M5.3-2부터 python-pptx).
 - M5.3-1: 파일 내용 감사. script-kind 스크립트 + 고정(in/inout) 템플릿 파일
+- M5.3-3: 스크립트 실행 제한. 자식 환경 화이트리스트
+  (SYSTEMROOT·TEMP 등 + PYTHONUTF8/IO 고정, PATH·HOME·비밀 제외).
+  단, Node가 Windows에서 시스템 변수(PATH·USERPROFILE 등)를 강제 주입하므로
+  완전 차단은 불가 (문서화로 갈음). 네트워크 차단은 이식성 있게 불가 —
+  OS 수준 sandbox 아님을 SKILL·여기에 명시.
+  실행 전후 projectRoot 스냅샷(size:mtime, .procforge/node_modules/.git 제외,
+  10만 파일 상한) 비교로 run fs 밖 변경 감지 → 노드 fail.
+  병렬 세션이 같은 projectRoot를 쓰면 오탐 가능 (detail에 변경 목록).
   (var/템플릿 경로 제외, pptx는 무의존 zip 텍스트 추출)에서 날짜·params값·
   녹화 수치(4자리+) 검사, 면제 없음. strict 시 bad_request.
   상한: 스크립트 200KB, 템플릿 8MB (초과·판독 불가 조용히 제외).
