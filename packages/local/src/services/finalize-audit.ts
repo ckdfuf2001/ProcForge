@@ -24,6 +24,18 @@ function isDateLike(s: string): boolean {
   return DATE_RES.some((re) => re.test(s));
 }
 
+export { isDateLike };
+
+/** 텍스트 속 첫 날짜 표현 샘플 (없으면 null) */
+export function findDateSample(text: string): string | null {
+  const m = text.match(
+    /(19|20)\d{2}-(0?[1-9]|1[0-2])\b|(19|20)\d{2}년\s?\d{1,2}월|(?:^|[^\d])\d{1,2}월|\b(19|20)\d{2}(0[1-9]|1[0-2])\b/,
+  );
+  if (!m) return null;
+  const sample = m[0].trim().slice(0, 40);
+  return isDateLike(sample) ? sample : null;
+}
+
 /** 기록된 응답 속 수치 상수 집합 (4자리 이상 정수) */
 export function recordedNumbers(entries: { response: { summary: string; json?: unknown } }[]): Set<number> {
   const out = new Set<number>();
@@ -53,7 +65,6 @@ function numValue(v: unknown): number | undefined {
 }
 
 type Scalar = { value: string | number; path: string };
-
 function deepScalars(v: unknown, out: Scalar[], base: string): void {
   if (typeof v === "string" || typeof v === "number") {
     out.push({ value: v, path: base });

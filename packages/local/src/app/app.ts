@@ -43,6 +43,7 @@ import { readRunState, writeRunState } from "../services/run-state.js";
 import { writeJUnitFile, resolveJUnitPath, copyRunFsToOut } from "../services/runner.js";
 import { repairDiscard } from "../services/repair.js";
 import { auditFixedValues } from "../services/finalize-audit.js";
+import { auditContentTexts, collectAuditContent } from "../services/audit-content.js";
 import { buildTrace, formatTraceMarkdown } from "../trace.js";
 import { exportSession } from "../export.js";
 import { assertProjectPath } from "../artifacts.js";
@@ -756,8 +757,12 @@ export class ProcForgeApp {
       }
     }
     const audit = auditFixedValues({ params: sess.params, nodes, cassettes });
-    if ((a.strict as boolean | undefined) === true && audit.length > 0) {
-      throw pfError("bad_request", `고정값 감사 실패(${audit.length}건): ${audit.slice(0, 3).join("; ")}`);
+    // M5.3-1: 파일 내용 감사 (스크립트 + 비바인딩 템플릿). strict면 실패 시 거부.
+    const contentItems = collectAuditContent({ projectRoot: this.projectRoot, nodes });
+    const contentAudit = auditContentTexts({ params: sess.params, items: contentItems, cassettes });
+    const allAudit = [...audit, ...contentAudit];
+    if ((a.strict as boolean | undefined) === true && allAudit.length > 0) {
+      throw pfError("bad_request", `고정값 감사 실패(${allAudit.length}건): ${allAudit.slice(0, 3).join("; ")}`);
     }
     const written = writeProcedure({
       procforgeDir: this.procforgeDir,
@@ -765,9 +770,9 @@ export class ProcForgeApp {
       sessionId: sid,
       doc,
       force: (a.force as boolean | undefined) ?? false,
-      auditFindings: audit,
+      auditFindings: allAudit,
     });
-    return { name: doc.name, dir: written.dir, warnings: [...warnings, ...audit], files: written.files, commandFile: written.commandFile };
+    return { name: doc.name, dir: written.dir, warnings: [...warnings, ...allAudit], files: written.files, commandFile: written.commandFile };
   }
 
   /** 절차서 live 실행 시작 (M5). 실행은 pf_run_next/supply로 단계 진행. */

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { collectCatalog } from "../src/catalog.js";
@@ -241,6 +241,32 @@ describe("pf_finalize", () => {
     expect(cmd).toContain("procforge run");
     expect(cmd).not.toContain("미지원(M5");
     expect(skill).not.toContain("그대로 실행");
+  }, 30000);
+
+  it("M5.3-1 스크립트 하드코딩 → 경고 / strict 거부", async () => {
+    const { client } = testStack(pfdir);
+    const app = new ProcForgeApp({ core: client, procforgeDir: pfdir, projectRoot: root });
+    mkdirSync(join(root, "scripts"), { recursive: true });
+    writeFileSync(join(root, "scripts", "agg.py"), 'PERIOD = "2026-09"\nprint("{}")');
+    const started = await client.pfStart({
+      request: "집계", params: { month: "2026-09" },
+      toolCatalog: [{ server: "host", name: "script", inputSchema: {}, schemaHash: "s" }],
+    });
+    const sid = started.session.id;
+    await client.pfResolve({ sessionId: sid, nodeId: "1", decision: "split", children: [{ goal: "집계" }] });
+    await client.pfReport({
+      sessionId: sid, nodeId: "1.1", tool: { server: "host", name: "script" },
+      args: { x: "a" }, resultSummary: "ok", resultJson: { n: 1 },
+      selfVerdict: "pass", selfReason: "ok",
+    });
+    await client.pfResolve({
+      sessionId: sid, nodeId: "1.1", decision: "leaf",
+      tool: { server: "host", name: "script" },
+      argSpecs: { x: { kind: "fixed", value: "a" }, run: { kind: "script", file: "scripts/agg.py" } } as never,
+    });
+    const out = await app.finalize({ sessionId: sid, name: "content-audit" });
+    expect(out.warnings.some((w) => w.includes("script:scripts/agg.py") && w.includes("날짜 표현"))).toBe(true);
+    await expect(app.finalize({ sessionId: sid, name: "content-audit", strict: true })).rejects.toThrow(/고정값 감사 실패/);
   }, 30000);
 
   it("M5.1-B1 고정값 감사: 경고 + strict 거부", async () => {

@@ -359,6 +359,11 @@
   R2 미러 면제는 attempts resultJson이 있을 때만 동작 (단위 계약).
   auto constraint 강제는 경로가 있어야 가능하므로 미적용 (경고로 대체).
 - M5.2-5: 수락 테스트. CI E2E m52-monthly.test.ts (절차서 monthly):
+- M5.3-1: 파일 내용 감사. script-kind 스크립트 + 고정(in/inout) 템플릿 파일
+  (var/템플릿 경로 제외, pptx는 무의존 zip 텍스트 추출)에서 날짜·params값·
+  녹화 수치(4자리+) 검사, 면제 없음. strict 시 bad_request.
+  상한: 스크립트 200KB, 템플릿 8MB (초과·판독 불가 조용히 제외).
+- M5.2-5: 수락 테스트. CI E2E m52-monthly.test.ts (절차서 monthly):
   1.1 script 집계 + period==${params.month}, 1.2 script 렌더 +
   total==$1.1.total. a 9월 분해 strict 0, b 10월 실행·독립 계산 일치,
   c 11월 부재 bad_request, d 데이터 교체 period fail+blocked.
