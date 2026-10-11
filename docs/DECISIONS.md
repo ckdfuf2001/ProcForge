@@ -386,6 +386,14 @@
   stale → fail ["approval"] + "승인 갱신 필요" (exit 3). dependsOn은 항상 []이므로
   순서 변경은 해시에 영향 없음. map/until 템플릿 변경도 현 공식에는 미반영
   (부모 pin 승인 시 템플릿은 args 패턴으로만 통제).
+- M5.6 하네스 과제 (c·d·j, repo 대상 아님):
+  - c: 채팅 백엔드의 evaluator가 defaultEvaluate (제약 있으면 전부 fail).
+    repo core는 실제 checker를 주입하므로 하네스 한정. "미판정" 구분 필요.
+  - d: 채팅 도구 경계가 map/until/stateWrites·sideEffect·params 선언·script 배치를
+    전달하지 않음 (repo DTO는 모두 지원, 병렬 세션 §5에서 귀속 검증).
+    seedFiles는 시작 시에만 있고 중반 추가 수단 없음.
+  - j: 토큰 사용량이 모델에게 비가시. pf 호출 수가 유일한 대리 지표.
+    계측 노출은 하네스 과제.
 - M5.5-5: dogfood daily-crawl (fake board 날짜별 3페이지 + detail x3 실패).
   until 수집 → script 평탄화 → map 상세(external·threshold 0.5) → script 누적.
   run1(d1) x1,x2·run2(d2) x4 신규만, state seenIds 누적. (a) stale hash → fail
