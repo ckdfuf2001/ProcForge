@@ -276,14 +276,8 @@ export function matchApproval(
   return matchValue(entry.args, args);
 }
 
-export function isApproved(
-  approvals: ApprovalEntry[],
-  server: string,
-  name: string,
-  args: Record<string, unknown>,
-): boolean {
-  return approvals.some((e) => matchApproval(e, server, name, args));
-}
+// M5.5-4.3-4: pin 없는 isApproved 삭제 (node pin 없는 매칭 금지).
+// 외부 호출은 checkApproval만 사용.
 
 // M5.5-4.1-3: 절차서 노드에서 승인 항목 생성.
 // 해시는 importProcedure와 동일 공식 (goal·args·constraints·dependsOn []).

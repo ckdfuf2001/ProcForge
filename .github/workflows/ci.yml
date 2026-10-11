@@ -40,3 +40,7 @@ jobs:
       - name: no console.log in local src (stderr logger only, cli.ts excepted)
         run: |
           ! grep -rn --exclude='*.test.ts' "console\.log" packages/local/src --exclude=cli.ts || (echo "console.log forbidden, use logger" && exit 1)
+      - name: no direct approval matching outside approvals service (M5.5-4.3-4)
+        run: |
+          ! grep -rn --include='*.ts' --exclude='*.test.ts' "matchApproval" packages/local/src | grep -v "services/approvals.ts" | grep -q . || (echo "direct matchApproval forbidden, use checkApproval" && exit 1)
+          ! grep -rn --include='*.ts' "\<isApproved>(" packages/local/src packages/local/test packages/shared/src packages/core/src || (echo "isApproved removed, use checkApproval" && exit 1)

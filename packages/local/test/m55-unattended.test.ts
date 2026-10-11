@@ -4,7 +4,7 @@ import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { ProcForgeApp } from "../src/app/app.js";
 import { runProcedureTest } from "../src/runner/procedure-run.js";
-import { isApproved, loadApprovals, matchApproval, approvalPins, checkApproval, buildApprovalEntry, migrateV1Value, computeApprovalHash } from "../src/services/approvals.js";
+import { loadApprovals, matchApproval, approvalPins, checkApproval, buildApprovalEntry, migrateV1Value, computeApprovalHash } from "../src/services/approvals.js";
 import { runExitCode, cliErrorExit, runErrorExit } from "../src/app/run-exit.js";
 import { testStack } from "./client-mode.js";
 import { computeNodeHash } from "@procforge/shared/schema.js";
@@ -106,8 +106,9 @@ describe("M5.5-4 approvals 매칭", () => {
       "s", "t", { o: { x: 1, y: 2 } },
     )).toBe(false);
     expect(matchApproval({ node: { id: "1.1", hash: "h1" }, tool: { server: "s", name: "t" } }, "s", "t", { whatever: 1 })).toBe(true);
-    expect(isApproved([e], "s", "t", { a: "x", b: 1 })).toBe(true);
-    expect(isApproved([], "s", "t", { a: "x", b: 1 })).toBe(false);
+    // M5.5-4.3-4: pin 없는 isApproved 삭제 → checkApproval으로 판정.
+    expect(checkApproval([e], approvalPins({ id: "1.1", hash: "h1" }), "s", "t", { a: "x", b: 1 })).toBe("ok");
+    expect(checkApproval([], approvalPins({ id: "1.1", hash: "h1" }), "s", "t", { a: "x", b: 1 })).toBe("denied");
   });
 
   it("pin 판정 ok·stale·denied + map 부모 pin", () => {
