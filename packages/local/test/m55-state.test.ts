@@ -118,6 +118,8 @@ async function buildState(): Promise<void> {
   });
   await client.pfEditNode({
     sessionId: sid, nodeId: "1.2",
+    // M5.6-g: 누적 노드 human 출력 단언 (strict finalize 필수).
+    addConstraints: [{ id: "c-last", kind: "json_path_exists", spec: { path: "last" }, source: "human" }],
     stateWrites: [{ key: "lastId", from: "$1.2.last" }],
   });
   const r2 = await client.pfReport({

@@ -43,7 +43,7 @@ import { importProcedure } from "../procedure.js";
 import { readRunState, writeRunState } from "../services/run-state.js";
 import { writeJUnitFile, resolveJUnitPath, copyRunFsToOut } from "../services/runner.js";
 import { repairDiscard } from "../services/repair.js";
-import { auditFixedValues, findDateSample } from "../services/finalize-audit.js";
+import { auditFixedValues, auditStateWrites, findDateSample } from "../services/finalize-audit.js";
 import { auditContentTexts, collectAuditContent } from "../services/audit-content.js";
 import { buildTrace, formatTraceMarkdown } from "../trace.js";
 import { exportSession } from "../export.js";
@@ -796,6 +796,11 @@ export class ProcForgeApp {
       const srcAudit = auditContentTexts({ params: sess.params, items: srcItems, cassettes });
       allAudit.push(...srcAudit);
     }
+    // M5.6-g: 누적(stateWrites) 노드는 출력 단언 constraint 필수. 없으면 경고,
+    // strict면 위에서 거부. 빈 누적 결과가 그대로 통과하는 것을 막는다.
+    // tree 요약에는 stateWrites가 없으므로 전체 노드로 감사.
+    const fullNodes = await Promise.all(nodes.map((n) => this.core.getNode(sid, n.id)));
+    allAudit.push(...auditStateWrites(fullNodes as { id: string; constraints?: { kind?: string; source?: string }[]; stateWrites?: { key: string; from: string }[] }[]));
     if ((a.strict as boolean | undefined) === true && allAudit.length > 0) {
       throw pfError("bad_request", `고정값 감사 실패(${allAudit.length}건): ${allAudit.slice(0, 3).join("; ")}`);
     }

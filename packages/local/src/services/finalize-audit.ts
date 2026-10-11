@@ -26,6 +26,43 @@ function isDateLike(s: string): boolean {
 
 export { isDateLike };
 
+/** M5.6-g: 출력 단언 constraint 종류 (결과를 읽는 제약. file_exists 제외). */
+export const OUTPUT_ASSERT_KINDS: ReadonlySet<string> = new Set([
+  "equals",
+  "count",
+  "numeric_match",
+  "json_path_exists",
+  "regex",
+  "pptx_table_sum",
+  "llm_rubric",
+  "schema",
+]);
+
+/**
+ * M5.6-g: 누적(stateWrites) 노드 출력 단언 감사.
+ * stateWrites가 있는데 human 출력 단언 제약이 하나도 없으면 경고를 남긴다
+ * (빈 누적 결과가 그대로 통과하는 것을 막기 위함. auto 제약은 존재 확인에
+ * 불과하므로 인정하지 않음).
+ */
+export function auditStateWrites(
+  nodes: { id: string; constraints?: { kind?: string; source?: string }[]; stateWrites?: { key: string; from: string }[] }[],
+): string[] {
+  const out: string[] = [];
+  for (const n of nodes) {
+    const sw = n.stateWrites;
+    if (!Array.isArray(sw) || sw.length === 0) continue;
+    const asserted = (n.constraints ?? []).some(
+      (c) => c.source === "human" && OUTPUT_ASSERT_KINDS.has(c.kind ?? ""),
+    );
+    if (!asserted) {
+      out.push(
+        `stateWrites 출력 단언 없음: ${n.id} (state ${sw.map((e) => e.key).join(",")}) — 누적 결과가 비어도 통과한다. count 등 출력 제약을 추가하라.`,
+      );
+    }
+  }
+  return out;
+}
+
 /** 텍스트 속 첫 날짜 표현 샘플 (없으면 null) */
 export function findDateSample(text: string): string | null {
   const m = text.match(
