@@ -167,13 +167,19 @@ async function cmdRun(): Promise<number> {
 
 async function cmdApprove(): Promise<number> {
   // M5.5-4.2-4: 판별 전 정규화 (win32 "procedures\m55-unatt" 허용).
+  // M5.6-a: UUID면 run 승인, 아니면 절차서 승인 (bare name·procedures/·.json·디렉터리).
   const target = normalizeCliPath(positionals[1]);
   const nodeId = positionals[2];
+  if (!target) {
+    console.error("usage: procforge approve <runId> <nodeId> | procforge approve <procedure> --node <id> [--allow-wildcard <key> ...]");
+    return 2;
+  }
   const { projectRoot, procforgeDir } = resolveDirs(values, process.env);
   try {
     const { app } = createApp({ procforgeDir, projectRoot });
-    // M5.5-4.1-3: 절차서 사전 승인 (procforge approve procedures/<name> --node <id>).
-    const targetIsProc = (target ?? "").startsWith("procedures/") || (target ?? "").endsWith(".json");
+    // M5.6-a: UUID면 run 승인, 아니면 절차서 승인 (bare name·procedures/·.json·디렉터리).
+    // resolveProcedureRef가 3형식을 같은 dir로 푼다.
+    const targetIsProc = !UUID_RE.test(target);
     if (targetIsProc) {
       const r = await app.approveProcedureNode({
         procedure: target, nodeId: values.node ?? nodeId, allowWildcard: values["allow-wildcard"] ?? [],
@@ -225,7 +231,8 @@ async function main(): Promise<number> {
   if (cmd === "run") return cmdRun();
   if (cmd === "approve") return cmdApprove();
   console.error("usage: procforge <test|trace|export|repair|run|approve> ...");
-  console.error("  approve <runId> <nodeId> | approve procedures/<name> --node <id> [--allow-wildcard <key> ...]");
+  console.error("  approve <runId> <nodeId> | approve <procedure> --node <id> [--allow-wildcard <key> ...]");
+  console.error("  <procedure>: 이름 | procedures/<name> | <dir> | <procedure.json>");
   return 2;
 }
 

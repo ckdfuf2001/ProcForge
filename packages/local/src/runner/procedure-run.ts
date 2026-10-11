@@ -1,5 +1,5 @@
-import { existsSync, readFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { existsSync, readFileSync, statSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { ProcedureDocSchema, type ProcedureDoc } from "@procforge/shared/procedure.js";
 import { importProcedure } from "../procedure.js";
 import { runSession } from "./run.js";
@@ -23,13 +23,28 @@ export type ProcedureRunOptions = {
 };
 
 export function resolveProcedureRef(procforgeDir: string, ref: string): { dir: string; file: string } {
-  const abs = resolve(ref);
-  if (ref.endsWith(".json") && existsSync(abs)) {
-    return { dir: resolve(abs, "..", ".."), file: abs };
+  // M5.6-a: 3형식 통일 (.json 파일 / bare name·procedures/ 접두 / 디렉터리).
+  // 모두 같은 {dir, file}로 수렴. win32 역슬래시 정규화.
+  const norm = (ref ?? "").split("\\").join("/");
+  // 1. .json 파일 (절대·상대).
+  if (norm.endsWith(".json")) {
+    const abs = resolve(norm);
+    if (existsSync(abs) && statSync(abs).isFile()) return { dir: dirname(abs), file: abs };
+    throw Object.assign(new Error(`procedure 없음: ${ref}`), { code: "not_found" });
   }
-  const byName = join(procforgeDir, "procedures", ref, "procedure.json");
-  if (existsSync(byName)) return { dir: join(procforgeDir, "procedures", ref), file: byName };
-  if (existsSync(abs)) return { dir: resolve(abs, ".."), file: abs };
+  // 2. 존재하는 디렉터리 (절대·상대) → 안의 procedure.json.
+  const absDir = resolve(norm);
+  if (existsSync(absDir) && statSync(absDir).isDirectory()) {
+    const f = join(absDir, "procedure.json");
+    if (existsSync(f)) return { dir: absDir, file: f };
+    throw Object.assign(new Error(`procedure 없음: ${ref}`), { code: "not_found" });
+  }
+  // 3. bare name ("procedures/" 접두 허용) → procforgeDir 아래.
+  const name = norm.startsWith("procedures/") ? norm.slice("procedures/".length) : norm;
+  const byName = join(procforgeDir, "procedures", name, "procedure.json");
+  if (name !== "" && existsSync(byName)) {
+    return { dir: join(procforgeDir, "procedures", name), file: byName };
+  }
   throw Object.assign(new Error(`procedure 없음: ${ref}`), { code: "not_found" });
 }
 
