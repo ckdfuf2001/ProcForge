@@ -52,7 +52,8 @@
 - `$prefix`가 `scheme://`로 시작하면 URL 모드다. 실제 값을 `new URL()`로
   정규화 (호스트 소문자·기본 포트·dot 세그먼트 해소) 후 origin 정확 일치 +
   path 세그먼트 접두로 비교한다. 패턴은 origin 뒤 `/`가 필수
-  (`"https://a.com"`은 로드 시 `bad_request`).
+  (`"https://a.com"`은 로드 시 `bad_request`). 패턴에 query/fragment가
+  있으면 로드 시 `bad_request`, 실제 값에 username/password가 있으면 거부한다.
 - 생성된 패턴은 fixed 값 그대로다. var/generated 키는 `--allow-wildcard <key>`로
   명시한 것만 `{"$any": true}`가 되고, 미지정 키가 있으면 `bad_request`(exit 2) +
   키 목록으로 거부된다 (암묵적 전체 허용 금지).

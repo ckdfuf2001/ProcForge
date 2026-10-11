@@ -210,6 +210,18 @@ describe("M5.5-4 approvals 매칭", () => {
     expect(matchApproval(pub, "s", "t", { url: "https://a.com:443/public/x" })).toBe(true);
     expect(matchApproval(pub, "s", "t", { url: "https://a.com/private" })).toBe(false);
     expect(matchApproval(pub, "s", "t", { url: "not a url" })).toBe(false);
+    // M5.5-4.4-4: 실제 값 자격 포함 → 거부.
+    expect(matchApproval(pub, "s", "t", { url: "https://user:pass@a.com/public/x" })).toBe(false);
+    expect(matchApproval(pub, "s", "t", { url: "https://user@a.com/public/x" })).toBe(false);
+    // 패턴 query/fragment → 로드 거부.
+    for (const bad of ["https://a.com/public/?x=1", "https://a.com/public/#frag"]) {
+      const d = mkdtempSync(join(tmpdir(), "pf-m544q-"));
+      writeFileSync(join(d, "approvals.json"), JSON.stringify({
+        version: 2,
+        entries: [{ node: { id: "1", hash: "h" }, tool: { server: "s", name: "t" }, args: { url: { $prefix: bad } } }],
+      }));
+      expect(() => loadApprovals(d)).toThrow(/형식 오류/);
+    }
     // origin 뒤 "/" 없는 패턴은 로드 거부.
     const d = mkdtempSync(join(tmpdir(), "pf-m543u-"));
     writeFileSync(join(d, "approvals.json"), JSON.stringify({

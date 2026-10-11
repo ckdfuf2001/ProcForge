@@ -156,7 +156,16 @@ function isValidPatternValue(v: unknown): boolean {
       const pv = (v as { $prefix?: unknown }).$prefix;
       if (typeof pv !== "string") return false;
       // M5.5-4.3-2: scheme:// 시작이면 origin 뒤 "/" 필수.
-      if (SCHEME_RE.test(pv) && !URL_PREFIX_RE.test(pv)) return false;
+      // M5.5-4.4-4: query/fragment 포함이면 로드 거부.
+      if (SCHEME_RE.test(pv)) {
+        if (!URL_PREFIX_RE.test(pv)) return false;
+        try {
+          const u = new URL(pv);
+          if (u.search !== "" || u.hash !== "") return false;
+        } catch {
+          return false;
+        }
+      }
       return true;
     }
     return Object.values(v as Record<string, unknown>).every(isValidPatternValue);
@@ -277,6 +286,8 @@ export function matchUrlPrefix(prefix: string, actual: string): boolean {
     return false;
   }
   if (a.origin !== p.origin) return false;
+  // M5.5-4.4-4: 실제 값에 자격(username/password)이 있으면 거부.
+  if (a.username !== "" || a.password !== "") return false;
   // 빈 세그먼트 제외 후 접두 비교 ("/" = origin 전체, "/public/" = public 하위).
   const pp = p.pathname.split("/").filter((s) => s !== "");
   const ap = a.pathname.split("/").filter((s) => s !== "");
