@@ -448,6 +448,18 @@ f. 재시도는 readOnly 도구 호출만(일시 네트워크 오류, 지수 백
    external은 재시도 금지 테스트.
 c·d·j는 하네스 과제로 DECISIONS에 기록만.
 
+### M5.6.1 (재시도·승인 다듬기, 한 묶음)
+1. callWithRetry: resp.isError 텍스트도 isTransientToolError로 판별해 재시도.
+   테스트: fake MCP가 isError "fetch failed"를 2회 반환 후 성공 → pass, attempts=3.
+2. 판별 정규식에 \b 적용. 10013은 기본 제외(설정으로만). attempts ≤10,
+   1회 대기 ≤30s + jitter, Retry-After 존중. 테스트 포함.
+3. sideEffect 기본값 확인: 지정 안 한 readOnly 노드가 재시도 대상인지 테스트로 고정.
+   readOnly annotation을 신뢰하는 한계를 DECISIONS에 기록.
+4. fixedTemplatePrefix: 리터럴이 세그먼트 중간에서 끝나면 마지막 "/"까지로 자르거나,
+   URL·경로 모드의 마지막 세그먼트를 문자열 접두로 비교 (둘 중 하나 택해 DECISIONS 기록).
+   테스트: "https://h/x/item-${id}" approve 무수정 → "https://h/x/item-123" 통과,
+   "https://h/y/..." 거부. ${}가 2개 이상이면 approve 출력에 범위 경고.
+
 ### M5 검증과 실행 분리
 - `procforge test <proc>`: replay 전용, drift 검출만.
 - `procforge run <procedure> --param k=v ... [--out <dir>]`: live 실행 전용.
@@ -570,4 +582,5 @@ c·d·j는 하네스 과제로 DECISIONS에 기록만.
 | 2026-10-11 | 6, 8 | M5.5-4.4 신설 (승인 해시·패턴 보강 1~5): script 내용·파서 통일·경로 모드·URL 자격·toHashable | 승인 보강 마지막 |
 | 2026-10-11 | 6, 8 | M5.6 신설 (dogfood-real repo 대상 한 묶음 a~h): ref 통일·$prefix 생성·external 입력·출력 단언·offset 문구·readOnly 재시도 | 0.2 개정 후속 |
 | 2026-10-11 | 6, 8 | M5.6 완료 (한 묶음): L3(dev-verify) green·양 OS CI success·c·d·j 하네스 기록 | — |
+| 2026-10-11 | 6, 8 | M5.6.1 신설 (재시도·승인 다듬기 1~4): isError 판별·정규식 상한·기본값 고정·범위 경고 | M5.6 완료 후속 |
 | 2026-10-11 | 6, 8 | M5.5-4.2 신설 (승인 정합성 보강 1~6): 논리경로 매칭·wildcard 명시·해시 재계산·경로 정규화·잠금 finally·NODE_ENV 경고 | M5.5-6보다 먼저 |
