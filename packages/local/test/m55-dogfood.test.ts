@@ -285,4 +285,22 @@ describe("M5.5-5 dogfood", () => {
     expect(err.code).toBe("conflict");
     expect(runErrorExit(err)).toBe(4);
   }, 180000);
+
+  it("M5.5-4.3-3 템플릿 수정(maxItems) → stale exit 3", async () => {
+    const app = await buildDogfood();
+    await app.approveProcedureNode({ procedure: "daily-crawl", nodeId: "1.3", allowWildcard: ["id"] });
+    const procFile = join(pfdir, "procedures", "daily-crawl", "procedure.json");
+    const text = readFileSync(procFile, "utf8");
+    expect(text).toContain('"maxItems": 10');
+    writeFileSync(procFile, text.replace('"maxItems": 10', '"maxItems": 11'));
+    const r = await runProcedureTest(pfdir, root, "daily-crawl", {
+      procforgeDir: pfdir, projectRoot: root, mode: "live",
+      params: { day: "d1", stateDefaults: '{"seenIds":[]}' }, unattended: true,
+    });
+    const n = r.report.results.find((x) => x.nodeId === "1.3")!;
+    expect(n.status).toBe("fail");
+    expect(n.failedConstraints).toContain("approval");
+    expect(n.detail ?? "").toContain("갱신");
+    expect(runExitCode({ failed: r.report.summary.fail, suspended: 0, approvalBlocked: true })).toBe(3);
+  }, 180000);
 });

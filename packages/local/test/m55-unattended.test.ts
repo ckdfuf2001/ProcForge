@@ -4,7 +4,7 @@ import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { ProcForgeApp } from "../src/app/app.js";
 import { runProcedureTest } from "../src/runner/procedure-run.js";
-import { isApproved, loadApprovals, matchApproval, approvalPins, checkApproval, buildApprovalEntry, migrateV1Value } from "../src/services/approvals.js";
+import { isApproved, loadApprovals, matchApproval, approvalPins, checkApproval, buildApprovalEntry, migrateV1Value, computeApprovalHash } from "../src/services/approvals.js";
 import { runExitCode, cliErrorExit, runErrorExit } from "../src/app/run-exit.js";
 import { testStack } from "./client-mode.js";
 import { computeNodeHash } from "@procforge/shared/schema.js";
@@ -619,4 +619,107 @@ describe("M5.5-4.2-5 절차서 잠금", () => {
       vi.useRealTimers();
     }
   });
+});
+
+describe("M5.5-4.3-3 approvalHash", () => {
+  const A = {
+    id: "1.1", goal: "g", tool: { server: "s", name: "t" },
+    args: { a: { kind: "fixed", value: "x" } }, constraints: [], sideEffect: "none",
+  };
+  const B = {
+    id: "1.2", goal: "h", tool: { server: "s", name: "t" },
+    args: { b: { kind: "var", ref: "$1.1" } }, constraints: [], sideEffect: "external",
+  };
+  const byIdOf = (...nodes: { id: string }[]) =>
+    new Map(nodes.map((n) => [n.id, n as never]));
+
+  it("단위: 상류·tool·sideEffect·템플릿 변경에 민감, params 무영향", () => {
+    const base = computeApprovalHash(B as never, byIdOf(A as never, B as never));
+    expect(computeApprovalHash(B as never, byIdOf(A as never, B as never))).toBe(base);
+    const A2 = { ...A, args: { a: { kind: "fixed", value: "y" } } };
+    expect(computeApprovalHash(B as never, byIdOf(A2 as never, B as never))).not.toBe(base);
+    const Btool = { ...B, tool: { server: "s", name: "u" } };
+    expect(computeApprovalHash(Btool as never, byIdOf(A as never, Btool as never))).not.toBe(base);
+    const Bse = { ...B, sideEffect: "none" };
+    expect(computeApprovalHash(Bse as never, byIdOf(A as never, Bse as never))).not.toBe(base);
+    const M = { ...B, map: { over: "$1.1", template: { tool: { server: "s", name: "t" }, args: {} } } };
+    const M2 = { ...B, map: { over: "$1.1", template: { tool: { server: "s", name: "u" }, args: {} } } };
+    expect(computeApprovalHash(M2 as never, byIdOf(A as never, M2 as never))).not.toBe(
+      computeApprovalHash(M as never, byIdOf(A as never, M as never)),
+    );
+    const P1 = { ...B, args: {} };
+    const P2 = { ...B, args: { p: { kind: "var", ref: "${params.p}" } } };
+    // params 참조는 상류를 끌고 오지 않지만 내용은 바뀌므로 해시는 달라진다.
+    expect(computeApprovalHash(P2 as never, byIdOf(A as never, P2 as never))).not.toBe(
+      computeApprovalHash(P1 as never, byIdOf(A as never, P1 as never)),
+    );
+    // 상류가 byId에 없으면 무시하고 결정적으로 계산.
+    expect(computeApprovalHash(B as never, new Map())).toBe(
+      computeApprovalHash(B as never, new Map()),
+    );
+  });
+
+  async function buildChain(): Promise<ProcForgeApp> {
+    const { client } = testStack(pfdir);
+    const app = new ProcForgeApp({ core: client, procforgeDir: pfdir, projectRoot: root });
+    const started = await client.pfStart({ request: "chain", params: {}, toolCatalog: ECHO_CAT });
+    const sid = started.session.id;
+    await client.pfResolve({
+      sessionId: sid, nodeId: "1", decision: "split",
+      children: [{ goal: "원본" }, { goal: "전달", dependsOn: ["1.1"] }],
+    });
+    const r1 = await client.pfReport({
+      sessionId: sid, nodeId: "1.1", tool: { server: "fake-ppt", name: "echo" },
+      args: { note: "hi" }, resultSummary: "hi", resultJson: { note: "hi" },
+      selfVerdict: "pass", selfReason: "ok",
+    });
+    expect(r1.verdict).toBe("pass");
+    await client.pfResolve({
+      sessionId: sid, nodeId: "1.1", decision: "leaf",
+      tool: { server: "fake-ppt", name: "echo" },
+      argSpecs: { note: { kind: "fixed", value: "hi" } } as never,
+    });
+    const r2 = await client.pfReport({
+      sessionId: sid, nodeId: "1.2", tool: { server: "fake-ppt", name: "echo" },
+      args: { note: "hi" }, resultSummary: "fwd", resultJson: { note: "hi" },
+      selfVerdict: "pass", selfReason: "ok",
+    });
+    expect(r2.verdict).toBe("pass");
+    await client.pfResolve({
+      sessionId: sid, nodeId: "1.2", decision: "leaf",
+      tool: { server: "fake-ppt", name: "echo" },
+      argSpecs: { note: { kind: "var", ref: "$1.1.note" } } as never,
+      sideEffect: "external",
+    });
+    const fin = await app.finalize({ sessionId: sid, name: "m55-chain" });
+    expect(fin.warnings.filter((w) => w.includes("bad_"))).toEqual([]);
+    return app;
+  }
+
+  it("상류 1.1 수정 → 1.2 stale exit 3 (1.2 자체 hash 불변)", async () => {
+    const app = await buildChain();
+    const ap = await app.approveProcedureNode({ procedure: "m55-chain", nodeId: "1.2", allowWildcard: ["note"] });
+    const first = await runProcedureTest(pfdir, root, "m55-chain", {
+      procforgeDir: pfdir, projectRoot: root, mode: "live", params: {}, unattended: true,
+    });
+    expect(first.report.summary.fail).toBe(0);
+    const procFile = join(pfdir, "procedures", "m55-chain", "procedure.json");
+    const text = readFileSync(procFile, "utf8");
+    expect(text).toContain('"value": "hi"');
+    writeFileSync(procFile, text.replace('"value": "hi"', '"value": "ho"'));
+    // 1.2 자체 내용은 불변 → node.hash는 승인값과 동일해야 한다.
+    const doc = JSON.parse(readFileSync(procFile, "utf8")) as {
+      nodes: { id: string; goal: string; args: Record<string, never>; constraints: never[] }[];
+    };
+    const n12 = doc.nodes.find((n) => n.id === "1.2")!;
+    expect(computeNodeHash({ goal: n12.goal, args: n12.args, constraints: n12.constraints, dependsOn: [] })).toBe(ap.hash);
+    const r = await runProcedureTest(pfdir, root, "m55-chain", {
+      procforgeDir: pfdir, projectRoot: root, mode: "live", params: {}, unattended: true,
+    });
+    const n = r.report.results.find((x) => x.nodeId === "1.2")!;
+    expect(n.status).toBe("fail");
+    expect(n.failedConstraints).toContain("approval");
+    expect(n.detail ?? "").toContain("갱신");
+    expect(runExitCode({ failed: r.report.summary.fail, suspended: 0, approvalBlocked: true })).toBe(3);
+  }, 180000);
 });

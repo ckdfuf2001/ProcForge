@@ -528,7 +528,11 @@ async function execNode(
       const parent = n.parentId ? byId.get(n.parentId) : undefined;
       const verdict = checkApproval(
         opts.approvals ?? [],
-        approvalPins(n, parent ? { id: parent.id, hash: parent.hash, kind: (parent as { kind?: string }).kind } : undefined),
+        approvalPins(
+          n,
+          parent ? { id: parent.id, hash: parent.hash, kind: (parent as { kind?: string }).kind } : undefined,
+          byId as unknown as Map<string, import("../services/approvals.js").HashableNode>,
+        ),
         server, tool, logicalArgs as Record<string, unknown>,
       );
       if (verdict === "stale") {

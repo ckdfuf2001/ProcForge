@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { createHash } from "node:crypto";
 import { pfError } from "@procforge/shared/errors.js";
 import { computeNodeHash, type ArgSpec, type Constraint } from "@procforge/shared/schema.js";
 import { writeAtomicFile } from "../fsutil.js";
@@ -13,11 +14,85 @@ import { logger } from "../logger.js";
 
 export type ApprovalEntry = {
   node: { id: string; hash: string };
+  /** M5.5-4.3-3: 승인 해시 (nodeHash + tool + sideEffect + map/until + 상류 재귀). */
+  approvalHash: string;
   tool: { server: string; name: string };
   args?: Record<string, unknown>;
 };
 
-export type ApprovalPin = { id: string; hash: string };
+export type ApprovalPin = { id: string; hash: string; approvalHash: string };
+// M5.5-4.3-3: 승인 해시.
+// nodeHash(기존 공식 유지) + tool + sideEffect + map/until 전체 스펙 +
+// var-kind 인자가 참조하는 상류 노드 approvalHash (재귀, $self·${item}·params 제외).
+// 단계마다 sha256으로 접어 크기를 묶는다. doc/세션 양쪽에서 동일 공식.
+export type HashableNode = {
+  id: string;
+  goal: string;
+  tool?: { server: string; name: string };
+  args?: Record<string, unknown>;
+  constraints?: unknown[];
+  sideEffect?: string;
+  map?: unknown;
+  until?: unknown;
+};
+
+function stable(v: unknown): string {
+  if (Array.isArray(v)) return `[${v.map(stable).join(",")}]`;
+  if (typeof v === "object" && v !== null) {
+    const o = v as Record<string, unknown>;
+    return `{${Object.keys(o).sort().map((k) => `${JSON.stringify(k)}:${stable(o[k])}`).join(",")}}`;
+  }
+  return JSON.stringify(v) ?? "null";
+}
+
+function varRefNodeIds(ref: string): string[] {
+  if (ref === "$self" || ref.startsWith("${item")) return [];
+  const m = /^\$(\d+(?:\.\d+)*)(?:\.|$)/.exec(ref);
+  return m ? [m[1]] : [];
+}
+
+function collectArgNodeRefs(specs: Record<string, unknown> | undefined): string[] {
+  const out: string[] = [];
+  for (const s of Object.values(specs ?? {})) {
+    if (typeof s === "object" && s !== null && (s as { kind?: unknown }).kind === "var") {
+      const ref = (s as { ref?: unknown }).ref;
+      if (typeof ref === "string") out.push(...varRefNodeIds(ref));
+    }
+  }
+  return out;
+}
+
+export function computeApprovalHash(
+  n: HashableNode,
+  byId: Map<string, HashableNode>,
+  seen: Set<string> = new Set(),
+): string {
+  const base = computeNodeHash({
+    goal: n.goal,
+    args: (n.args ?? {}) as Record<string, ArgSpec>,
+    constraints: (n.constraints ?? []) as Constraint[],
+    dependsOn: [],
+  });
+  const tool = n.tool ? `${n.tool.server}/${n.tool.name}` : "";
+  const se = n.sideEffect ?? "";
+  const specs = [n.map !== undefined ? stable(n.map) : "", n.until !== undefined ? stable(n.until) : ""];
+  const fold = (up: string[]): string =>
+    createHash("sha256").update(stable({ base, tool, se, specs, up })).digest("hex").slice(0, 32);
+  if (seen.has(n.id)) return fold([`cycle:${n.id}`]);
+  seen.add(n.id);
+  const refs: string[] = [...collectArgNodeRefs(n.args as Record<string, unknown> | undefined)];
+  for (const k of ["map", "until"] as const) {
+    const spec = n[k] as { over?: unknown; template?: { args?: Record<string, unknown> } } | undefined;
+    if (typeof spec?.over === "string") refs.push(...varRefNodeIds(spec.over));
+    refs.push(...collectArgNodeRefs(spec?.template?.args));
+  }
+  const up = [...new Set(refs)]
+    .filter((id) => id !== n.id && byId.has(id))
+    .map((id) => computeApprovalHash(byId.get(id) as HashableNode, byId, seen))
+    .sort();
+  seen.delete(n.id);
+  return fold(up);
+}
 
 export function approvalsPath(procedureDir: string): string {
   return join(procedureDir, "approvals.json");
@@ -29,6 +104,9 @@ function isEntry(x: unknown): x is ApprovalEntry {
   if (typeof nd !== "object" || nd === null) return false;
   if (typeof (nd as { id?: unknown }).id !== "string") return false;
   if (typeof (nd as { hash?: unknown }).hash !== "string") return false;
+  // approvalHash는 v2 approve 생성분에만 존재 (v1 변환분은 node.hash로만 판정).
+  const ah = (x as { approvalHash?: unknown }).approvalHash;
+  if (ah !== undefined && typeof ah !== "string") return false;
   const t = (x as { tool?: unknown }).tool;
   if (typeof t !== "object" || t === null) return false;
   const s = (t as { server?: unknown }).server;
@@ -221,8 +299,11 @@ export function buildApprovalEntry(
     args?: Record<string, ArgSpec>;
     constraints?: Constraint[];
     sideEffect?: string;
+    map?: unknown;
+    until?: unknown;
   },
   allowWildcardKeys: string[] = [],
+  docById: Map<string, HashableNode> = new Map(),
 ): ApprovalEntry {
   if (!docNode.tool) throw pfError("bad_request", `승인은 tool 노드만 가능: ${docNode.id}`);
   if (docNode.sideEffect !== undefined && docNode.sideEffect !== "external") {
@@ -245,6 +326,18 @@ export function buildApprovalEntry(
   if (denied.length > 0) {
     throw pfError("bad_request", `승인 불가: 와일드카드 미지정 키 (${denied.join(",")}). --allow-wildcard <key>로 명시`);
   }
+  const hashable: HashableNode = {
+    id: docNode.id,
+    goal: docNode.goal,
+    tool: docNode.tool,
+    args: docNode.args,
+    constraints: docNode.constraints,
+    sideEffect: docNode.sideEffect,
+    map: docNode.map,
+    until: docNode.until,
+  };
+  const nodes = new Map(docById);
+  nodes.set(hashable.id, hashable);
   return {
     node: {
       id: docNode.id,
@@ -255,6 +348,7 @@ export function buildApprovalEntry(
         dependsOn: [],
       }),
     },
+    approvalHash: computeApprovalHash(hashable, nodes),
     tool: { server: docNode.tool.server, name: docNode.tool.name },
     args: pattern,
   };
@@ -278,11 +372,21 @@ export type ApprovalVerdict = "ok" | "stale" | "denied";
 export function approvalPins(
   node: { id: string; hash?: string; parentId?: string | null },
   parent?: { id: string; hash?: string; kind?: string },
+  byId?: Map<string, HashableNode>,
 ): ApprovalPin[] {
-  const pins: ApprovalPin[] = [{ id: node.id, hash: node.hash ?? "" }];
+  const nodes = byId ?? new Map<string, HashableNode>();
+  const pin = (id: string, hash: string): ApprovalPin => {
+    const full = nodes.get(id);
+    return {
+      id,
+      hash,
+      approvalHash: full ? computeApprovalHash(full, nodes) : computeApprovalHash({ id, goal: "", args: {} }, nodes),
+    };
+  };
+  const pins: ApprovalPin[] = [pin(node.id, node.hash ?? "")];
   // map/until 인스턴스(1.2.1)는 부모 노드 pin으로 승인 (항목별 해시는 불안정).
   if (node.parentId && parent && (parent.kind === "map" || parent.kind === "until")) {
-    pins.push({ id: parent.id, hash: parent.hash ?? "" });
+    pins.push(pin(parent.id, parent.hash ?? ""));
   }
   return pins;
 }
@@ -294,10 +398,26 @@ export function checkApproval(
   name: string,
   args: Record<string, unknown>,
 ): ApprovalVerdict {
-  if (approvals.some((e) => pins.some((p) => p.id === e.node.id && p.hash === e.node.hash) && matchApproval(e, server, name, args))) {
-    return "ok";
-  }
-  if (approvals.some((e) => pins.some((p) => p.id === e.node.id && p.hash !== e.node.hash))) {
+  const pinned = (e: ApprovalEntry): boolean =>
+    pins.some(
+      (p) =>
+        p.id === e.node.id &&
+        p.hash === e.node.hash &&
+        (e.approvalHash === undefined || e.approvalHash === p.approvalHash) &&
+        matchApproval(e, server, name, args),
+    );
+  if (approvals.some(pinned)) return "ok";
+  // id는 맞는데 hash 또는 approvalHash가 다르면 stale (갱신 필요).
+  // approvalHash 없는 v1 변환분은 node.hash로만 판정.
+  if (
+    approvals.some((e) =>
+      pins.some(
+        (p) =>
+          p.id === e.node.id &&
+          (p.hash !== e.node.hash || (e.approvalHash !== undefined && e.approvalHash !== p.approvalHash)),
+      ),
+    )
+  ) {
     return "stale";
   }
   return "denied";

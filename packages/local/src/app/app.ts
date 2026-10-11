@@ -1000,12 +1000,29 @@ export class ProcForgeApp {
     const { doc, dir } = loadProcedureDoc(this.procforgeDir, procRef);
     const n = doc.nodes.find((x) => x.id === nodeId);
     if (!n) throw pfError("not_found", `노드 없음: ${nodeId} (${procRef})`);
+    const docById = new Map(
+      doc.nodes.map((x) => [
+        x.id,
+        {
+          id: x.id,
+          goal: x.goal,
+          tool: x.tool,
+          args: x.args,
+          constraints: x.constraints,
+          sideEffect: x.sideEffect,
+          map: (x as { map?: unknown }).map,
+          until: (x as { until?: unknown }).until,
+        },
+      ]),
+    );
     const entry = buildApprovalEntry({
       id: n.id, goal: n.goal, tool: n.tool,
       args: n.args as Record<string, import("@procforge/shared/schema.js").ArgSpec> | undefined,
       constraints: n.constraints as import("@procforge/shared/schema.js").Constraint[] | undefined,
       sideEffect: n.sideEffect,
-    }, allowWildcard);
+      map: (n as { map?: unknown }).map,
+      until: (n as { until?: unknown }).until,
+    }, allowWildcard, docById as Map<string, import("../services/approvals.js").HashableNode>);
     const { path, replaced } = saveApproval(dir, entry);
     return { procedureDir: dir, path, nodeId, hash: entry.node.hash, replaced };
   }
