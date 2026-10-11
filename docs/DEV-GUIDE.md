@@ -336,6 +336,15 @@ C4 CI E2E에도 C2·C3를 fake 서버로 추가. M5-dogfood.md 3절을 실제 �
    없으면 null. 테스트: 다중 키 누락 메시지 → 파싱 성공, 미등록 code → null.
 7. 0.2 규칙에 추가: 로컬 검증은 dist 삭제(clean) 후 build → test. 클린 클론 결과만 완료 증거로 인정.
 
+### M5.3.1 (확정 산출물 정합성)
+1. export 시 auto file_exists 경로를 논리 경로(바인딩 인자명 또는 sandbox 상대 템플릿)로 변환.
+   fixtures/<id>/<attemptId>/ 형태가 procedure.json에 남으면 finalize bad_request.
+   live run에서 이 제약이 10월 입력/출력을 실제로 검사하는지 테스트 (10월 출력 삭제 시 fail).
+2. 감사 대상에 auto 제약 spec 포함. examples/procedures/monthly 재생성 후 "2026-09" 0건 확인 (golden·goldenArgs 제외).
+3. 기간성 params(감사가 날짜로 판정한 값)는 default 금지 → required. 미지정 run은 bad_request. 테스트 포함.
+4. golden.output은 녹화 원문 그대로(템플릿 치환 금지). replay 전용임을 DECISIONS에 기록.
+5. 푸시 전 `pnpm -r build` 필수 + 로컬 @types/node가 lockfile 버전과 같은지 확인 (0.2 보강).
+
 ### M5 검증과 실행 분리
 - `procforge test <proc>`: replay 전용, drift 검출만.
 - `procforge run <procedure> --param k=v ... [--out <dir>]`: live 실행 전용.
@@ -418,6 +427,7 @@ C4 CI E2E에도 C2·C3를 fake 서버로 추가. M5-dogfood.md 3절을 실제 �
 | M5.2 | 교차 기간 재사용 | [x] | `adf6ae7` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38074263388 | 입력 바인딩·스크립트 leaf·값 흐름·수락 a~d·단가 통일 |
 | M5.3-0 | 확정 게이트 선행 | [x] | `18e0b44` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38082174797 | confirm required 강제·회귀·에러 계약·증거 경고·관찰 기록 |
 | M5.3 | 절차서 신뢰성 마무리 | [x] | `a107ade` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38107570434 | 감사 확장·S2 템플릿·실행 제한·실물 커밋·게이트 범위·에러 계약·검증 규율 |
+| M5.3.1 | 확정 산출물 정합성 | [ ] | | | file_exists 논리 경로·auto 감사·기간 params·원문 golden·0.2 보강 |
 | M5.5 | 반복 노드 | [ ] | | | |
 | M5.6 | 상태 / sideEffect | [ ] | | | |
 | - | 크롤링 테스트 | [ ] | | | 사람 진행 |
@@ -446,3 +456,4 @@ C4 CI E2E에도 C2·C3를 fake 서버로 추가. M5-dogfood.md 3절을 실제 �
 | 2026-10-11 | 6, 8 | M5.2 완료 + M5 재확정: 입력 바인딩·스크립트 leaf(kind script)·교차 경고·expected 감사·약식 ref·수락 a~d(CI+실측)·runner UTF-8·단가 통일·양 모드 38+61+200 | 절차서 monthly (기간 없음) |
 | 2026-10-11 | 6, 8 | M5.3-0 신설: BC 실사용 세션 finalize 실패(가짜 leaf + -32602 마스킹) → 확정 게이트 0-1~0-5 | M5.3 진입 전 확정 단계 결함 해소 |
 | 2026-10-11 | 6, 8 | M5.3 신설 (절차서 신뢰성 마무리 1~7): 감사 확장·S2 템플릿·실행 제한·실물 커밋·게이트 범위·에러 계약·검증 규율 | M5.3-0 완료 후속 |
+| 2026-10-11 | 6, 8 | M5.3.1 신설 (확정 산출물 정합성 1~5): file_exists 논리 경로·auto 감사·기간 params·원문 golden·0.2 보강 | M5.3 완료 후속 |
