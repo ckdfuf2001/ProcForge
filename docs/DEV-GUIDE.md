@@ -394,6 +394,22 @@ C4 CI E2E에도 C2·C3를 fake 서버로 추가. M5-dogfood.md 3절을 실제 �
    staleMs를 문서(60s)와 일치시키고 실행 중 하트비트가 .run.lock에도 적용되는지 테스트.
 6. check:env에 NODE_ENV=production 경고 추가.
 
+### M5.5-4.3 (승인 패턴 명시화)
+1. approvals 패턴 명시화: 문자열은 항상 정확 일치. 와일드카드는 {"$any":true},
+   접두는 {"$prefix":"..."}만. approvals.json {version:2, entries}로 바꾸고
+   v1은 로드 시 1회 변환(끝 "*" 문자열 → $prefix, "*" → $any) 후 경고.
+   테스트: fixed "SELECT *" 승인 → "SELECT x" 거부, fixed "*" → 다른 값 거부.
+2. URL 모드: $prefix가 scheme://로 시작하면 실제 값을 new URL()로 정규화하고
+   origin 정확 일치 + path 세그먼트 접두로 비교. 패턴에 origin 뒤 "/"가 없으면
+   approve 시 bad_request. 테스트: a.com.evil.com, a.com@evil.com,
+   /public/../admin, %2e%2e, 대문자 호스트, 기본 포트 명시.
+3. approvalHash = nodeHash + tool + sideEffect + map/until 템플릿 +
+   와일드카드 키가 참조하는 상류 노드 approvalHash(재귀). 기존 노드 hash 공식은 유지.
+   테스트: 상류 1.1 args 수정 → 1.2 stale exit 3, 템플릿 수정 → stale.
+4. pin 없는 isApproved 삭제, server/app/runner에서 matchApproval 직접 호출을
+   grep으로 금지.
+5. 0.2 규칙: 클린 클론은 NODE_ENV 미설정 상태로 검증.
+
 ### M5 검증과 실행 분리
 - `procforge test <proc>`: replay 전용, drift 검출만.
 - `procforge run <procedure> --param k=v ... [--out <dir>]`: live 실행 전용.
@@ -510,4 +526,5 @@ C4 CI E2E에도 C2·C3를 fake 서버로 추가. M5-dogfood.md 3절을 실제 �
 | 2026-10-11 | 6, 8 | M5.5-4.1 완료 (1~6): exit 4종·정확일치·nodeHash+approve CLI·generated 거부·.run.lock+exit 4·Windows 예시 (양 모드 m55-unattended·filestore) | M5.5-5 dogfood 전 |
 | 2026-10-11 | 6, 8 | M5.5-5 완료: dogfood daily-crawl E2E (run1·run2 누적 + stale exit 3 + 겹침 conflict, 양 모드 m55-dogfood 3/3) | M5.5-6 문구 전 |
 | 2026-10-11 | 6, 8 | M5.5-6 완료: 분해 instruction 문구 (pf_start·pf_next) + 계약 테스트 고정 | REVIEW-M5.5 전 |
+| 2026-10-11 | 6, 8 | M5.5-4.3 신설 (승인 패턴 명시화 1~5): $any/$prefix·URL 모드·approvalHash·직접호출 금지·NODE_ENV 미설정 | M5.5-6 완료 후속 |
 | 2026-10-11 | 6, 8 | M5.5-4.2 신설 (승인 정합성 보강 1~6): 논리경로 매칭·wildcard 명시·해시 재계산·경로 정규화·잠금 finally·NODE_ENV 경고 | M5.5-6보다 먼저 |
