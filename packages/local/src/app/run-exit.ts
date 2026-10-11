@@ -18,6 +18,12 @@ export function cliErrorExit(e: unknown): number {
   return typeof code === "string" && INPUT_ERROR_CODES.includes(code) ? 2 : 1;
 }
 
+// M5.5-4.1-5: run 명령 에러 매핑. 겹친 실행(conflict)만 4, 나머지는 cliErrorExit.
+export function runErrorExit(e: unknown): number {
+  if ((e as { code?: unknown } | null)?.code === "conflict") return 4;
+  return cliErrorExit(e);
+}
+
 // M5.5-4.1-1: 입력 오류 코드 (exit 2). scheduling.md 표와 일치 고정.
 const INPUT_ERROR_CODES: readonly string[] = [
   "bad_request",

@@ -379,9 +379,14 @@ export class FileStore implements Store {
    * 보유자만 주기 호출. 탈취된 파일의 수명까지 늘릴 수 있으나 release token 검사로 무해.
    */
   refreshLock(sid: string): void {
+    this.refreshFileLock(this.lockPath(sid));
+  }
+
+  /** 임의 경로 락 mtime 갱신 (M5.5-4.1-5, 하트비트용). */
+  refreshFileLock(lockPath: string): void {
     try {
       const now = new Date();
-      utimesSync(this.lockPath(sid), now, now);
+      utimesSync(lockPath, now, now);
     } catch {
       // 무시
     }
@@ -396,7 +401,16 @@ export class FileStore implements Store {
    */
   acquireLock(sid: string, staleMs = 30000): () => void {
     assertSessionId(sid);
-    const p = this.lockPath(sid);
+    return this.acquireFileLock(this.lockPath(sid), `session locked: ${sid}`, staleMs);
+  }
+
+  /**
+   * 임의 경로 advisory lock (M5.5-4.1-5, 절차서 run 잠금용).
+   * acquireLock과 동일 기제 (wx 원자 생성·stale 회수·token release).
+   * conflict 메시지는 호출자가 지정한다.
+   */
+  acquireFileLock(lockPath: string, conflictMessage: string, staleMs = 30000): () => void {
+    const p = lockPath;
     mkdirSync(dirname(p), { recursive: true });
     const token = randomUUID();
     const payload = JSON.stringify({ pid: process.pid, token, at: new Date().toISOString() });
@@ -422,7 +436,7 @@ export class FileStore implements Store {
           // 정리 실패 무시
         }
         if ((e as { code?: string }).code === "EPERM" || (e as { code?: string }).code === "EBUSY" || (e as { code?: string }).code === "EACCES") {
-          throw pfError("conflict", `session locked: ${sid}`);
+          throw pfError("conflict", conflictMessage);
         }
         throw e;
       } finally {
@@ -456,7 +470,7 @@ export class FileStore implements Store {
     if (tryCreate()) return release;
     // M5.1-A1: 살아 있는 pid의 잠금은 절대 회수 금지
     const observed = readLockContent(p);
-    if (observed && pidAlive(observed.pid)) throw pfError("conflict", `session locked: ${sid}`);
+    if (observed && pidAlive(observed.pid)) throw pfError("conflict", conflictMessage);
     // 이미 있음: fresh면 conflict, stale이면 회수 경합
     let stale = true;
     try {
@@ -464,18 +478,18 @@ export class FileStore implements Store {
     } catch {
       stale = true;
     }
-    if (!stale) throw pfError("conflict", `session locked: ${sid}`);
+    if (!stale) throw pfError("conflict", conflictMessage);
     // stale 회수: rename 성공한 쪽만 진행.
     // 직전 재확인으로 그 사이 생긴 fresh 락 탈취 방지.
     const staleName = `${p}.stale-${randomUUID()}`;
     const observedToken = typeof observed?.token === "string" ? observed.token : undefined;
     try {
       const at = statSync(p).mtimeMs;
-      if (Date.now() - at <= staleMs) throw pfError("conflict", `session locked: ${sid}`);
+      if (Date.now() - at <= staleMs) throw pfError("conflict", conflictMessage);
       renameSync(p, staleName);
     } catch (e) {
       if ((e as { code?: string }).code === "conflict") throw e;
-      throw pfError("conflict", `session locked: ${sid}`);
+      throw pfError("conflict", conflictMessage);
     }
     // M5.1-A2: 옮겨진 파일의 token이 관찰분과 다르면 새 잠금을 잘못 옮긴 것 →
     // 즉시 원위치 후 conflict. 일치할 때만 진행.
@@ -511,7 +525,7 @@ export class FileStore implements Store {
           // 점유 중 — 아무것도 덮어쓰지 않음
         }
       }
-      throw pfError("conflict", `session locked: ${sid}`);
+      throw pfError("conflict", conflictMessage);
     }
     lockStats.reclaims++;
     try {
@@ -519,9 +533,9 @@ export class FileStore implements Store {
     } catch {
       // best-effort (남겨도 판독에 무해 — .json 아님)
     }
-    logger.warn("stale session lock cleaned", { sessionId: sid });
+    logger.warn("stale lock cleaned", { lock: p });
     if (tryCreate()) return release;
-    throw pfError("conflict", `session locked: ${sid}`);
+    throw pfError("conflict", conflictMessage);
   }
 
   // ---- 세션 TTL용 메타 (M2.5-6) ----

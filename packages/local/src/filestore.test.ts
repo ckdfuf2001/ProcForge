@@ -421,6 +421,16 @@ describe("세션 lockfile (M2.6-7)", () => {
     store.acquireLock(sid)();
   });
 
+  it("M5.5-4.1-5 임의 경로 락: 겹치면 지정 메시지로 conflict", () => {
+    const p = join(dir, "procedures", "x", ".run.lock");
+    const release = store.acquireFileLock(p, "procedure run locked: x");
+    expect(existsSync(p)).toBe(true);
+    expect(() => store.acquireFileLock(p, "procedure run locked: x")).toThrow(/procedure run locked: x/);
+    release();
+    expect(existsSync(p)).toBe(false);
+    store.acquireFileLock(p, "procedure run locked: x")();
+  });
+
   it("오래된 잠금은 정리 후 획득", () => {
     const release = store.acquireLock(sid, 1);
     expect(() => store.acquireLock(sid, 60_000)).toThrow(/locked/);

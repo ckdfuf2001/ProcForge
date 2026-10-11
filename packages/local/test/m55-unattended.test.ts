@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { ProcForgeApp } from "../src/app/app.js";
 import { runProcedureTest } from "../src/runner/procedure-run.js";
 import { isApproved, loadApprovals, matchApproval, approvalPins, checkApproval, buildApprovalEntry } from "../src/services/approvals.js";
-import { runExitCode, cliErrorExit } from "../src/app/run-exit.js";
+import { runExitCode, cliErrorExit, runErrorExit } from "../src/app/run-exit.js";
 import { testStack } from "./client-mode.js";
 
 // M5.5-4 무인 실행 + approvals.json + 종료 코드 E2E (fake echo, external 노드).
@@ -151,6 +151,10 @@ describe("M5.5-4 종료 코드", () => {
       expect(cliErrorExit(Object.assign(new Error("x"), { code }))).toBe(1);
     }
     expect(cliErrorExit(new Error("x"))).toBe(1);
+    // M5.5-4.1-5: run 명령은 겹친 실행(conflict)만 4.
+    expect(runErrorExit(Object.assign(new Error("locked"), { code: "conflict" }))).toBe(4);
+    expect(runErrorExit(Object.assign(new Error("x"), { code: "bad_request" }))).toBe(2);
+    expect(runErrorExit(new Error("x"))).toBe(1);
   });
 });
 
@@ -220,6 +224,27 @@ describe("M5.5-4 무인 실행 E2E", () => {
     const app = await buildUnatt();
     await expect(app.approveProcedureNode({ procedure: "m55-unatt", nodeId: "9.9" })).rejects.toThrow();
     await expect(app.approveProcedureNode({ procedure: "m55-unatt", nodeId: "1" })).rejects.toThrow();
+  }, 120000);
+
+  it("겹친 실행 → 두 번째 conflict (exit 4)", async () => {
+    const app = await buildUnatt();
+    await app.approveProcedureNode({ procedure: "m55-unatt", nodeId: "1.1" });
+    const runOpts = {
+      procforgeDir: pfdir, projectRoot: root, mode: "live", params: {}, unattended: true,
+    } as const;
+    const [a, b] = await Promise.allSettled([
+      runProcedureTest(pfdir, root, "m55-unatt", { ...runOpts }),
+      runProcedureTest(pfdir, root, "m55-unatt", { ...runOpts }),
+    ]);
+    const ok = [a, b].filter((r) => r.status === "fulfilled");
+    const ng = [a, b].filter((r) => r.status === "rejected");
+    expect(ok.length).toBe(1);
+    expect(ng.length).toBe(1);
+    const err = (ng[0] as PromiseRejectedResult).reason as { code?: string; message?: string };
+    expect(err.code).toBe("conflict");
+    expect(String(err.message ?? "")).toContain("procedure run locked");
+    // M5.5-4.1-5: conflict → exit 4.
+    expect(runErrorExit(err)).toBe(4);
   }, 120000);
 });
 

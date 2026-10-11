@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { compareNodeIds } from "@procforge/shared/ids.js";
 import { effectiveDeps, expandDepLeafs, rawDepSources } from "@procforge/shared/deps.js";
 import type { Node } from "@procforge/shared/schema.js";
@@ -161,10 +161,16 @@ export async function runSession(opts: RunOptions): Promise<RunReport> {
     params: session.params as Record<string, string>,
   });
   const release = store.acquireLock(opts.sessionId, 60000);
+  // M5.5-4.1-5: 절차서 단위 run 잠금 (겹친 스케줄 실행 방지). 세션 락과 함께 보유.
+  const procLockPath = procedureDir ? join(procedureDir, ".run.lock") : undefined;
+  const releaseProcLock = procLockPath
+    ? store.acquireFileLock(procLockPath, `procedure run locked: ${basename(procedureDir as string)}`, 60000)
+    : undefined;
   // M5.1-A1: 장기 보유 중 하트비트 (20s 주기)
   const beat = setInterval(() => {
     try {
       store.refreshLock(opts.sessionId);
+      if (procLockPath) store.refreshFileLock(procLockPath);
     } catch {
       // 무시
     }
@@ -375,6 +381,7 @@ export async function runSession(opts: RunOptions): Promise<RunReport> {
   } finally {
     clearInterval(beat);
     release();
+    if (releaseProcLock) releaseProcLock();
     await pool.close();
   }
 }

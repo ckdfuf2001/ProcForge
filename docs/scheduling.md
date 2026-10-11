@@ -10,6 +10,7 @@
 | 1 | 검사 실패·중단 (fail>0 또는 suspended>0) | constraint 실패, 생성값·승인 대기 |
 | 2 | 입력 오류 (`bad_request`·`bad_args`·`not_found`·`session_not_found`) | bad `--param`, procedure 없음, approvals.json 형식 오류 |
 | 3 | 승인 필요 | 무인 실행 중 미승인 external (failedConstraints `approval`) |
+| 4 | 겹친 실행 (`conflict`) | 같은 절차서의 다른 run이 진행 중 (`procedures/<name>/.run.lock`) |
 
 ## approvals.json
 
@@ -64,4 +65,7 @@ Register-ScheduledTask -TaskName "procforge-daily" -Action $action -Trigger $tri
   `bad_request`(exit 2)로 거부된다. 스케줄 실행 절차서는 generated 없이 설계하라.
 - 실패한 run은 `state.json`을 갱신하지 않는다. 다음 스케줄 실행이 같은 지점부터
   다시 시도한다.
+- 같은 절차서의 실행이 겹치면 `procedures/<name>/.run.lock`으로 두 번째가
+  `conflict`(exit 4)로 거부된다. 앞선 실행이 비정상 종료된 지 60초가 지나면
+  잠금을 회수하고 진행한다.
 - 산출물 복사는 `--out` 지정 시에만, 기존 파일은 `--force` 없으면 거부된다.

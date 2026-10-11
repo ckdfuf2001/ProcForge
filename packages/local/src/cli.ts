@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { parseCliArgs, resolveDirs } from "./app/cli-args.js";
 import { createApp } from "./app/bootstrap.js";
-import { cliErrorExit, runExitCode } from "./app/run-exit.js";
+import { cliErrorExit, runErrorExit, runExitCode } from "./app/run-exit.js";
 
 // CLI 어댑터 (M4.2-4-1). 파일·저장소 작업은 App 메서드로만 수행한다
 // (check-deps: app/ 외 local 내부·node:fs import 금지).
@@ -149,6 +149,7 @@ async function cmdRun(): Promise<number> {
     console.log(`report: ${out.reportPath}`);
     if (out.outDir) console.log(`out: ${out.outDir}`);
     // M5.5-4: 종료 코드 0 성공 / 1 실패·중단 / 2 입력 오류 / 3 승인 필요.
+    // M5.5-4.1-5: 겹친 실행(conflict)은 4.
     if (out.approvalBlocked) {
       console.error("approval 필요: 무인 실행 미승인 external. approvals.json에 tool·인자 등록 후 재실행");
       return 3;
@@ -160,7 +161,7 @@ async function cmdRun(): Promise<number> {
     return runExitCode({ failed: out.failed, suspended: out.suspended, approvalBlocked: out.approvalBlocked });
   } catch (e) {
     console.error(`error: ${e instanceof Error ? e.message : String(e)}`);
-    return cliErrorExit(e);
+    return runErrorExit(e);
   }
 }
 
