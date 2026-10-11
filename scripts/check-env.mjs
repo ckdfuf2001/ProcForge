@@ -34,4 +34,9 @@ const hit = dirs.find((d) => d.startsWith("@types+node@"));
 if (!hit) fail("@types/node 미설치");
 const got = hit.slice("@types+node@".length).split("_")[0];
 if (got !== want) fail(`@types/node 불일치: 설치됨 ${got}, lockfile ${want} (pnpm install --frozen-lockfile 다시 실행)`);
+// M5.5-4.2-6: NODE_ENV=production이면 pnpm이 devDependencies를 스킵해
+// tsc/vitest가 없다 (클린 클론 검증 실패 사례). 경고만 하고 통과.
+if (process.env.NODE_ENV === "production") {
+  console.error("check:env WARN: NODE_ENV=production (devDependencies 스킵됨. NODE_ENV=development로 pnpm install 다시 실행)");
+}
 console.log(`check:env ok (@types/node ${got})`);
