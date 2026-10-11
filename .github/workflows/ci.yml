@@ -33,10 +33,10 @@ jobs:
         run: node scripts/m3-ci-replay.mjs
       - name: no policy strings in local bundle
         run: |
-          ! grep -ri "분해 정책\|멈춤 판단\|argSpec 분류 휴리스틱" packages/local/src || (echo "policy leak in local" && exit 1)
+          ! grep -ri --exclude='*.test.ts' "분해 정책\|멈춤 판단\|argSpec 분류 휴리스틱" packages/local/src || (echo "policy leak in local" && exit 1)
       - name: no policy strings in MCP surface (descriptions/prompts)
         run: |
           ! grep -n "부가세\|llm_rubric\|numeric_match\|json_path_exists\|file_exists\|auto constraint\|휴리스틱" packages/local/src/server.ts || (echo "policy leak in MCP surface" && exit 1)
       - name: no console.log in local src (stderr logger only, cli.ts excepted)
         run: |
-          ! grep -rn "console\.log" packages/local/src --exclude=cli.ts || (echo "console.log forbidden, use logger" && exit 1)
+          ! grep -rn --exclude='*.test.ts' "console\.log" packages/local/src --exclude=cli.ts || (echo "console.log forbidden, use logger" && exit 1)

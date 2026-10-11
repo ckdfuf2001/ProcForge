@@ -364,6 +364,12 @@
   c 11월 부재 bad_request, d 데이터 교체 period fail+blocked.
   CI에 setup-python + openpyxl (+ M5.3-2부터 python-pptx).
 - M5.3-1: 파일 내용 감사. script-kind 스크립트 + 고정(in/inout) 템플릿 파일
+- M5.3-5: policy grep 범위 확정. src/** 중 *.test.ts 제외.
+  사유: 테스트는 checker·제약 종류 문자열을 테스트 데이터로 정식 포함
+  (checker.test.ts 등)하므로 스캔 대상에서 제외.
+  우회 금지: 테스트에 정책 문자열을 넣어 제품 동작에 반영하는 것은 금지.
+  구조적 방지책 = instruction 언급 도구 제한 테스트 (M2.6-1) +
+  description 언급 도구 제한 테스트. 리뷰 시 강제.
 - M5.3-3: 스크립트 실행 제한. 자식 환경 화이트리스트
   (SYSTEMROOT·TEMP 등 + PYTHONUTF8/IO 고정, PATH·HOME·비밀 제외).
   단, Node가 Windows에서 시스템 변수(PATH·USERPROFILE 등)를 강제 주입하므로
