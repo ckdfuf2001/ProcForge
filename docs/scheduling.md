@@ -119,6 +119,8 @@ Register-ScheduledTask -TaskName "procforge-daily" -Action $action -Trigger $tri
   (지수 백오프, 기본 3회·500ms, `--retry-attempts`·`--retry-base-ms`로 설정).
   attempts 상한 10, 1회 대기는 30초 상한+jitter, `Retry-After`는 상한 내에서 존중.
   external·쓰기 노드는 재시도하지 않는다 (중복 부작용 방지).
+- script 노드는 기본 미재시도. 노드에 `retry: {attempts}` 멱등 선언이 있을 때만
+  일시 오류를 재시도한다 (판별·상한은 도구 호출과 동일).
 - 같은 절차서의 실행이 겹치면 `procedures/<name>/.run.lock`으로 두 번째가
   `conflict`(exit 4)로 거부된다. 앞선 실행이 비정상 종료된 지 60초가 지나면
   잠금을 회수하고 진행한다.

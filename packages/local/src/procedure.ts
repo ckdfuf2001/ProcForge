@@ -63,6 +63,7 @@ export function importProcedure(
       ...(n.map !== undefined ? { map: n.map as Node["map"] } : {}),
       ...(n.until !== undefined ? { until: n.until as Node["until"] } : {}),
       ...(n.stateWrites !== undefined ? { stateWrites: n.stateWrites as Node["stateWrites"] } : {}),
+      ...(n.retry !== undefined ? { retry: n.retry as Node["retry"] } : {}),
       sideEffect: n.sideEffect,
       constraints: (n.constraints ?? []) as Constraint[],
       advice: [],

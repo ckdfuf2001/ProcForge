@@ -419,6 +419,11 @@ export function isTransientToolError(e: unknown, extraRes: RegExp[] = []): boole
   return TRANSIENT_RES.some((re) => re.test(msg)) || extraRes.some((re) => re.test(msg));
 }
 
+// M5.7-3: 스크립트 타임아웃 판별 (runScript code "timeout").
+export function isScriptTimeout(e: unknown): boolean {
+  return (e as { code?: unknown } | null)?.code === "timeout";
+}
+
 // M5.6.1-2: Retry-After(초) 파싱. 없으면 undefined.
 export function parseRetryAfterMs(msg: string): number | undefined {
   const m = /retry-after:\s*(\d+)/i.exec(msg);
@@ -597,15 +602,33 @@ async function execNode(
       });
     }
     const scriptAbs = join(opts.procforgeDir, "runs", runId, rel);
-    const out = runScript({
-      runtime: spec.runtime ?? "python",
-      scriptAbs,
-      args,
-      cwd: fsDir,
-      timeoutMs: spec.timeoutMs,
-      projectRoot: opts.projectRoot,
-    });
-    resp = { resultText: out.summary, resultJson: out.json };
+    // M5.7-3: script 재시도는 노드 retry:{attempts} 명시(멱등 opt-in)시에만.
+    // 기본 미재시도. M5.6-f 판별·상한 재사용 (fs 밖 변경 등 확정 실패는 제외).
+    const scriptAttempts = (() => {
+      const a = (n as { retry?: { attempts?: unknown } }).retry?.attempts;
+      if (!Number.isInteger(a)) return 1;
+      return Math.min(10, Math.max(1, a as number));
+    })();
+    let scriptTries = 0;
+    for (;;) {
+      scriptTries += 1;
+      try {
+        const o = runScript({
+          runtime: spec.runtime ?? "python",
+          scriptAbs,
+          args,
+          cwd: fsDir,
+          timeoutMs: spec.timeoutMs,
+          projectRoot: opts.projectRoot,
+        });
+        resp = { resultText: o.summary, resultJson: o.json };
+        break;
+      } catch (e) {
+        const transient = isTransientToolError(e) || isScriptTimeout(e);
+        if (scriptTries >= scriptAttempts || !transient) throw e;
+        await new Promise((r) => setTimeout(r, retryDelayMs(500, scriptTries - 1)));
+      }
+    }
   } else if (n.sideEffect === "external" && mode !== "live") {
     // record/replay/passthrough에서 실제 호출 금지 (M3)
     const rec = findRecording(loadCassette(opts.procforgeDir, opts.sessionId, n.id), key);

@@ -41,6 +41,7 @@ export const ProcedureDocSchema = z.object({
     until: z.unknown().optional(),
     stateWrites: z.array(z.object({ key: z.string(), from: z.string() })).optional(),
     sideEffect: z.enum(["none", "local_write", "external"]),
+    retry: z.object({ attempts: z.number().int().min(1).max(10) }).optional(),
     constraints: z.array(z.unknown()),
     golden: z.object({
       fixtures: z.array(z.string()),

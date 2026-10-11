@@ -940,8 +940,9 @@ export class CoreService implements CoreClient {
       const mapChanged = input.map !== undefined;
       const untilChanged = input.until !== undefined;
       const stateChanged = input.stateWrites !== undefined;
-      if (input.goal === undefined && adds.length === 0 && removes.length === 0 && !mapChanged && !untilChanged && !stateChanged) {
-        throw err("bad_request", "변경 없음 (goal/addConstraints/removeConstraintIds/map/until/stateWrites 중 하나 필요).");
+      const retryChanged = (input as { retry?: unknown }).retry !== undefined;
+      if (input.goal === undefined && adds.length === 0 && removes.length === 0 && !mapChanged && !untilChanged && !stateChanged && !retryChanged) {
+        throw err("bad_request", "변경 없음 (goal/addConstraints/removeConstraintIds/map/until/stateWrites/retry 중 하나 필요).");
       }
       if (input.goal !== undefined && input.goal.length === 0) throw err("bad_request", "goal이 비었다.");
       let constraints = n.constraints;
@@ -1013,11 +1014,21 @@ export class CoreService implements CoreClient {
         }
         stateWritesSpec = sw;
       }
+      // M5.7-3: script 재시도 선언 (멱등 opt-in, 1..10).
+      let retrySpec = (n as { retry?: unknown }).retry as { attempts?: unknown } | undefined;
+      if (retryChanged) {
+        const ra = (input as { retry?: { attempts?: unknown } }).retry?.attempts;
+        if (!Number.isInteger(ra) || (ra as number) < 1 || (ra as number) > 10) {
+          throw err("bad_request", "bad retry: attempts 1..10 정수 필요");
+        }
+        retrySpec = { attempts: ra as number };
+      }
       const next: Node = { ...n, goal: input.goal ?? n.goal, constraints, status };
       if (kind !== undefined) (next as { kind?: string }).kind = kind;
       if (mapSpec !== undefined) (next as { map?: unknown }).map = mapSpec;
       if (untilSpec !== undefined) (next as { until?: unknown }).until = untilSpec;
       if (stateWritesSpec !== undefined) (next as { stateWrites?: unknown }).stateWrites = stateWritesSpec;
+      if (retrySpec !== undefined) (next as { retry?: unknown }).retry = retrySpec;
       next.hash = this.hashFor(s.id, next);
       this.store.saveNode(s.id, next);
       this.propagateStale(s.id, n.id);
@@ -1130,6 +1141,10 @@ export class CoreService implements CoreClient {
           until: (n as { until?: unknown }).until,
           ...((n as { stateWrites?: { key: string; from: string }[] }).stateWrites !== undefined
             ? { stateWrites: (n as { stateWrites?: { key: string; from: string }[] }).stateWrites as { key: string; from: string }[] }
+            : {}),
+          // M5.7-3: script 재시도 선언 유지.
+          ...((n as { retry?: { attempts: number } }).retry !== undefined
+            ? { retry: (n as { retry?: { attempts: number } }).retry as { attempts: number } }
             : {}),
           sideEffect: n.sideEffect,
           constraints: n.constraints as unknown[],

@@ -148,6 +148,8 @@ export type PfEditNodeInput = {
   until?: unknown;
   /** 실행 간 상태 기록 선언 (M5.5-3) */
   stateWrites?: unknown;
+  /** script 재시도 선언 (M5.7-3, 멱등 opt-in) */
+  retry?: { attempts: number };
   expectedRevision?: number;
   actor?: Actor;
 };

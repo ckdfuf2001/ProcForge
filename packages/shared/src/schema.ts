@@ -255,6 +255,8 @@ export const NodeSchema = z.object({
   until: UntilSpecSchema.optional(),
   /** 실행 간 상태 기록 선언 (M5.5-3). 성공 종료 시에만 procedures/<name>/state.json에 저장. */
   stateWrites: z.array(z.object({ key: z.string().min(1), from: z.string().min(1) })).optional(),
+  /** script 재시도 선언 (M5.7-3, 멱등 opt-in. 일시 오류만, 기본 미재시도). */
+  retry: z.object({ attempts: z.number().int().min(1).max(10) }).optional(),
   sideEffect: SideEffectSchema,
   constraints: z.array(ConstraintSchema).default([]),
   advice: z

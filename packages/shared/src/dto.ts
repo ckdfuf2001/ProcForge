@@ -217,5 +217,7 @@ export const EditNodeInputSchema = z.object({
   until: z.unknown().optional(),
   /** 실행 간 상태 기록 선언 (M5.5-3) */
   stateWrites: z.unknown().optional(),
+  /** script 재시도 선언 (M5.7-3, 멱등 opt-in) */
+  retry: z.object({ attempts: z.number().int().min(1).max(10) }).optional(),
 }).merge(RevisionOptsSchema);
 export type EditNodeInput = z.infer<typeof EditNodeInputSchema>;

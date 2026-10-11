@@ -1,10 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, writeFileSync, readFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync, mkdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { ProcForgeApp } from "../src/app/app.js";
 import { runProcedureTest } from "../src/runner/procedure-run.js";
-import { callWithRetry, isTransientToolError, isTransientResult, retryDelayMs, parseRetryAfterMs } from "../src/runner/run.js";
+import { callWithRetry, isTransientToolError, isTransientResult, isScriptTimeout, retryDelayMs, parseRetryAfterMs } from "../src/runner/run.js";
 import { parseRetryOptions } from "../src/app/run-exit.js";
 import { testStack } from "./client-mode.js";
 
@@ -15,6 +15,8 @@ const UNSTABLE_CAT = [{
   server: "fake-ppt", name: "unstable", inputSchema: {}, schemaHash: "h",
   annotations: { readOnlyHint: true },
 }] as never;
+const ECHO_CAT = [{ server: "fake-ppt", name: "echo", inputSchema: {}, schemaHash: "h" }] as never;
+const SCRIPT_CAT = [{ server: "host", name: "script", inputSchema: {}, schemaHash: "script" }] as never;
 
 let root: string;
 let pfdir: string;
@@ -182,5 +184,81 @@ describe("M5.6-f readOnly E2E (unstable 첫 호출 실패 → 재시도 통과)"
     // 첫 호출 실패가 확정적이므로 pass는 재시도(2회 실패 후 3회차 성공) 증거.
     expect(report.summary.fail).toBe(0);
     expect(report.results.find((r) => r.nodeId === "1.1")?.status).toBe("pass");
+  }, 120000);
+});
+
+describe("M5.7-3 script opt-in 재시도", () => {
+  const FLAKY_PY = `import json,os,sys
+p = "flaky_counter.txt"
+n = int(open(p).read()) if os.path.exists(p) else 0
+open(p, "w").write(str(n + 1))
+if n < 2:
+    print("ECONNRESET simulated", file=sys.stderr)
+    sys.exit(1)
+print(json.dumps({"json": {"ok": True}}))
+`;
+
+  async function buildFlaky(withRetry: boolean, name: string): Promise<void> {
+    mkdirSync(join(root, "scripts"), { recursive: true });
+    writeFileSync(join(root, "scripts", "flaky.py"), FLAKY_PY);
+    const { client } = testStack(pfdir);
+    const app = new ProcForgeApp({ core: client, procforgeDir: pfdir, projectRoot: root });
+    const started = await client.pfStart({ request: "flaky", params: {}, toolCatalog: SCRIPT_CAT });
+    const sid = started.session.id;
+    await client.pfResolve({
+      sessionId: sid, nodeId: "1", decision: "split", children: [{ goal: "스크립트" }],
+    });
+    await client.pfReport({
+      sessionId: sid, nodeId: "1.1", tool: { server: "host", name: "script" },
+      args: {}, resultSummary: "ok", resultJson: { ok: true },
+      selfVerdict: "pass", selfReason: "ok",
+    });
+    if (withRetry) {
+      await client.pfEditNode({ sessionId: sid, nodeId: "1.1", retry: { attempts: 3 } });
+    }
+    const r = await client.pfReport({
+      sessionId: sid, nodeId: "1.1", tool: { server: "host", name: "script" },
+      args: {}, resultSummary: "ok", resultJson: { ok: true },
+      selfVerdict: "pass", selfReason: "ok",
+    });
+    expect(r.verdict).toBe("pass");
+    await client.pfResolve({
+      sessionId: sid, nodeId: "1.1", decision: "leaf",
+      tool: { server: "host", name: "script" },
+      argSpecs: { go: { kind: "script", file: "scripts/flaky.py" } } as never,
+    });
+    const fin = await app.finalize({ sessionId: sid, name });
+    expect(fin.warnings.filter((w) => w.includes("bad_"))).toEqual([]);
+  }
+
+  it("isScriptTimeout 판별", () => {
+    expect(isScriptTimeout(Object.assign(new Error("x"), { code: "timeout" }))).toBe(true);
+    expect(isScriptTimeout(new Error("x"))).toBe(false);
+  });
+
+  it("editNode retry 검증 (1..10)", async () => {
+    const { client } = testStack(pfdir);
+    const started = await client.pfStart({ request: "r", params: {}, toolCatalog: ECHO_CAT });
+    const sid = started.session.id;
+    await expect(client.pfEditNode({ sessionId: sid, nodeId: "1", retry: { attempts: 0 } })).rejects.toThrow(/bad retry/);
+    await expect(client.pfEditNode({ sessionId: sid, nodeId: "1", retry: { attempts: 11 } })).rejects.toThrow(/bad retry/);
+  });
+
+  it("retry 명시 → 2회 실패 후 통과", async () => {
+    await buildFlaky(true, "m57-flaky");
+    const { report } = await runProcedureTest(pfdir, root, "m57-flaky", {
+      procforgeDir: pfdir, projectRoot: root, mode: "live", params: {},
+    });
+    expect(report.summary.fail).toBe(0);
+    expect(report.results.find((r) => r.nodeId === "1.1")?.status).toBe("pass");
+  }, 120000);
+
+  it("미지정 → 첫 실패로 fail (기본 미재시도)", async () => {
+    await buildFlaky(false, "m57-flaky-plain");
+    const { report } = await runProcedureTest(pfdir, root, "m57-flaky-plain", {
+      procforgeDir: pfdir, projectRoot: root, mode: "live", params: {},
+    });
+    expect(report.summary.fail).toBe(1);
+    expect(report.results.find((r) => r.nodeId === "1.1")?.status).toBe("fail");
   }, 120000);
 });
