@@ -120,7 +120,8 @@ export const ConstraintRegexSchema = ConstraintBase.extend({
 export const ConstraintCountSchema = ConstraintBase.extend({
   kind: z.literal("count"),
   spec: z.object({
-    path: z.string().min(1),
+    /** 생략 시 결과 전체 (M5.5-1 map 집계용) */
+    path: z.string().min(1).optional(),
     min: z.number().int().min(0).optional(),
     max: z.number().int().min(0).optional(),
     exact: z.number().int().min(0).optional(),
@@ -177,6 +178,25 @@ export const ConstraintSchema = z.discriminatedUnion("kind", [
 ]);
 export type Constraint = z.infer<typeof ConstraintSchema>;
 
+/** map 실행 명세 (M5.5-1). 템플릿은 인라인 (트리 자식 아님). */
+export const MapSpecSchema = z.object({
+  over: z.string().min(1),
+  as: z.string().min(1).default("item"),
+  maxItems: z.number().int().positive().optional(),
+  policy: z
+    .object({
+      kind: z.enum(["all", "any", "threshold"]),
+      ratio: z.number().min(0).max(1).optional(),
+    })
+    .default({ kind: "all" }),
+  template: z.object({
+    tool: z.object({ server: z.string().min(1), name: z.string().min(1) }),
+    args: z.record(ArgSpecSchema),
+    constraints: z.array(ConstraintSchema).default([]),
+  }),
+});
+export type MapSpec = z.infer<typeof MapSpecSchema>;
+
 // ---------- Tool / Attempt ----------
 
 export const ToolRefSchema = z.object({
@@ -216,7 +236,9 @@ export const NodeSchema = z.object({
   children: z.array(NodeIdSchema).default([]),
   tool: ToolWithSchemaSchema.optional(),
   args: z.record(ArgSpecSchema).optional(),
-  iterate: z.object({ over: z.string(), as: z.string() }).optional(),
+  /** map 노드 표시 + 실행 명세 (M5.5-1). kind와 함께 설정된다. */
+  kind: z.literal("map").optional(),
+  map: MapSpecSchema.optional(),
   sideEffect: SideEffectSchema,
   constraints: z.array(ConstraintSchema).default([]),
   advice: z
@@ -300,6 +322,7 @@ export function computeNodeHash(input: {
   args?: Record<string, ArgSpec>;
   constraints: Constraint[];
   dependsOn: string[];
+  map?: unknown;
 }): string {
   const canonical = JSON.stringify(
     sortKeysDeep({
@@ -307,6 +330,8 @@ export function computeNodeHash(input: {
       args: input.args ?? {},
       constraints: input.constraints,
       dependsOn: [...input.dependsOn].sort(),
+      // map 미설정 시 기존 해시와 동일 (하위 호환)
+      ...(input.map !== undefined ? { map: input.map } : {}),
     }),
   );
   return createHash("sha256").update(canonical).digest("hex").slice(0, 16);

@@ -11,7 +11,7 @@ import { writeAtomicFile } from "../fsutil.js";
 import { normalizeArgSpecs, fixtureFileExists, isEscapeRel, readManifest } from "../artifacts.js";
 import { ConnectionPool } from "./connections.js";
 import { findRecording, loadCassette, recordKey, saveRecording, toToolResponse, compareToolResponses } from "./recordings.js";
-import { resolveArgs, substituteParams } from "./resolve.js";
+import { resolveArgs, resolveVar, substituteItemSpecs, substituteParams } from "./resolve.js";
 import { runScript } from "./script-run.js";
 import { inferPathRole, rewritePaths, type InferredRole, type PathRole } from "./paths.js";
 import { setupRunFs } from "./workdir.js";
@@ -308,6 +308,10 @@ async function execNode(
   runId: string,
 ): Promise<NodeResult> {
   const start = Date.now();
+  // M5.5-1: map 노드는 항목별 실행으로 분기
+  if ((n as { kind?: string }).kind === "map") {
+    return execMap(opts, params, outputs, pool, fsDir, n, mode, byId, runId, start);
+  }
   // 구 세션 마이그레이션: 절대경로 fixed → 상대경로 (M3.2-2)
   const normSpecs = normalizeArgSpecs(n.args ?? {}, {
     sandboxDir: join(opts.procforgeDir, "sandbox", opts.sessionId),
@@ -468,25 +472,8 @@ async function execNode(
   // 판정 (checker 재사용, llm_rubric·deferred는 별도 집계)
   // M3.6-3: fixture 존재 검사는 바이너리 존재+크기>0 (sha256 비교 금지)
   // M3.5.1-1: 논리 경로(source rel)는 manifest 역조회로 판정 (구 fixture 키도 허용)
-  const manifest = readManifest(opts.procforgeDir, opts.sessionId);
-  const sessDir = join(opts.procforgeDir, "sessions", opts.sessionId);
-  const fileExists = (p: string) => {
-    // M5.3.1-1: 논리 경로는 run fs를 먼저 본다 (실행 입력·산출 검사).
-    // ${params.}는 실행 params로 치환. 탈출·절대경로는 실패로 닫는다.
-    const rel = substituteParams(p, params).split("\\").join("/");
-    if (!isEscapeRel(rel, "/") && !rel.startsWith("/") && !/^[a-zA-Z]:/.test(rel)) {
-      try {
-        if (existsSync(join(fsDir, rel))) return true;
-      } catch {
-        // 무시하고 세션 저장소로 폴백
-      }
-    }
-    if (fixtureFileExists(join(sessDir, p))) return true;
-    for (const [fx, src] of Object.entries(manifest)) {
-      if (src === p && fixtureFileExists(join(sessDir, fx))) return true;
-    }
-    return false;
-  };
+  // M5.3.1-1: 논리 경로는 run fs를 먼저 본다 (실행 입력·산출 검사)
+  const fileExists = makeFileExists(opts.procforgeDir, opts.sessionId, fsDir, params);
   const nodeOutputs: Record<string, unknown> = {};
   for (const [k, v] of outputs) nodeOutputs[k] = v;
   const r = evaluateAll(n.constraints, {
@@ -527,8 +514,228 @@ function catalogEntry(_opts: RunOptions, _n: Node) {
   }
 }
 
-function updateNodeGolden(opts: RunOptions, n: Node, resp: ToolResponse): void {
-  const store = new FileStore(opts.procforgeDir);
+/**
+ * file_exists 판정 함수 (M5.3.1-1 + M5.5-1 execNode/execMap 공용).
+ * 논리 경로는 run fs를 먼저 보고, 세션 저장소로 폴백한다.
+ */
+export function makeFileExists(
+  procforgeDir: string,
+  sessionId: string,
+  fsDir: string,
+  params: Record<string, string>,
+): (p: string) => boolean {
+  const manifest = readManifest(procforgeDir, sessionId);
+  const sessDir = join(procforgeDir, "sessions", sessionId);
+  return (p: string) => {
+    const rel = substituteParams(p, params).split("\\").join("/");
+    if (!isEscapeRel(rel, "/") && !rel.startsWith("/") && !/^[a-zA-Z]:/.test(rel)) {
+      try {
+        if (existsSync(join(fsDir, rel))) return true;
+      } catch {
+        // 무시하고 세션 저장소로 폴백
+      }
+    }
+    if (fixtureFileExists(join(sessDir, p))) return true;
+    for (const [fx, src] of Object.entries(manifest)) {
+      if (src === p && fixtureFileExists(join(sessDir, fx))) return true;
+    }
+    return false;
+  };
+}
+
+/**
+ * M5.5-1: map 노드 실행. over를 항목 배열로 해석해 템플릿 자식(children[0])을
+ * 항목별로 실행한다. 각 인스턴스는 ephemeral 노드(`${mapId}.${i+1}`)로 기존
+ * execNode를 재사용하므로 record/replay/script/external 처리가 그대로 적용된다.
+ * 인스턴스 출력은 실행 후 outputs에서 회수하고, map 출력 배열만 남긴다.
+ * 정책: all(기본, 전체 통과) | any(1개 이상) | threshold(통과율 ≥ ratio).
+ * 항목 0개면 빈 배열로 pass (비어 있음 검사는 count 제약이 담당).
+ */
+async function execMap(
+  opts: RunOptions,
+  params: Record<string, string>,
+  outputs: Map<string, unknown>,
+  pool: ConnectionPool,
+  fsDir: string,
+  n: Node,
+  mode: RunMode,
+  byId: Map<string, Node>,
+  runId: string,
+  start: number,
+): Promise<NodeResult> {
+  const done = (r: Omit<NodeResult, "durationMs">): NodeResult => ({ ...r, durationMs: Date.now() - start });
+  const spec = (n as unknown as { map?: { over?: unknown; as?: unknown; maxItems?: unknown; policy?: unknown } }).map;
+  if (!spec || typeof spec.over !== "string" || spec.over.length === 0) {
+    throw Object.assign(new Error(`map spec 없음: ${n.id}`), { code: "bad_request" });
+  }
+  const as = typeof spec.as === "string" && spec.as.length > 0 ? spec.as : "item";
+  const topo = {
+    isSplit: (id: string) => byId.get(id)?.status === "split",
+    childrenOf: (id: string) => byId.get(id)?.children ?? [],
+  };
+  let rawItems: unknown;
+  try {
+    rawItems = resolveVar(spec.over, params, outputs, topo);
+  } catch (e) {
+    throw Object.assign(new Error(`map over 해석 실패: ${n.id} (${e instanceof Error ? e.message : String(e)})`), {
+      code: "bad_request",
+    });
+  }
+  if (!Array.isArray(rawItems)) {
+    throw Object.assign(new Error(`map over가 배열 아님: ${n.id}`), { code: "bad_request" });
+  }
+  const maxItems = typeof spec.maxItems === "number" && spec.maxItems > 0 ? Math.floor(spec.maxItems) : 100;
+  const items = (rawItems as unknown[]).slice(0, maxItems);
+  const template = (spec as { template?: { tool?: { server?: unknown; name?: unknown }; args?: unknown; constraints?: unknown } }).template;
+  if (!template || typeof template.tool?.server !== "string" || typeof template.tool?.name !== "string") {
+    throw Object.assign(new Error(`map 템플릿 도구 없음: ${n.id}`), { code: "bad_request" });
+  }
+  const templateArgs = (template.args ?? {}) as Record<string, import("@procforge/shared/schema.js").ArgSpec>;
+  const templateConstraints = (Array.isArray(template.constraints) ? template.constraints : []) as import("@procforge/shared/schema.js").Constraint[];
+  // live generated 게이트: 템플릿 generated는 map 단위 supplied로 해결 (항목별 공급 미지원)
+  if (mode === "live") {
+    const supplied = opts.supplied?.[n.id] ?? {};
+    const missing = Object.entries(templateArgs)
+      .filter(([k, s]) => (s as { kind?: string }).kind === "generated" && !Object.prototype.hasOwnProperty.call(supplied, k))
+      .map(([k]) => k);
+    if (missing.length > 0) {
+      return done({ nodeId: n.id, status: "suspended", failedConstraints: [], detail: `need_generated:${missing.join(",")}` });
+    }
+  }
+  const itemOutputs: unknown[] = [];
+  const failedItems: number[] = [];
+  const failedDetails: string[] = [];
+  // live external 게이트: map 단위 중단 (인스턴스는 map sideEffect 상속)
+  if (mode === "live" && n.sideEffect === "external" && !(opts.approvedNodeIds ?? []).includes(n.id)) {
+    return done({ nodeId: n.id, status: "suspended", failedConstraints: [], detail: "need_approval" });
+  }
+  const supplied: Record<string, unknown> = (opts.supplied?.[n.id] ?? {}) as Record<string, unknown>;
+  for (let i = 0; i < items.length; i++) {
+    const instanceId = `${n.id}.${i + 1}`;
+    let inst: Node;
+    try {      const normed = normalizeArgSpecs(templateArgs, {
+        sandboxDir: join(opts.procforgeDir, "sandbox", opts.sessionId),
+        projectRoot: opts.projectRoot,
+      }).specs;
+      // generated는 map 단위 supplied로 고정 (항목별 공급 미지원)
+      const fixedGen: Record<string, import("@procforge/shared/schema.js").ArgSpec> = {};
+      for (const [k, s] of Object.entries(normed)) {
+        if ((s as { kind?: string }).kind === "generated") {
+          if (!Object.prototype.hasOwnProperty.call(supplied, k)) {
+            throw new Error(`generated 인자 미공급: ${k} (map ${n.id}에 supply)`);
+          }
+          fixedGen[k] = { kind: "fixed", value: supplied[k] } as never;
+        }
+      }
+      const base = { ...normed, ...fixedGen };
+      const specs = substituteItemSpecs(base, as, items[i]);
+      inst = {
+        id: instanceId,
+        parentId: n.id,
+        goal: `${n.goal} [${i}]`,
+        status: "leaf",
+        depth: n.depth + 1,
+        dependsOn: [],
+        children: [],
+        tool: {
+          server: template.tool.server,
+          name: template.tool.name,
+          schemaHash: n.tool?.schemaHash ?? "map",
+        },
+        args: specs,
+        sideEffect: n.sideEffect,
+        constraints: templateConstraints,
+        advice: [],
+        attempts: [],
+        retries: 0,
+        hash: `${n.hash}#${i}`,
+        locked: false,
+      } as Node;
+    } catch (e) {
+      failedItems.push(i);
+      failedDetails.push(`${i}:${e instanceof Error ? e.message : String(e)}`);
+      itemOutputs.push({ error: e instanceof Error ? e.message : String(e) });
+      continue;
+    }
+    let r: NodeResult;
+    try {
+      r = await execNode(opts, params, outputs, pool, fsDir, inst, mode, byId, runId);
+    } catch (e) {
+      r = {
+        nodeId: instanceId,
+        status: "fail",
+        failedConstraints: [],
+        detail: e instanceof Error ? e.message : String(e),
+        durationMs: 0,
+      };
+    }
+    if (r.status === "suspended") {
+      for (let j = 0; j < items.length; j++) outputs.delete(`${n.id}.${j + 1}`);
+      return done({ nodeId: n.id, status: "suspended", failedConstraints: [], detail: r.detail });
+    }
+    if (r.status === "pass") {
+      const v = outputs.get(instanceId);
+      outputs.delete(instanceId);
+      itemOutputs.push(v ?? null);
+    } else {
+      outputs.delete(instanceId);
+      failedItems.push(i);
+      failedDetails.push(`${i}:${r.detail ?? r.failedConstraints.join(",")}`);
+      itemOutputs.push({ error: r.detail ?? r.failedConstraints.join(",") });
+    }
+  }
+  outputs.set(n.id, itemOutputs);
+  const total = items.length;
+  const passed = total - failedItems.length;
+  const policy = (spec.policy ?? {}) as { kind?: string; ratio?: number };
+  const kind = policy.kind ?? "all";
+  let ok: boolean;
+  if (total === 0) {
+    ok = true;
+  } else if (kind === "all") {
+    ok = failedItems.length === 0;
+  } else if (kind === "any") {
+    ok = passed >= 1;
+  } else {
+    const ratio = typeof policy.ratio === "number" ? policy.ratio : 1;
+    ok = passed / total >= ratio;
+  }
+  // map 자체 제약 (count 등 집계 검사)은 출력 배열에 대해 판정
+  const summary = `map ${passed}/${total} (${kind})`;
+  const cr = evaluateAll(n.constraints, {
+    resultSummary: summary,
+    resultJson: itemOutputs,
+    artifacts: {},
+    fileExists: makeFileExists(opts.procforgeDir, opts.sessionId, fsDir, params),
+    nodeOutputs: Object.fromEntries(outputs),
+    params,
+    fsDir,
+  });
+  if (!ok) {
+    return done({
+      nodeId: n.id,
+      status: "fail",
+      failedConstraints: ["policy", ...cr.failedConstraints],
+      failedItems,
+      detail: `map policy ${kind} 실패: ${failedDetails.slice(0, 5).join("; ")}`,
+    });
+  }
+  if (cr.failedConstraints.length > 0) {
+    return done({
+      nodeId: n.id,
+      status: "fail",
+      failedConstraints: cr.failedConstraints,
+      failedItems,
+      detail: `map 집계 제약 실패: ${cr.failedConstraints.join(",")}`,
+    });
+  }
+  if (cr.unverified.length > 0) {
+    return done({ nodeId: n.id, status: "unverified", failedConstraints: [], failedItems, detail: summary });
+  }
+  return done({ nodeId: n.id, status: "pass", failedConstraints: [], failedItems, detail: summary });
+}
+
+function updateNodeGolden(opts: RunOptions, n: Node, resp: ToolResponse): void {  const store = new FileStore(opts.procforgeDir);
   const cur = store.getNode(opts.sessionId, n.id);
   if (!cur) return;
   // updateGolden은 golden.output만 갱신 (fixtures는 pf_report 소유). (DECISIONS M3)

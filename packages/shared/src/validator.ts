@@ -67,8 +67,21 @@ export function templateParamsKeys(ref: string): string[] | null {
   return keys;
 }
 
-function getByDotPath(root: unknown, path: string): boolean {
-  const parts = path.split(".");
+/** map 범위 판정: 노드 자신 또는 조상이 kind:"map"이면 as 이름 반환 (M5.5-1) */
+export function mapAsName(n: Node, byId: Map<string, Node>): string | null {
+  let cur: Node | undefined = n;
+  let guard = 0;
+  while (cur && guard++ < 1000) {
+    if ((cur as unknown as { kind?: string }).kind === "map") {
+      const as = (cur as unknown as { map?: { as?: unknown } }).map?.as;
+      return typeof as === "string" && as.length > 0 ? as : "item";
+    }
+    cur = cur.parentId ? byId.get(cur.parentId) : undefined;
+  }
+  return null;
+}
+
+function getByDotPath(root: unknown, path: string): boolean {  const parts = path.split(".");
   let cur: unknown = root;
   for (const p of parts) {
     if (cur === null || cur === undefined) return false;
@@ -181,6 +194,37 @@ export function validateTree(session: Session, nodes: Node[], opts: ValidateOpti
         errors.push({ code: "dep_on_lineage", nodeId: n.id, message: `dependsOn ${d} is ancestor/descendant (deadlock)` });
     }
 
+    // map 검사 (M5.5-1)
+    {
+      const nkind = (n as unknown as { kind?: string }).kind;
+      const nmap = (n as unknown as { map?: unknown }).map;
+      if (nkind === "map" || nmap !== undefined) {
+        if (nkind !== "map" || typeof nmap !== "object" || nmap === null) {
+          errors.push({ code: "bad_map", nodeId: n.id, message: "map kind/spec mismatch" });
+        } else {
+          const spec = nmap as { over?: unknown; maxItems?: unknown; policy?: unknown };
+          if (typeof spec.over !== "string" || spec.over.length === 0) {
+            errors.push({ code: "bad_map", nodeId: n.id, message: "map over 비어 있음" });
+          }
+          if (spec.maxItems !== undefined && (!Number.isInteger(spec.maxItems) || (spec.maxItems as number) <= 0)) {
+            errors.push({ code: "bad_map", nodeId: n.id, message: "map maxItems는 양의 정수" });
+          }
+          const policy = spec.policy as { kind?: unknown; ratio?: unknown } | undefined;
+          if (policy !== undefined) {
+            if (!["all", "any", "threshold"].includes(policy.kind as string)) {
+              errors.push({ code: "bad_map", nodeId: n.id, message: "map policy kind 불명" });
+            } else if (policy.kind === "threshold" &&
+              (typeof policy.ratio !== "number" || policy.ratio < 0 || policy.ratio > 1)) {
+              errors.push({ code: "bad_map", nodeId: n.id, message: "map threshold 정책은 ratio 0~1 필요" });
+            }
+          }
+          if (Array.isArray(n.children) && n.children.length > 0) {
+            errors.push({ code: "bad_map", nodeId: n.id, message: "map 노드는 자식을 가질 수 없음 (템플릿 인라인)" });
+          }
+        }
+      }
+    }
+
     // leaf 검사
     if (n.status === "leaf") {
       if (!n.tool) {
@@ -215,8 +259,23 @@ export function validateTree(session: Session, nodes: Node[], opts: ValidateOpti
       for (const [argName, spec] of Object.entries(n.args)) {
         if (spec.kind !== "var") continue;
         const ref = (spec as { ref: string }).ref;
+        // M5.5-1: map 범위에서는 ${as...} 참조 허용 (이름 일치 검사).
+        // strip 후 남은 부분은 기존 템플릿 검사로 계속 검증한다.
+        const asName = mapAsName(n, byId);
+        let work = ref;
+        if (asName !== null) {
+          const others = [...ref.matchAll(/\$\{([A-Za-z_][A-Za-z0-9_]*)(?:\.[A-Za-z0-9_.-]+)?\}/g)]
+            .map((m) => m[1])
+            .filter((nm) => nm !== "params" && nm !== asName);
+          if (others.length > 0) {
+            errors.push({ code: "bad_ref", nodeId: n.id, message: `arg ${argName}: unknown item "${others[0]}" (as="${asName}")` });
+            continue;
+          }
+          work = ref.replace(new RegExp(`\\$\\{${asName}(?:\\.[A-Za-z0-9_.-]+)?\\}`, "g"), "");
+          if (work === "") continue;
+        }
         // M5.1-B3: 템플릿 var는 포함된 params 키 존재 여부만 검사
-        const tkeys = templateParamsKeys(ref);
+        const tkeys = templateParamsKeys(work);
         if (tkeys !== null) {
           if (tkeys.length === 0) {
             errors.push({ code: "bad_ref_field", nodeId: n.id, message: `arg ${argName}: bad template ref ${ref}` });
@@ -228,11 +287,11 @@ export function validateTree(session: Session, nodes: Node[], opts: ValidateOpti
           }
           continue;
         }
-        if (!isValidRefSyntax(ref)) {
+        if (!isValidRefSyntax(work)) {
           errors.push({ code: "bad_ref_field", nodeId: n.id, message: `arg ${argName}: bad ref syntax ${ref}` });
           continue;
         }
-        const parsed = parseRef(ref);
+        const parsed = parseRef(work);
         if (!parsed) {
           errors.push({ code: "bad_ref_field", nodeId: n.id, message: `arg ${argName}: bad ref ${ref}` });
           continue;

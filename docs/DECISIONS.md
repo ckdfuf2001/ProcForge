@@ -365,6 +365,13 @@
   CI에 setup-python + openpyxl (+ M5.3-2부터 python-pptx).
 - M5.3-1: 파일 내용 감사. script-kind 스크립트 + 고정(in/inout) 템플릿 파일
 - M5.3.1-1: file_exists 논리 경로. export 시 auto file_exists의
+- M5.5-1: map 노드. Node kind:"map" + map{over,as,maxItems,policy,template}
+  (템플릿 인라인, 트리 자식 금지). ${as} 참조는 map 범위에서만 허용.
+  실행은 템플릿을 항목별 ephemeral 노드로 기존 execNode 재사용
+  (record/replay/script/external 그대로). 출력 배열, 정책 all|any|threshold,
+  failedItems 보고. count path 생략 시 결과 전체.
+  generated in map은 live-supply만 (map id 키), replay/record 미지원.
+  edit_node map 설정 + split 금지 + dep over 인정 + hash 포함.
 - M5.5-0: pptx_table_sum checker. 산출 pptx 표 셀을 직접 합산 (보고값이
   아닌 그려진 값). expected는 numeric과 같은 ref 규칙 ($노드·${params}).
   fsDir 없으면 deferred. numeric expected 해결을 resolveNumericExpected로

@@ -316,9 +316,10 @@ export function evaluateConstraint(c: Constraint, ctx: CheckContext): CheckResul
       return re.test(v) ? { pass: true } : { pass: false, reason: `regex mismatch: ${c.spec.pattern}` };
     }
     case "count": {
-      const r = resolvePath(ctx, c.spec.path);
-      if (!r.found) return { pass: false, reason: `path not found: ${c.spec.path}` };
-      const len = lengthOf(r.value);
+      // M5.5-1: path 생략 시 결과 전체 (map 출력 배열 집계용)
+      const target = c.spec.path ? resolvePath(ctx, c.spec.path) : { found: true, value: ctx.resultJson };
+      if (!target.found) return { pass: false, reason: `path not found: ${c.spec.path}` };
+      const len = lengthOf((target as { value: unknown }).value);
       if (len === null) return { pass: false, reason: "count target has no length" };
       if (c.spec.exact !== undefined && len !== c.spec.exact)
         return { pass: false, reason: `count ${len} != exact ${c.spec.exact}` };

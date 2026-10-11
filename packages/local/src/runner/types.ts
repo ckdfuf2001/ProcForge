@@ -34,6 +34,8 @@ export type NodeResult = {
   failedConstraints: string[];
   unverified?: string[];
   detail?: string;
+  /** map 항목 실패 인덱스 (M5.5-1) */
+  failedItems?: number[];
   durationMs: number;
 };
 

@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import {
   computeNodeHash,
   ConstraintSchema,
+  MapSpecSchema,
   ToolCatalogEntrySchema,
   type ArgSpec,
   type Constraint,
@@ -276,7 +277,14 @@ export class CoreService implements CoreClient {
   private hashFor(sid: string, n: Node, preloaded?: Map<string, Node>): string {
     const byId = preloaded ?? this.store.getNodes(sid);
     const depHs = [...new Set(effectiveDeps(n, byId).map((id) => byId.get(id)?.hash ?? `missing:${id}`))].sort();
-    return computeNodeHash({ goal: n.goal, args: n.args, constraints: n.constraints, dependsOn: depHs });
+    const map = (n as { map?: unknown }).map;
+    return computeNodeHash({
+      goal: n.goal,
+      args: n.args,
+      constraints: n.constraints,
+      dependsOn: depHs,
+      ...(map !== undefined ? { map } : {}),
+    });
   }
 
   /**
@@ -624,6 +632,8 @@ export class CoreService implements CoreClient {
       }
       case "split": {
         if (n.locked) throw err("conflict", `locked node ${n.id} cannot be split`);
+        // M5.5-1: map 노드는 분해 불가 (템플릿 인라인)
+        if ((n as { kind?: string }).kind === "map") throw err("bad_request", `map 노드는 분해 불가: ${n.id}`);
         const all = [...this.store.getNodes(s.id).values()];
         if (all.some((x) => x.locked && x.id !== n.id && x.id.startsWith(n.id + ".")))
           throw err("conflict", "ancestor of locked node");
@@ -746,6 +756,12 @@ export class CoreService implements CoreClient {
         // M3.6-5: dependsOn 중 var/generated 어디에서도 참조되지 않으면 경고 (에러 아님)
         {
           const referenced = new Set<string>();
+          // M5.5-1: map over 대상도 데이터 흐름으로 인정
+          const mapOver = (n as { map?: { over?: unknown } }).map?.over;
+          if (typeof mapOver === "string") {
+            const oid = varRefNodeId(mapOver);
+            if (oid) for (const a of selfAndAncestors(oid)) referenced.add(a);
+          }
           for (const spec of Object.values(input.argSpecs)) {
             if (spec.kind === "var") {
               const id = varRefNodeId((spec as { ref: string }).ref);
@@ -910,8 +926,9 @@ export class CoreService implements CoreClient {
       if (n.locked) throw err("conflict", `node ${n.id} is locked`);
       const adds = input.addConstraints ?? [];
       const removes = input.removeConstraintIds ?? [];
-      if (input.goal === undefined && adds.length === 0 && removes.length === 0) {
-        throw err("bad_request", "변경 없음 (goal/addConstraints/removeConstraintIds 중 하나 필요).");
+      const mapChanged = input.map !== undefined;
+      if (input.goal === undefined && adds.length === 0 && removes.length === 0 && !mapChanged) {
+        throw err("bad_request", "변경 없음 (goal/addConstraints/removeConstraintIds/map 중 하나 필요).");
       }
       if (input.goal !== undefined && input.goal.length === 0) throw err("bad_request", "goal이 비었다.");
       let constraints = n.constraints;
@@ -934,7 +951,27 @@ export class CoreService implements CoreClient {
       const goalChanged = input.goal !== undefined && input.goal !== n.goal;
       const reopened = goalChanged && n.status === "leaf" ? ("open" as const) : n.status;
       const status = n.status === "needs_human" ? "open" : reopened;
+      // M5.5-1: map 실행 명세 설정 (kind:"map" 동반).
+      let kind = (n as { kind?: string }).kind;
+      let mapSpec = (n as { map?: unknown }).map;
+      if (mapChanged) {
+        const parsed = MapSpecSchema.safeParse(input.map);
+        if (!parsed.success) throw err("bad_request", `bad map: ${parsed.error.issues[0]?.message ?? "invalid"}`);
+        if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(parsed.data.as)) {
+          throw err("bad_request", `bad map.as: ${parsed.data.as} (영문·숫자·밑줄)`);
+        }
+        if (parsed.data.policy.kind === "threshold" && parsed.data.policy.ratio === undefined) {
+          throw err("bad_request", "map threshold 정책은 ratio 필요 (0~1)");
+        }
+        if (Array.isArray(n.children) && n.children.length > 0) {
+          throw err("bad_request", `map 노드는 자식을 가질 수 없음: ${n.id} (템플릿은 인라인)`);
+        }
+        kind = "map";
+        mapSpec = parsed.data;
+      }
       const next: Node = { ...n, goal: input.goal ?? n.goal, constraints, status };
+      if (kind !== undefined) (next as { kind?: string }).kind = kind;
+      if (mapSpec !== undefined) (next as { map?: unknown }).map = mapSpec;
       next.hash = this.hashFor(s.id, next);
       this.store.saveNode(s.id, next);
       this.propagateStale(s.id, n.id);
@@ -1039,6 +1076,8 @@ export class CoreService implements CoreClient {
           children: n.children,
           tool: n.tool ? { ...n.tool } : undefined,
           args: n.args as Record<string, unknown> | undefined,
+          kind: (n as { kind?: string }).kind === "map" ? ("map" as const) : undefined,
+          map: (n as { map?: unknown }).map,
           sideEffect: n.sideEffect,
           constraints: n.constraints as unknown[],
           golden: n.golden ? { ...n.golden, ignore: n.golden.ignore ?? [] } : undefined,

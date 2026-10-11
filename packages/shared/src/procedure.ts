@@ -33,6 +33,8 @@ export const ProcedureDocSchema = z.object({
     children: z.array(z.string()),
     tool: z.object({ server: z.string(), name: z.string(), schemaHash: z.string() }).optional(),
     args: z.record(z.unknown()).optional(),
+    kind: z.literal("map").optional(),
+    map: z.unknown().optional(),
     sideEffect: z.enum(["none", "local_write", "external"]),
     constraints: z.array(z.unknown()),
     golden: z.object({

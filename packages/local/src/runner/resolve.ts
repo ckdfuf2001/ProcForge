@@ -9,6 +9,71 @@ export type OutputTopo = {
   childrenOf: (id: string) => string[];
 };
 
+/** map 항목 컨텍스트 (M5.5-1): ${as} / ${as.path} 해결용 */
+export type ItemContext = {
+  name: string;
+  value: unknown;
+};
+
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * ${as} / ${as.path} 치환 (M5.5-1).
+ * 전체가 단일 참조면 원시값(객체 포함) 반환, 임베디드는 문자열 치환.
+ * 경로 없음 → throw (호출자가 항목 fail 처리).
+ */
+export function substituteItemVars(text: string, as: string, item: unknown): unknown {
+  const full = new RegExp(`^\\$\\{${escapeRegExp(as)}(\\.[A-Za-z0-9_.-]+)?\\}$`).exec(text);
+  if (full) {
+    if (!full[1]) return item;
+    return getByDot(item, full[1].slice(1));
+  }
+  if (!text.includes("${")) return text;
+  return text.replace(
+    new RegExp(`\\$\\{${escapeRegExp(as)}(\\.[A-Za-z0-9_.-]+)?\\}`, "g"),
+    (_m: string, p?: string) => {
+      const v = !p ? item : getByDot(item, p.slice(1));
+      return typeof v === "string" ? v : JSON.stringify(v) ?? "";
+    },
+  );
+}
+
+/** argSpecs 깊은 복사 + 모든 문자열 리프에 ${as} 치환 (M5.5-1).
+ * 치환 후 참조가 남지 않은 var는 fixed로 전환 (실행 시점 값 확정). */
+export function substituteItemSpecs(
+  specs: Record<string, ArgSpec>,
+  as: string,
+  item: unknown,
+): Record<string, ArgSpec> {
+  const deep = (v: unknown): unknown => {
+    if (typeof v === "string") return substituteItemVars(v, as, item);
+    if (Array.isArray(v)) return v.map(deep);
+    if (v !== null && typeof v === "object") {
+      const out: Record<string, unknown> = {};
+      for (const [k, x] of Object.entries(v as Record<string, unknown>)) out[k] = deep(x);
+      return out;
+    }
+    return v;
+  };
+  const out: Record<string, ArgSpec> = {};
+  for (const [k, spec] of Object.entries(specs)) {
+    if (spec.kind === "var" && typeof (spec as { ref?: unknown }).ref === "string") {
+      const r = substituteItemVars((spec as unknown as { ref: string }).ref, as, item);
+      if (typeof r !== "string" || (!r.includes("${") && !r.startsWith("$"))) {
+        const s = spec as unknown as { path?: unknown };
+        out[k] = { kind: "fixed", value: r, ...(s.path !== undefined ? { path: s.path as never } : {}) } as ArgSpec;
+        continue;
+      }
+      out[k] = { ...spec, ref: r } as ArgSpec;
+      continue;
+    }
+    out[k] = deep(spec) as ArgSpec;
+  }
+  return out;
+}
+
 export function resolveArgs(input: {
   specs: Record<string, ArgSpec>;
   params: Record<string, string>;
@@ -76,16 +141,25 @@ function getByDot(root: unknown, path: string): unknown {
   }
   return cur;
 }
-
-export function resolveVar(  ref: string,
+export function resolveVar(
+  ref: string,
   params: Record<string, string>,
   outputs: Map<string, unknown>,
   topo?: OutputTopo,
+  itemCtx?: ItemContext,
 ): unknown {
   const pm = /^\$\{params\.([A-Za-z0-9_.-]+)\}$/.exec(ref);
   if (pm) {
     if (!(pm[1] in params)) throw new Error(`params 참조 없음: ${pm[1]}`);
     return params[pm[1]];
+  }
+  // M5.5-1: map 항목 참조 (${as} / ${as.path}). 항목 컨텍스트가 있을 때만.
+  if (itemCtx) {
+    const im = new RegExp(`^\\$\\{${escapeRegExp(itemCtx.name)}(\\.[A-Za-z0-9_.-]+)?\\}$`).exec(ref);
+    if (im) {
+      if (!im[1]) return itemCtx.value;
+      return getByDot(itemCtx.value, im[1].slice(1));
+    }
   }
   // M5.1-B3: 문자열 내 템플릿 치환 ("sales-${params.month}.xlsx" 등)
   if (ref.includes("${params.")) {

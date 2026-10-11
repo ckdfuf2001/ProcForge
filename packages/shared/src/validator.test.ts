@@ -101,6 +101,51 @@ describe("validator 10종", () => {
     expect(errs.some((e) => e.code === "cycle")).toBe(true);
   });
 
+  it("M5.5-1 map 범위 item 참조 + bad_map", () => {
+    const s = baseSession();
+    const tplArgs = { v: { kind: "var", ref: "${item.v}" } };
+    const mapSpec = {
+      over: "$1.items", as: "item", maxItems: 10, policy: { kind: "threshold", ratio: 0.5 },
+      template: { tool: { server: "fs", name: "read" }, args: tplArgs, constraints: [] },
+    };
+    const map = leaf("2", {
+      children: [],
+      args: tplArgs,
+      ...{ kind: "map", map: mapSpec },
+    } as Partial<Node>);
+    const src = leaf("1");
+    const errs = validateTree(s, [src, map]);
+    expect(errs.filter((e) => e.code === "bad_ref" || e.code === "bad_ref_field" || e.code === "bad_map")).toEqual([]);
+    // as 불일치
+    const badTplArgs = { v: { kind: "var", ref: "${it.v}" } };
+    const badName = leaf("2", {
+      children: [],
+      args: badTplArgs,
+      ...{ kind: "map", map: { ...mapSpec, template: { tool: { server: "fs", name: "read" }, args: badTplArgs, constraints: [] } } },
+    } as Partial<Node>);
+    expect(
+      validateTree(s, [src, badName]).some((e) => e.code === "bad_ref" && e.message.includes("unknown item")),
+    ).toBe(true);
+    // map 범위 밖 item 참조
+    const outside = leaf("9", { args: { v: { kind: "var", ref: "${item.v}" } } });
+    expect(
+      validateTree(s, [src, outside]).some((e) => e.code === "bad_ref_field"),
+    ).toBe(true);
+    // 자식 보유 map
+    const withChild = leaf("3", {
+      children: ["3.1"],
+      ...{ kind: "map", map: mapSpec },
+    } as Partial<Node>);
+    const ch = leaf("3.1", { parentId: "3" });
+    expect(
+      validateTree(s, [src, withChild, ch]).some((e) => e.code === "bad_map"),
+    ).toBe(true);
+    // over 비어 있음
+    const noOver = leaf("4", { ...{ kind: "map", map: { over: "" } } } as Partial<Node>);
+    expect(
+      validateTree(s, [src, noOver]).some((e) => e.code === "bad_map"),
+    ).toBe(true);
+  });
   it("M5.2-4 약식 $1.1.rows 허용 + 미등록 노드 거부", () => {
     const s = baseSession();
     const ok = leaf("2", {

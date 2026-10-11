@@ -58,6 +58,8 @@ export function importProcedure(
       children: n.children,
       tool: n.tool ? { ...n.tool } : undefined,
       args: (n.args ?? {}) as Record<string, ArgSpec>,
+      ...(n.kind === "map" ? { kind: "map" as const } : {}),
+      ...(n.map !== undefined ? { map: n.map as Node["map"] } : {}),
       sideEffect: n.sideEffect,
       constraints: (n.constraints ?? []) as Constraint[],
       advice: [],
