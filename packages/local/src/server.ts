@@ -89,7 +89,9 @@ function errResult(e: unknown) {
   // -32602로 가린다. 형식 고정 (M5.3-0-3): 첫 줄 "<code>: <message>",
   // 선택 둘째 줄 "hint: <hint>".
   const hintText = `${hint}`.trim();
-  const text = hintText.length > 0 ? `${code}: ${message}\nhint: ${hintText}` : `${code}: ${message}`;
+  // M5.3-6: message 내 줄바꿈은 "; "로 치환 (1줄 계약).
+  const oneLine = `${message}`.replace(/\r?\n/g, "; ");
+  const text = hintText.length > 0 ? `${code}: ${oneLine}\nhint: ${hintText}` : `${code}: ${oneLine}`;
   return {
     isError: true as const,
     content: [{ type: "text" as const, text }],

@@ -68,6 +68,8 @@ export function parseErrorText(text: string): ParsedErrorText | null {
   const lines = text.trim().split("\n");
   const m = /^([A-Za-z0-9_]+): ([\s\S]*)$/.exec(lines[0] ?? "");
   if (!m) return null;
+  // M5.3-6: 등록 코드만 파싱 (미등록·외부는 null)
+  if (!(ERROR_CODE_LIST as readonly string[]).includes(m[1])) return null;
   const out: ParsedErrorText = { code: m[1], message: m[2].trim() };
   if (lines.length === 1) return out;
   if (lines.length > 2) return null;

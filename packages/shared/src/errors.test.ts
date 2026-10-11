@@ -16,10 +16,19 @@ describe("parseErrorText", () => {
     expect(parseErrorText("conflict: 잠김")).toEqual({ code: "conflict", message: "잠김" });
   });
 
-  it("외부 형식은 null", () => {
+  it("외부 형식·미등록 code는 null", () => {
     expect(parseErrorText("MCP error -32602: Input validation error")).toBe(null);
     expect(parseErrorText("plain text")).toBe(null);
     expect(parseErrorText("")).toBe(null);
     expect(parseErrorText("a: b\nc")).toBe(null);
+    expect(parseErrorText("weird_code: something")).toBe(null);
+  });
+
+  it("다중 키 누락 메시지 파싱 성공", () => {
+    expect(parseErrorText("bad_request: argSpecs missing required: command, path\nhint: 고쳐라")).toEqual({
+      code: "bad_request",
+      message: "argSpecs missing required: command, path",
+      hint: "고쳐라",
+    });
   });
 });
