@@ -25,6 +25,8 @@ export type CliValues = {
   "allow-wildcard"?: string[];
   "retry-attempts"?: string;
   "retry-base-ms"?: string;
+  "fail-on-unverified"?: boolean;
+  "allow-unverified"?: boolean;
 };
 
 export function parseCliArgs(argv: string[]): { values: CliValues; positionals: string[] } {
@@ -52,6 +54,8 @@ export function parseCliArgs(argv: string[]): { values: CliValues; positionals: 
       "allow-wildcard": { type: "string", multiple: true },
       "retry-attempts": { type: "string" },
       "retry-base-ms": { type: "string" },
+      "fail-on-unverified": { type: "boolean", default: true },
+      "allow-unverified": { type: "boolean", default: false },
     },
     allowPositionals: true,
   });

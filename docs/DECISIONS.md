@@ -399,6 +399,10 @@
   실행될 수 있다. 완화: local_write·external은 힌트와 무관하게 재시도 제외,
   external은 approvals 정확 일치까지 요구. 잔여 신뢰(카탈로그 정직성)는 도구 구현과
   동일 선상 (별도 검증 없음).
+- M5.7-2 fail-on-unverified 기본 on (무인 실행): 사람 검토 없는 누적은
+  조용히 통과보다 크게 실패가 낫다. on이면 unverified>0 → exit 1 + state 미저장.
+  `--allow-unverified`로 해제 (RunOptions로는 failOnUnverified:false).
+  대화형(MCP·세션 실행)은 기존 동작 유지.
 - M5.6.1-4 세그먼트 중간 리터럴: 자르지 않고 마지막 세그먼트 문자열 접두로 비교
   (URL·경로 공통, 나머지 세그먼트는 정확 일치). "https://h/x/item-" 패턴은
   "https://h/x/item-123"에 통과, "https://h/y/..."·"https://h/x/other"에 거부.

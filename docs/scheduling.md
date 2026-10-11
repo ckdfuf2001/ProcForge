@@ -7,10 +7,13 @@
 | 코드 | 의미 | 예 |
 | --- | --- | --- |
 | 0 | 성공 (fail=0, suspended=0) | 정상 완료 |
-| 1 | 검사 실패·중단 (fail>0 또는 suspended>0) | constraint 실패, 생성값·승인 대기 |
+| 1 | 검사 실패·중단 (fail>0 또는 suspended>0, 무인 기본 unverified>0 포함) | constraint 실패, 생성값·승인 대기, 사람 검토 필요 |
 | 2 | 입력 오류 (`bad_request`·`bad_args`·`not_found`·`session_not_found`) | bad `--param`, procedure 없음, approvals.json 형식 오류 |
 | 3 | 승인 필요 | 무인 실행 중 미승인 external (failedConstraints `approval`) |
 | 4 | 겹친 실행 (`conflict`) | 같은 절차서의 다른 run이 진행 중 (`procedures/<name>/.run.lock`) |
+
+무인 실행에서는 `unverified>0`도 exit 1이며 `state.json`을 저장하지 않는다
+(기본 on, `--allow-unverified`로 해제).
 
 ## approvals.json
 

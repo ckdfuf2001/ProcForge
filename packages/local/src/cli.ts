@@ -146,6 +146,10 @@ async function cmdRun(): Promise<number> {
         return cliErrorExit(e);
       }
     }
+    // M5.7-2: 무인 기본 on (DECISIONS). --allow-unverified로 해제.
+    const fou = (values.unattended ?? false)
+      && (values["fail-on-unverified"] ?? true)
+      && !(values["allow-unverified"] ?? false);
     const out = await app.runProcedure({
       procedure: procRef,
       params,
@@ -155,12 +159,14 @@ async function cmdRun(): Promise<number> {
       allowProjectRead: values["allow-project-read"] ?? false,
       unattended: values.unattended ?? false,
       ...(toolRetry ? { toolRetry } : {}),
+      failOnUnverified: fou,
     });
     console.log(`run ${out.runId} (session ${out.sessionId}): pass=${out.passed} fail=${out.failed} unverified=${out.unverified} skipped=${out.skipped} blocked=${out.blocked} suspended=${out.suspended}`);
     console.log(`report: ${out.reportPath}`);
     if (out.outDir) console.log(`out: ${out.outDir}`);
     // M5.5-4: 종료 코드 0 성공 / 1 실패·중단 / 2 입력 오류 / 3 승인 필요.
     // M5.5-4.1-5: 겹친 실행(conflict)은 4.
+    // M5.7-2: 무인 기본 on — unverified>0도 1.
     if (out.approvalBlocked) {
       console.error("approval 필요: 무인 실행 미승인 external. approvals.json에 tool·인자 등록 후 재실행");
       return 3;
@@ -169,7 +175,14 @@ async function cmdRun(): Promise<number> {
       console.error("suspended: pf_run_next로 재개 (MCP) — 생성값·승인 필요");
       return 1;
     }
-    return runExitCode({ failed: out.failed, suspended: out.suspended, approvalBlocked: out.approvalBlocked });
+    const code = runExitCode({
+      failed: out.failed, suspended: out.suspended, approvalBlocked: out.approvalBlocked,
+      unverified: out.unverified, failOnUnverified: fou,
+    });
+    if (code === 1 && out.failed === 0 && out.suspended === 0) {
+      console.error("unverified: 사람 검토 필요 (llm_rubric 등). --allow-unverified로 우회");
+    }
+    return code;
   } catch (e) {
     console.error(`error: ${e instanceof Error ? e.message : String(e)}`);
     return runErrorExit(e);

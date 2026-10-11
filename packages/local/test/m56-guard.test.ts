@@ -1,13 +1,16 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync } from "node:fs";
-import { join } from "node:path";
+import { mkdtempSync, writeFileSync, readFileSync, existsSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { ProcForgeApp } from "../src/app/app.js";
+import { runProcedureTest } from "../src/runner/procedure-run.js";
+import { runExitCode } from "../src/app/run-exit.js";
 import { testStack } from "./client-mode.js";
 
 // M5.6-g: 누적(stateWrites) 노드 출력 단언 필수 (없으면 경고, strict면 거부).
 
 const ECHO_CAT = [{ server: "fake-ppt", name: "echo", inputSchema: {}, schemaHash: "h" }] as never;
+const serverMjs = resolve(__dirname, "fixtures/fake-ppt-mcp/server.mjs");
 
 let root: string;
 let pfdir: string;
@@ -23,6 +26,10 @@ beforeEach(() => {
   oldProfile = process.env.USERPROFILE;
   process.env.HOME = home;
   process.env.USERPROFILE = home;
+  writeFileSync(
+    join(root, "opencode.json"),
+    JSON.stringify({ mcp: { "fake-ppt": { type: "local", command: ["node", serverMjs] } } }),
+  );
 });
 
 afterEach(() => {
@@ -107,4 +114,69 @@ describe("M5.6-g 누적 출력 단언", () => {
     expect(fin.warnings.some((w) => w.includes("stateWrites 출력 단언 없음: 1.2"))).toBe(true);
     await expect(app.finalize({ sessionId: sid, name: "m57-acc-rubric-strict", strict: true })).rejects.toThrow(/stateWrites 출력 단언 없음/);
   }, 60000);
+});
+
+describe("M5.7-2 fail-on-unverified", () => {
+  async function buildRubric(): Promise<{ app: ProcForgeApp; sid: string }> {
+    const { client } = testStack(pfdir);
+    const app = new ProcForgeApp({ core: client, procforgeDir: pfdir, projectRoot: root });
+    const started = await client.pfStart({ request: "rubric", params: {}, toolCatalog: ECHO_CAT });
+    const sid = started.session.id;
+    await client.pfResolve({
+      sessionId: sid, nodeId: "1", decision: "split", children: [{ goal: "판정" }],
+    });
+    await client.pfReport({
+      sessionId: sid, nodeId: "1.1", tool: { server: "fake-ppt", name: "echo" },
+      args: { note: "a" }, resultSummary: "a", resultJson: { note: "a" },
+      selfVerdict: "pass", selfReason: "ok",
+    });
+    await client.pfEditNode({
+      sessionId: sid, nodeId: "1.1",
+      addConstraints: [{ id: "c-r", kind: "llm_rubric", spec: { rubric: "품질" }, source: "human" }],
+      stateWrites: [{ key: "k", from: "$1.1.note" }],
+    });
+    const r = await client.pfReport({
+      sessionId: sid, nodeId: "1.1", tool: { server: "fake-ppt", name: "echo" },
+      args: { note: "a" }, resultSummary: "a", resultJson: { note: "a" },
+      rubricReasons: { "c-r": "좋음" },
+      selfVerdict: "pass", selfReason: "ok",
+    });
+    expect(r.verdict).toBe("pass");
+    await client.pfResolve({
+      sessionId: sid, nodeId: "1.1", decision: "leaf",
+      tool: { server: "fake-ppt", name: "echo" },
+      argSpecs: { note: { kind: "fixed", value: "a" } } as never,
+    });
+    const fin = await app.finalize({ sessionId: sid, name: "m57-fou" });
+    expect(fin.warnings.some((w) => w.includes("stateWrites 출력 단언 없음: 1.1"))).toBe(true);
+    return { app, sid };
+  }
+
+  function statePath(): string {
+    return join(pfdir, "procedures", "m57-fou", "state.json");
+  }
+
+  it("기본 on: unverified → exit 1 + state 미저장", async () => {
+    await buildRubric();
+    expect(existsSync(statePath())).toBe(false);
+    const { report } = await runProcedureTest(pfdir, root, "m57-fou", {
+      procforgeDir: pfdir, projectRoot: root, mode: "live",
+      params: { stateDefaults: '{"k":""}' }, unattended: true,
+    });
+    expect(report.summary.fail).toBe(0);
+    expect(report.summary.unverified).toBe(1);
+    expect(existsSync(statePath())).toBe(false);
+    expect(runExitCode({ failed: 0, suspended: 0, approvalBlocked: false, unverified: 1, failOnUnverified: true })).toBe(1);
+  }, 120000);
+
+  it("해제 시: exit 0 + state 저장", async () => {
+    await buildRubric();
+    const { report } = await runProcedureTest(pfdir, root, "m57-fou", {
+      procforgeDir: pfdir, projectRoot: root, mode: "live",
+      params: { stateDefaults: '{"k":""}' }, unattended: true, failOnUnverified: false,
+    });
+    expect(report.summary.fail).toBe(0);
+    expect(JSON.parse(readFileSync(statePath(), "utf-8"))).toEqual({ k: "a" });
+    expect(runExitCode({ failed: 0, suspended: 0, approvalBlocked: false, unverified: 1, failOnUnverified: false })).toBe(0);
+  }, 120000);
 });
