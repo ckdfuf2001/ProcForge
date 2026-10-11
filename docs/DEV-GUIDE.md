@@ -320,6 +320,21 @@ C4 CI E2E에도 C2·C3를 fake 서버로 추가. M5-dogfood.md 3절을 실제 �
 0-5 bc 세션 결과를 docs/M5-dogfood.md에 "관찰: 실사용 1건" 절로 기록
   (호스트·모델·막힌 지점·가짜 leaf 원인).
 
+### M5.3 (절차서 신뢰성 마무리)
+1. finalize 감사 확장: (a) procedures/<name>/scripts/* 내용, (b) 바인딩 입력이 아닌 템플릿 파일
+   (pptx는 텍스트 추출)에서 날짜 표현·params 값·녹화 수치 상수 검사. strict 시 bad_request.
+   테스트: 스크립트에 "2026-09" 하드코딩 → 경고 / strict 거부.
+2. dogfood monthly: S2 제목도 템플릿("${month} 실적 요약" 형태). 10월 run 산출 pptx의 전체 텍스트에
+   "9월"·"2026-09" 0건을 테스트로 단언 (CI E2E + 실측).
+3. 스크립트 실행 제한: 환경변수 화이트리스트, 네트워크 차단 시도(불가하면 문서화),
+   실행 전후 projectRoot 스냅샷 비교로 run fs 밖 변경 감지 → 노드 fail.
+   DECISIONS·SKILL에 "OS 수준 sandbox 아님" 명시.
+4. examples/procedures/monthly/에 절차서 실물 커밋 + README에 "9월 분해 → 10월 run" 재현 절차 5줄.
+5. policy grep 게이트 범위를 src/** 중 *.test.ts 제외로 확정 (DECISIONS 기록, 테스트 문자열 우회 금지).
+6. 에러 텍스트: 직렬화 시 message 내 줄바꿈을 "; "로 치환, parseErrorText는 code가 ERROR_CODE_LIST에
+   없으면 null. 테스트: 다중 키 누락 메시지 → 파싱 성공, 미등록 code → null.
+7. 0.2 규칙에 추가: 로컬 검증은 dist 삭제(clean) 후 build → test. 클린 클론 결과만 완료 증거로 인정.
+
 ### M5 검증과 실행 분리
 - `procforge test <proc>`: replay 전용, drift 검출만.
 - `procforge run <procedure> --param k=v ... [--out <dir>]`: live 실행 전용.
@@ -401,6 +416,7 @@ C4 CI E2E에도 C2·C3를 fake 서버로 추가. M5-dogfood.md 3절을 실제 �
 | M5 | 검증/실행 분리 | [x] | `78e6514` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38067485259 | M5.2 수락 a~d로 재확정 (입력 바인딩·값 흐름 실증) |
 | M5.2 | 교차 기간 재사용 | [x] | `adf6ae7` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38074263388 | 입력 바인딩·스크립트 leaf·값 흐름·수락 a~d·단가 통일 |
 | M5.3-0 | 확정 게이트 선행 | [x] | `18e0b44` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38082174797 | confirm required 강제·회귀·에러 계약·증거 경고·관찰 기록 |
+| M5.3 | 절차서 신뢰성 마무리 | [ ] | | | 감사 확장·S2 템플릿·실행 제한·실물 커밋·게이트 범위·에러 계약·검증 규율 |
 | M5.5 | 반복 노드 | [ ] | | | |
 | M5.6 | 상태 / sideEffect | [ ] | | | |
 | - | 크롤링 테스트 | [ ] | | | 사람 진행 |
@@ -428,3 +444,4 @@ C4 CI E2E에도 C2·C3를 fake 서버로 추가. M5-dogfood.md 3절을 실제 �
 | 2026-10-11 | 6, 8 | M5.2 신설 + M5 미완료로 재환원: 11월 실행 실험(pass 3·표지 2026-11·표 10월 수치, run 52ff17ab)으로 교차 기간 재사용 미증명 확정 | 입력 바인딩·스크립트 leaf·값 흐름·수락 a~d |
 | 2026-10-11 | 6, 8 | M5.2 완료 + M5 재확정: 입력 바인딩·스크립트 leaf(kind script)·교차 경고·expected 감사·약식 ref·수락 a~d(CI+실측)·runner UTF-8·단가 통일·양 모드 38+61+200 | 절차서 monthly (기간 없음) |
 | 2026-10-11 | 6, 8 | M5.3-0 신설: BC 실사용 세션 finalize 실패(가짜 leaf + -32602 마스킹) → 확정 게이트 0-1~0-5 | M5.3 진입 전 확정 단계 결함 해소 |
+| 2026-10-11 | 6, 8 | M5.3 신설 (절차서 신뢰성 마무리 1~7): 감사 확장·S2 템플릿·실행 제한·실물 커밋·게이트 범위·에러 계약·검증 규율 | M5.3-0 완료 후속 |
