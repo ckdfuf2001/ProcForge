@@ -146,6 +146,49 @@ describe("validator 10종", () => {
       validateTree(s, [src, noOver]).some((e) => e.code === "bad_map"),
     ).toBe(true);
   });
+  it("M5.5-2 until 본문·$self·bad_until", () => {
+    const s = baseSession();
+    const tplArgs = { cursor: { kind: "var", ref: "$self" } };
+    const untilSpec = {
+      until: { id: "c-done", kind: "equals", spec: { path: "next", expected: null }, source: "human" },
+      maxIterations: 5,
+      carry: "$self.next",
+      template: { tool: { server: "fs", name: "read" }, args: tplArgs, constraints: [] },
+    };
+    const loop = leaf("2", {
+      children: [],
+      args: tplArgs,
+      ...{ kind: "until", until: untilSpec },
+    } as Partial<Node>);
+    const src = leaf("1");
+    const errs = validateTree(s, [src, loop]);
+    expect(errs.filter((e) => e.code === "bad_ref" || e.code === "bad_ref_field" || e.code === "bad_until")).toEqual([]);
+    // $self 범위 밖
+    const outside = leaf("9", { args: { c: { kind: "var", ref: "$self" } } });
+    expect(validateTree(s, [src, outside]).some((e) => e.code === "bad_ref_field")).toBe(true);
+    // $self.x 형태 거부 (템플릿 인자)
+    const dottedTpl = { cursor: { kind: "var", ref: "$self.next" } };
+    const dotted = leaf("2", {
+      children: [],
+      args: dottedTpl,
+      ...{ kind: "until", until: { ...untilSpec, template: { tool: { server: "fs", name: "read" }, args: dottedTpl, constraints: [] } } },
+    } as Partial<Node>);
+    expect(validateTree(s, [src, dotted]).some((e) => e.code === "bad_ref_field")).toBe(true);
+    // 자식 보유 until
+    const withChild = leaf("3", {
+      children: ["3.1"],
+      ...{ kind: "until", until: untilSpec },
+    } as Partial<Node>);
+    const ch = leaf("3.1", { parentId: "3" });
+    expect(validateTree(s, [src, withChild, ch]).some((e) => e.code === "bad_until")).toBe(true);
+    // maxIterations 불량 + carry 불량
+    const badSpec = leaf("4", {
+      children: [],
+      ...{ kind: "until", until: { until: { id: "c", kind: "equals", spec: {}, source: "human" }, maxIterations: 0, carry: "nope", template: untilSpec.template } },
+    } as Partial<Node>);
+    const errs2 = validateTree(s, [src, badSpec]).filter((e) => e.code === "bad_until");
+    expect(errs2.length).toBe(2);
+  });
   it("M5.2-4 약식 $1.1.rows 허용 + 미등록 노드 거부", () => {
     const s = baseSession();
     const ok = leaf("2", {

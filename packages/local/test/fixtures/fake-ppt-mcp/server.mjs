@@ -52,6 +52,21 @@ server.tool(
 );
 
 server.tool(
+  "page",
+  "Paginated list (M5.5-2). Empty cursor starts. Fixed 2 pages.",
+  { cursor: z.string().optional() },
+  async ({ cursor }) => {
+    if (!cursor) {
+      return { content: [{ type: "text", text: JSON.stringify({ items: ["a", "b"], nextCursor: "p2" }) }] };
+    }
+    if (cursor === "p2") {
+      return { content: [{ type: "text", text: JSON.stringify({ items: ["c"], nextCursor: null }) }] };
+    }
+    return { content: [{ type: "text", text: JSON.stringify({ items: [], nextCursor: null }) }] };
+  },
+);
+
+server.tool(
   "save",
   "Save text to a file (M3.3 weakIn test)",
   { file_path: z.string(), content: z.string().optional() },

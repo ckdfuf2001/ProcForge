@@ -3,6 +3,7 @@ import {
   computeNodeHash,
   ConstraintSchema,
   MapSpecSchema,
+  UntilSpecSchema,
   ToolCatalogEntrySchema,
   type ArgSpec,
   type Constraint,
@@ -278,12 +279,14 @@ export class CoreService implements CoreClient {
     const byId = preloaded ?? this.store.getNodes(sid);
     const depHs = [...new Set(effectiveDeps(n, byId).map((id) => byId.get(id)?.hash ?? `missing:${id}`))].sort();
     const map = (n as { map?: unknown }).map;
+    const until = (n as { until?: unknown }).until;
     return computeNodeHash({
       goal: n.goal,
       args: n.args,
       constraints: n.constraints,
       dependsOn: depHs,
       ...(map !== undefined ? { map } : {}),
+      ...(until !== undefined ? { until } : {}),
     });
   }
 
@@ -633,7 +636,9 @@ export class CoreService implements CoreClient {
       case "split": {
         if (n.locked) throw err("conflict", `locked node ${n.id} cannot be split`);
         // M5.5-1: map 노드는 분해 불가 (템플릿 인라인)
+        // M5.5-2: until 노드는 분해 불가 (본문 1개 고정)
         if ((n as { kind?: string }).kind === "map") throw err("bad_request", `map 노드는 분해 불가: ${n.id}`);
+        if ((n as { kind?: string }).kind === "until") throw err("bad_request", `until 노드는 분해 불가: ${n.id}`);
         const all = [...this.store.getNodes(s.id).values()];
         if (all.some((x) => x.locked && x.id !== n.id && x.id.startsWith(n.id + ".")))
           throw err("conflict", "ancestor of locked node");
@@ -927,8 +932,9 @@ export class CoreService implements CoreClient {
       const adds = input.addConstraints ?? [];
       const removes = input.removeConstraintIds ?? [];
       const mapChanged = input.map !== undefined;
-      if (input.goal === undefined && adds.length === 0 && removes.length === 0 && !mapChanged) {
-        throw err("bad_request", "변경 없음 (goal/addConstraints/removeConstraintIds/map 중 하나 필요).");
+      const untilChanged = input.until !== undefined;
+      if (input.goal === undefined && adds.length === 0 && removes.length === 0 && !mapChanged && !untilChanged) {
+        throw err("bad_request", "변경 없음 (goal/addConstraints/removeConstraintIds/map/until 중 하나 필요).");
       }
       if (input.goal !== undefined && input.goal.length === 0) throw err("bad_request", "goal이 비었다.");
       let constraints = n.constraints;
@@ -969,9 +975,25 @@ export class CoreService implements CoreClient {
         kind = "map";
         mapSpec = parsed.data;
       }
+      // M5.5-2: until 실행 명세 설정 (kind:"until" 동반, 트리 자식 없음)
+      let untilSpec = (n as { until?: unknown }).until;
+      if (untilChanged) {
+        const parsed = UntilSpecSchema.safeParse(input.until);
+        if (!parsed.success) throw err("bad_request", `bad until: ${parsed.error.issues[0]?.message ?? "invalid"}`);
+        if (parsed.data.carry !== undefined && !/^\$self\.[A-Za-z0-9_.-]+$/.test(parsed.data.carry)) {
+          throw err("bad_request", `bad until.carry: ${parsed.data.carry} ("$self.경로" 형태)`);
+        }
+        if (Array.isArray(n.children) && n.children.length > 0) {
+          throw err("bad_request", `until 노드는 자식을 가질 수 없음: ${n.id} (템플릿은 인라인)`);
+        }
+        if (kind !== undefined && kind !== "until") throw err("bad_request", `map/until 중복 불가: ${n.id}`);
+        kind = "until";
+        untilSpec = parsed.data;
+      }
       const next: Node = { ...n, goal: input.goal ?? n.goal, constraints, status };
       if (kind !== undefined) (next as { kind?: string }).kind = kind;
       if (mapSpec !== undefined) (next as { map?: unknown }).map = mapSpec;
+      if (untilSpec !== undefined) (next as { until?: unknown }).until = untilSpec;
       next.hash = this.hashFor(s.id, next);
       this.store.saveNode(s.id, next);
       this.propagateStale(s.id, n.id);
@@ -1076,8 +1098,12 @@ export class CoreService implements CoreClient {
           children: n.children,
           tool: n.tool ? { ...n.tool } : undefined,
           args: n.args as Record<string, unknown> | undefined,
-          kind: (n as { kind?: string }).kind === "map" ? ("map" as const) : undefined,
+          kind: (() => {
+            const k = (n as { kind?: string }).kind;
+            return k === "map" || k === "until" ? (k as "map" | "until") : undefined;
+          })(),
           map: (n as { map?: unknown }).map,
+          until: (n as { until?: unknown }).until,
           sideEffect: n.sideEffect,
           constraints: n.constraints as unknown[],
           golden: n.golden ? { ...n.golden, ignore: n.golden.ignore ?? [] } : undefined,

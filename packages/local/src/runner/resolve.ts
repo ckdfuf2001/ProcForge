@@ -87,13 +87,15 @@ export function resolveArgs(input: {
   topo?: OutputTopo;
   /** M5 공급값 (이 노드 키→값, generated 우선) */
   supplied?: Record<string, unknown>;
+  /** M5.5-2 until 전달값 */
+  selfCarry?: { present: boolean; value: unknown };
 }): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [k, spec] of Object.entries(input.specs)) {
     if (spec.kind === "fixed") {
       out[k] = (spec as { value: unknown }).value;
     } else if (spec.kind === "var") {
-      out[k] = resolveVar((spec as { ref: string }).ref, input.params, input.outputs, input.topo);
+      out[k] = resolveVar((spec as { ref: string }).ref, input.params, input.outputs, input.topo, undefined, input.selfCarry);
     } else if (spec.kind === "script") {
       // M5.2-2: 스크립트 지정은 해석 대상 아님. 파일 위치는 finalize/import가
       // 절차서 기준으로 재작성하므로 여기서는 원문 유지 (execNode가 처리).
@@ -124,7 +126,7 @@ export function resolveGenerated(k: string, attempts: Attempt[], goldenAttemptId
   return last.args[k];
 }
 
-function getByDot(root: unknown, path: string): unknown {
+export function getByDot(root: unknown, path: string): unknown {
   let cur = root;
   for (const p of path.split(".")) {
     if (cur === null || cur === undefined) throw new Error(`참조 경로 없음: ${path}`);
@@ -147,6 +149,7 @@ export function resolveVar(
   outputs: Map<string, unknown>,
   topo?: OutputTopo,
   itemCtx?: ItemContext,
+  selfCarry?: { present: boolean; value: unknown },
 ): unknown {
   const pm = /^\$\{params\.([A-Za-z0-9_.-]+)\}$/.exec(ref);
   if (pm) {
@@ -160,6 +163,10 @@ export function resolveVar(
       if (!im[1]) return itemCtx.value;
       return getByDot(itemCtx.value, im[1].slice(1));
     }
+  }
+  // M5.5-2: until 전달값 ($self bare). 전달 없으면 undefined (첫 페이지 관례).
+  if (ref === "$self") {
+    return selfCarry && selfCarry.present ? selfCarry.value : undefined;
   }
   // M5.1-B3: 문자열 내 템플릿 치환 ("sales-${params.month}.xlsx" 등)
   if (ref.includes("${params.")) {

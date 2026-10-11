@@ -11,7 +11,7 @@ import { writeAtomicFile } from "../fsutil.js";
 import { normalizeArgSpecs, fixtureFileExists, isEscapeRel, readManifest } from "../artifacts.js";
 import { ConnectionPool } from "./connections.js";
 import { findRecording, loadCassette, recordKey, saveRecording, toToolResponse, compareToolResponses } from "./recordings.js";
-import { resolveArgs, resolveVar, substituteItemSpecs, substituteParams } from "./resolve.js";
+import { getByDot, resolveArgs, resolveVar, substituteItemSpecs, substituteParams } from "./resolve.js";
 import { runScript } from "./script-run.js";
 import { inferPathRole, rewritePaths, type InferredRole, type PathRole } from "./paths.js";
 import { setupRunFs } from "./workdir.js";
@@ -306,11 +306,17 @@ async function execNode(
   mode: RunMode,
   byId: Map<string, Node>,
   runId: string,
+  /** M5.5-2 until 전달값 ($self 해결용) */
+  selfCarry?: { present: boolean; value: unknown },
 ): Promise<NodeResult> {
   const start = Date.now();
   // M5.5-1: map 노드는 항목별 실행으로 분기
   if ((n as { kind?: string }).kind === "map") {
     return execMap(opts, params, outputs, pool, fsDir, n, mode, byId, runId, start);
+  }
+  // M5.5-2: until 노드는 본문 반복으로 분기
+  if ((n as { kind?: string }).kind === "until") {
+    return execUntil(opts, params, outputs, pool, fsDir, n, mode, byId, runId, start);
   }
   // 구 세션 마이그레이션: 절대경로 fixed → 상대경로 (M3.2-2)
   const normSpecs = normalizeArgSpecs(n.args ?? {}, {
@@ -365,6 +371,7 @@ async function execNode(
       goldenAttemptId: n.golden?.attemptId,
       live: mode === "live",
       supplied: opts.supplied?.[n.id],
+      selfCarry,
       topo: {
         isSplit: (id) => byId.get(id)?.status === "split",
         childrenOf: (id) => byId.get(id)?.children ?? [],
@@ -733,6 +740,207 @@ async function execMap(
     return done({ nodeId: n.id, status: "unverified", failedConstraints: [], failedItems, detail: summary });
   }
   return done({ nodeId: n.id, status: "pass", failedConstraints: [], failedItems, detail: summary });
+}
+
+/**
+ * M5.5-2: until 노드 실행. 본문 자식(1개)을 반복 실행한다.
+ * - $self: 이전 반복의 본문 출력에서 carry 경로 값을 전달 (없으면 undefined=첫 페이지).
+ * - until 제약이 결과에 맞으면 중단·성공, 아니면 carry 후 다음 반복.
+ * - maxIterations 도달해도 끝나지 않으면 fail (조용한 절단 금지).
+ * - 반복 출력은 배열로 모아 until 노드 출력으로 둔다. 본문 자식 출력(마지막)은 유지.
+ */
+async function execUntil(
+  opts: RunOptions,
+  params: Record<string, string>,
+  outputs: Map<string, unknown>,
+  pool: ConnectionPool,
+  fsDir: string,
+  n: Node,
+  mode: RunMode,
+  byId: Map<string, Node>,
+  runId: string,
+  start: number,
+): Promise<NodeResult> {
+  const done = (r: Omit<NodeResult, "durationMs">): NodeResult => ({ ...r, durationMs: Date.now() - start });
+  const spec = (n as unknown as { until?: { until?: unknown; maxIterations?: unknown; carry?: unknown } }).until;
+  if (!spec || typeof spec.maxIterations !== "number" || spec.maxIterations <= 0) {
+    throw Object.assign(new Error(`until spec 없음: ${n.id}`), { code: "bad_request" });
+  }
+  const maxIterations = Math.floor(spec.maxIterations);
+  const template = (spec as { template?: { tool?: { server?: unknown; name?: unknown }; args?: unknown; constraints?: unknown } }).template;
+  if (!template || typeof template.tool?.server !== "string" || typeof template.tool?.name !== "string") {
+    throw Object.assign(new Error(`until 템플릿 도구 없음: ${n.id}`), { code: "bad_request" });
+  }
+  const templateArgs = (template.args ?? {}) as Record<string, import("@procforge/shared/schema.js").ArgSpec>;
+  const templateConstraints = (Array.isArray(template.constraints) ? template.constraints : []) as import("@procforge/shared/schema.js").Constraint[];
+  const carryPath = typeof spec.carry === "string" && spec.carry.startsWith("$self.")
+    ? spec.carry.slice("$self.".length)
+    : null;
+  const untilConstraint = spec.until as import("@procforge/shared/schema.js").Constraint | undefined;
+  const supplied: Record<string, unknown> = (opts.supplied?.[n.id] ?? {}) as Record<string, unknown>;
+  // live generated 게이트: 템플릿 generated는 until 단위 supplied로 해결
+  if (mode === "live") {
+    const missing = Object.entries(templateArgs)
+      .filter(([k, s]) => (s as { kind?: string }).kind === "generated" && !Object.prototype.hasOwnProperty.call(supplied, k))
+      .map(([k]) => k);
+    if (missing.length > 0) {
+      return done({ nodeId: n.id, status: "suspended", failedConstraints: [], detail: `need_generated:${missing.join(",")}` });
+    }
+  }
+  // live external 게이트: until 단위 중단 (인스턴스는 until sideEffect 상속)
+  if (mode === "live" && n.sideEffect === "external" && !(opts.approvedNodeIds ?? []).includes(n.id)) {
+    return done({ nodeId: n.id, status: "suspended", failedConstraints: [], detail: "need_approval" });
+  }
+  const pages: unknown[] = [];
+  let carry: { present: boolean; value: unknown } | undefined;
+  for (let i = 0; i < maxIterations; i++) {
+    const instanceId = `${n.id}.${i + 1}`;
+    let inst: Node;
+    try {
+      const normed = normalizeArgSpecs(templateArgs, {
+        sandboxDir: join(opts.procforgeDir, "sandbox", opts.sessionId),
+        projectRoot: opts.projectRoot,
+      }).specs;
+      const fixedGen: Record<string, import("@procforge/shared/schema.js").ArgSpec> = {};
+      for (const [k, s] of Object.entries(normed)) {
+        if ((s as { kind?: string }).kind === "generated") {
+          if (!Object.prototype.hasOwnProperty.call(supplied, k)) {
+            throw new Error(`generated 인자 미공급: ${k} (until ${n.id}에 supply)`);
+          }
+          fixedGen[k] = { kind: "fixed", value: supplied[k] } as never;
+        }
+      }
+      inst = {
+        id: instanceId,
+        parentId: n.id,
+        goal: `${n.goal} [${i}]`,
+        status: "leaf",
+        depth: n.depth + 1,
+        dependsOn: [],
+        children: [],
+        tool: {
+          server: template.tool.server,
+          name: template.tool.name,
+          schemaHash: n.tool?.schemaHash ?? "until",
+        },
+        args: { ...normed, ...fixedGen },
+        sideEffect: n.sideEffect,
+        constraints: templateConstraints,
+        advice: [],
+        attempts: [],
+        retries: 0,
+        hash: `${n.hash}#${i}`,
+        locked: false,
+      } as Node;
+    } catch (e) {
+      return done({
+        nodeId: n.id,
+        status: "fail",
+        failedConstraints: [],
+        failedItems: [i],
+        detail: `until 반복 ${i} 준비 실패: ${e instanceof Error ? e.message : String(e)}`,
+      });
+    }
+    let r: NodeResult;
+    try {
+      r = await execNode(opts, params, outputs, pool, fsDir, inst, mode, byId, runId, carry);
+    } catch (e) {
+      return done({
+        nodeId: n.id,
+        status: "fail",
+        failedConstraints: [],
+        failedItems: [i],
+        detail: `until 반복 ${i} 실패: ${e instanceof Error ? e.message : String(e)}`,
+      });
+    }
+    if (r.status === "suspended") {
+      for (let j = 0; j <= i; j++) outputs.delete(`${n.id}.${j + 1}`);
+      return done({ nodeId: n.id, status: "suspended", failedConstraints: [], detail: r.detail });
+    }
+    const out = outputs.get(instanceId);
+    outputs.delete(instanceId);
+    if (r.status !== "pass") {
+      return done({
+        nodeId: n.id,
+        status: "fail",
+        failedConstraints: r.failedConstraints,
+        failedItems: [i],
+        detail: `until 반복 ${i} 실패: ${r.detail ?? r.failedConstraints.join(",")}`,
+      });
+    }
+    pages.push(out ?? null);
+    // 종료 조건 판정 (제약 충족 = 중단·성공)
+    if (untilConstraint) {
+      const cr = evaluateAll([untilConstraint], {
+        resultSummary: `until 반복 ${i}`,
+        resultJson: out,
+        artifacts: {},
+        fileExists: makeFileExists(opts.procforgeDir, opts.sessionId, fsDir, params),
+        nodeOutputs: Object.fromEntries(outputs),
+        params,
+        fsDir,
+      });
+      const failed = cr.failedConstraints.length > 0;
+      const undecided = cr.unverified.length > 0;
+      if (!failed && !undecided) break;
+      if (undecided) {
+        return done({
+          nodeId: n.id,
+          status: "fail",
+          failedConstraints: [],
+          failedItems: [i],
+          detail: `until 판정 불가: ${cr.unverified.join(",")}`,
+        });
+      }
+    }
+    if (i + 1 >= maxIterations) {
+      return done({
+        nodeId: n.id,
+        status: "fail",
+        failedConstraints: ["maxIterations"],
+        failedItems: [],
+        detail: `until 미수렴: ${maxIterations}회 반복에도 종료 조건 불충족`,
+      });
+    }
+    if (carryPath !== null) {
+      try {
+        const v = getByDot(out, carryPath);
+        carry = { present: true, value: v };
+      } catch {
+        return done({
+          nodeId: n.id,
+          status: "fail",
+          failedConstraints: [],
+          failedItems: [i],
+          detail: `until carry 없음: ${spec.carry}`,
+        });
+      }
+    }
+  }
+  outputs.set(n.id, pages);
+  const summary = `until ${pages.length}회`;
+  const cr = evaluateAll(n.constraints, {
+    resultSummary: summary,
+    resultJson: pages,
+    artifacts: {},
+    fileExists: makeFileExists(opts.procforgeDir, opts.sessionId, fsDir, params),
+    nodeOutputs: Object.fromEntries(outputs),
+    params,
+    fsDir,
+  });
+  if (cr.failedConstraints.length > 0) {
+    return done({
+      nodeId: n.id,
+      status: "fail",
+      failedConstraints: cr.failedConstraints,
+      failedItems: [],
+      detail: `until 집계 제약 실패: ${cr.failedConstraints.join(",")}`,
+    });
+  }
+  if (cr.unverified.length > 0) {
+    return done({ nodeId: n.id, status: "unverified", failedConstraints: [], failedItems: [], detail: summary });
+  }
+  return done({ nodeId: n.id, status: "pass", failedConstraints: [], failedItems: [], detail: summary });
 }
 
 function updateNodeGolden(opts: RunOptions, n: Node, resp: ToolResponse): void {  const store = new FileStore(opts.procforgeDir);

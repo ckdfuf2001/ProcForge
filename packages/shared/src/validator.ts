@@ -67,6 +67,17 @@ export function templateParamsKeys(ref: string): string[] | null {
   return keys;
 }
 
+/** until 범위 판정 (M5.5-2): 노드 자신 또는 조상이 kind:"until"이면 true */
+export function inUntilScope(n: Node, byId: Map<string, Node>): boolean {
+  let cur: Node | undefined = n;
+  let guard = 0;
+  while (cur && guard++ < 1000) {
+    if ((cur as unknown as { kind?: string }).kind === "until") return true;
+    cur = cur.parentId ? byId.get(cur.parentId) : undefined;
+  }
+  return false;
+}
+
 /** map 범위 판정: 노드 자신 또는 조상이 kind:"map"이면 as 이름 반환 (M5.5-1) */
 export function mapAsName(n: Node, byId: Map<string, Node>): string | null {
   let cur: Node | undefined = n;
@@ -197,12 +208,16 @@ export function validateTree(session: Session, nodes: Node[], opts: ValidateOpti
     // map 검사 (M5.5-1)
     {
       const nkind = (n as unknown as { kind?: string }).kind;
-      const nmap = (n as unknown as { map?: unknown }).map;
-      if (nkind === "map" || nmap !== undefined) {
+      const nmap = (n as unknown as { map?: unknown }).map;      if (nkind === "map" || nmap !== undefined) {
         if (nkind !== "map" || typeof nmap !== "object" || nmap === null) {
           errors.push({ code: "bad_map", nodeId: n.id, message: "map kind/spec mismatch" });
         } else {
-          const spec = nmap as { over?: unknown; maxItems?: unknown; policy?: unknown };
+          const spec = nmap as { over?: unknown; maxItems?: unknown; policy?: unknown; template?: unknown };
+          const tpl = spec.template as { tool?: unknown } | undefined;
+          const tool = tpl?.tool as { server?: unknown; name?: unknown } | undefined;
+          if (!tpl || typeof tool?.server !== "string" || typeof tool?.name !== "string") {
+            errors.push({ code: "bad_map", nodeId: n.id, message: "map 템플릿 도구 없음" });
+          }
           if (typeof spec.over !== "string" || spec.over.length === 0) {
             errors.push({ code: "bad_map", nodeId: n.id, message: "map over 비어 있음" });
           }
@@ -220,6 +235,34 @@ export function validateTree(session: Session, nodes: Node[], opts: ValidateOpti
           }
           if (Array.isArray(n.children) && n.children.length > 0) {
             errors.push({ code: "bad_map", nodeId: n.id, message: "map 노드는 자식을 가질 수 없음 (템플릿 인라인)" });
+          }
+        }
+      }
+    }
+
+    // until 검사 (M5.5-2)
+    {
+      const nkind = (n as unknown as { kind?: string }).kind;
+      const nuntil = (n as unknown as { until?: unknown }).until;
+      if (nkind === "until" || nuntil !== undefined) {
+        if (nkind !== "until" || typeof nuntil !== "object" || nuntil === null) {
+          errors.push({ code: "bad_until", nodeId: n.id, message: "until kind/spec mismatch" });
+        } else {
+          const spec = nuntil as { until?: unknown; maxIterations?: unknown; carry?: unknown; template?: unknown };
+          const tpl = spec.template as { tool?: unknown; args?: unknown } | undefined;
+          if (typeof spec.maxIterations !== "number" || !Number.isInteger(spec.maxIterations) || spec.maxIterations <= 0) {
+            errors.push({ code: "bad_until", nodeId: n.id, message: "until maxIterations는 양의 정수" });
+          }
+          if (spec.carry !== undefined &&
+            (typeof spec.carry !== "string" || !/^\$self\.[A-Za-z0-9_.-]+$/.test(spec.carry))) {
+            errors.push({ code: "bad_until", nodeId: n.id, message: 'until carry는 "$self.경로" 형태' });
+          }
+          if (!Array.isArray(n.children) || n.children.length !== 0) {
+            errors.push({ code: "bad_until", nodeId: n.id, message: "until 노드는 자식을 가질 수 없음 (템플릿 인라인)" });
+          }
+          const tool = tpl?.tool as { server?: unknown; name?: unknown } | undefined;
+          if (!tpl || typeof tool?.server !== "string" || typeof tool?.name !== "string") {
+            errors.push({ code: "bad_until", nodeId: n.id, message: "until 템플릿 도구 없음" });
           }
         }
       }
@@ -255,9 +298,8 @@ export function validateTree(session: Session, nodes: Node[], opts: ValidateOpti
     }
 
     // var 참조 검사 (10-3, 10-4)
-      if (n.args) {
-      for (const [argName, spec] of Object.entries(n.args)) {
-        if (spec.kind !== "var") continue;
+    const checkVarArg = (argName: string, spec: { kind: string }): void => {
+        if (spec.kind !== "var") return;
         const ref = (spec as { ref: string }).ref;
         // M5.5-1: map 범위에서는 ${as...} 참조 허용 (이름 일치 검사).
         // strip 후 남은 부분은 기존 템플릿 검사로 계속 검증한다.
@@ -269,41 +311,53 @@ export function validateTree(session: Session, nodes: Node[], opts: ValidateOpti
             .filter((nm) => nm !== "params" && nm !== asName);
           if (others.length > 0) {
             errors.push({ code: "bad_ref", nodeId: n.id, message: `arg ${argName}: unknown item "${others[0]}" (as="${asName}")` });
-            continue;
+            return;
           }
-          work = ref.replace(new RegExp(`\\$\\{${asName}(?:\\.[A-Za-z0-9_.-]+)?\\}`, "g"), "");
-          if (work === "") continue;
+          const escAs = asName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+          work = ref.replace(new RegExp(`\\$\\{${escAs}(?:\\.[A-Za-z0-9_.-]+)?\\}`, "g"), "");
+          if (work === "") return;
+        }
+        // M5.5-2: until 범위에서는 bare "$self" 허용 ("$self.경로"는 인자에서 금지).
+        if (ref === "$self") {
+          if (!inUntilScope(n, byId)) {
+            errors.push({ code: "bad_ref_field", nodeId: n.id, message: `arg ${argName}: $self outside until` });
+          }
+          return;
+        }
+        if (ref.startsWith("$self")) {
+          errors.push({ code: "bad_ref_field", nodeId: n.id, message: `arg ${argName}: 인자에서는 bare $self만 (채널은 carry 선언)` });
+          return;
         }
         // M5.1-B3: 템플릿 var는 포함된 params 키 존재 여부만 검사
         const tkeys = templateParamsKeys(work);
         if (tkeys !== null) {
           if (tkeys.length === 0) {
             errors.push({ code: "bad_ref_field", nodeId: n.id, message: `arg ${argName}: bad template ref ${ref}` });
-            continue;
+            return;
           }
           for (const k of tkeys) {
             if (!(k in session.params))
               errors.push({ code: "bad_ref", nodeId: n.id, message: `arg ${argName}: unknown params ${k}` });
           }
-          continue;
+          return;
         }
         if (!isValidRefSyntax(work)) {
           errors.push({ code: "bad_ref_field", nodeId: n.id, message: `arg ${argName}: bad ref syntax ${ref}` });
-          continue;
+          return;
         }
         const parsed = parseRef(work);
         if (!parsed) {
           errors.push({ code: "bad_ref_field", nodeId: n.id, message: `arg ${argName}: bad ref ${ref}` });
-          continue;
+          return;
         }
         if (parsed.paramsKey) {
           if (!(parsed.paramsKey in session.params))
             errors.push({ code: "bad_ref", nodeId: n.id, message: `arg ${argName}: unknown params ${parsed.paramsKey}` });
-          continue;
+          return;
         }
         if (parsed.nodeId && !byId.has(parsed.nodeId)) {
           errors.push({ code: "bad_ref", nodeId: n.id, message: `arg ${argName}: unknown node ${parsed.nodeId}` });
-          continue;
+          return;
         }
         if (parsed.nodeId && parsed.fieldPath && opts.outputs) {
           const out = opts.outputs[parsed.nodeId];
@@ -314,6 +368,15 @@ export function validateTree(session: Session, nodes: Node[], opts: ValidateOpti
               message: `arg ${argName}: field ${parsed.fieldPath} not in node ${parsed.nodeId} output`,
             });
         }
+    };
+    if (n.args) {
+      for (const [argName, spec] of Object.entries(n.args)) checkVarArg(argName, spec);
+    }
+    // M5.5-1/2: 인라인 템플릿 인자도 동일 검사
+    for (const tkey of ["map", "until"] as const) {
+      const tpl = (n as unknown as Record<string, { template?: { args?: Record<string, { kind: string }> } }>)[tkey]?.template;
+      if (tpl && typeof tpl.args === "object" && tpl.args !== null) {
+        for (const [argName, spec] of Object.entries(tpl.args)) checkVarArg(argName, spec);
       }
     }
   }

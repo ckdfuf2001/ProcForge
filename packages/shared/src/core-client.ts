@@ -144,6 +144,8 @@ export type PfEditNodeInput = {
   removeConstraintIds?: string[];
   /** map 실행 명세 (M5.5-1) */
   map?: unknown;
+  /** until 실행 명세 (M5.5-2) */
+  until?: unknown;
   expectedRevision?: number;
   actor?: Actor;
 };

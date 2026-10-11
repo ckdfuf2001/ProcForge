@@ -365,6 +365,11 @@
   CI에 setup-python + openpyxl (+ M5.3-2부터 python-pptx).
 - M5.3-1: 파일 내용 감사. script-kind 스크립트 + 고정(in/inout) 템플릿 파일
 - M5.3.1-1: file_exists 논리 경로. export 시 auto file_exists의
+- M5.5-2: until 노드. Node kind:"until" + until{until, maxIterations, carry?,
+  template{tool,args,constraints}} (인라인, 자식 금지).
+  $self = 이전 반복 출력의 carry 경로 값 (없으면 undefined=첫 페이지 관례).
+  인자에서는 bare $self만. until 충족=중단·성공, maxIterations 도달=fail.
+  반복 출력 배열 + count 집계. generated는 until 단위 supply.
 - M5.5-1: map 노드. Node kind:"map" + map{over,as,maxItems,policy,template}
   (템플릿 인라인, 트리 자식 금지). ${as} 참조는 map 범위에서만 허용.
   실행은 템플릿을 항목별 ephemeral 노드로 기존 execNode 재사용

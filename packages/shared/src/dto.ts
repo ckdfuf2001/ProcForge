@@ -213,5 +213,7 @@ export const EditNodeInputSchema = z.object({
   removeConstraintIds: z.array(z.string()).optional(),
   /** map 실행 명세 (M5.5-1, kind:"map"과 함께 설정) */
   map: z.unknown().optional(),
+  /** until 실행 명세 (M5.5-2, kind:"until"과 함께 설정) */
+  until: z.unknown().optional(),
 }).merge(RevisionOptsSchema);
 export type EditNodeInput = z.infer<typeof EditNodeInputSchema>;

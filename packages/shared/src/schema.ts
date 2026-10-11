@@ -197,6 +197,19 @@ export const MapSpecSchema = z.object({
 });
 export type MapSpec = z.infer<typeof MapSpecSchema>;
 
+/** until 실행 명세 (M5.5-2). 본문 템플릿 인라인 (트리 자식 아님). */
+export const UntilSpecSchema = z.object({
+  until: ConstraintSchema,
+  maxIterations: z.number().int().positive(),
+  carry: z.string().min(1).optional(),
+  template: z.object({
+    tool: z.object({ server: z.string().min(1), name: z.string().min(1) }),
+    args: z.record(ArgSpecSchema),
+    constraints: z.array(ConstraintSchema).default([]),
+  }),
+});
+export type UntilSpec = z.infer<typeof UntilSpecSchema>;
+
 // ---------- Tool / Attempt ----------
 
 export const ToolRefSchema = z.object({
@@ -236,9 +249,10 @@ export const NodeSchema = z.object({
   children: z.array(NodeIdSchema).default([]),
   tool: ToolWithSchemaSchema.optional(),
   args: z.record(ArgSpecSchema).optional(),
-  /** map 노드 표시 + 실행 명세 (M5.5-1). kind와 함께 설정된다. */
-  kind: z.literal("map").optional(),
+  /** map/until 노드 표시 (M5.5-1/2). map/until 명세와 함께 설정된다. */
+  kind: z.enum(["map", "until"]).optional(),
   map: MapSpecSchema.optional(),
+  until: UntilSpecSchema.optional(),
   sideEffect: SideEffectSchema,
   constraints: z.array(ConstraintSchema).default([]),
   advice: z
