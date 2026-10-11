@@ -62,3 +62,8 @@ export function resolveDirs(
   const procforgeDir = resolve(values["procforge-dir"] ?? env.PROCFORGE_DIR ?? `${projectRoot}/.procforge`);
   return { projectRoot, procforgeDir };
 }
+
+// M5.5-4.2-4: approve/run 대상 판별 전 경로 정규화 (win32 역슬래시 허용).
+export function normalizeCliPath(p: string | undefined): string {
+  return (p ?? "").split("\\").join("/");
+}

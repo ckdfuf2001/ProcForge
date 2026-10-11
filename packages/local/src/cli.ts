@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { parseCliArgs, resolveDirs } from "./app/cli-args.js";
+import { parseCliArgs, resolveDirs, normalizeCliPath } from "./app/cli-args.js";
 import { createApp } from "./app/bootstrap.js";
 import { cliErrorExit, runErrorExit, runExitCode } from "./app/run-exit.js";
 
@@ -166,7 +166,9 @@ async function cmdRun(): Promise<number> {
 }
 
 async function cmdApprove(): Promise<number> {
-  const [, target, nodeId] = positionals;
+  // M5.5-4.2-4: 판별 전 정규화 (win32 "procedures\m55-unatt" 허용).
+  const target = normalizeCliPath(positionals[1]);
+  const nodeId = positionals[2];
   const { projectRoot, procforgeDir } = resolveDirs(values, process.env);
   try {
     const { app } = createApp({ procforgeDir, projectRoot });
