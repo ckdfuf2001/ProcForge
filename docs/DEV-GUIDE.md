@@ -583,4 +583,5 @@ c·d·j는 하네스 과제로 DECISIONS에 기록만.
 | 2026-10-11 | 6, 8 | M5.6 신설 (dogfood-real repo 대상 한 묶음 a~h): ref 통일·$prefix 생성·external 입력·출력 단언·offset 문구·readOnly 재시도 | 0.2 개정 후속 |
 | 2026-10-11 | 6, 8 | M5.6 완료 (한 묶음): L3(dev-verify) green·양 OS CI success·c·d·j 하네스 기록 | — |
 | 2026-10-11 | 6, 8 | M5.6.1 신설 (재시도·승인 다듬기 1~4): isError 판별·정규식 상한·기본값 고정·범위 경고 | M5.6 완료 후속 |
+| 2026-10-11 | 6, 8 | M5.6.1 완료 (한 묶음): L3(dev-verify) green·양 OS CI success | — |
 | 2026-10-11 | 6, 8 | M5.5-4.2 신설 (승인 정합성 보강 1~6): 논리경로 매칭·wildcard 명시·해시 재계산·경로 정규화·잠금 finally·NODE_ENV 경고 | M5.5-6보다 먼저 |
