@@ -1,10 +1,10 @@
 # monthly
 
-원본 세션: 08ddcdb0-5145-4d2f-9626-2632c26dc73b / 생성: 2026-10-11T02:47:02.307Z
+원본 세션: c6a0407a-31bf-4988-996a-92f32555659f / 생성: 2026-10-11T04:57:03.494Z
 
 ## 파라미터
 
-- `month` (기본값: `2026-09`)
+- `month` (필수, --param 지정)
 
 ## 목차
 
@@ -22,11 +22,11 @@
   - `agg` = 스크립트: `scripts/1_1.py`
 - 확인 조건:
   - [equals] path=period
-  - [file_exists] path=fixtures/1.1/be242f08-1f1a-4fc9-83c1-5eacb9833875/0-sales-2026-09.xlsx
+  - [file_exists] path=sales-${params.month}.xlsx
   - [json_path_exists] path=rows
   - [json_path_exists] path=total
   - [json_path_exists] path=period
-- 기대 출력: `agg ${params.month} total 2000000`
+- 기대 출력: `agg 2026-09 total 2000000`
 
 ### 2. 보고서 pptx를 생성한다 (`1.2`)
 
@@ -42,11 +42,11 @@
   - `render` = 스크립트: `scripts/1_2.py`
 - 확인 조건:
   - [numeric_match] expected=$1.1.total
-  - [file_exists] path=fixtures/1.2/97345bd9-1653-4350-bbb6-0f2a8d3fac17/0-shell.pptx
-  - [file_exists] path=fixtures/1.2/97345bd9-1653-4350-bbb6-0f2a8d3fac17/1-rendered.pptx
+  - [file_exists] path=shell.pptx
+  - [file_exists] path=output/rendered.pptx
   - [json_path_exists] path=total
   - [json_path_exists] path=title
-- 기대 출력: `render ${params.month} total 2000000`
+- 기대 출력: `render 2026-09 total 2000000`
 
 ## 고정값 감사 (M5.1-B1)
 

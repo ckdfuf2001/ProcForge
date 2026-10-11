@@ -769,6 +769,32 @@ export class ProcForgeApp {
     const contentItems = collectAuditContent({ projectRoot: this.projectRoot, nodes });
     const contentAudit = auditContentTexts({ params: sess.params, items: contentItems, cassettes });
     const allAudit = [...audit, ...contentAudit];
+    // M5.3.1-2: manifest source 문자열도 감사 (바인딩 해석분 제외).
+    // fixtures/ 형태 file_exists는 시스템 경로라 건너뛰므로, 대응 source rel의
+    // 날짜·params 리터럴이 strict를 빠져나가는 구멍을 여기서 막는다.
+    {
+      const boundSrcs = new Set<string>();
+      for (const n of nodes) {
+        const lastArgs = (n.attempts[n.attempts.length - 1]?.args ?? {}) as Record<string, unknown>;
+        for (const [k, spec] of Object.entries(n.args ?? {})) {
+          const s = spec as { kind?: string; ref?: unknown };
+          if (s.kind === "var" && typeof s.ref === "string" && s.ref.includes("${params.") &&
+            typeof lastArgs[k] === "string") {
+            boundSrcs.add(lastArgs[k] as string);
+          }
+        }
+      }
+      const manifestMap = readManifest(this.procforgeDir, sid);
+      const srcItems: { nodeId: string; where: string; text: string }[] = [];
+      for (const [fx, src] of Object.entries(manifestMap)) {
+        if (boundSrcs.has(src)) continue;
+        const m = /^fixtures\/([^/]+)\//.exec(fx);
+        if (!m) continue;
+        srcItems.push({ nodeId: m[1], where: `template:${src} (fixture)`, text: src });
+      }
+      const srcAudit = auditContentTexts({ params: sess.params, items: srcItems, cassettes });
+      allAudit.push(...srcAudit);
+    }
     if ((a.strict as boolean | undefined) === true && allAudit.length > 0) {
       throw pfError("bad_request", `고정값 감사 실패(${allAudit.length}건): ${allAudit.slice(0, 3).join("; ")}`);
     }

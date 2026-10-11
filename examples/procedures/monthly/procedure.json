@@ -2,13 +2,13 @@
   "format": "procforge-procedure",
   "version": 1,
   "name": "monthly",
-  "sourceSession": "08ddcdb0-5145-4d2f-9626-2632c26dc73b",
-  "createdAt": "2026-10-11T02:47:02.307Z",
+  "sourceSession": "c6a0407a-31bf-4988-996a-92f32555659f",
+  "createdAt": "2026-10-11T04:57:03.494Z",
   "params": {
     "month": {
       "type": "string",
-      "default": "2026-09",
-      "description": ""
+      "description": "",
+      "required": true
     }
   },
   "toolCatalog": [
@@ -61,7 +61,7 @@
           "note": "auto: first-pass shape",
           "kind": "file_exists",
           "spec": {
-            "path": "fixtures/1.1/be242f08-1f1a-4fc9-83c1-5eacb9833875/0-sales-2026-09.xlsx"
+            "path": "sales-${params.month}.xlsx"
           }
         },
         {
@@ -94,10 +94,10 @@
       ],
       "golden": {
         "fixtures": [
-          "fixtures/1.1/be242f08-1f1a-4fc9-83c1-5eacb9833875/0-sales-2026-09.xlsx"
+          "fixtures/1.1/3dd0a7a9-7377-4932-85ec-a222d84bcc61/0-sales-2026-09.xlsx"
         ],
-        "output": "agg ${params.month} total 2000000",
-        "attemptId": "be242f08-1f1a-4fc9-83c1-5eacb9833875",
+        "output": "agg 2026-09 total 2000000",
+        "attemptId": "3dd0a7a9-7377-4932-85ec-a222d84bcc61",
         "ignore": []
       },
       "goldenArgs": {
@@ -168,7 +168,7 @@
           "note": "auto: first-pass shape",
           "kind": "file_exists",
           "spec": {
-            "path": "fixtures/1.2/97345bd9-1653-4350-bbb6-0f2a8d3fac17/0-shell.pptx"
+            "path": "shell.pptx"
           }
         },
         {
@@ -177,7 +177,7 @@
           "note": "auto: first-pass shape",
           "kind": "file_exists",
           "spec": {
-            "path": "fixtures/1.2/97345bd9-1653-4350-bbb6-0f2a8d3fac17/1-rendered.pptx"
+            "path": "output/rendered.pptx"
           }
         },
         {
@@ -201,11 +201,11 @@
       ],
       "golden": {
         "fixtures": [
-          "fixtures/1.2/97345bd9-1653-4350-bbb6-0f2a8d3fac17/0-shell.pptx",
-          "fixtures/1.2/97345bd9-1653-4350-bbb6-0f2a8d3fac17/1-rendered.pptx"
+          "fixtures/1.2/bcca7523-3c9d-4ae4-89bd-f674dbd7b168/0-shell.pptx",
+          "fixtures/1.2/bcca7523-3c9d-4ae4-89bd-f674dbd7b168/1-rendered.pptx"
         ],
-        "output": "render ${params.month} total 2000000",
-        "attemptId": "97345bd9-1653-4350-bbb6-0f2a8d3fac17",
+        "output": "render 2026-09 total 2000000",
+        "attemptId": "bcca7523-3c9d-4ae4-89bd-f674dbd7b168",
         "ignore": [
           "title"
         ]

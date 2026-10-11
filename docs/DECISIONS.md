@@ -365,6 +365,10 @@
   CI에 setup-python + openpyxl (+ M5.3-2부터 python-pptx).
 - M5.3-1: 파일 내용 감사. script-kind 스크립트 + 고정(in/inout) 템플릿 파일
 - M5.3.1-1: file_exists 논리 경로. export 시 auto file_exists의
+- M5.3.1-2: auto 감사 구멍 봉합. fixtures/ 형태 file_exists는 시스템 경로라
+  건너뛰므로, manifest source 문자열을 finalize에서 직접 감사 (바인딩 해석분
+  제외). examples/procedures/monthly는 정의부 기간 0건 (golden·goldenArgs·
+  createdAt 제외, m531-monthly-grep.test.ts로 고정).
 - M5.3.1-4: golden.output 원문. 저장 시점 마스킹 제거 (confirm·updateGolden).
   비교 시점 마스킹(recordings)은 유지 — passthrough 재바인딩 비교는 그대로 통과.
   golden.output은 replay 전용 (drift 기준 아님, 표시용). 원문 포함 시
