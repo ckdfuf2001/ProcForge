@@ -181,6 +181,29 @@ describe("M5.5-4 approvals 매칭", () => {
     expect(matchApproval(star, "s", "t", { q: "other" })).toBe(false);
   });
 
+  it("M5.5-4.3-2: URL 모드 (origin+세그먼트)", () => {
+    const e = (prefix: string) => ({
+      node: { id: "1", hash: "h" }, tool: { server: "s", name: "t" }, args: { url: { $prefix: prefix } },
+    });
+    const pub = e("https://a.com/public/");
+    expect(matchApproval(pub, "s", "t", { url: "https://a.com/public/x" })).toBe(true);
+    expect(matchApproval(pub, "s", "t", { url: "https://a.com.evil.com/public/x" })).toBe(false);
+    expect(matchApproval(pub, "s", "t", { url: "https://a.com@evil.com/public/x" })).toBe(false);
+    expect(matchApproval(pub, "s", "t", { url: "https://a.com/public/../admin" })).toBe(false);
+    expect(matchApproval(pub, "s", "t", { url: "https://a.com/%2e%2e/admin" })).toBe(false);
+    expect(matchApproval(pub, "s", "t", { url: "https://A.COM/public/x" })).toBe(true);
+    expect(matchApproval(pub, "s", "t", { url: "https://a.com:443/public/x" })).toBe(true);
+    expect(matchApproval(pub, "s", "t", { url: "https://a.com/private" })).toBe(false);
+    expect(matchApproval(pub, "s", "t", { url: "not a url" })).toBe(false);
+    // origin 뒤 "/" 없는 패턴은 로드 거부.
+    const d = mkdtempSync(join(tmpdir(), "pf-m543u-"));
+    writeFileSync(join(d, "approvals.json"), JSON.stringify({
+      version: 2,
+      entries: [{ node: { id: "1", hash: "h" }, tool: { server: "s", name: "t" }, args: { url: { $prefix: "https://a.com" } } }],
+    }));
+    expect(() => loadApprovals(d)).toThrow(/bad_request|형식 오류/);
+  });
+
   it("M5.5-4.3-1: v1 변환 (*→$any, 끝*→$prefix)", () => {
     expect(migrateV1Value("*")).toEqual({ $any: true });
     expect(migrateV1Value("https://a.com/*")).toEqual({ $prefix: "https://a.com/" });

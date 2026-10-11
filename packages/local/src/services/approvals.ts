@@ -52,7 +52,11 @@ function isValidPatternValue(v: unknown): boolean {
       return (v as { $any?: unknown }).$any === true;
     }
     if (keys.length === 1 && keys[0] === "$prefix") {
-      return typeof (v as { $prefix?: unknown }).$prefix === "string";
+      const pv = (v as { $prefix?: unknown }).$prefix;
+      if (typeof pv !== "string") return false;
+      // M5.5-4.3-2: scheme:// 시작이면 origin 뒤 "/" 필수.
+      if (SCHEME_RE.test(pv) && !URL_PREFIX_RE.test(pv)) return false;
+      return true;
     }
     return Object.values(v as Record<string, unknown>).every(isValidPatternValue);
   }
@@ -128,10 +132,35 @@ export function migrateV1Value(v: unknown): unknown {
   return v;
 }
 
-// M5.5-4.3-1: $prefix 비교 (문자열 접두. URL 모드는 4.3-2에서 정규화).
+// M5.5-4.3-1: $prefix 비교. scheme:// 시작이면 URL 모드 (4.3-2), 아니면 문자열 접두.
 export function matchPrefix(prefix: unknown, actual: unknown): boolean {
   if (typeof prefix !== "string") return false;
-  return typeof actual === "string" && actual.startsWith(prefix);
+  if (typeof actual !== "string") return false;
+  if (SCHEME_RE.test(prefix)) return matchUrlPrefix(prefix, actual);
+  return actual.startsWith(prefix);
+}
+
+const SCHEME_RE = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//;
+// URL 패턴은 origin 뒤 "/" 필수 (없으면 로드 시 bad_request).
+const URL_PREFIX_RE = /^[a-zA-Z][a-zA-Z0-9+.-]*:\/\/[^/]+\//;
+
+// M5.5-4.3-2: URL 모드. 실제 값을 new URL()로 정규화 (호스트 소문자·기본 포트·
+// dot 세그먼트 해소) 후 origin 정확 일치 + path 세그먼트 접두 비교.
+export function matchUrlPrefix(prefix: string, actual: string): boolean {
+  let p: URL;
+  let a: URL;
+  try {
+    p = new URL(prefix);
+    a = new URL(actual);
+  } catch {
+    return false;
+  }
+  if (a.origin !== p.origin) return false;
+  // 빈 세그먼트 제외 후 접두 비교 ("/" = origin 전체, "/public/" = public 하위).
+  const pp = p.pathname.split("/").filter((s) => s !== "");
+  const ap = a.pathname.split("/").filter((s) => s !== "");
+  if (pp.length > ap.length) return false;
+  return pp.every((s, i) => s === ap[i]);
 }
 
 function matchValue(pattern: unknown, actual: unknown): boolean {
