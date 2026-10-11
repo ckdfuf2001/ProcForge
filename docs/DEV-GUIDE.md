@@ -379,6 +379,21 @@ C4 CI E2E에도 C2·C3를 fake 서버로 추가. M5-dogfood.md 3절을 실제 �
    겹치면 conflict (exit 1 또는 별도 코드 4, 문서화).
 6. scheduling.md Windows 예시: cmd.exe /c 또는 node 절대경로, "로그온 여부와 관계없이 실행" 명시.
 
+### M5.5-4.2 (승인 정합성 보강, M5.5-6보다 먼저)
+1. 승인 매칭은 논리 경로 기준 (rewritePaths 전 인자 또는 pathnorm {RUNFS} 정규화).
+   수락 테스트: approve CLI 생성 → 수정 없이 run --unattended → exit 0.
+   문서의 "직접 고쳐 써라" 삭제.
+2. approve CLI: var/generated 키는 --allow-wildcard <key> 명시 시에만 "*" 생성,
+   없으면 bad_request(exit 2) + 키 목록. 패턴 값에 접두 와일드카드 허용
+   ("https://a.com/*", 끝 *만, 정규식 금지). 테스트: 다른 호스트 URL → exit 3.
+3. procedure.json 텍스트 직접 수정(args 값 1글자) → run --unattended exit 3 +
+   "승인 갱신 필요" 테스트. 런타임 hash가 파일 내용에서 재계산되는지 확인하고
+   DECISIONS에 기록.
+4. cmdApprove 대상 판별 전 "\" → "/" 정규화. win32 테스트.
+5. runSession: 절차서 잠금 실패 시 세션 잠금 해제(finally) 테스트. 절차서 잠금
+   staleMs를 문서(60s)와 일치시키고 실행 중 하트비트가 .run.lock에도 적용되는지 테스트.
+6. check:env에 NODE_ENV=production 경고 추가.
+
 ### M5 검증과 실행 분리
 - `procforge test <proc>`: replay 전용, drift 검출만.
 - `procforge run <procedure> --param k=v ... [--out <dir>]`: live 실행 전용.
@@ -494,3 +509,4 @@ C4 CI E2E에도 C2·C3를 fake 서버로 추가. M5-dogfood.md 3절을 실제 �
 | 2026-10-11 | 6, 8 | M5.5-4.1 신설 (무인 실행 보강 0~6): CI 경위·exit 확장·args 정확일치·nodeHash 승인·generated 거부·run 잠금·Windows 예시 | M5.5-4 완료 후속 |
 | 2026-10-11 | 6, 8 | M5.5-4.1 완료 (1~6): exit 4종·정확일치·nodeHash+approve CLI·generated 거부·.run.lock+exit 4·Windows 예시 (양 모드 m55-unattended·filestore) | M5.5-5 dogfood 전 |
 | 2026-10-11 | 6, 8 | M5.5-5 완료: dogfood daily-crawl E2E (run1·run2 누적 + stale exit 3 + 겹침 conflict, 양 모드 m55-dogfood 3/3) | M5.5-6 문구 전 |
+| 2026-10-11 | 6, 8 | M5.5-4.2 신설 (승인 정합성 보강 1~6): 논리경로 매칭·wildcard 명시·해시 재계산·경로 정규화·잠금 finally·NODE_ENV 경고 | M5.5-6보다 먼저 |
