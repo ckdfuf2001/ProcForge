@@ -361,7 +361,8 @@ export class CoreService implements CoreClient {
       instruction:
         `루트 노드다. 이 작업이 툴 1회 호출로 가능한지 판단하라. 가능하면 실행 후 pf_report(selfVerdict/selfReason 필수)로 보고하고, 너무 크면 pf_split으로 분해하라. ` +
         `탐색 실행(probing)은 .procforge/sandbox/${sid}/ 작업 사본에서만 하라. ` +
-        `항목 반복은 map, 페이지는 until, 지난 실행 기억은 state를 쓰라.`,
+        `항목 반복은 map, 페이지는 until, 지난 실행 기억은 state를 쓰라. ` +
+        `offset·cursor 증가 연산은 ref로 못 하므로 until 본문을 script로 받아라.`,
     };
   }
 
@@ -447,7 +448,8 @@ export class CoreService implements CoreClient {
         ? `사람이 인자를 수정함(node.suggestedArgs 참조). 이 인자로 실행 후 pf_report.`
         : `노드 ${n.id}(${n.goal}): 툴 1회로 가능한지 판단하라. 가능하면 sandbox(.procforge/sandbox/${sessionId}/) 사본에서 실행 후 ` +
           `pf_report(selfVerdict/selfReason 필수), 아니면 pf_split. pass여도 leaf 자동 확정 없음 — pf_confirm_leaf(tool, argSpecs) 제출이 필요하다. ` +
-          `항목 반복은 map, 페이지는 until, 지난 실행 기억은 state를 쓰라.`,
+          `항목 반복은 map, 페이지는 until, 지난 실행 기억은 state를 쓰라. ` +
+          `offset·cursor 증가 연산은 ref로 못 하므로 until 본문을 script로 받아라.`,
       enteredProbing: wasOpen,
     }, summary: `next ${n.id}` };
   });

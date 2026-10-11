@@ -58,6 +58,11 @@ describe("M2.6-1 instruction 도구명 일치", () => {
     const src = readFileSync(resolve(__dirname, "../../core/src/service.ts"), "utf8");
     expect(src).toContain("항목 반복은 map, 페이지는 until, 지난 실행 기억은 state");
   });
+
+  it("M5.6-h offset 문구 고정", () => {
+    const src = readFileSync(resolve(__dirname, "../../core/src/service.ts"), "utf8");
+    expect(src).toContain("offset·cursor 증가 연산은 ref로 못 하므로 until 본문을 script로");
+  });
 });
 
 describe("instruction-following host E2E", () => {
