@@ -411,6 +411,7 @@ async function execNode(
       goldenAttemptId: n.golden?.attemptId,
       live: mode === "live",
       supplied: opts.supplied?.[n.id],
+      selfCarry,
       state: opts.state,
       topo: {
         isSplit: (id) => byId.get(id)?.status === "split",
