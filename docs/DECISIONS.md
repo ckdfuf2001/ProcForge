@@ -370,6 +370,16 @@
   참조 ${state.k} (var 전용, resolve/checker/validator 지원).
   첫 실행 state 부재 → params.stateDefaults(JSON) 또는 bad_request.
   절대경로 var는 입력 바인딩 제외 (rewritePaths가 처리).
+- M5.5-4.1-0: M5.5-3(612030a)은 CI failure(run 38126010591, ubuntu/inprocess가
+  pnpm -r run test에서 실패, 나머지는 fail-fast 취소) 상태에서 완료 처리됨.
+  원인은 로컬에서 신규 파일(m55-state)만 실행하고 CI를 확인하지 않은 것.
+  CI는 전체 스위트를 돌리므로 m55-until이 실행되어 확정적 실패했음
+  (M5.5-3의 resolveArgs 호출에서 selfCarry 누락 → $self 미전달 → 미수렴.
+  9e1d0b3에서 수정). "CI에서 안 돌았다"가 아니므로 파일 수 검사는 추가하지 않음.
+  교정: 항목 완료 선언 전 API로 head_sha 일치 run의 conclusion=success 확인 필수
+  (gh 없음 → api.github.com repos/.../actions/runs?head_sha=...).
+  중간 커밋은 run이 생기지 않음(푸시 head만 실행). M5.5-4(a75a3c5)는
+  run 38127197074 success로 M5.5-3 회귀까지 해소됨.
 - M5.5-4: 무인 실행. --unattended에서 external은 approvals.json 일치 시만 실행,
   불일치 시 suspended 대신 fail ["approval"] (exit 3). map 거부 항목은 map 실패에
   ["approval"] 전파, until은 그대로 전파. 매칭은 해석된 인자 기준, "*" 와일드카드.

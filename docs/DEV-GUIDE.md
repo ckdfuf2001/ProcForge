@@ -366,6 +366,19 @@ C4 CI E2E에도 C2·C3를 fake 서버로 추가. M5-dogfood.md 3절을 실제 �
    실제 웹 크롤링 도구 연동은 범위 밖(DECISIONS 기록).
 6. 분해 instruction에 "항목 반복은 map, 페이지는 until, 지난 실행 기억은 state" 문구 추가, 계약 테스트 유지.
 
+### M5.5-4.1 (무인 실행 보강)
+0. M5.5-3 CI failure 경위 확인·DECISIONS 기록 (신규 파일만 로컬 실행하고 CI 미확인.
+   CI는 전체 스위트이므로 파일 수 검사는 추가하지 않고 head_sha 일치 확인 강제).
+1. cliErrorExit: bad_request·bad_args·not_found·session_not_found → 2.
+   scheduling.md 표와 테스트로 일치 고정.
+2. approvals 매칭: 패턴에 args가 있으면 키 집합 정확히 일치 (추가 키 → 거부).
+3. approvals 항목에 nodeId + nodeHash 필수. 해시 불일치 → 거부(exit 3) + "승인 갱신 필요".
+   CLI `procforge approve procedures/<name> --node <id>`로 현재 해시 기준 항목 생성 (MCP 도구 추가 금지).
+4. --unattended에서 generated 인자 노드가 있으면 실행 전 bad_request(exit 2).
+5. 절차서 단위 run 잠금 (procedures/<name>/.run.lock, 기존 lockfile 재사용).
+   겹치면 conflict (exit 1 또는 별도 코드 4, 문서화).
+6. scheduling.md Windows 예시: cmd.exe /c 또는 node 절대경로, "로그온 여부와 관계없이 실행" 명시.
+
 ### M5 검증과 실행 분리
 - `procforge test <proc>`: replay 전용, drift 검출만.
 - `procforge run <procedure> --param k=v ... [--out <dir>]`: live 실행 전용.
@@ -478,3 +491,4 @@ C4 CI E2E에도 C2·C3를 fake 서버로 추가. M5-dogfood.md 3절을 실제 �
 | 2026-10-11 | 6, 8 | M5.3.1 신설 (확정 산출물 정합성 1~5): file_exists 논리 경로·auto 감사·기간 params·원문 golden·0.2 보강 | M5.3 완료 후속 |
 | 2026-10-11 | 6, 8 | M5.5 신설 (반복·상태, 크롤링용 0~6): CI URL 검증·pptx_table_sum·map·until·state·무인 실행·dogfood·문구 | M5.3.1 완료 후속 |
 | 2026-10-11 | 6, 8 | M5.5-4 완료: 무인 실행·approvals.json·exit 표·docs/scheduling.md (양 모드 m55-unattended 7/7) | M5.5-3 완료 후속 |
+| 2026-10-11 | 6, 8 | M5.5-4.1 신설 (무인 실행 보강 0~6): CI 경위·exit 확장·args 정확일치·nodeHash 승인·generated 거부·run 잠금·Windows 예시 | M5.5-4 완료 후속 |
