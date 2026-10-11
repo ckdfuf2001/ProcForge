@@ -412,6 +412,17 @@ C4 CI E2E에도 C2·C3를 fake 서버로 추가. M5-dogfood.md 3절을 실제 �
    grep으로 금지.
 5. 0.2 규칙: 클린 클론은 NODE_ENV 미설정 상태로 검증.
 
+### M5.5-4.4 (승인 해시·패턴 보강)
+1. script 노드 approvalHash에 procedures/<name>/scripts/<id>.* 내용 sha256 포함.
+   테스트: dogfood 평탄화 스크립트 1줄 수정 → 하류 map 승인 stale, exit 3.
+2. 상류 참조 수집을 템플릿 resolver와 같은 파서로 통일(var ref + 템플릿 문자열 내 노드 참조).
+   테스트: url 템플릿이 $1.1을 참조할 때 1.1 수정 → stale.
+3. 비-URL $prefix는 경로 모드: posix 정규화, ".."·절대경로 거부, 세그먼트 접두.
+   테스트: "output/" 승인 → "output/../secret.txt" 거부, "output/a.csv" 통과.
+4. URL 패턴에 query/fragment 있으면 로드 시 bad_request. 실제 값에 username/password가 있으면 거부.
+5. toHashable(node) 단일 변환(doc·세션 공용, 캐스팅 제거).
+   테스트: examples/procedures/* 전 노드에서 doc approvalHash == 세션 approvalHash.
+
 ### M5 검증과 실행 분리
 - `procforge test <proc>`: replay 전용, drift 검출만.
 - `procforge run <procedure> --param k=v ... [--out <dir>]`: live 실행 전용.
@@ -529,4 +540,5 @@ C4 CI E2E에도 C2·C3를 fake 서버로 추가. M5-dogfood.md 3절을 실제 �
 | 2026-10-11 | 6, 8 | M5.5-5 완료: dogfood daily-crawl E2E (run1·run2 누적 + stale exit 3 + 겹침 conflict, 양 모드 m55-dogfood 3/3) | M5.5-6 문구 전 |
 | 2026-10-11 | 6, 8 | M5.5-6 완료: 분해 instruction 문구 (pf_start·pf_next) + 계약 테스트 고정 | REVIEW-M5.5 전 |
 | 2026-10-11 | 6, 8 | M5.5-4.3 신설 (승인 패턴 명시화 1~5): $any/$prefix·URL 모드·approvalHash·직접호출 금지·NODE_ENV 미설정 | M5.5-6 완료 후속 |
+| 2026-10-11 | 6, 8 | M5.5-4.4 신설 (승인 해시·패턴 보강 1~5): script 내용·파서 통일·경로 모드·URL 자격·toHashable | 승인 보강 마지막 |
 | 2026-10-11 | 6, 8 | M5.5-4.2 신설 (승인 정합성 보강 1~6): 논리경로 매칭·wildcard 명시·해시 재계산·경로 정규화·잠금 finally·NODE_ENV 경고 | M5.5-6보다 먼저 |
