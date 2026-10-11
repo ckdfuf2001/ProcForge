@@ -539,6 +539,7 @@ C4 CI E2E에도 C2·C3를 fake 서버로 추가. M5-dogfood.md 3절을 실제 �
 | 2026-10-11 | 6, 8 | M5.5-4.1 완료 (1~6): exit 4종·정확일치·nodeHash+approve CLI·generated 거부·.run.lock+exit 4·Windows 예시 (양 모드 m55-unattended·filestore) | M5.5-5 dogfood 전 |
 | 2026-10-11 | 6, 8 | M5.5-5 완료: dogfood daily-crawl E2E (run1·run2 누적 + stale exit 3 + 겹침 conflict, 양 모드 m55-dogfood 3/3) | M5.5-6 문구 전 |
 | 2026-10-11 | 6, 8 | M5.5-6 완료: 분해 instruction 문구 (pf_start·pf_next) + 계약 테스트 고정 | REVIEW-M5.5 전 |
+| 2026-10-11 | 6, 8 | 실모델 dogfood: docs/M5.5-dogfood-real.md (HN 일일 누적, Pf 38호출·무인 2회차·M6 목록 a~j) | 승인 동결, M6 전 |
 | 2026-10-11 | 6, 8 | M5.5-4.3 신설 (승인 패턴 명시화 1~5): $any/$prefix·URL 모드·approvalHash·직접호출 금지·NODE_ENV 미설정 | M5.5-6 완료 후속 |
 | 2026-10-11 | 6, 8 | M5.5-4.4 신설 (승인 해시·패턴 보강 1~5): script 내용·파서 통일·경로 모드·URL 자격·toHashable | 승인 보강 마지막 |
 | 2026-10-11 | 6, 8 | M5.5-4.2 신설 (승인 정합성 보강 1~6): 논리경로 매칭·wildcard 명시·해시 재계산·경로 정규화·잠금 finally·NODE_ENV 경고 | M5.5-6보다 먼저 |
