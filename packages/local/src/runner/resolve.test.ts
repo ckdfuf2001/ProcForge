@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { resolveVar, resolveArgs, substituteItemSpecs, substituteItemVars } from "./resolve.js";
+import { resolveVar, resolveArgs, substituteItemSpecs, substituteItemVars, collectRefNodeIds } from "./resolve.js";
 
 // M5.1-B3: 문자열 내 템플릿 치환.
 
@@ -62,5 +62,32 @@ describe("resolveVar 템플릿", () => {
       live: true,
     });
     expect(out).toEqual({ f: "sales-2026-10.xlsx" });
+  });
+
+  it("M5.5-4.4-2 collectRefNodeIds는 resolveVar 문법과 일치", () => {
+    // 노드 참조 → id, 나머지는 [] (resolveVar 해석 결과와 대조).
+    const outs = new Map<string, unknown>([["1.1", { note: "hi" }]]);
+    const cases: [string, string[]][] = [
+      ["$1.1", ["1.1"]],
+      ["$1.1.note", ["1.1"]],
+      ["$1.1.output.note", ["1.1"]],
+      ["$1", ["1"]],
+      ["$self", []],
+      ["${params.month}", []],
+      ["sales-${params.month}.xlsx", []],
+      ["${state.lastId}", []],
+      ["${item}", []],
+      ["${item.note}", []],
+      ["plain", []],
+      ["$x", []],
+    ];
+    for (const [ref, ids] of cases) {
+      expect(collectRefNodeIds(ref)).toEqual(ids);
+    }
+    // 같은 배터리 resolveVar 결제 확인 (노드 참조는 해석 성공).
+    expect(resolveVar("$1.1.note", {}, outs)).toBe("hi");
+    expect(resolveVar("$self", {}, outs)).toBe(undefined);
+    expect(resolveVar("${params.month}", { month: "2026-10" }, outs)).toBe("2026-10");
+    expect(() => resolveVar("$x", {}, outs)).toThrow();
   });
 });

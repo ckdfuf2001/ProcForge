@@ -145,6 +145,24 @@ export function getByDot(root: unknown, path: string): unknown {
   }
   return cur;
 }
+
+/**
+ * M5.5-4.4-2: 참조 문자열에서 상류 노드 id 수집 (resolveVar와 같은 문법).
+ * $N... 전체 참조 → [N]. ${params.*}·${state.*}·${item*}·$self →
+ * 실행 시점 값이라 내용 고정이 아니므로 []. resolveVar가 throw하는 형식도 [].
+ */
+export function collectRefNodeIds(ref: string): string[] {
+  if (typeof ref !== "string") return [];
+  if (ref === "$self") return [];
+  if (ref.includes("${state.")) return [];
+  if (/^\$\{params\.[A-Za-z0-9_.-]+\}$/.test(ref)) return [];
+  if (ref.includes("${params.")) return [];
+  if (ref.startsWith("${")) return [];
+  const m = /^\$(\d+(?:\.\d+)*)(.*)$/.exec(ref);
+  if (!m) return [];
+  return [m[1]];
+}
+
 export function resolveVar(
   ref: string,
   params: Record<string, string>,

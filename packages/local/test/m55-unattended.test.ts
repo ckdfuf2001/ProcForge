@@ -739,3 +739,65 @@ describe("M5.5-4.3-3 approvalHash", () => {
     expect(runExitCode({ failed: r.report.summary.fail, suspended: 0, approvalBlocked: true })).toBe(3);
   }, 180000);
 });
+
+describe("M5.5-4.4-2 url 템플릿 상류 참조", () => {
+  async function buildUrlChain(): Promise<ProcForgeApp> {
+    const { client } = testStack(pfdir);
+    const app = new ProcForgeApp({ core: client, procforgeDir: pfdir, projectRoot: root });
+    const started = await client.pfStart({ request: "urlchain", params: {}, toolCatalog: ECHO_CAT });
+    const sid = started.session.id;
+    await client.pfResolve({
+      sessionId: sid, nodeId: "1", decision: "split",
+      children: [{ goal: "원본" }, { goal: "가져오기", dependsOn: ["1.1"] }],
+    });
+    const r1 = await client.pfReport({
+      sessionId: sid, nodeId: "1.1", tool: { server: "fake-ppt", name: "echo" },
+      args: { note: "https://a.com/list" }, resultSummary: "url",
+      resultJson: { note: "https://a.com/list" },
+      selfVerdict: "pass", selfReason: "ok",
+    });
+    expect(r1.verdict).toBe("pass");
+    await client.pfResolve({
+      sessionId: sid, nodeId: "1.1", decision: "leaf",
+      tool: { server: "fake-ppt", name: "echo" },
+      argSpecs: { note: { kind: "fixed", value: "https://a.com/list" } } as never,
+    });
+    const r2 = await client.pfReport({
+      sessionId: sid, nodeId: "1.2", tool: { server: "fake-ppt", name: "echo" },
+      args: { url: "https://a.com/list" }, resultSummary: "fetch",
+      resultJson: { url: "https://a.com/list" },
+      selfVerdict: "pass", selfReason: "ok",
+    });
+    expect(r2.verdict).toBe("pass");
+    await client.pfResolve({
+      sessionId: sid, nodeId: "1.2", decision: "leaf",
+      tool: { server: "fake-ppt", name: "echo" },
+      argSpecs: { url: { kind: "var", ref: "$1.1.note" } } as never,
+      sideEffect: "external",
+    });
+    const fin = await app.finalize({ sessionId: sid, name: "m55-urlchain" });
+    expect(fin.warnings.filter((w) => w.includes("bad_"))).toEqual([]);
+    return app;
+  }
+
+  it("url 템플릿이 $1.1 참조 → 1.1 수정 시 stale exit 3", async () => {
+    const app = await buildUrlChain();
+    await app.approveProcedureNode({ procedure: "m55-urlchain", nodeId: "1.2", allowWildcard: ["url"] });
+    const first = await runProcedureTest(pfdir, root, "m55-urlchain", {
+      procforgeDir: pfdir, projectRoot: root, mode: "live", params: {}, unattended: true,
+    });
+    expect(first.report.summary.fail).toBe(0);
+    const procFile = join(pfdir, "procedures", "m55-urlchain", "procedure.json");
+    const text = readFileSync(procFile, "utf8");
+    expect(text).toContain("https://a.com/list");
+    writeFileSync(procFile, text.replace("https://a.com/list", "https://a.com/other"));
+    const r = await runProcedureTest(pfdir, root, "m55-urlchain", {
+      procforgeDir: pfdir, projectRoot: root, mode: "live", params: {}, unattended: true,
+    });
+    const n = r.report.results.find((x) => x.nodeId === "1.2")!;
+    expect(n.status).toBe("fail");
+    expect(n.failedConstraints).toContain("approval");
+    expect(n.detail ?? "").toContain("갱신");
+    expect(runExitCode({ failed: r.report.summary.fail, suspended: 0, approvalBlocked: true })).toBe(3);
+  }, 180000);
+});

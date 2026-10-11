@@ -5,6 +5,7 @@ import { pfError } from "@procforge/shared/errors.js";
 import { computeNodeHash, type ArgSpec, type Constraint } from "@procforge/shared/schema.js";
 import { writeAtomicFile } from "../fsutil.js";
 import { logger } from "../logger.js";
+import { collectRefNodeIds } from "../runner/resolve.js";
 
 // M5.5-4: 무인 실행 사전 승인 (procedures/<name>/approvals.json).
 // M5.5-4.3-1: v2 형식 {version:2, entries}. 패턴 명시화:
@@ -45,18 +46,13 @@ function stable(v: unknown): string {
   return JSON.stringify(v) ?? "null";
 }
 
-function varRefNodeIds(ref: string): string[] {
-  if (ref === "$self" || ref.startsWith("${item")) return [];
-  const m = /^\$(\d+(?:\.\d+)*)(?:\.|$)/.exec(ref);
-  return m ? [m[1]] : [];
-}
-
 function collectArgNodeRefs(specs: Record<string, unknown> | undefined): string[] {
   const out: string[] = [];
   for (const s of Object.values(specs ?? {})) {
     if (typeof s === "object" && s !== null && (s as { kind?: unknown }).kind === "var") {
       const ref = (s as { ref?: unknown }).ref;
-      if (typeof ref === "string") out.push(...varRefNodeIds(ref));
+      // M5.5-4.4-2: 템플릿 resolver와 같은 파서 (resolve.ts collectRefNodeIds).
+      if (typeof ref === "string") out.push(...collectRefNodeIds(ref));
     }
   }
   return out;
@@ -110,7 +106,7 @@ export function computeApprovalHash(
   const refs: string[] = [...collectArgNodeRefs(n.args as Record<string, unknown> | undefined)];
   for (const k of ["map", "until"] as const) {
     const spec = n[k] as { over?: unknown; template?: { args?: Record<string, unknown> } } | undefined;
-    if (typeof spec?.over === "string") refs.push(...varRefNodeIds(spec.over));
+    if (typeof spec?.over === "string") refs.push(...collectRefNodeIds(spec.over));
     refs.push(...collectArgNodeRefs(spec?.template?.args));
   }
   const up = [...new Set(refs)]
