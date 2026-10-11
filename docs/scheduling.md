@@ -8,7 +8,7 @@
 | --- | --- | --- |
 | 0 | 성공 (fail=0, suspended=0) | 정상 완료 |
 | 1 | 검사 실패·중단 (fail>0 또는 suspended>0) | constraint 실패, 생성값·승인 대기 |
-| 2 | 입력 오류 | bad `--param`, procedure 없음, approvals.json 형식 오류 |
+| 2 | 입력 오류 (`bad_request`·`bad_args`·`not_found`·`session_not_found`) | bad `--param`, procedure 없음, approvals.json 형식 오류 |
 | 3 | 승인 필요 | 무인 실행 중 미승인 external (failedConstraints `approval`) |
 
 ## approvals.json

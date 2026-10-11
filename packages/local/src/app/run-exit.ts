@@ -15,5 +15,13 @@ export function runExitCode(o: RunExitInput): number {
 
 export function cliErrorExit(e: unknown): number {
   const code = (e as { code?: unknown } | null)?.code;
-  return code === "bad_request" ? 2 : 1;
+  return typeof code === "string" && INPUT_ERROR_CODES.includes(code) ? 2 : 1;
 }
+
+// M5.5-4.1-1: 입력 오류 코드 (exit 2). scheduling.md 표와 일치 고정.
+const INPUT_ERROR_CODES: readonly string[] = [
+  "bad_request",
+  "bad_args",
+  "not_found",
+  "session_not_found",
+];

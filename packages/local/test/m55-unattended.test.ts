@@ -103,7 +103,13 @@ describe("M5.5-4 종료 코드", () => {
     expect(runExitCode({ failed: 1, suspended: 0, approvalBlocked: false })).toBe(1);
     expect(runExitCode({ failed: 0, suspended: 1, approvalBlocked: false })).toBe(1);
     expect(runExitCode({ failed: 1, suspended: 0, approvalBlocked: true })).toBe(3);
-    expect(cliErrorExit(Object.assign(new Error("x"), { code: "bad_request" }))).toBe(2);
+    // M5.5-4.1-1: scheduling.md 표와 일치 (입력 오류 4종 → 2, 그 외 → 1).
+    for (const code of ["bad_request", "bad_args", "not_found", "session_not_found"]) {
+      expect(cliErrorExit(Object.assign(new Error("x"), { code }))).toBe(2);
+    }
+    for (const code of ["conflict", "internal", "unimplemented"]) {
+      expect(cliErrorExit(Object.assign(new Error("x"), { code }))).toBe(1);
+    }
     expect(cliErrorExit(new Error("x"))).toBe(1);
   });
 });
