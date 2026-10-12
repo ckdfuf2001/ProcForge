@@ -100,6 +100,8 @@ export const ConfirmLeafInputSchema = z.object({
   argSpecs: z.record(ArgSpecSchema),
   sideEffect: z.enum(["none", "local_write", "external"]).optional(),
   ignore: z.array(z.string()).optional(),
+  /** bash leaf opt-in 선언 (절차서 단위 의도, 기본 거부. DECISIONS M5.8.1-1) */
+  allowBash: z.boolean().optional(),
 }).merge(RevisionOptsSchema);
 export type ConfirmLeafInput = z.infer<typeof ConfirmLeafInputSchema>;
 

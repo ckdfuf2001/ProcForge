@@ -577,7 +577,7 @@ c·d·j는 하네스 과제로 DECISIONS에 기록만.
 | M5.7 | 감사·종료·재시도 | [x] | `8075046` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38177878319 | 결정종 단언·fail-on-unverified·script opt-in |
 | M5.7.1 | rubric 경고·unverified 옵션 정리 | [x] | `0651476` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38203088600 | finalize rubric 경고(`a8b11da`)·--allow-unverified 단일화(`e413eb8`) |
 | M5.8 | OpenCode 실제 E2E | [ ] | | | (a) TUI+dist MCP 분해 (b) advise 부분 stale (c) finalize→무수정 approve→이틀 unattended exit 0 (d) docs/M5.8-opencode-e2e.md 기록 — [보류] 발견 1~3, M5.8.1 후 재시도. 성공 기준 유지 |
-| M5.8.1 | E2E 실행벽 해소 | [ ] | | | 0 사실확인·1 실행불가 leaf 거부·2 메시지 정정·3 finalize 사전검사·4 dependsOn 편집 |
+| M5.8.1 | E2E 실행벽 해소 | [ ] | | | 0 사실확인·6 호출주체·1 실행불가 leaf 거부·2 메시지 정정·3 finalize 사전검사·4 dependsOn 편집 |
 | M6 | core 분리 | [ ] | | | |
 | M7 | UI | [ ] | | | |
 

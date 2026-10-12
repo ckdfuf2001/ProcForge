@@ -14,6 +14,9 @@ function toLineIndex(v: unknown, what: string): number {
   return n as number;
 }
 
+// runner가 직접 실행하는 내장 도구 (M5.8.1-1: runnable 판정의 단일 원천).
+export const RUNNER_BUILTINS = ["read", "write", "edit", "bash"] as const;
+
 export class ConnectionPool {
   private mcp = new Map<string, Client>();
   private configs: Record<string, Parameters<typeof connectMcpServer>[1]> = {};
@@ -28,7 +31,7 @@ export class ConnectionPool {
 
   isBuiltin(server: string, name: string): boolean {
     if (server !== "opencode") return false;
-    return ["read", "write", "edit", "bash"].includes(name);
+    return (RUNNER_BUILTINS as readonly string[]).includes(name);
   }
 
   private runPath(p: string): string {

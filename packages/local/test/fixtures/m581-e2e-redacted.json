@@ -1,0 +1,13 @@
+{
+  "source": "M5.8 1회차 하위 테스트 세션 77c17c91 (redacted: 결과물·경로·호출 기록 제거, 확정 입력 형태만 보존)",
+  "nodes": [
+    {
+      "id": "1.1",
+      "goal": "Algolia search_by_date(tags=story)로 최신 스토리 목록 조회",
+      "tool": { "server": "opencode", "name": "bash" },
+      "argSpecs": {
+        "command": { "kind": "fixed", "path": "in", "value": "curl -s (Algolia API)" }
+      }
+    }
+  ]
+}

@@ -41,6 +41,7 @@ import { runProcedureTest } from "../runner/procedure-run.js";
 import { loadProcedureDoc } from "../runner/procedure-run.js";
 import { buildApprovalEntry, saveApproval, scopeWarnings, toHashable } from "../services/approvals.js";
 import { importProcedure } from "../procedure.js";
+import { runnableTools } from "../services/runnable-tools.js";
 import { readRunState, writeRunState } from "../services/run-state.js";
 import { writeJUnitFile, resolveJUnitPath, copyRunFsToOut } from "../services/runner.js";
 import { repairDiscard } from "../services/repair.js";
@@ -427,6 +428,12 @@ export class ProcForgeApp {
       sideEffect: a.sideEffect as "none" | "local_write" | "external" | undefined,
       goldenIgnore: a.ignore as string[] | undefined,
       artifacts: merged,
+      // M5.8.1-1: runner 실행 가능 집합을 core에 전달 (계산만, 판단은 core).
+      // allowBash 미선언이면 기본 거부.
+      runnableTools: runnableTools(
+        (s.toolCatalog ?? []) as { server: string; name: string }[],
+        { allowBash: (a as { allowBash?: unknown }).allowBash === true },
+      ),
       // M4.2-2.5.1-4: 생략 시 읽은 revision 전달 (도중 변경은 conflict)
       expectedRevision: a.expectedRevision ?? s.revision,
       actor: a.actor ?? "host",
@@ -820,6 +827,15 @@ export class ProcForgeApp {
     allAudit.push(...auditStateWrites(fullNodes as { id: string; constraints?: { kind?: string; source?: string }[]; stateWrites?: { key: string; from: string }[] }[]));
     // M5.7.1: llm_rubric 잔존 경고 (무인 실행 unverified → exit 1). strict면 아래에서 거부.
     allAudit.push(...auditRubricConstraints(fullNodes as { id: string; constraints?: { id?: string; kind?: string }[] }[]));
+    // M5.8.1-1: bash leaf 포함 시 run에 --allow-bash 필요 경고 (기본 거부·opt-in은 DECISIONS).
+    {
+      const bashLeaves = (fullNodes as { id: string; tool?: { server?: string; name?: string } }[])
+        .filter((x) => x.tool?.server === "opencode" && x.tool?.name === "bash")
+        .map((x) => x.id);
+      if (bashLeaves.length > 0) {
+        allAudit.push(`bash leaf 포함(${bashLeaves.join(",")}): run에 --allow-bash 필요 (기본 거부, DECISIONS M5.8.1-1)`);
+      }
+    }
     if ((a.strict as boolean | undefined) === true && allAudit.length > 0) {
       throw pfError("bad_request", `고정값 감사 실패(${allAudit.length}건): ${allAudit.slice(0, 3).join("; ")}`);
     }

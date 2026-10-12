@@ -411,9 +411,15 @@
   개명 (반전 의미, 기본 false). `--no-` 형식은 Node parseArgs 미지원이므로 도입하지 않음.
 - M5.6.1-4 세그먼트 중간 리터럴: 자르지 않고 마지막 세그먼트 문자열 접두로 비교
   (URL·경로 공통, 나머지 세그먼트는 정확 일치). "https://h/x/item-" 패턴은
-  "https://h/x/item-123"에 통과, "https://h/y/..."·"https://h/x/other"에 거부.
+  "https://h/y/..."·"https://h/x/other"에 거부.
   마지막 "/"까지 자르는 안은 과승인이라 기각. ${} 2개 이상은 앞부분 과승인
   위험을 approve 출력 경고로 알림.
+- [M5.8.1-1] bash leaf 기본 거부·절차서 단위 opt-in: runner 실행 가능 집합은
+  LocalServices.runnableTools가 계산 (catalog의 MCP 도구 + 활성화 builtin.
+  bash는 confirm 입력 allowBash 선언 시만 포함). App은 집합을 core confirmLeaf
+  입력에 넘기고 판정은 core가 한다 (R1~R4). 명령 문자열을 path in/out/inout으로
+  확정하면 core가 거부 (kind:"script" 사용). bash leaf 포함 절차서는 finalize가
+  run --allow-bash 필요를 경고.
 - M5.5-5: dogfood daily-crawl (fake board 날짜별 3페이지 + detail x3 실패).
   until 수집 → script 평탄화 → map 상세(external·threshold 0.5) → script 누적.
   run1(d1) x1,x2·run2(d2) x4 신규만, state seenIds 누적. (a) stale hash → fail

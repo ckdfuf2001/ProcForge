@@ -720,6 +720,30 @@ export class CoreService implements CoreClient {
         if (!input.tool) throw err("bad_request", "leaf requires tool");
         const cat = s.toolCatalog.find((t) => t.server === input.tool!.server && t.name === input.tool!.name);
         if (!cat) throw err("bad_request", "unknown tool");
+        // M5.8.1-1: runner 실행 가능 집합 소속 판정 (집합 계산은 LocalServices,
+        // 판정은 core. R1~R4: server/App에 판단 if 금지).
+        if (input.runnableTools !== undefined &&
+          !input.runnableTools.includes(`${input.tool!.server}/${input.tool!.name}`)) {
+          throw err("bad_request",
+            `runner에서 실행할 수 없음: ${input.tool!.server}/${input.tool!.name}. ` +
+            `대안: MCP 도구로 다시 확정하거나 kind:"script"로 확정하라 ` +
+            `(bash로 실행한 내용은 scripts/<노드>.py|mjs로 옮겨라).`);
+        }
+        // M5.8.1-1: 경로 역할(in/out/inout) 확정 시 검증. 명령 문자열은 경로가
+        // 아니다 — 키가 command/script/code 계열이거나 값에 공백·셸 메타문자가
+        // 있으면 거부 (fixed만 검사. var 참조의 $ 등은 제외).
+        for (const [k, spec] of Object.entries(input.argSpecs ?? {})) {
+          const ps = spec as { kind?: string; path?: string; value?: unknown };
+          if (ps.kind === "fixed" && (ps.path === "in" || ps.path === "out" || ps.path === "inout")) {
+            const keyFam = /(^|[_-])(command|script|code)$/i.test(k);
+            const badVal = typeof ps.value === "string" && /[ \t\n\r|&;<>()$`'"\\*?!#~]/.test(ps.value);
+            if (keyFam || badVal) {
+              throw err("bad_request",
+                `argSpecs 경로 역할 부적합: ${k} (path:"${ps.path}"). ` +
+                `명령 문자열은 경로가 아니다. kind:"script"로 확정하라 (scripts/<노드>.py|mjs).`);
+            }
+          }
+        }
         const last = n.attempts[n.attempts.length - 1];
         // M2.6-4: external은 승인된 dry-run 계획으로만 확정 (실행 없음)
         const isApprovedExternalPlan =

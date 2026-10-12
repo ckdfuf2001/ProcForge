@@ -94,6 +94,8 @@ export type PfResolveInput = {
   goldenIgnore?: string[];
   /** leaf 확정 시 attempt 결과물로 확정할 목록 (M4.2-2.5-4, 생략 시 마지막 attempt 유지) */
   artifacts?: string[];
+  /** runner 실행 가능 도구 집합 ("server/name", M5.8.1-1). 있으면 core가 소속 판정 */
+  runnableTools?: string[];
   expectedRevision?: number;
   actor?: Actor;
 };

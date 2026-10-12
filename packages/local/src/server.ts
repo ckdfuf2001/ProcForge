@@ -247,6 +247,8 @@ export function buildServer(deps: ServerDeps): McpServer {
         "sideEffect(선택): external 노드는 pf_confirm_leaf에 sideEffect 전달.",
         "external은 직접 실행·보고 금지 — dry-run 계획을 pf_ask_human으로 보고하고",
         "pf_approve 승인 후 확정한다 (미승인 확정 거부).",
+        "bash로 실행한 것은 script leaf로 확정하라 (kind:\"script\", scripts/<노드>.py|mjs).",
+        "runner 실행 불가 도구(opencode/bash 등)는 확정 거부된다 (allowBash opt-in 제외).",
         "leaf 확정과 golden 기록 반환. 다음: pf_next.",
       ].join("\n"),
       inputSchema: ConfirmLeafInputSchema,

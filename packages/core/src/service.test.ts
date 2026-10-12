@@ -1353,3 +1353,40 @@ describe("M5.3-0-1 confirm required 강제", () => {
     expect(warned.instruction).toMatch(/증거 없음/);
   });
 });
+
+describe("M5.8.1-1 runner 실행 가능 집합 + 경로 역할 검증", () => {
+  const bashCat: Session["toolCatalog"] = [
+    { server: "opencode", name: "bash", inputSchema: { type: "object", properties: { command: { type: "string" } }, additionalProperties: true } as unknown as Record<string, unknown>, schemaHash: "h" },
+  ];
+  async function bashReported() {
+    const svc = new CoreService(createMemoryStore(), passEval);
+    const { session } = await svc.pfStart({ request: "r", toolCatalog: bashCat });
+    await svc.pfReport({ ...rep(), sessionId: session.id, tool: { server: "opencode", name: "bash" }, args: { command: "curl x" } });
+    return { svc, sid: session.id };
+  }
+  it("집합에 없으면 확정 거부", async () => {
+    const { svc, sid } = await bashReported();
+    try {
+      await svc.pfResolve({ sessionId: sid, nodeId: "1", decision: "leaf", tool: { server: "opencode", name: "bash" }, argSpecs: { command: { kind: "fixed", value: "curl x" } } as never, runnableTools: [] });
+      expect.unreachable();
+    } catch (e) {
+      expect((e as { code?: string }).code).toBe("bad_request");
+      expect((e as Error).message).toMatch(/runner에서 실행할 수 없음: opencode\/bash/);
+    }
+  });
+  it("집합에 있으면 확정", async () => {
+    const { svc, sid } = await bashReported();
+    const ok = await svc.pfResolve({ sessionId: sid, nodeId: "1", decision: "leaf", tool: { server: "opencode", name: "bash" }, argSpecs: { command: { kind: "fixed", value: "curl x" } } as never, runnableTools: ["opencode/bash"] });
+    expect(ok.node.status).toBe("leaf");
+  });
+  it("command를 path:in으로 확정 → 거부", async () => {
+    const { svc, sid } = await bashReported();
+    try {
+      await svc.pfResolve({ sessionId: sid, nodeId: "1", decision: "leaf", tool: { server: "opencode", name: "bash" }, argSpecs: { command: { kind: "fixed", path: "in", value: "curl -s https://x" } } as never, runnableTools: ["opencode/bash"] });
+      expect.unreachable();
+    } catch (e) {
+      expect((e as { code?: string }).code).toBe("bad_request");
+      expect((e as Error).message).toMatch(/경로 역할 부적합: command/);
+    }
+  });
+});
