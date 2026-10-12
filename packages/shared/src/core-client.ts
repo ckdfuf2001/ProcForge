@@ -152,6 +152,8 @@ export type PfEditNodeInput = {
   stateWrites?: unknown;
   /** script 재시도 선언 (M5.7-3, 멱등 opt-in) */
   retry?: { attempts: number };
+  /** 선행 의존 사후 편집 (M5.8.1-4, 기존 노드만·순환 거부) */
+  dependsOn?: string[];
   expectedRevision?: number;
   actor?: Actor;
 };

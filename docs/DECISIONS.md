@@ -423,7 +423,11 @@
 - [M5.8.1-2] 실행 불가 vs 녹화본 없음 구분: runner가 도구를 실행할 수 없는 경우
   (미지원 내장·allowBash 없는 bash)는 fixture 게이트보다 먼저 "실행 불가"로
   실패. record/live 모드의 fixture 에러에서는 "record로 재녹화" 힌트를 내지
-  않는다 (replay/passthrough는 유지).
+  않는다   (replay/passthrough는 유지).
+- [M5.8.1-4] dependsOn 사후 편집: pf_split에서 형제 2개 이상인데 전부 의존이
+  비어 있으면 경고 + instruction에 연결 문구. pf_edit_node에 dependsOn 추가
+  (CoreClient 경유, 기존 노드만·자기참조/순환 거부, 해시 재계산·stale 전파·
+  revision 증가는 공용 경로).
 - [M5.8.1-3] finalize export 무명 예외 제거: E2E에서 artifact 없는 leaf 트리로
   finalize 4회 internal (완성 .tmp-* 잔재, 교체 안 됨. 유령 재시도 1회 포함).
   확정 원인은 못 잡음. 빌드~교체 사이 fs 실패와 일치하므로 swapDir에

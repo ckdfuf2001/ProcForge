@@ -1390,3 +1390,55 @@ describe("M5.8.1-1 runner 실행 가능 집합 + 경로 역할 검증", () => {
     }
   });
 });
+
+describe("M5.8.1-4 dependsOn", () => {
+  it("split: 형제 전부 의존 없음 → 경고 + 연결 문구", async () => {
+    const svc = new CoreService(createMemoryStore(), passEval);
+    const { session } = await svc.pfStart({ request: "r", toolCatalog: catalog });
+    const out = await svc.pfResolve({
+      sessionId: session.id, nodeId: "1", decision: "split",
+      children: [{ goal: "a" }, { goal: "b" }, { goal: "c" }],
+    });
+    expect(out.instruction).toMatch(/의존 없음/);
+    expect(out.instruction).toMatch(/pf_edit_node로 dependsOn을 연결/);
+  });
+  it("split: 의존 있으면 경고 없음", async () => {
+    const svc = new CoreService(createMemoryStore(), passEval);
+    const { session } = await svc.pfStart({ request: "r", toolCatalog: catalog });
+    const out = await svc.pfResolve({
+      sessionId: session.id, nodeId: "1", decision: "split",
+      children: [{ goal: "a" }, { goal: "b", dependsOn: ["1.1"] }],
+    });
+    expect(out.instruction).not.toMatch(/의존 없음/);
+  });
+  it("editNode dependsOn + advise → 해당 하류만 stale, 나머지 불변", async () => {
+    const svc = new CoreService(createMemoryStore(), passEval);
+    const { session } = await svc.pfStart({ request: "r", toolCatalog: catalog });
+    await svc.pfResolve({
+      sessionId: session.id, nodeId: "1", decision: "split",
+      children: [{ goal: "a" }, { goal: "b" }, { goal: "c" }],
+    });
+    const edited = await svc.pfEditNode({ sessionId: session.id, nodeId: "1.3", dependsOn: ["1.2"] });
+    expect(edited.node.dependsOn).toEqual(["1.2"]);
+    const h11 = (await svc.pfTree(session.id)).nodes.find((n) => n.id === "1.1")!.hash;
+    const h12 = (await svc.pfTree(session.id)).nodes.find((n) => n.id === "1.2")!.hash;
+    const h13 = (await svc.pfTree(session.id)).nodes.find((n) => n.id === "1.3")!.hash;
+    await svc.pfAdvise({ sessionId: session.id, nodeId: "1.2", text: "형식을 맞춰라" });
+    const after = await svc.pfTree(session.id);
+    expect(after.nodes.find((n) => n.id === "1.1")!.hash).toBe(h11);
+    expect(after.nodes.find((n) => n.id === "1.2")!.hash).not.toBe(h12);
+    expect(after.nodes.find((n) => n.id === "1.3")!.hash).not.toBe(h13);
+  });
+  it("editNode dependsOn: 미존재·자기참조·순환 거부", async () => {
+    const svc = new CoreService(createMemoryStore(), passEval);
+    const { session } = await svc.pfStart({ request: "r", toolCatalog: catalog });
+    await svc.pfResolve({
+      sessionId: session.id, nodeId: "1", decision: "split",
+      children: [{ goal: "a" }, { goal: "b" }],
+    });
+    await expect(svc.pfEditNode({ sessionId: session.id, nodeId: "1.2", dependsOn: ["9.9"] })).rejects.toThrow(/dep_missing/);
+    await expect(svc.pfEditNode({ sessionId: session.id, nodeId: "1.2", dependsOn: ["1.2"] })).rejects.toThrow(/자기 참조/);
+    await svc.pfEditNode({ sessionId: session.id, nodeId: "1.1", dependsOn: ["1.2"] });
+    await expect(svc.pfEditNode({ sessionId: session.id, nodeId: "1.2", dependsOn: ["1.1"] })).rejects.toThrow(/cycle/);
+  });
+});

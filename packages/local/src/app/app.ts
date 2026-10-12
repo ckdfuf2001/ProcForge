@@ -662,6 +662,7 @@ export class ProcForgeApp {
       goal: a.goal as string | undefined,
       addConstraints: a.addConstraints as import("@procforge/shared/schema.js").Constraint[] | undefined,
       removeConstraintIds: a.removeConstraintIds as string[] | undefined,
+      dependsOn: a.dependsOn as string[] | undefined,
       expectedRevision: a.expectedRevision as number | undefined,
       actor: (a.actor as Actor | undefined) ?? "host",
     });

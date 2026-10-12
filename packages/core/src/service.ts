@@ -711,7 +711,11 @@ export class CoreService implements CoreClient {
         next.hash = this.hashFor(s.id, next);
         this.store.saveNode(s.id, next);
         this.propagateStale(s.id, n.id);
-        return { result: { node: next, created: withHashes, instruction: `분해 완료. 자식 ${withHashes.length}개를 순서대로 pf_next로 처리하라.` }, summary: `split ${n.id} +${withHashes.length}` };
+        // M5.8.1-4(a): 형제 2개 이상인데 ref/dependsOn 전부 비어 있으면 경고.
+        const depWarn = withHashes.length >= 2 && withHashes.every((c) => c.dependsOn.length === 0)
+          ? ` 경고: 의존 없음 — 형제 ${withHashes.length}개 전부 dependsOn 비어 있음. 데이터 흐름이 있으면 pf_edit_node로 dependsOn을 연결하라.`
+          : "";
+        return { result: { node: next, created: withHashes, instruction: `분해 완료. 자식 ${withHashes.length}개를 순서대로 pf_next로 처리하라.${depWarn}` }, summary: `split ${n.id} +${withHashes.length}` };
       }
       case "leaf": {
         // M1.5-1: leaf 확정은 여기서만. pass여도 report에서 자동 확정 없음.
@@ -965,8 +969,9 @@ export class CoreService implements CoreClient {
       const untilChanged = input.until !== undefined;
       const stateChanged = input.stateWrites !== undefined;
       const retryChanged = (input as { retry?: unknown }).retry !== undefined;
-      if (input.goal === undefined && adds.length === 0 && removes.length === 0 && !mapChanged && !untilChanged && !stateChanged && !retryChanged) {
-        throw err("bad_request", "변경 없음 (goal/addConstraints/removeConstraintIds/map/until/stateWrites/retry 중 하나 필요).");
+      const depChanged = input.dependsOn !== undefined;
+      if (input.goal === undefined && adds.length === 0 && removes.length === 0 && !mapChanged && !untilChanged && !stateChanged && !retryChanged && !depChanged) {
+        throw err("bad_request", "변경 없음 (goal/addConstraints/removeConstraintIds/map/until/stateWrites/retry/dependsOn 중 하나 필요).");
       }
       if (input.goal !== undefined && input.goal.length === 0) throw err("bad_request", "goal이 비었다.");
       let constraints = n.constraints;
@@ -1048,6 +1053,26 @@ export class CoreService implements CoreClient {
         retrySpec = { attempts: ra as number };
       }
       const next: Node = { ...n, goal: input.goal ?? n.goal, constraints, status };
+      // M5.8.1-4(b): dependsOn 사후 편집. 기존 노드만, 자기 참조·순환 거부.
+      // 해시 재계산 + propagateStale은 아래 공용 경로 (revision 증가 포함).
+      if (depChanged) {
+        const deps = input.dependsOn as unknown;
+        if (!Array.isArray(deps) || deps.some((d) => typeof d !== "string" || d.length === 0)) {
+          throw err("bad_request", "bad dependsOn: 문자열 배열 필요");
+        }
+        if ((deps as string[]).includes(n.id)) throw err("bad_request", `bad dependsOn: 자기 참조 ${n.id}`);
+        const all = [...this.store.getNodes(s.id).values()];
+        const existing = new Set(all.map((x) => x.id));
+        const missing = (deps as string[]).filter((d) => !existing.has(d));
+        if (missing.length > 0) {
+          throw err("bad_request", `dep_missing: unknown dependsOn ${missing.join(",")}. 기존 노드만 지정하라.`);
+        }
+        const tentative = new Map(all.map((x) => [x.id, { ...x } as Node]));
+        tentative.set(n.id, { ...n, dependsOn: [...(deps as string[])] } as Node);
+        if (hasCycle([...tentative.values()])) throw err("bad_request", "dependsOn creates dependency cycle");
+        if (hasLineageDep(tentative.get(n.id)!, tentative)) throw err("bad_request", "dependsOn creates dependency cycle (lineage)");
+        next.dependsOn = [...(deps as string[])];
+      }
       if (kind !== undefined) (next as { kind?: string }).kind = kind;
       if (mapSpec !== undefined) (next as { map?: unknown }).map = mapSpec;
       if (untilSpec !== undefined) (next as { until?: unknown }).until = untilSpec;
