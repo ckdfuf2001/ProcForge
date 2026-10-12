@@ -15,26 +15,68 @@ function procDir(procforgeDir: string, name: string): string {
 /**
  * 원자 디렉터리 교체 (M4.1-5). Windows는 rename 덮어쓰기가 안 되므로
  * 기존 폴더를 .old로 이동 후 교체·삭제. 실패 시 롤백 시도.
+ * M5.8.1-3: Windows 파일 잠금(AV 스캔 등) 경합에 EPERM/EBUSY/ENOTEMPTY면
+ * 재시도. 그래도 실패하면 coded 에러 (internal 금지).
  */
 export function swapDir(tmpDir: string, finalDir: string): void {
-  if (!existsSync(finalDir)) {
-    renameSync(tmpDir, finalDir);
-    return;
-  }
-  const oldDir = `${finalDir}.old`;
-  if (existsSync(oldDir)) rmSync(oldDir, { recursive: true, force: true });
-  renameSync(finalDir, oldDir);
   try {
-    renameSync(tmpDir, finalDir);
-  } catch (e) {
-    try {
-      renameSync(oldDir, finalDir);
-    } catch {
-      // 롤백 best-effort
+    if (!existsSync(finalDir)) {
+      renameWithRetry(tmpDir, finalDir);
+      return;
     }
-    throw e;
+    const oldDir = `${finalDir}.old`;
+    if (existsSync(oldDir)) rmSync(oldDir, { recursive: true, force: true });
+    renameWithRetry(finalDir, oldDir);
+    try {
+      renameWithRetry(tmpDir, finalDir);
+    } catch (e) {
+      try {
+        renameWithRetry(oldDir, finalDir);
+      } catch {
+        // 롤백 best-effort
+      }
+      throw e;
+    }
+    rmSync(oldDir, { recursive: true, force: true });
+  } catch (e) {
+    throw codedFs(e, `디렉터리 교체 실패(${tmpDir} → ${finalDir})`);
   }
-  rmSync(oldDir, { recursive: true, force: true });
+}
+
+/** 코드 없는 fs 예외를 bad_request로 (internal 금지). coded는 그대로. */
+export function codedFs(e: unknown, what: string): Error {
+  const code = (e as { code?: string } | null)?.code;
+  if (typeof code === "string" && ["bad_request", "conflict", "not_found", "bad_args"].includes(code)) {
+    return e as Error;
+  }
+  return Object.assign(new Error(`${what}: ${e instanceof Error ? e.message : String(e)}`), { code: "bad_request" });
+}
+
+const RETRYABLE_FS = new Set(["EPERM", "EBUSY", "ENOTEMPTY", "EACCES"]);
+
+function sleepSync(ms: number): void {
+  try {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+  } catch {
+    const end = Date.now() + ms;
+    while (Date.now() < end) { /* fallback */ }
+  }
+}
+
+/** Windows 잠금 경합 시 재시도 후 rename (M5.8.1-3) */
+function renameWithRetry(from: string, to: string, tries = 3): void {
+  let last: unknown;
+  for (let i = 0; i < tries; i++) {
+    try {
+      renameSync(from, to);
+      return;
+    } catch (e) {
+      last = e;
+      if (!(e instanceof Error) || !RETRYABLE_FS.has((e as { code?: string }).code ?? "")) throw e;
+      if (i + 1 < tries) sleepSync(100 * (i + 1));
+    }
+  }
+  throw last;
 }
 
 export type WriteProcedureResult = {
@@ -172,21 +214,23 @@ export function writeProcedure(input: {
     writeFileSync(p, data);
     files.push(rel.replace(/\\/g, "/"));
   };
-  put(
-    "procedure.json",
-    JSON.stringify(
-      rewriteAutoFileExists(
-        collectScripts(doc, projectRoot, buildDir, files),
-        join(procforgeDir, "sessions", input.sessionId, "fixtures-manifest.json"),
+  // M5.8.1-3: export 경로 무명 fs 예외 금지. coded는 그대로, 나머지는 bad_request.
+  try {
+    put(
+      "procedure.json",
+      JSON.stringify(
+        rewriteAutoFileExists(
+          collectScripts(doc, projectRoot, buildDir, files),
+          join(procforgeDir, "sessions", input.sessionId, "fixtures-manifest.json"),
+        ),
+        null,
+        2,
       ),
-      null,
-      2,
-    ),
-  );
-  put("PROCEDURE.md", renderProcedureMd(doc, input.auditFindings ?? []));
-  put("SKILL.md", renderSkillMd(doc));
-  const commandMd = renderCommandMd(doc);
-  put("command.md", commandMd);
+    );
+    put("PROCEDURE.md", renderProcedureMd(doc, input.auditFindings ?? []));
+    put("SKILL.md", renderSkillMd(doc));
+    const commandMd = renderCommandMd(doc);
+    put("command.md", commandMd);
   // tests/: golden + cassette 사본
   const sessDir = join(procforgeDir, "sessions", input.sessionId);
   const copyTree = (srcRel: string, dstRel: string) => {
@@ -224,6 +268,10 @@ export function writeProcedure(input: {
   mkdirSync(dirname(commandFile), { recursive: true });
   writeFileSync(commandFile, commandMd);
   return { dir, files: files.sort(), commandFile };
+  } catch (e) {
+    rmSync(buildDir, { recursive: true, force: true });
+    throw codedFs(e, "export 실패");
+  }
 }
 
 function renderProcedureMd(doc: ProcedureDoc, auditFindings: string[] = []): string {
