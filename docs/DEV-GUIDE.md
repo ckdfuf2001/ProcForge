@@ -9,47 +9,57 @@
 
 ### 0.1 문서 업데이트 규칙 (필수)
 
-에이전트는 작업하면서 아래 문서를 직접 갱신한다. 문서 갱신은 해당 항목 커밋에 함께 넣는다. 별도 커밋으로 미루지 않는다.
+문서 갱신은 해당 항목 커밋에 함께 넣는다. 별도 커밋으로 미루지 않는다.
+(예외: CI run URL은 푸시 후에만 생기므로, SHA·run URL 기록은 다음 커밋에 넣거나 `docs:` 접두어를 붙인 문서 전용 커밋으로 해도 된다.)
 
 | 문서 | 언제 | 무엇을 |
 |---|---|---|
-| `docs/DEV-GUIDE.md` (이 파일) | 항목 완료 시 | 8절 진행 현황 표의 체크박스, 커밋 SHA, run URL |
-| `docs/DEV-GUIDE.md` | 가이드와 구현이 달라질 때 | 해당 절 본문 수정 + 9절 변경 이력에 사유 기록 |
+| `docs/DEV-GUIDE.md` | 항목 완료 시 | 8절 진행 현황 체크박스, 커밋 SHA, run URL |
+| `docs/DEV-GUIDE.md` | 가이드와 구현이 달라질 때 | 해당 절 본문 수정 + 9절 변경 이력에 "무엇을, 왜" |
 | `docs/DECISIONS.md` | 가이드에 없는 가정을 할 때 | `[M<x>-<n>] 제목 — 가정/이유/영향` |
 | `docs/REVIEW-<M>.md` | 마일스톤 종료 시 | 7절 자가 점검 결과 |
 | `README.md`, `SKILL.md`, `command.md` 템플릿 | 사용자에게 보이는 동작이 바뀔 때 | 실제 구현과 일치하게 |
 
-규칙:
-- 가이드 내용을 임의로 생략하거나 바꾸지 않는다. 바꿔야 하면 본문을 고치고 9절에 "무엇을, 왜"를 남긴다.
-- 진행 현황 표는 실제 상태만 적는다. CI가 green이 아니면 체크하지 않는다.
-- 막힌 항목은 `[!]`로 표시하고 원인과 필요한 결정을 적은 뒤 다음 항목으로 넘어가지 말고 보고한다.
-- CI run URL은 푸시 후에만 생기므로, 진행표의 커밋 SHA와 run URL 기록은 "다음 커밋에 포함" 또는 "문서 전용 커밋"을 허용한다. 문서 전용 커밋은 `docs:` 접두어.
+- 가이드 내용을 임의로 생략하거나 바꾸지 않는다. 바꿔야 하면 본문을 고치고 9절에 기록한다.
+- 진행표는 실제 상태만 적는다. CI가 green이 아니면 체크하지 않는다.
+- 막힌 항목은 `[!]`로 표시하고 원인과 필요한 결정을 적는다. 다음 항목으로 넘어가지 말고 보고한다.
 
 ### 0.2 작업 규칙
 
+커밋·푸시
 - 커밋은 항목별로 `M<x>-<n> 요약` 형식. 회귀 테스트를 반드시 같이 넣는다.
-- 검증 3단계:
-  - L1: `pnpm fast` = shared/core 단위 + local 비spawn 테스트, 30초 목표.
-  - L2: 항목 완료 시 L1 + vitest related(변경 파일) 1모드.
-  - L3: 묶음 완료 시 `scripts/dev-verify.mjs` 전체(dist 삭제, 클린 빌드, 양 모드,
-    클린 클론) 후 푸시, head_sha 일치 CI success → 그때 묶음 내 항목 완료 선언.
-    항목별 커밋은 유지.
-- 커밋 직전 `git diff --check` + `--stat` 확인 의무
-  (의도 밖 파일·대량 줄 변화 시 중단).
-- `scripts/dev-verify.mjs`: NODE_ENV 해제, `--dns-result-order=ipv4first`,
-  git push/clone만 재시도(3회 백오프), 테스트 재시도 금지.
-  테스트가 외부 네트워크를 쓰면 실패로 간주 (스위트는 hermetic 유지).
-- 푸시 전 `git status --porcelain`이 비어 있어야 한다. 클린 클론에서 `pnpm install --frozen-lockfile` → build → test 통과를 확인한다.
-  클린 클론 검증은 NODE_ENV 미설정 상태로 한다 (`production`이면 devDependencies가
-  스킵되어 tsc/vitest가 없다. `check:env`가 경고).
-- 로컬 검증은 dist 삭제(clean) 후 build → test. 로컬 vitest는 패키지 간 import를 dist로 해결하므로, core/shared 변경분은 빌드 없이 검증되지 않는다. 클린 클론 결과만 완료 증거로 인정한다.
-- 푸시 전 `pnpm -r build` 필수. 로컬 @types/node가 lockfile과 같은지 `pnpm check:env`로 확인한다 (tsc 결과가 환경에 따라 달라짐).
-- 완료 기준: GitHub Actions에서 ubuntu-latest, windows-latest 둘 다 success. run URL을 보고한다.
-- 보고는 `git diff --stat <base>..<head>` 기준으로, 실제로 바뀐 것만 쓴다.
-- 테스트 명령: `pnpm -r run test -- --run --testTimeout=20000 --hookTimeout=20000`
+- 커밋 직전에 `git diff --check`와 `git diff --stat`를 확인한다. 의도하지 않은 파일이나 대량 줄 변화가 있으면 중단한다.
+- 커밋은 항목마다, 푸시는 묶음이 끝날 때(L3 통과 후) 한다.
+- 푸시 전 `git status --porcelain`이 비어 있어야 한다.
+
+검증 3단계
+- L1: `pnpm fast` (shared/core 단위 + local 비spawn 테스트, 30초 목표). 수시로 실행.
+- L2: 항목 완료 시 L1 + `vitest related <변경 파일>`, 한 모드로.
+- L3: 묶음 완료 시 `node scripts/dev-verify.mjs`를 실행한다. dist 삭제 → 클린 빌드 → 양 모드(inprocess/loopback) 전체 테스트 → 클린 클론 install/build/test → 푸시 순서다.
+- 전체 테스트 명령: `pnpm -r run test -- --run --testTimeout=20000 --hookTimeout=20000`
+  (`pnpm -r test -- ...` 형식은 pnpm이 거부한다.)
+
+환경
+- 클린 클론 검증은 `NODE_ENV`를 설정하지 않은 상태로 한다. (`production`이면 devDependencies가 빠져서 tsc/vitest가 없다.)
+- 로컬 vitest는 패키지 간 import를 dist로 해결한다. 그래서 core/shared 변경은 빌드 없이 검증되지 않는다. 푸시 전 `pnpm -r build`는 필수다.
+- `pnpm check:env`로 로컬 @types/node가 lockfile과 같은지 확인한다. (vitest는 타입체크를 하지 않아서, tsc 실패는 빌드에서만 잡힌다.)
+- `dev-verify.mjs`: NODE_ENV 해제, `--dns-result-order=ipv4first`. 재시도는 git push/clone만(3회 백오프) 하고, 테스트 재시도는 금지한다.
+- 스위트는 hermetic하게 유지한다. 테스트가 외부 네트워크를 쓰면 실패로 본다.
+
+완료 선언
+- 완료 기준: GitHub Actions에서 ubuntu-latest·windows-latest × 양 모드가 모두 success.
+- `api.github.com/repos/ckdfuf2001/ProcForge/actions/runs?head_sha=<푸시한 head>`로 head_sha가 일치하는 run의 `conclusion=success`를 확인한 뒤에만 완료를 선언한다. 중간 커밋에는 run이 없을 수 있으니 묶음의 마지막 head로 확인한다.
+- 실패한 run이 있었으면 감추지 말고 "정정" 항목으로 원인과 해소 커밋을 보고한다.
+
+보고 형식
+- `git diff --stat <base>..<head>` 기준으로 실제로 바뀐 것만 쓴다.
+- 항목별 커밋 SHA와 한 줄 요약, L3 결과(테스트 수), CI run URL(head_sha 일치), 정정 사항, 다음 항목을 적는다.
+
+금지·제약
 - MCP sampling, elicitation에 의존하지 않는다 (OpenCode 미지원).
 - UI는 M7 전까지 착수하지 않는다.
-- 테스트가 무한 대기하면 자식 프로세스·연결 정리 누락부터 의심한다. 항목 단위로 커밋·푸시해서 중간에 멈춰도 진행분이 남게 한다.
+- 새 기능은 CoreClient → App → 어댑터 순서로 만든다. server.ts/cli.ts에는 판단 로직, 파일 접근, store 접근을 넣지 않는다 (R1~R4).
+- 테스트가 무한 대기하면 자식 프로세스·연결 정리 누락부터 의심한다.
 
 ---
 
@@ -550,10 +560,23 @@ c·d·j는 하네스 과제로 DECISIONS에 기록만.
 | M5.3-0 | 확정 게이트 선행 | [x] | `18e0b44` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38082174797 | confirm required 강제·회귀·에러 계약·증거 경고·관찰 기록 |
 | M5.3 | 절차서 신뢰성 마무리 | [x] | `a107ade` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38107570434 | 감사 확장·S2 템플릿·실행 제한·실물 커밋·게이트 범위·에러 계약·검증 규율 |
 | M5.3.1 | 확정 산출물 정합성 | [x] | `7beb2a4` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38113634838 | file_exists 논리 경로·auto 감사·기간 params·원문 golden·0.2 보강 |
-| M5.5 | 반복·상태, 크롤링용 | [ ] | | | 0 정리·1 map·2 until·3 state·4 무인 실행·5 dogfood·6 문구 |
-| M5.5 | 반복 노드 | [ ] | | | |
-| M5.6 | 상태 / sideEffect | [ ] | | | |
-| - | 크롤링 테스트 | [ ] | | | 사람 진행 |
+| M5.5 | 반복·상태, 크롤링용 | [ ] | | | 기계 부분 완료. 실제 호스트 E2E는 M5.8로 분리 |
+| M5.5 | 0 정리 (CI URL 검증·pptx_table_sum) | [x] | `43bb334` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38116594537 | checker + monthly c-sum 교체 |
+| M5.5 | 1 map 노드 | [x] | `67ac055` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38123064242 | 인라인 템플릿·policy·failedItems |
+| M5.5 | 2 until 노드 | [x] | `a904128` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38127197074 | 정정: push run 38124765636 failure (pnpm build) → 후속 success로 회귀 확인 |
+| M5.5 | 3 실행 간 state | [x] | `612030a` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38127197074 | 정정: push run 38126010591 failure (selfCarry) → `9e1d0b3` 해소 (DECISIONS M5.5-4.1-0) |
+| M5.5 | 4 무인 실행 | [x] | `a75a3c5` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38127197074 | approvals·exit 표·scheduling |
+| M5.5 | 4.1 무인 실행 보강 | [x] | `73550c1` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38142216706 | exit 확장·정확일치·nodeHash·generated 거부·run 잠금 |
+| M5.5 | 4.2 승인 정합성 보강 | [x] | `a026242` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38148498515 | 논리경로·wildcard 명시·해시 재계산·finally (REVIEW-M5.5) |
+| M5.5 | 4.3 승인 패턴 명시화 | [x] | `faa8b50` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38151012128 | $any/$prefix v2·URL 모드·approvalHash 재귀 |
+| M5.5 | 4.4 승인 해시·패턴 보강 | [x] | `67aef29` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38156035319 | script 해시·파서 통일·경로 모드·toHashable |
+| M5.5 | 5 dogfood daily-crawl | [x] | `5531d52` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38142527524 | fake E2E run1·run2 누적 + stale + 겹침 |
+| M5.5 | 6 분해 instruction 문구 | [x] | `f01fb3e` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38148687392 | map/until/state 문구 + 계약 테스트 (REVIEW-M5.5 `cf17a0f`) |
+| M5.6 | dogfood-real 보강 한 묶음 | [x] | `d3599ca` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38169625367 | ref 통일·prefix 생성·external 흐름·출력 단언·재시도 |
+| M5.6.1 | 재시도·승인 다듬기 | [x] | `9dcc1c3` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38172339664 | isError 판별·정규식 상한·기본값 고정·범위 경고 |
+| M5.7 | 감사·종료·재시도 | [x] | `8075046` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38177878319 | 결정종 단언·fail-on-unverified·script opt-in |
+| M5.7.1 | rubric 경고·unverified 옵션 정리 | [ ] | | | finalize rubric 경고·--allow-unverified 단일화 (아래 지시 2) |
+| M5.8 | OpenCode 실제 E2E | [ ] | | | (a) TUI+dist MCP 분해 (b) advise 부분 stale (c) finalize→무수정 approve→이틀 unattended exit 0 (d) docs/M5.8-opencode-e2e.md 기록 |
 | M6 | core 분리 | [ ] | | | |
 | M7 | UI | [ ] | | | |
 
@@ -598,3 +621,5 @@ c·d·j는 하네스 과제로 DECISIONS에 기록만.
 | 2026-10-11 | 6, 8 | M5.7 완료 (한 묶음): L3(dev-verify) green·양 OS CI success | — |
 | 2026-10-11 | 6, 8 | 실모델 dogfood 2회차: docs/M5.5-dogfood-real2.md (3 must-haves 녹색·M5.6 실증·M6-f2) | M5.5 닫기 |
 | 2026-10-11 | 6, 8 | M5.5-4.2 신설 (승인 정합성 보강 1~6): 논리경로 매칭·wildcard 명시·해시 재계산·경로 정규화·잠금 finally·NODE_ENV 경고 | M5.5-6보다 먼저 |
+| 2026-10-12 | 0 | 0절을 새 세션 지시 블록으로 교체 (0.1 예외 문구 본문 편입·0.2 소절 구조화·푸시는 묶음 끝 L3 후·완료 선언에 head_sha 일치 API 확인 명시) | 지시 블록과 기존 0절이 실질적으로 다름(푸시 시점 충돌·완료 기준 강화). 0.1 규칙에 따라 본문 교체 + 본 행에 사유 기록 |
+| 2026-10-12 | 8, 9 | 8절 정합화: 표 미갱신 누적 정리, M5.5 실제 호스트 E2E를 M5.8로 분리 | M5.5-4.1~6·M5.6·M5.6.1·M5.7 완료가 9절에만 쌓이고 8절 표는 [ ]로 방치됨. 핵심 흐름(실제 호스트 분해→확정→무인 실행)이 미연결이므로 M5.8로 분리 |
