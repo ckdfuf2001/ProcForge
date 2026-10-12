@@ -5,6 +5,7 @@ import type { CoreClient } from "@procforge/shared/core-client.js";
 import type { Actor } from "@procforge/shared/dto.js";
 import { pfError } from "@procforge/shared/errors.js";
 import { collectCatalog } from "../catalog.js";
+import { FileStore } from "../filestore.js";
 import { constraintSummary, nodeSummary } from "../views.js";
 import type { OUTPUT_SCHEMAS } from "../views.js";
 import type {
@@ -102,12 +103,28 @@ export class ProcForgeApp {
     this.catalogTimeoutMs = deps.catalogTimeoutMs;
   }
 
-  async start(a: StartInput): Promise<OutputOf<"pf_start">> {    const collected = a.toolCatalog
+  async start(a: StartInput): Promise<OutputOf<"pf_start">> {
+    // M5.8.1-6: MCP client가 opencode면 그 버전을 쓴다 (detectOpencodeVersion 대신).
+    const clientName = (a as { clientName?: unknown }).clientName;
+    const clientVersion = (a as { clientVersion?: unknown }).clientVersion;
+    const clientOpencodeVersion =
+      typeof clientName === "string" && /opencode/i.test(clientName) && typeof clientVersion === "string"
+        ? clientVersion
+        : undefined;
+    const collected = a.toolCatalog
       ? undefined
-      : await collectCatalog(this.projectRoot, { cacheDir: join(this.procforgeDir, "cache"), ...(this.catalogTimeoutMs !== undefined ? { timeoutMs: this.catalogTimeoutMs } : {}) });
+      : await collectCatalog(this.projectRoot, { cacheDir: join(this.procforgeDir, "cache"), ...(this.catalogTimeoutMs !== undefined ? { timeoutMs: this.catalogTimeoutMs } : {}),
+        ...(clientOpencodeVersion !== undefined ? { opencodeVersion: clientOpencodeVersion } : {}) });
     const catalog = a.toolCatalog ?? collected!.entries;
     const warnings = collected?.warnings ?? [];
     const out = await this.core.pfStart({ request: a.request as string, params: a.params as Record<string, string> | undefined, toolCatalog: catalog as never, limits: a.limits as never, opencodeVersion: collected?.opencodeVersion });
+    // M5.8.1-6: 세션 메타에 호출 주체 기록 (서버가 기입한 clientInfo 전달).
+    if (typeof clientName === "string" || typeof clientVersion === "string") {
+      new FileStore(this.procforgeDir).touchSession(out.session.id, {
+        ...(typeof clientName === "string" ? { clientName } : {}),
+        ...(typeof clientVersion === "string" ? { clientVersion } : {}),
+      });
+    }
     const sandboxNote = seedSandbox({
       procforgeDir: this.procforgeDir,
       sessionId: out.session.id,

@@ -12,6 +12,11 @@ export type TraceEvent = {
   sessionId: string;
   nodeId?: string;
   ok: boolean;
+  /** 호출 주체 (events.jsonl과 같은 값, M5.8.1-6) */
+  actor?: string;
+  /** MCP initialize clientInfo (M5.8.1-6) */
+  clientName?: string;
+  clientVersion?: string;
 };
 
 export function eventsFile(procforgeDir: string, sessionId: string): string {

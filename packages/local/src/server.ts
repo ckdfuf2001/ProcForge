@@ -124,6 +124,20 @@ export function buildServer(deps: ServerDeps): McpServer {
     }
   };
   // pf_* 호출 기록 (trace용, M3.5)
+  // M5.8.1-6: actor + MCP initialize clientInfo 기록. clientInfo는
+  // underlying Server.getClientVersion()에서 읽는다 (판단 없음, 전달만).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const clientFields = (): { clientName: string; clientVersion: string } | Record<string, never> => {
+    try {
+      const cv = (server as unknown as { server?: { getClientVersion?: () => { name: string; version: string } | undefined } }).server?.getClientVersion?.();
+      if (cv && typeof cv.name === "string" && typeof cv.version === "string") {
+        return { clientName: cv.name, clientVersion: cv.version };
+      }
+    } catch {
+      // 무시 (연결 전 등)
+    }
+    return {};
+  };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const logged = (name: string, cb: any) => async (a: any, extra: any) => {
     const r = (await cb(a, extra)) as { isError?: boolean; structuredContent?: { sessionId?: string } };
@@ -136,6 +150,8 @@ export function buildServer(deps: ServerDeps): McpServer {
           sessionId: sid,
           nodeId: a.nodeId as string | undefined,
           ok: !r.isError,
+          actor: typeof (a as { actor?: unknown }).actor === "string" ? (a as { actor: string }).actor : "host",
+          ...clientFields(),
         });
       }
     } catch {
@@ -160,7 +176,9 @@ export function buildServer(deps: ServerDeps): McpServer {
       outputSchema: OUTPUT_SCHEMAS["pf_start"] as never,
       annotations: WRITE_ANN,
     },
-    H("pf_start"),
+    // M5.8.1-6: 세션 메타·버전 판별용 clientInfo를 App 입력에 전달 (서버가 기입, 판단 없음).
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (async (a: any) => H("pf_start")({ ...(a as Record<string, unknown>), ...clientFields() })) as never,
   );
 
   R(

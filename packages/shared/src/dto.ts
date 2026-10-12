@@ -59,6 +59,9 @@ export const StartInputSchema = z.object({
   toolCatalog: z.array(ToolCatalogEntrySchema).optional(),
   seedFiles: z.array(z.string()).optional(),
   limits: z.object({ maxDepth: z.number().int().min(1), maxRetries: z.number().int().min(0), maxNodes: z.number().int().min(1) }).optional(),
+  /** MCP initialize clientInfo. 서버가 자동 기입, 모델이 직접 넣지 말 것 (M5.8.1-6) */
+  clientName: z.string().optional(),
+  clientVersion: z.string().optional(),
 });
 export type StartInput = z.infer<typeof StartInputSchema>;
 

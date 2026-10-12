@@ -544,9 +544,22 @@ export class FileStore implements Store {
     return join(this.sessionDir(sid), "meta.json");
   }
 
-  touchSession(sid: string): void {
+  touchSession(sid: string, extra?: { clientName?: string; clientVersion?: string }): void {
     assertSessionId(sid);
-    this.writeAtomic(this.metaPath(sid), JSON.stringify({ lastUsedAt: new Date().toISOString() }));
+    // M5.8.1-6: 호출 주체(clientInfo) 기록. 먼저 기록된 값이 있으면 유지 (first-wins).
+    let prev: { clientName?: unknown; clientVersion?: unknown } = {};
+    try {
+      prev = JSON.parse(readFileSync(this.metaPath(sid), "utf8")) as typeof prev;
+    } catch {
+      // 없으면 새로 기록
+    }
+    const name = typeof prev.clientName === "string" ? prev.clientName : extra?.clientName;
+    const version = typeof prev.clientVersion === "string" ? prev.clientVersion : extra?.clientVersion;
+    this.writeAtomic(this.metaPath(sid), JSON.stringify({
+      lastUsedAt: new Date().toISOString(),
+      ...(name !== undefined ? { clientName: name } : {}),
+      ...(version !== undefined ? { clientVersion: version } : {}),
+    }));
   }
 
   /**
