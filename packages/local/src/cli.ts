@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { parseCliArgs, resolveDirs, normalizeCliPath } from "./app/cli-args.js";
 import { createApp } from "./app/bootstrap.js";
-import { cliErrorExit, parseRetryOptions, runErrorExit, runExitCode } from "./app/run-exit.js";
+import { cliErrorExit, parseRetryOptions, resolveAllowUnverified, runErrorExit, runExitCode } from "./app/run-exit.js";
 
 // CLI 어댑터 (M4.2-4-1). 파일·저장소 작업은 App 메서드로만 수행한다
 // (check-deps: app/ 외 local 내부·node:fs import 금지).
@@ -121,7 +121,7 @@ async function cmdRun(): Promise<number> {
   const positional = positionals[1];
   const procRef = (!values.session ? positional : undefined) ?? values.procedure;
   if (!procRef) {
-    console.error("procedure 실행: procforge run procedures/<name> [--param k=v] [--out dir] [--force] [--unattended] [--retry-attempts n] [--retry-base-ms ms]");
+    console.error("procedure 실행: procforge run procedures/<name> [--param k=v] [--out dir] [--force] [--unattended] [--allow-unverified] [--retry-attempts n] [--retry-base-ms ms]");
     return 2;
   }
   const params: Record<string, string> = {};
@@ -146,10 +146,13 @@ async function cmdRun(): Promise<number> {
         return cliErrorExit(e);
       }
     }
-    // M5.7-2: 무인 기본 on (DECISIONS). --allow-unverified로 해제.
-    const fou = (values.unattended ?? false)
-      && (values["fail-on-unverified"] ?? true)
-      && !(values["allow-unverified"] ?? false);
+    // M5.7-2: 무인 기본 on (DECISIONS). M5.7.1: --allow-unverified 단일화,
+    // --fail-on-unverified는 경고 후 무시 (제거 예정).
+    const { allowUnverified, deprecatedWarned } = resolveAllowUnverified(values);
+    if (deprecatedWarned) {
+      console.error("warning: --fail-on-unverified는 제거 예정이며 무시된다. --allow-unverified를 사용하라.");
+    }
+    const fou = (values.unattended ?? false) && !allowUnverified;
     const out = await app.runProcedure({
       procedure: procRef,
       params,
@@ -159,7 +162,7 @@ async function cmdRun(): Promise<number> {
       allowProjectRead: values["allow-project-read"] ?? false,
       unattended: values.unattended ?? false,
       ...(toolRetry ? { toolRetry } : {}),
-      failOnUnverified: fou,
+      allowUnverified,
     });
     console.log(`run ${out.runId} (session ${out.sessionId}): pass=${out.passed} fail=${out.failed} unverified=${out.unverified} skipped=${out.skipped} blocked=${out.blocked} suspended=${out.suspended}`);
     console.log(`report: ${out.reportPath}`);
@@ -177,7 +180,7 @@ async function cmdRun(): Promise<number> {
     }
     const code = runExitCode({
       failed: out.failed, suspended: out.suspended, approvalBlocked: out.approvalBlocked,
-      unverified: out.unverified, failOnUnverified: fou,
+      unverified: out.unverified, allowUnverified: !fou,
     });
     if (code === 1 && out.failed === 0 && out.suspended === 0) {
       console.error("unverified: 사람 검토 필요 (llm_rubric 등). --allow-unverified로 우회");

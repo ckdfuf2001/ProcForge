@@ -369,8 +369,8 @@ export async function runSession(opts: RunOptions): Promise<RunReport> {
     const latestPath = latestReportPath(opts.procforgeDir, opts.sessionId);
     writeAtomicFile(latestPath, JSON.stringify({ runId, at: report.at, nodeHashes: report.nodeHashes, lastPassHash: merged }));
     // M5.5-3: 성공 종료 시에만 state 저장 (원자). 실패·중단은 불변.
-    // M5.7-2: 무인 실행 기본 on — unverified>0이면 저장 안 함.
-    const fou = opts.unattended === true && opts.failOnUnverified !== false;
+    // M5.7-2: 무인 실행 기본 on — unverified>0이면 저장 안 함 (M5.7.1: --allow-unverified로 해제).
+    const fou = opts.unattended === true && opts.allowUnverified !== true;
     if (procedureDir && summary.fail === 0 && summary.suspended === 0 && (summary.unverified === 0 || !fou)) {
       const writers = [...store.getNodes(opts.sessionId).values()].filter(
         (x) => Array.isArray((x as { stateWrites?: unknown }).stateWrites) && ((x as { stateWrites?: unknown[] }).stateWrites as unknown[]).length > 0,

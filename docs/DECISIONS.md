@@ -403,6 +403,12 @@
   조용히 통과보다 크게 실패가 낫다. on이면 unverified>0 → exit 1 + state 미저장.
   `--allow-unverified`로 해제 (RunOptions로는 failOnUnverified:false).
   대화형(MCP·세션 실행)은 기존 동작 유지.
+- [M5.7.1-1] `--fail-on-unverified` 제거 예정 — `--allow-unverified`로 단일화
+  (기본 fail-on on 유지). 구 옵션은 1개 버전 동안 경고 후 무시한다.
+  이유: 두 플래그가 같은 스위치를 정반대 극성으로 제어해 조합 의미가 모호했음
+  (`--fail-on-unverified=false`와 `--allow-unverified` 중복).
+  영향: RunOptions/ProcedureRunOptions `failOnUnverified` → `allowUnverified`로
+  개명 (반전 의미, 기본 false). `--no-` 형식은 Node parseArgs 미지원이므로 도입하지 않음.
 - M5.6.1-4 세그먼트 중간 리터럴: 자르지 않고 마지막 세그먼트 문자열 접두로 비교
   (URL·경로 공통, 나머지 세그먼트는 정확 일치). "https://h/x/item-" 패턴은
   "https://h/x/item-123"에 통과, "https://h/y/..."·"https://h/x/other"에 거부.

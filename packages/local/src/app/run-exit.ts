@@ -1,20 +1,37 @@
 // M5.5-4: run 종료 코드 결정 (순수 함수, CLI·테스트 공용).
 // 0 성공 / 1 검사 실패·중단 / 2 입력 오류 / 3 승인 필요 / 4 겹친 실행.
 // M5.7-2: 무인 실행 기본 on — unverified>0도 1.
+// M5.7.1: --allow-unverified 단일화 (기본 false = fail-on on 유지).
 
 export type RunExitInput = {
   failed: number;
   suspended: number;
   approvalBlocked: boolean;
   unverified?: number;
-  failOnUnverified?: boolean;
+  /** unverified>0도 통과 (M5.7.1. 기본 false). */
+  allowUnverified?: boolean;
 };
 
 export function runExitCode(o: RunExitInput): number {
   if (o.approvalBlocked) return 3;
   if (o.failed > 0 || o.suspended > 0) return 1;
-  if ((o.failOnUnverified ?? false) && (o.unverified ?? 0) > 0) return 1;
+  if (!(o.allowUnverified ?? false) && (o.unverified ?? 0) > 0) return 1;
   return 0;
+}
+
+/**
+ * M5.7.1: unverified 옵션 해석. `--allow-unverified` 하나만 유효하고,
+ * `--fail-on-unverified`는 1개 버전 동안 경고 후 무시한다 (제거 예정,
+ * DECISIONS 기록). Node parseArgs는 `--no-` 형식을 지원하지 않으므로 쓰지 않는다.
+ */
+export function resolveAllowUnverified(values: {
+  "allow-unverified"?: boolean;
+  "fail-on-unverified"?: boolean;
+}): { allowUnverified: boolean; deprecatedWarned: boolean } {
+  return {
+    allowUnverified: values["allow-unverified"] === true,
+    deprecatedWarned: values["fail-on-unverified"] !== undefined,
+  };
 }
 
 export function cliErrorExit(e: unknown): number {

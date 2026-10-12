@@ -1030,7 +1030,7 @@ export class ProcForgeApp {
   async runProcedure(a: {
     procedure: unknown; params?: unknown; out?: unknown; force?: unknown;
     allowBash?: unknown; allowProjectRead?: unknown; unattended?: unknown;
-    toolRetry?: unknown; allowUnverified?: unknown; failOnUnverified?: unknown;
+    toolRetry?: unknown; allowUnverified?: unknown;
   }): Promise<{
     runId: string; sessionId: string; mode: "live";
     passed: number; failed: number; unverified: number; skipped: number; blocked: number; suspended: number;
@@ -1041,8 +1041,7 @@ export class ProcForgeApp {
     if (!procRef) throw pfError("bad_request", "procedure가 필요하다.");
     const params = ((a.params ?? {}) as Record<string, string>);
     const unattended = a.unattended === true;
-    // M5.7-2: 무인 기본 on. --allow-unverified 또는 failOnUnverified:false로 해제.
-    const fou = unattended && a.allowUnverified !== true && a.failOnUnverified !== false;
+    // M5.7-2: 무인 기본 on. M5.7.1: --allow-unverified 단일화 (runner가 unattended와 조합해 판단).
     const { report, sessionId } = await runProcedureTest(this.procforgeDir, this.projectRoot, procRef, {
       procforgeDir: this.procforgeDir,
       projectRoot: this.projectRoot,
@@ -1053,7 +1052,7 @@ export class ProcForgeApp {
       allowProjectRead: a.allowProjectRead === true,
       unattended,
       ...((a.toolRetry as { attempts?: number; baseMs?: number } | undefined) ? { toolRetry: a.toolRetry as { attempts?: number; baseMs?: number } } : {}),
-      failOnUnverified: fou,
+      allowUnverified: a.allowUnverified === true,
     });
     let outDir: string | undefined;
     const outOpt = a.out as string | undefined;

@@ -25,6 +25,7 @@ export type CliValues = {
   "allow-wildcard"?: string[];
   "retry-attempts"?: string;
   "retry-base-ms"?: string;
+  /** M5.7.1: 제거 예정 (경고 후 무시). --allow-unverified로 단일화. */
   "fail-on-unverified"?: boolean;
   "allow-unverified"?: boolean;
 };
@@ -54,7 +55,8 @@ export function parseCliArgs(argv: string[]): { values: CliValues; positionals: 
       "allow-wildcard": { type: "string", multiple: true },
       "retry-attempts": { type: "string" },
       "retry-base-ms": { type: "string" },
-      "fail-on-unverified": { type: "boolean", default: true },
+      // M5.7.1: 기본값 제거 — 전달 여부로 제거 경고를 판단한다 (기본 동작은 fail-on on).
+      "fail-on-unverified": { type: "boolean" },
       "allow-unverified": { type: "boolean", default: false },
     },
     allowPositionals: true,

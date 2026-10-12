@@ -22,8 +22,8 @@ export type ProcedureRunOptions = {
   unattended?: boolean;
   /** 도구 호출 재시도 (M5.6-f) */
   toolRetry?: { attempts?: number; baseMs?: number; extraTransient?: string[] };
-  /** unverified>0 실패 처리 (M5.7-2. 무인 기본 on) */
-  failOnUnverified?: boolean;
+  /** unverified>0 통과 허용 (M5.7.1. 기본 false = 무인 실행 fail-on). */
+  allowUnverified?: boolean;
 };
 
 export function resolveProcedureRef(procforgeDir: string, ref: string): { dir: string; file: string } {
@@ -85,7 +85,7 @@ export async function runProcedureTest(
     procedureDir: dir,
     unattended: o.unattended ?? false,
     ...(o.toolRetry ? { toolRetry: o.toolRetry } : {}),
-    ...(o.failOnUnverified !== undefined ? { failOnUnverified: o.failOnUnverified } : {}),
+    ...(o.allowUnverified !== undefined ? { allowUnverified: o.allowUnverified } : {}),
   });
   return { report, sessionId, procedureDir: dir };
 }

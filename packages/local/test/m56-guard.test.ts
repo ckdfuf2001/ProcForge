@@ -4,7 +4,7 @@ import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { ProcForgeApp } from "../src/app/app.js";
 import { runProcedureTest } from "../src/runner/procedure-run.js";
-import { runExitCode } from "../src/app/run-exit.js";
+import { runExitCode, resolveAllowUnverified } from "../src/app/run-exit.js";
 import { testStack } from "./client-mode.js";
 
 // M5.6-g: 누적(stateWrites) 노드 출력 단언 필수 (없으면 경고, strict면 거부).
@@ -116,7 +116,7 @@ describe("M5.6-g 누적 출력 단언", () => {
   }, 60000);
 });
 
-describe("M5.7-2 fail-on-unverified", () => {
+describe("M5.7.1 unverified 기본 on·해제 (구 M5.7-2)", () => {
   async function buildRubric(): Promise<{ app: ProcForgeApp; sid: string }> {
     const { client } = testStack(pfdir);
     const app = new ProcForgeApp({ core: client, procforgeDir: pfdir, projectRoot: root });
@@ -166,18 +166,18 @@ describe("M5.7-2 fail-on-unverified", () => {
     expect(report.summary.fail).toBe(0);
     expect(report.summary.unverified).toBe(1);
     expect(existsSync(statePath())).toBe(false);
-    expect(runExitCode({ failed: 0, suspended: 0, approvalBlocked: false, unverified: 1, failOnUnverified: true })).toBe(1);
+    expect(runExitCode({ failed: 0, suspended: 0, approvalBlocked: false, unverified: 1 })).toBe(1);
   }, 120000);
 
   it("해제 시: exit 0 + state 저장", async () => {
     await buildRubric();
     const { report } = await runProcedureTest(pfdir, root, "m57-fou", {
       procforgeDir: pfdir, projectRoot: root, mode: "live",
-      params: { stateDefaults: '{"k":""}' }, unattended: true, failOnUnverified: false,
+      params: { stateDefaults: '{"k":""}' }, unattended: true, allowUnverified: true,
     });
     expect(report.summary.fail).toBe(0);
     expect(JSON.parse(readFileSync(statePath(), "utf-8"))).toEqual({ k: "a" });
-    expect(runExitCode({ failed: 0, suspended: 0, approvalBlocked: false, unverified: 1, failOnUnverified: false })).toBe(0);
+    expect(runExitCode({ failed: 0, suspended: 0, approvalBlocked: false, unverified: 1, allowUnverified: true })).toBe(0);
   }, 120000);
 });
 
@@ -198,4 +198,24 @@ describe("M5.7.1 finalize rubric 경고", () => {
     const fin = await app.finalize({ sessionId: sid, name: "m571-rubric-clean" });
     expect(fin.warnings.some((w) => w.includes("llm_rubric 잔존"))).toBe(false);
   }, 60000);
+});
+
+describe("M5.7.1 unverified 옵션 정리", () => {
+  it("기본 → unverified 시 exit 1", () => {
+    const r = resolveAllowUnverified({});
+    expect(r).toEqual({ allowUnverified: false, deprecatedWarned: false });
+    expect(runExitCode({ failed: 0, suspended: 0, approvalBlocked: false, unverified: 1, allowUnverified: r.allowUnverified })).toBe(1);
+  });
+
+  it("--allow-unverified → exit 0", () => {
+    const r = resolveAllowUnverified({ "allow-unverified": true });
+    expect(r).toEqual({ allowUnverified: true, deprecatedWarned: false });
+    expect(runExitCode({ failed: 0, suspended: 0, approvalBlocked: false, unverified: 1, allowUnverified: r.allowUnverified })).toBe(0);
+  });
+
+  it("구 옵션 → 경고 + 동작 불변 (기본 on 유지)", () => {
+    const r = resolveAllowUnverified({ "fail-on-unverified": true });
+    expect(r).toEqual({ allowUnverified: false, deprecatedWarned: true });
+    expect(runExitCode({ failed: 0, suspended: 0, approvalBlocked: false, unverified: 1, allowUnverified: r.allowUnverified })).toBe(1);
+  });
 });
