@@ -475,7 +475,7 @@ c·d·j는 하네스 과제로 DECISIONS에 기록만.
    (count·file_exists·json_path·numeric_match 등, llm_rubric 제외).
    llm_rubric만 있으면 finalize 경고, strict는 거부.
    테스트: 빈 CSV를 내는 누적 노드 → strict finalize 거부.
-2. --fail-on-unverified (무인 실행 기본값 on 여부를 DECISIONS에 결정·기록).
+2. --allow-unverified (M5.7.1에서 단일화. 무인 실행 기본 fail-on on, DECISIONS 결정·기록).
    on이면 unverified>0 → exit 1, state 미저장.
 3. script leaf 재시도는 opt-in: 노드에 retry:{attempts} 명시(멱등 선언)한 script만
    일시 오류 재시도, 기본은 미재시도. M5.6-f 판별·상한 재사용. 테스트 포함.
@@ -575,7 +575,7 @@ c·d·j는 하네스 과제로 DECISIONS에 기록만.
 | M5.6 | dogfood-real 보강 한 묶음 | [x] | `d3599ca` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38169625367 | ref 통일·prefix 생성·external 흐름·출력 단언·재시도 |
 | M5.6.1 | 재시도·승인 다듬기 | [x] | `9dcc1c3` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38172339664 | isError 판별·정규식 상한·기본값 고정·범위 경고 |
 | M5.7 | 감사·종료·재시도 | [x] | `8075046` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38177878319 | 결정종 단언·fail-on-unverified·script opt-in |
-| M5.7.1 | rubric 경고·unverified 옵션 정리 | [x] | `e413eb8` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38202876054 | finalize rubric 경고(`a8b11da`)·--allow-unverified 단일화(`e413eb8`) |
+| M5.7.1 | rubric 경고·unverified 옵션 정리 | [x] | `0651476` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38203088600 | finalize rubric 경고(`a8b11da`)·--allow-unverified 단일화(`e413eb8`) |
 | M5.8 | OpenCode 실제 E2E | [ ] | | | (a) TUI+dist MCP 분해 (b) advise 부분 stale (c) finalize→무수정 approve→이틀 unattended exit 0 (d) docs/M5.8-opencode-e2e.md 기록 |
 | M6 | core 분리 | [ ] | | | |
 | M7 | UI | [ ] | | | |
@@ -624,3 +624,4 @@ c·d·j는 하네스 과제로 DECISIONS에 기록만.
 | 2026-10-12 | 0 | 0절을 새 세션 지시 블록으로 교체 (0.1 예외 문구 본문 편입·0.2 소절 구조화·푸시는 묶음 끝 L3 후·완료 선언에 head_sha 일치 API 확인 명시) | 지시 블록과 기존 0절이 실질적으로 다름(푸시 시점 충돌·완료 기준 강화). 0.1 규칙에 따라 본문 교체 + 본 행에 사유 기록 |
 | 2026-10-12 | 8, 9 | 8절 정합화: 표 미갱신 누적 정리, M5.5 실제 호스트 E2E를 M5.8로 분리 | M5.5-4.1~6·M5.6·M5.6.1·M5.7 완료가 9절에만 쌓이고 8절 표는 [ ]로 방치됨. 핵심 흐름(실제 호스트 분해→확정→무인 실행)이 미연결이므로 M5.8로 분리 |
 | 2026-10-12 | 6, 8 | M5.7.1 완료 (한 묶음): finalize llm_rubric 잔존 경고·strict 거부 + --allow-unverified 단일화 (구 옵션 경고 후 무시, RunOptions 개명) | 무인 실행 unverified 사전 안내 + 플래그 중복 해소 |
+| 2026-10-12 | 8 | M5.7.1 기록 정합: 8절행 최종 head(`0651476`)+run 38203088600, M5.7 본문 옵션명 --allow-unverified | 0.1 본문-구현 일치 + 묶음 마지막 head 확인 규칙 |
