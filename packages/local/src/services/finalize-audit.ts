@@ -62,6 +62,28 @@ export function auditStateWrites(
   return out;
 }
 
+/**
+ * M5.7.1: 절차서에 llm_rubric constraint가 남아 있으면 finalize 경고.
+ * 무인 실행에서는 해당 노드가 unverified → exit 1이 되므로 결정적
+ * constraint로 교체하도록 안내한다. strict면 호출 측에서 거부한다.
+ */
+export function auditRubricConstraints(
+  nodes: { id: string; constraints?: { id?: string; kind?: string }[] }[],
+): string[] {
+  const out: string[] = [];
+  for (const n of nodes) {
+    const ids = (n.constraints ?? [])
+      .filter((c) => c.kind === "llm_rubric")
+      .map((c) => c.id ?? "?");
+    if (ids.length > 0) {
+      out.push(
+        `llm_rubric 잔존: ${n.id} (${ids.join(",")}) — 무인 실행 시 이 노드는 unverified → exit 1. 결정적 constraint(count·file_exists·json_path·numeric_match 등)로 바꾸라.`,
+      );
+    }
+  }
+  return out;
+}
+
 /** 텍스트 속 첫 날짜 표현 샘플 (없으면 null) */
 export function findDateSample(text: string): string | null {
   const m = text.match(

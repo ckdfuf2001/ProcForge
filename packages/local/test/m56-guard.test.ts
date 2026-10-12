@@ -180,3 +180,22 @@ describe("M5.7-2 fail-on-unverified", () => {
     expect(runExitCode({ failed: 0, suspended: 0, approvalBlocked: false, unverified: 1, failOnUnverified: false })).toBe(0);
   }, 120000);
 });
+
+describe("M5.7.1 finalize rubric 경고", () => {
+  it("llm_rubric 잔존 시 경고 1건", async () => {
+    const { app, sid } = await buildAcc(true);
+    const fin = await app.finalize({ sessionId: sid, name: "m571-rubric-warn" });
+    expect(fin.warnings.filter((w) => w.includes("llm_rubric 잔존: 1.2"))).toHaveLength(1);
+  }, 60000);
+
+  it("strict면 거부", async () => {
+    const { app, sid } = await buildAcc(true);
+    await expect(app.finalize({ sessionId: sid, name: "m571-rubric-strict", strict: true })).rejects.toThrow(/llm_rubric 잔존: 1\.2/);
+  }, 60000);
+
+  it("rubric 없음 → 경고 없음", async () => {
+    const { app, sid } = await buildAcc(false);
+    const fin = await app.finalize({ sessionId: sid, name: "m571-rubric-clean" });
+    expect(fin.warnings.some((w) => w.includes("llm_rubric 잔존"))).toBe(false);
+  }, 60000);
+});

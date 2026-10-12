@@ -43,7 +43,7 @@ import { importProcedure } from "../procedure.js";
 import { readRunState, writeRunState } from "../services/run-state.js";
 import { writeJUnitFile, resolveJUnitPath, copyRunFsToOut } from "../services/runner.js";
 import { repairDiscard } from "../services/repair.js";
-import { auditFixedValues, auditStateWrites, findDateSample } from "../services/finalize-audit.js";
+import { auditFixedValues, auditRubricConstraints, auditStateWrites, findDateSample } from "../services/finalize-audit.js";
 import { auditContentTexts, collectAuditContent } from "../services/audit-content.js";
 import { buildTrace, formatTraceMarkdown } from "../trace.js";
 import { exportSession } from "../export.js";
@@ -801,6 +801,8 @@ export class ProcForgeApp {
     // tree 요약에는 stateWrites가 없으므로 전체 노드로 감사.
     const fullNodes = await Promise.all(nodes.map((n) => this.core.getNode(sid, n.id)));
     allAudit.push(...auditStateWrites(fullNodes as { id: string; constraints?: { kind?: string; source?: string }[]; stateWrites?: { key: string; from: string }[] }[]));
+    // M5.7.1: llm_rubric 잔존 경고 (무인 실행 unverified → exit 1). strict면 아래에서 거부.
+    allAudit.push(...auditRubricConstraints(fullNodes as { id: string; constraints?: { id?: string; kind?: string }[] }[]));
     if ((a.strict as boolean | undefined) === true && allAudit.length > 0) {
       throw pfError("bad_request", `고정값 감사 실패(${allAudit.length}건): ${allAudit.slice(0, 3).join("; ")}`);
     }
