@@ -575,7 +575,7 @@ c·d·j는 하네스 과제로 DECISIONS에 기록만.
 | M5.6 | dogfood-real 보강 한 묶음 | [x] | `d3599ca` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38169625367 | ref 통일·prefix 생성·external 흐름·출력 단언·재시도 |
 | M5.6.1 | 재시도·승인 다듬기 | [x] | `9dcc1c3` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38172339664 | isError 판별·정규식 상한·기본값 고정·범위 경고 |
 | M5.7 | 감사·종료·재시도 | [x] | `8075046` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38177878319 | 결정종 단언·fail-on-unverified·script opt-in |
-| M5.7.1 | rubric 경고·unverified 옵션 정리 | [ ] | | | finalize rubric 경고·--allow-unverified 단일화 (아래 지시 2) |
+| M5.7.1 | rubric 경고·unverified 옵션 정리 | [x] | `e413eb8` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38202876054 | finalize rubric 경고(`a8b11da`)·--allow-unverified 단일화(`e413eb8`) |
 | M5.8 | OpenCode 실제 E2E | [ ] | | | (a) TUI+dist MCP 분해 (b) advise 부분 stale (c) finalize→무수정 approve→이틀 unattended exit 0 (d) docs/M5.8-opencode-e2e.md 기록 |
 | M6 | core 분리 | [ ] | | | |
 | M7 | UI | [ ] | | | |
