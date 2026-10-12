@@ -10,6 +10,7 @@ import { logger } from "../logger.js";
 import { writeAtomicFile } from "../fsutil.js";
 import { normalizeArgSpecs, fixtureFileExists, isEscapeRel, readManifest } from "../artifacts.js";
 import { ConnectionPool } from "./connections.js";
+import { RUNNER_BUILTINS } from "./connections.js";
 import { findRecording, loadCassette, recordKey, saveRecording, toToolResponse, compareToolResponses } from "./recordings.js";
 import { getByDot, resolveArgs, resolveVar, substituteItemSpecs, substituteParams } from "./resolve.js";
 import { loadProcedureState, procedureStatePath, saveProcedureState } from "../services/procedure-state.js";
@@ -521,6 +522,19 @@ async function execNode(
   if ((n as { kind?: string }).kind === "until") {
     return execUntil(opts, params, outputs, pool, fsDir, n, mode, byId, runId, start);
   }
+  // M5.8.1-2: 도구 자체 실행 불가 vs 녹화본 없음 구분. 실제 호출이 일어나는
+  // record/passthrough/live에서만 판정 (replay는 녹화 사용, 실행 없음).
+  // fixture 게이트(rewritePaths)보다 먼저여서 "재녹화" 힌트에 가려지지 않는다.
+  if (mode === "record" || mode === "passthrough" || mode === "live") {
+    const srv = n.tool?.server;
+    const nm = n.tool?.name;
+    if (srv === "opencode" && nm !== undefined && !(RUNNER_BUILTINS as readonly string[]).includes(nm)) {
+      throw Object.assign(new Error(`runner 미지원 내장 도구: opencode/${nm}`), { code: "bad_request" });
+    }
+    if (srv === "opencode" && nm === "bash" && opts.allowBash !== true) {
+      throw Object.assign(new Error(`runner에서 bash 실행 불가 (allowBash 필요)`), { code: "bad_request" });
+    }
+  }
   // 구 세션 마이그레이션: 절대경로 fixed → 상대경로 (M3.2-2)
   const normSpecs = normalizeArgSpecs(n.args ?? {}, {
     sandboxDir: join(opts.procforgeDir, "sandbox", opts.sessionId),
@@ -584,7 +598,7 @@ async function execNode(
   const args = rewritePaths(
     logicalArgs,
     roles,
-    { fsDir, projectRoot: opts.projectRoot, allowProjectRead: opts.allowProjectRead ?? false, toolReadOnly: readOnly },
+    { fsDir, projectRoot: opts.projectRoot, allowProjectRead: opts.allowProjectRead ?? false, toolReadOnly: readOnly, recordHint: mode !== "record" && mode !== "live" },
   );
   const server = n.tool!.server;
   const tool = n.tool!.name;

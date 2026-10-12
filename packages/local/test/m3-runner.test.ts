@@ -558,6 +558,32 @@ describe("M3.2 runner", () => {
     expect(rep.summary.fail).toBe(1);
     expect(rep.results.find((r) => r.nodeId === "1.1")?.detail).toMatch(/fixture 없음/);
   }, 30000);
+
+  it("M5.8.1-2 record + 실행 불가 도구 → 실행 불가 메시지 (재녹화 힌트 없음)", async () => {
+    const started = await client.pfStart({
+      request: "unrunnable",
+      toolCatalog: [{ server: "opencode", name: "bash", inputSchema: { type: "object", properties: { command: { type: "string" } }, additionalProperties: true }, schemaHash: "b" }] as never,
+      limits: { maxDepth: 3, maxRetries: 2, maxNodes: 10 },
+    });
+    const sid = started.session.id;
+    await client.pfResolve({ sessionId: sid, nodeId: "1", decision: "split", children: [{ goal: "x" }] });
+    await client.pfReport({
+      sessionId: sid, nodeId: "1.1",
+      tool: { server: "opencode", name: "bash" }, args: { command: "curl x" },
+      resultSummary: "ok", resultJson: { n: 1 },
+      selfVerdict: "pass", selfReason: "ok",
+    });
+    await client.pfResolve({
+      sessionId: sid, nodeId: "1.1", decision: "leaf",
+      tool: { server: "opencode", name: "bash" },
+      argSpecs: { command: { kind: "fixed", value: "curl x" } } as never,
+    });
+    const rep = await runSession({ procforgeDir: pfdir, projectRoot: root, sessionId: sid, mode: "record", nodeId: "1.1" });
+    expect(rep.summary.fail).toBe(1);
+    const detail = rep.results.find((r) => r.nodeId === "1.1")?.detail ?? "";
+    expect(detail).toMatch(/실행 불가/);
+    expect(detail).not.toMatch(/재녹화/);
+  }, 30000);
 });
 
 describe("M3.3 runner", () => {

@@ -420,6 +420,10 @@
   입력에 넘기고 판정은 core가 한다 (R1~R4). 명령 문자열을 path in/out/inout으로
   확정하면 core가 거부 (kind:"script" 사용). bash leaf 포함 절차서는 finalize가
   run --allow-bash 필요를 경고.
+- [M5.8.1-2] 실행 불가 vs 녹화본 없음 구분: runner가 도구를 실행할 수 없는 경우
+  (미지원 내장·allowBash 없는 bash)는 fixture 게이트보다 먼저 "실행 불가"로
+  실패. record/live 모드의 fixture 에러에서는 "record로 재녹화" 힌트를 내지
+  않는다 (replay/passthrough는 유지).
 - M5.5-5: dogfood daily-crawl (fake board 날짜별 3페이지 + detail x3 실패).
   until 수집 → script 평탄화 → map 상세(external·threshold 0.5) → script 누적.
   run1(d1) x1,x2·run2(d2) x4 신규만, state seenIds 누적. (a) stale hash → fail

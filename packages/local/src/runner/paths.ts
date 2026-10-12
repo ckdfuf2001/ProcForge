@@ -78,6 +78,9 @@ export type RewriteOpts = {
   allowProjectRead?: boolean;
   /** 도구 readOnlyHint (M3.2-3 추정 2·4단계용) */
   toolReadOnly?: boolean;
+  /** fixture 에러에 "record로 재녹화" 힌트 포함 (기본 true. M5.8.1-2:
+   *  record/live 모드에서는 힌트를 내지 않는다) */
+  recordHint?: boolean;
 };
 
 const URL_RE = /^[a-z][a-z0-9+.-]*:\/\//i;
@@ -110,7 +113,10 @@ export function rewritePaths(
     return proot ? existsSync(resolve(proot, rel)) : false;
   };
   const fixtureError = (argName: string, v: string): Error =>
-    Object.assign(new Error(`fixture 없음: ${argName}=${v}, record 모드로 재녹화`), { code: "bad_request" });
+    Object.assign(
+      new Error(`fixture 없음: ${argName}=${v}${(opts.recordHint ?? true) ? ", record 모드로 재녹화" : ""}`),
+      { code: "bad_request" },
+    );
   const mapOne = (v: string, role: PathRole | InferredRole | undefined, argName: string): string => {
     // M3.4.1-3: weakIn이어도 값이 경로처럼 보이지 않으면 원문 유지 + 경고
     if (role === "weakIn" && !looksLikePath(v)) {
