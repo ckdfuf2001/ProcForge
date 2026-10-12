@@ -576,7 +576,8 @@ c·d·j는 하네스 과제로 DECISIONS에 기록만.
 | M5.6.1 | 재시도·승인 다듬기 | [x] | `9dcc1c3` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38172339664 | isError 판별·정규식 상한·기본값 고정·범위 경고 |
 | M5.7 | 감사·종료·재시도 | [x] | `8075046` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38177878319 | 결정종 단언·fail-on-unverified·script opt-in |
 | M5.7.1 | rubric 경고·unverified 옵션 정리 | [x] | `0651476` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38203088600 | finalize rubric 경고(`a8b11da`)·--allow-unverified 단일화(`e413eb8`) |
-| M5.8 | OpenCode 실제 E2E | [ ] | | | (a) TUI+dist MCP 분해 (b) advise 부분 stale (c) finalize→무수정 approve→이틀 unattended exit 0 (d) docs/M5.8-opencode-e2e.md 기록 |
+| M5.8 | OpenCode 실제 E2E | [ ] | | | (a) TUI+dist MCP 분해 (b) advise 부분 stale (c) finalize→무수정 approve→이틀 unattended exit 0 (d) docs/M5.8-opencode-e2e.md 기록 — [보류] 발견 1~3, M5.8.1 후 재시도. 성공 기준 유지 |
+| M5.8.1 | E2E 실행벽 해소 | [ ] | | | 0 사실확인·1 실행불가 leaf 거부·2 메시지 정정·3 finalize 사전검사·4 dependsOn 편집 |
 | M6 | core 분리 | [ ] | | | |
 | M7 | UI | [ ] | | | |
 
@@ -625,3 +626,4 @@ c·d·j는 하네스 과제로 DECISIONS에 기록만.
 | 2026-10-12 | 8, 9 | 8절 정합화: 표 미갱신 누적 정리, M5.5 실제 호스트 E2E를 M5.8로 분리 | M5.5-4.1~6·M5.6·M5.6.1·M5.7 완료가 9절에만 쌓이고 8절 표는 [ ]로 방치됨. 핵심 흐름(실제 호스트 분해→확정→무인 실행)이 미연결이므로 M5.8로 분리 |
 | 2026-10-12 | 6, 8 | M5.7.1 완료 (한 묶음): finalize llm_rubric 잔존 경고·strict 거부 + --allow-unverified 단일화 (구 옵션 경고 후 무시, RunOptions 개명) | 무인 실행 unverified 사전 안내 + 플래그 중복 해소 |
 | 2026-10-12 | 8 | M5.7.1 기록 정합: 8절행 최종 head(`0651476`)+run 38203088600, M5.7 본문 옵션명 --allow-unverified | 0.1 본문-구현 일치 + 묶음 마지막 head 확인 규칙 |
+| 2026-10-12 | 8 | M5.8.1 신설 (E2E 실행벽 해소 0~4) + M5.8 보류: 발견 1 dependsOn 사후편집 불가·2 finalize internal(artifact 전제)·3 외부 probing 실행 단절 | 하위 테스트 1회차에서 실행 경로 부재 확인. 성공 기준은 유지 |
