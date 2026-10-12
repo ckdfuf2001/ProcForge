@@ -627,3 +627,4 @@ c·d·j는 하네스 과제로 DECISIONS에 기록만.
 | 2026-10-12 | 6, 8 | M5.7.1 완료 (한 묶음): finalize llm_rubric 잔존 경고·strict 거부 + --allow-unverified 단일화 (구 옵션 경고 후 무시, RunOptions 개명) | 무인 실행 unverified 사전 안내 + 플래그 중복 해소 |
 | 2026-10-12 | 8 | M5.7.1 기록 정합: 8절행 최종 head(`0651476`)+run 38203088600, M5.7 본문 옵션명 --allow-unverified | 0.1 본문-구현 일치 + 묶음 마지막 head 확인 규칙 |
 | 2026-10-12 | 8 | M5.8.1 신설 (E2E 실행벽 해소 0~4) + M5.8 보류: 발견 1 dependsOn 사후편집 불가·2 finalize internal(artifact 전제)·3 외부 probing 실행 단절 | 하위 테스트 1회차에서 실행 경로 부재 확인. 성공 기준은 유지 |
+| 2026-10-12 | 8 | M5.8 1회차 기록: docs/M5.8-opencode-e2e.md (세션 77c17c91, UTC advise, (a) 미충족-호스트가 에이전트) | M5.8.1 항목별 근거 + 재시도 기준 |
