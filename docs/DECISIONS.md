@@ -484,6 +484,11 @@
   (공유 스키마 재사용 + 필수 키. 깊은 페이로드는 shared 그대로).
   `x-procforge-version` 헤더, 불일치면 conflict + 업그레이드 힌트.
   에러는 기존 코드 체계 그대로, internal은 고정 메시지만 (스택 비노출).
+- [M6-2] FileStore shared 이동: local/src/{logger,fsutil,filestore}.ts를
+  shared로 이동 (core-server 재사용 + core-server→local import 금지 대응).
+  기존 import 경로는 re-export shim으로 유지 (adapter 검사·테스트 경로 보존).
+  checker는 fs 2종만 local 래퍼에 두고 나머지는 shared로 (core-server는
+  shared 판정기 + deferred 사용, 중복 구현 없음).
 - M5.5-5: dogfood daily-crawl (fake board 날짜별 3페이지 + detail x3 실패).
   until 수집 → script 평탄화 → map 상세(external·threshold 0.5) → script 누적.
   run1(d1) x1,x2·run2(d2) x4 신규만, state seenIds 누적. (a) stale hash → fail

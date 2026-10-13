@@ -31,7 +31,15 @@
     "./procedure": "./dist/procedure.js",
     "./procedure.js": "./dist/procedure.js",
     "./stable": "./dist/stable.js",
-    "./stable.js": "./dist/stable.js"
+    "./stable.js": "./dist/stable.js",
+    "./logger": "./dist/logger.js",
+    "./logger.js": "./dist/logger.js",
+    "./fsutil": "./dist/fsutil.js",
+    "./fsutil.js": "./dist/fsutil.js",
+    "./filestore": "./dist/filestore.js",
+    "./filestore.js": "./dist/filestore.js",
+    "./check": "./dist/check.js",
+    "./check.js": "./dist/check.js"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",

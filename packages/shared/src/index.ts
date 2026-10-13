@@ -13,3 +13,7 @@ export * from "./args-schema.js";
 export * from "./loopback.js";
 export * from "./stable.js";
 export * from "./wire.js";
+export * from "./logger.js";
+export * from "./fsutil.js";
+export * from "./filestore.js";
+export * from "./check.js";

@@ -1,0 +1,659 @@
+import { mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync, unlinkSync, statSync, appendFileSync, renameSync, openSync, writeSync, closeSync, utimesSync } from "node:fs";
+import { join, dirname } from "node:path";
+import { randomUUID, createHash } from "node:crypto";
+import type { Store } from "./store.js";
+import type { CommitChange } from "./store.js";
+import type { Node, Session } from "./schema.js";
+import { pfError } from "./errors.js";
+import type { EventEntry } from "./dto.js";
+import { EventEntrySchema } from "./dto.js";
+import { NodeIdSchema, NodeSchema, SessionIdSchema, SessionSchema } from "./schema.js";
+import { CommitChangeSchema } from "./store.js";
+import { logger } from "./logger.js";
+import * as fsutil from "./fsutil.js";
+
+/** ID 이중 검증 (M2.6-2). 서버 zod에 더해 저장소 진입부에서도 검사. */
+export function assertSessionId(sid: string): void {
+  if (!SessionIdSchema.safeParse(sid).success) throw pfError("bad_request", `bad session id: ${sid}`);
+}
+
+export function assertNodeId(nid: string): void {
+  if (!NodeIdSchema.safeParse(nid).success) throw pfError("bad_request", `bad node id: ${nid}`);
+}
+
+/** lock 회수 계측 (M5.1-A3). 테스트에서 reset 후 단언. */
+export const lockStats = { reclaims: 0 };
+export function resetLockStats(): void {
+  lockStats.reclaims = 0;
+}
+
+/** pid 생존 확인 (M5.1-A1). ESRCH=사망, 그 외(EPERM 포함)=생존 취급. */
+function pidAlive(pid: unknown): boolean {
+  if (typeof pid !== "number" || !Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return (e as { code?: string }).code !== "ESRCH";
+  }
+}
+
+/** lock 파일 내용 읽기 (best-effort) */
+function readLockContent(p: string): { pid?: unknown; token?: unknown } | undefined {
+  try {
+    const parsed = JSON.parse(readFileSync(p, "utf8")) as { pid?: unknown; token?: unknown } | null;
+    if (parsed && typeof parsed === "object") return parsed;
+    return undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+// NOTE: local 전용. core 패키지는 이 파일을 모른다. 합성은 core-inprocess.ts에서만.
+export class FileStore implements Store {
+  constructor(private root: string) {}
+
+  private sessionDir(sid: string): string {
+    return join(this.root, "sessions", sid);
+  }
+
+  private writeAtomic(path: string, data: string): void {
+    fsutil.writeAtomicFile(path, data);
+  }
+
+  // 세션 쓰기는 withLock 안에서 직렬화 (프로세스 간은 .lock advisory lock).
+
+  getSession(id: string): Session | undefined {
+    assertSessionId(id);
+    const p = join(this.sessionDir(id), "session.json");
+    // M4.2-0.5-2: 읽기는 순수 조회 (구 세션 revision 기본값은 파서가 적용).
+    // M4.2-2.5.1-1: pending이 있으면 파일 쓰기 없이 메모리 뷰에 반영.
+    // M4.2-4-0-3: session.json 부재 시 적용 가능 pending에서 뷰 구성.
+    const raw: Record<string, unknown> = {};
+    if (existsSync(p)) Object.assign(raw, JSON.parse(readFileSync(p, "utf8")) as Record<string, unknown>);
+    let found = existsSync(p);
+    for (const change of this.readPendings(id)) {
+      if (change.session) {
+        Object.assign(raw, change.session);
+        found = true;
+      }
+    }
+    if (!found) return undefined;
+    return SessionSchema.parse(raw);
+  }
+
+  saveSession(s: Session): void {
+    assertSessionId(s.id);
+    this.writeAtomic(join(this.sessionDir(s.id), "session.json"), JSON.stringify(s, null, 2));
+  }
+
+  getNodes(sessionId: string): Map<string, Node> {
+    assertSessionId(sessionId);
+    const dir = join(this.sessionDir(sessionId), "nodes");
+    const out = new Map<string, Node>();
+    if (existsSync(dir)) {
+      for (const f of readdirSync(dir)) {
+        if (!f.endsWith(".json") || f === ".lock") continue;
+        const n = NodeSchema.parse(JSON.parse(readFileSync(join(dir, f), "utf8")));
+        if (this.migrateAttemptResultJson(sessionId, n)) {
+          this.saveNode(sessionId, n);
+        }
+        out.set(n.id, n);
+      }
+    }
+    // M4.2-2.5.1-1: pending 반영 메모리 뷰 (쓰기 없음)
+    for (const change of this.readPendings(sessionId)) {
+      for (const n of change.nodes ?? []) out.set(n.id, n);
+    }
+    return out;
+  }
+
+  getNode(sessionId: string, nodeId: string): Node | undefined {
+    assertSessionId(sessionId);
+    assertNodeId(nodeId);
+    const p = join(this.sessionDir(sessionId), "nodes", `${nodeId}.json`);
+    let base: Node | undefined;
+    if (existsSync(p)) base = NodeSchema.parse(JSON.parse(readFileSync(p, "utf8")));
+    // M4.2-2.5.1-1: pending 반영 메모리 뷰 (쓰기 없음)
+    for (const change of this.readPendings(sessionId)) {
+      const found = (change.nodes ?? []).find((n) => n.id === nodeId);
+      if (found) base = found;
+    }
+    if (base && this.migrateAttemptResultJson(sessionId, base)) {
+      this.saveNode(sessionId, base);
+    }
+    return base;
+  }
+
+  /** attempt resultJson 파일 경로 (M5.8.2 후속, R8) */
+  resultJsonPath(sessionId: string, attemptId: string): string {
+    assertSessionId(sessionId);
+    return join(this.sessionDir(sessionId), "resultJson", `${attemptId}.json`);
+  }
+
+  /** resultJson 파일 기록 (best-effort 아님. 실패 시 throw) */
+  writeResultJson(sessionId: string, attemptId: string, value: unknown): void {
+    assertSessionId(sessionId);
+    const p = this.resultJsonPath(sessionId, attemptId);
+    mkdirSync(dirname(p), { recursive: true });
+    this.writeAtomic(p, JSON.stringify(value));
+  }
+
+  /** resultJson 파일 읽기 (없음·손상 시 undefined) */
+  readResultJson(sessionId: string, attemptId: string): unknown | undefined {
+    try {
+      return JSON.parse(readFileSync(this.resultJsonPath(sessionId, attemptId), "utf8"));
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * 구형 inline resultJson 1회 분리 마이그레이션 (M5.8.2 후속).
+   * attempt.resultJson → resultJson/<id>.json + resultJsonMeta.
+   * 멱등. true면 노드가 바뀌어 저장 필요.
+   */
+  migrateAttemptResultJson(sessionId: string, n: Node): boolean {
+    let changed = false;
+    for (const a of n.attempts ?? []) {
+      const rec = a as { resultJson?: unknown; resultJsonMeta?: unknown };
+      if (rec.resultJson === undefined) continue;
+      try {
+        this.writeResultJson(sessionId, a.id, rec.resultJson);
+        const text = JSON.stringify(rec.resultJson) ?? "";
+        rec.resultJsonMeta = {
+          sha256: createHash("sha256").update(text, "utf8").digest("hex"),
+          size: Buffer.byteLength(text, "utf8"),
+          preview: (text as string).slice(0, 4096),
+        };
+        delete rec.resultJson;
+        changed = true;
+      } catch {
+        // 기록 실패 시 다음 기회에 (inline 유지)
+      }
+    }
+    return changed;
+  }
+
+  saveNode(sessionId: string, n: Node): void {
+    assertSessionId(sessionId);
+    assertNodeId(n.id);
+    this.migrateAttemptResultJson(sessionId, n);
+    this.writeAtomic(join(this.sessionDir(sessionId), "nodes", `${n.id}.json`), JSON.stringify(n, null, 2));
+  }
+
+  /** 상태 이벤트 append (R6, 실패를 삼키지 않는다) */
+  appendEvents(sessionId: string, events: EventEntry[]): void {
+    assertSessionId(sessionId);
+    const dir = this.sessionDir(sessionId);
+    mkdirSync(dir, { recursive: true });
+    appendFileSync(join(dir, "events.jsonl"), events.map((e) => JSON.stringify(e)).join("\n") + "\n");
+  }
+
+  /** 상태 이벤트 조회 (R7 히스토리 원천, R7형만) */
+  readEvents(sessionId: string): EventEntry[] {
+    assertSessionId(sessionId);
+    const out = this.readFileEvents(sessionId);
+    // M4.2-2.5.1-1: pending 반영 메모리 뷰 (쓰기 없음, seq 중복 방지)
+    const seen = new Set(out.map((e) => e.seq));
+    for (const change of this.readPendings(sessionId)) {
+      for (const e of change.events ?? []) {
+        if (!seen.has(e.seq)) {
+          seen.add(e.seq);
+          out.push(e);
+        }
+      }
+    }
+    out.sort((a, b) => a.seq - b.seq);
+    return out;
+  }
+
+  /** events.jsonl 파일분만 읽기 (커밋 중복 제거 기준용) */
+  private readFileEvents(sessionId: string): EventEntry[] {
+    const p = join(this.sessionDir(sessionId), "events.jsonl");
+    const out: EventEntry[] = [];
+    if (!existsSync(p)) return out;
+    for (const line of readFileSync(p, "utf8").split("\n")) {
+      const t = line.trim();
+      if (!t) continue;
+      try {
+        const parsed = EventEntrySchema.safeParse(JSON.parse(t));
+        if (parsed.success) out.push(parsed.data);
+      } catch {
+        // 손상 줄 무시
+      }
+    }
+    return out;
+  }
+
+  private pendingFiles(sid: string): string[] {
+    const dir = this.sessionDir(sid);
+    if (!existsSync(dir)) return [];
+    return readdirSync(dir)
+      .filter((f) => /^pending-\d+\.json$/.test(f))
+      .sort((a, b) => Number.parseInt(a.slice(8, -5), 10) - Number.parseInt(b.slice(8, -5), 10))
+      .map((f) => join(dir, f));
+  }
+
+  /**
+   * pending 적용 계획 (M4.2-4-0-2, 읽기·복구 공용).
+   * - 적용은 파일 revision 직후부터 `revision === 직전+1`인 연속분만.
+   * - 낡은 revision(<= 파일)은 stale (정리만, 체인 유지).
+   * - revision 누락·파싱 실패는 corrupt, 불연속은 gap. 첫 손상·불연속에서 중단.
+   * - 파일이 없으면 최저 pending부터 체인 시작 (4-0-3 무세션 뷰).
+   */
+  planPendings(sid: string): {
+    baseRev: number | undefined;
+    chain: { file: string; rev: number; change: CommitChange }[];
+    stale: string[];
+    stoppedAt?: { file: string; reason: "corrupt" | "gap" };
+  } {
+    const baseRev = this.readSessionRaw(sid)?.revision;
+    const chain: { file: string; rev: number; change: CommitChange }[] = [];
+    const stale: string[] = [];
+    let stoppedAt: { file: string; reason: "corrupt" | "gap" } | undefined;
+    let expected: number | undefined = baseRev !== undefined ? baseRev + 1 : undefined;
+    for (const f of this.pendingFiles(sid)) {
+      let change: CommitChange | undefined;
+      try {
+        const parsed = CommitChangeSchema.safeParse(JSON.parse(readFileSync(f, "utf8")));
+        if (parsed.success) change = parsed.data;
+      } catch {
+        // 손상 pending (revision 누락 포함)
+      }
+      if (!change) {
+        stoppedAt = { file: f, reason: "corrupt" };
+        break;
+      }
+      if (baseRev !== undefined && change.revision <= baseRev) {
+        stale.push(f);
+        continue;
+      }
+      if (expected === undefined) expected = change.revision;
+      if (change.revision !== expected) {
+        stoppedAt = { file: f, reason: "gap" };
+        break;
+      }
+      chain.push({ file: f, rev: change.revision, change });
+      expected = change.revision + 1;
+    }
+    return { baseRev, chain, stale, stoppedAt };
+  }
+
+  /** pending 적용분 (읽기 경로용, 쓰기 없음. planPendings 체인만) */
+  private readPendings(sid: string): CommitChange[] {
+    return this.planPendings(sid).chain.map((e) => e.change);
+  }
+
+  /**
+   * 남은 pending 재반영 (M4.2-2.5-3, 2.5.1-2). planPendings 체인만 적용.
+   * M4.2-3-0-1: 낡은 revision은 적용 없이 정리만.
+   * M4.2-3-0-2: 첫 실패·손상에서 중단, 손상도 failed (새 커밋 거부).
+   * M4.2-4-0-2: 불연속(gap)도 중단 + failed (새 커밋 거부).
+   * 손상 파일은 .corrupt-<rev>-<ts>로 이동 (삭제 금지). 삭제는 fsutil 재시도 사용.
+   */
+  recoverSession(sid: string): { applied: string[]; failed: string[] } {
+    const plan = this.planPendings(sid);
+    const applied: string[] = [];
+    const failed: string[] = [];
+    for (const f of plan.stale) {
+      try {
+        fsutil.unlinkRetrySync(f);
+      } catch {
+        // 정리 실패 무시 (다음 진입 시 재시도)
+      }
+    }
+    for (const e of plan.chain) {
+      try {
+        this.applyPending(sid, e.change);
+        applied.push(e.file);
+      } catch {
+        failed.push(e.file);
+        break;
+      }
+      try {
+        fsutil.unlinkRetrySync(e.file);
+      } catch {
+        // 삭제 실패 무시 (다음 진입 시 재반영, 멱등)
+      }
+    }
+    if (plan.stoppedAt) {
+      const f = plan.stoppedAt.file;
+      if (plan.stoppedAt.reason === "corrupt") {
+        try {
+          renameSync(f, join(this.sessionDir(sid), `.corrupt-${this.pendingRev(f)}-${Date.now()}.json`));
+        } catch {
+          // 무시
+        }
+      }
+      failed.push(f);
+    }
+    return { applied, failed };
+  }
+
+  /** .corrupt-* 잔류 파일 목록 (M4.2-4-0-1, 커밋 거부 조건) */
+  corruptFiles(sid: string): string[] {
+    const dir = this.sessionDir(sid);
+    if (!existsSync(dir)) return [];
+    return readdirSync(dir)
+      .filter((f) => /^\.corrupt-.*\.json$/.test(f))
+      .map((f) => join(dir, f));
+  }
+
+  /**
+   * 손상 rev 해제 (M4.2-4-0-1, CLI repair 전용).
+   * .corrupt-<rev>-* + pending-<rev>.json 제거 후 human 이벤트 기록.
+   */
+  repairDiscard(sid: string, rev: number): { removed: string[] } {
+    assertSessionId(sid);
+    if (!Number.isInteger(rev) || rev < 0) throw pfError("bad_request", `bad revision: ${rev}`);
+    const dir = this.sessionDir(sid);
+    const removed: string[] = [];
+    for (const f of existsSync(dir) ? readdirSync(dir) : []) {
+      const m = /^\.corrupt-(\d+)-\d+\.json$/.exec(f);
+      if ((m?.[1] === String(rev) || f === `pending-${rev}.json`) && !f.startsWith(".lock")) {
+        try {
+          fsutil.unlinkRetrySync(join(dir, f));
+          removed.push(f);
+        } catch {
+          // 정리 실패 무시 (다음 repair에서 재시도)
+        }
+      }
+    }
+    if (removed.length === 0) throw pfError("bad_request", `nothing to discard: rev ${rev}`, "rev 확인 필요");
+    const fileRev = this.readSessionRaw(sid)?.revision;
+    const seqs = this.readFileEvents(sid).map((e) => e.seq);
+    const seq = seqs.length > 0 ? Math.max(...seqs) + 1 : Math.max(1, fileRev ?? 0);
+    this.appendEvents(sid, [{
+      seq, revision: fileRev ?? 0, at: new Date().toISOString(), actor: "human",
+      method: "repair", nodeIds: [], beforeHash: "", afterHash: "",
+      summary: `repair --discard ${rev} (${removed.length} files)`,
+    }]);
+    return { removed };
+  }
+
+  /** pending-<rev>.json 파일명에서 rev 추출 (손상 파일명용, 실패 시 unknown) */
+  private pendingRev(f: string): string {
+    const m = /(?:^|[\\/])pending-(\d+)\.json$/.exec(f);
+    return m ? m[1] : "unknown";
+  }
+
+  private applyPending(sid: string, c: CommitChange): void {
+    for (const n of c.nodes ?? []) this.saveNode(sid, n);
+    if (c.session) this.saveSession(c.session);
+    // 파일 기준 중복 제거 1회 계산 (자기 pending은 미반영 취급)
+    const have = new Set(this.readFileEvents(sid).map((e) => e.seq));
+    const fresh = (c.events ?? []).filter((e) => !have.has(e.seq));
+    if (fresh.length > 0) this.appendEvents(sid, fresh);
+  }
+
+  /**
+   * 원자 커밋 (M4.2-2.5-3): pending 원자 저장 → 노드 → 세션 → 이벤트 반영 →
+   * pending 삭제. 시작 시 남은 pending부터 재반영.
+   * M4.2-3-0-3: session 필수 (없으면 internal), revision 폴백 없음.
+   */
+  commitChange(sid: string, c: CommitChange): void {
+    assertSessionId(sid);
+    if (!c.session) throw pfError("internal", "commitChange requires session", "호출자 확인 필요");
+    // M4.2-4-0-1: 손상 잔류 시 새 커밋 거부 (CLI repair로만 해제)
+    const corrupt = this.corruptFiles(sid);
+    if (corrupt.length > 0) {
+      throw pfError("internal", `손상 파일 잔류(${corrupt.length}건), repair 필요`, "복구 필요");
+    }
+    // M4.2-2.5.1-2: 복구 실패 시 새 커밋 거부
+    const rec = this.recoverSession(sid);
+    if (rec.failed.length > 0) {
+      throw pfError("internal", `복구 실패(${rec.failed.length}건), 수동 확인 필요`, "복구 필요");
+    }
+    const rev = c.session.revision;
+    mkdirSync(this.sessionDir(sid), { recursive: true });
+    this.writeAtomic(
+      join(this.sessionDir(sid), `pending-${rev}.json`),
+      JSON.stringify({ revision: rev, session: c.session ?? null, nodes: c.nodes ?? [], events: c.events ?? [] }),
+    );
+    this.applyPending(sid, c);
+    try {
+      fsutil.unlinkRetrySync(join(this.sessionDir(sid), `pending-${rev}.json`));
+    } catch {
+      // 삭제 실패 무시 (다음 진입 시 재반영, 멱등)
+    }
+  }
+
+  private readSessionRaw(sid: string): Session | undefined {
+    const p = join(this.sessionDir(sid), "session.json");
+    if (!existsSync(p)) return undefined;
+    return SessionSchema.parse(JSON.parse(readFileSync(p, "utf8")));
+  }
+
+  // ---- 세션 lockfile (M2.6-7, 프로세스 간 advisory lock) ----
+
+  private lockPath(sid: string): string {
+    return join(this.sessionDir(sid), ".lock");
+  }
+
+  /**
+   * 락 mtime 갱신 (M5.1-A1 하트비트, best-effort).
+   * 보유자만 주기 호출. 탈취된 파일의 수명까지 늘릴 수 있으나 release token 검사로 무해.
+   */
+  refreshLock(sid: string): void {
+    this.refreshFileLock(this.lockPath(sid));
+  }
+
+  /** 임의 경로 락 mtime 갱신 (M5.5-4.1-5, 하트비트용). */
+  refreshFileLock(lockPath: string): void {
+    try {
+      const now = new Date();
+      utimesSync(lockPath, now, now);
+    } catch {
+      // 무시
+    }
+  }
+
+  /**
+   * 락 획득 (M3.5.2, M5.1-A1/A2). openSync "wx" 원자 생성 (존재확인→쓰기 금지).
+   * fresh 락·생존 pid 락이 있으면 conflict. stale 락은 rename 경합 승리 +
+   * token 일치 확인 후에만 재시도, 불일치 시 원위치 후 conflict.
+   * 내용은 {pid, token, at}, release는 token 일치 시에만 삭제.
+   * release()를 반드시 호출. 동기는 유지하되 프로세스 간 보호용.
+   */
+  acquireLock(sid: string, staleMs = 30000): () => void {
+    assertSessionId(sid);
+    return this.acquireFileLock(this.lockPath(sid), `session locked: ${sid}`, staleMs);
+  }
+
+  /**
+   * 임의 경로 advisory lock (M5.5-4.1-5, 절차서 run 잠금용).
+   * acquireLock과 동일 기제 (wx 원자 생성·stale 회수·token release).
+   * conflict 메시지는 호출자가 지정한다.
+   */
+  acquireFileLock(lockPath: string, conflictMessage: string, staleMs = 30000): () => void {
+    const p = lockPath;
+    mkdirSync(dirname(p), { recursive: true });
+    const token = randomUUID();
+    const payload = JSON.stringify({ pid: process.pid, token, at: new Date().toISOString() });
+    // 원자 생성 시도. EEXIST면 실패(false).
+    // M3.5.2: Windows 일시 오류(EPERM/EBUSY/EACCES)도 실패로 간주해 conflict
+    // 경로로 재시도 (영구 거부와 구분 불가, withLock 재시도 상한으로 bounded).
+    const tryCreate = (): boolean => {
+      let fd = -1;
+      try {
+        fd = openSync(p, "wx");
+      } catch (e) {
+        const code = (e as { code?: string }).code;
+        if (code === "EEXIST" || code === "EPERM" || code === "EBUSY" || code === "EACCES") return false;
+        throw e;
+      }
+      try {
+        writeSync(fd, payload);
+        return true;
+      } catch (e) {
+        try {
+          unlinkSync(p);
+        } catch {
+          // 정리 실패 무시
+        }
+        if ((e as { code?: string }).code === "EPERM" || (e as { code?: string }).code === "EBUSY" || (e as { code?: string }).code === "EACCES") {
+          throw pfError("conflict", conflictMessage);
+        }
+        throw e;
+      } finally {
+        if (fd >= 0) {
+          try {
+            closeSync(fd);
+          } catch {
+            // 무시
+          }
+        }
+      }
+    };
+    const releaseState = { done: false };
+    const release = (): void => {
+      if (releaseState.done) return;
+      releaseState.done = true;
+      let ours = false;
+      try {
+        const cur = JSON.parse(readFileSync(p, "utf8")) as { token?: string } | null;
+        ours = !!cur && cur.token === token;
+      } catch {
+        ours = false;
+      }
+      if (!ours) return;
+      try {
+        unlinkSync(p);
+      } catch {
+        // 이미 없음 — 무시
+      }
+    };
+    if (tryCreate()) return release;
+    // M5.1-A1: 살아 있는 pid의 잠금은 절대 회수 금지
+    const observed = readLockContent(p);
+    if (observed && pidAlive(observed.pid)) throw pfError("conflict", conflictMessage);
+    // 이미 있음: fresh면 conflict, stale이면 회수 경합
+    let stale = true;
+    try {
+      stale = Date.now() - statSync(p).mtimeMs > staleMs;
+    } catch {
+      stale = true;
+    }
+    if (!stale) throw pfError("conflict", conflictMessage);
+    // stale 회수: rename 성공한 쪽만 진행.
+    // 직전 재확인으로 그 사이 생긴 fresh 락 탈취 방지.
+    const staleName = `${p}.stale-${randomUUID()}`;
+    const observedToken = typeof observed?.token === "string" ? observed.token : undefined;
+    try {
+      const at = statSync(p).mtimeMs;
+      if (Date.now() - at <= staleMs) throw pfError("conflict", conflictMessage);
+      renameSync(p, staleName);
+    } catch (e) {
+      if ((e as { code?: string }).code === "conflict") throw e;
+      throw pfError("conflict", conflictMessage);
+    }
+    // M5.1-A2: 옮겨진 파일의 token이 관찰분과 다르면 새 잠금을 잘못 옮긴 것 →
+    // 즉시 원위치 후 conflict. 일치할 때만 진행.
+    let movedRaw: string | undefined;
+    try {
+      movedRaw = readFileSync(staleName, "utf8");
+    } catch {
+      movedRaw = undefined;
+    }
+    let movedToken: string | undefined;
+    try {
+      const moved = movedRaw === undefined ? undefined : (JSON.parse(movedRaw) as { token?: unknown } | null);
+      if (moved && typeof moved === "object" && typeof moved.token === "string") movedToken = moved.token;
+    } catch {
+      // 파싱 실패는 불일치 취급
+    }
+    if (observedToken !== undefined && movedToken !== observedToken) {
+      try {
+        renameSync(staleName, p);
+      } catch {
+        try {
+          const fd = openSync(p, "wx");
+          try {
+            if (movedRaw !== undefined) writeSync(fd, movedRaw);
+          } finally {
+            try {
+              closeSync(fd);
+            } catch {
+              // 무시
+            }
+          }
+        } catch {
+          // 점유 중 — 아무것도 덮어쓰지 않음
+        }
+      }
+      throw pfError("conflict", conflictMessage);
+    }
+    lockStats.reclaims++;
+    try {
+      unlinkSync(staleName);
+    } catch {
+      // best-effort (남겨도 판독에 무해 — .json 아님)
+    }
+    logger.warn("stale lock cleaned", { lock: p });
+    if (tryCreate()) return release;
+    throw pfError("conflict", conflictMessage);
+  }
+
+  // ---- 세션 TTL용 메타 (M2.5-6) ----
+
+  private metaPath(sid: string): string {
+    return join(this.sessionDir(sid), "meta.json");
+  }
+
+  touchSession(sid: string, extra?: { clientName?: string; clientVersion?: string }): void {
+    assertSessionId(sid);
+    // M5.8.1-6: 호출 주체(clientInfo) 기록. 먼저 기록된 값이 있으면 유지 (first-wins).
+    let prev: { clientName?: unknown; clientVersion?: unknown } = {};
+    try {
+      prev = JSON.parse(readFileSync(this.metaPath(sid), "utf8")) as typeof prev;
+    } catch {
+      // 없으면 새로 기록
+    }
+    const name = typeof prev.clientName === "string" ? prev.clientName : extra?.clientName;
+    const version = typeof prev.clientVersion === "string" ? prev.clientVersion : extra?.clientVersion;
+    this.writeAtomic(this.metaPath(sid), JSON.stringify({
+      lastUsedAt: new Date().toISOString(),
+      ...(name !== undefined ? { clientName: name } : {}),
+      ...(version !== undefined ? { clientVersion: version } : {}),
+    }));
+  }
+
+  /**
+   * 세션 lockfile 안에서 실행 (M4.2-2.5, core change 트랜잭션용).
+   * M4.2-2.5.1-5: 잠금 중이면 25ms 간격 최대 20회 재시도 후 conflict.
+   * M5.1-A1: 보유 중 하트비트 (staleMs/3 주기, 기본 10s).
+   */
+  async withLock<T>(sid: string, fn: () => T | Promise<T>): Promise<T> {
+    for (let i = 0; i < 20; i++) {
+      let release: (() => void) | undefined;
+      try {
+        release = this.acquireLock(sid);
+      } catch (e) {
+        if ((e as { code?: string }).code !== "conflict" || i === 19) throw e;
+        await new Promise((r) => setTimeout(r, 25));
+        continue;
+      }
+      const beat = setInterval(() => this.refreshLock(sid), 10000);
+      try {
+        return await fn();
+      } finally {
+        clearInterval(beat);
+        release();
+      }
+    }
+    throw pfError("conflict", `session locked: ${sid}`);
+  }
+
+  getLastUsed(sid: string): number | undefined {
+    assertSessionId(sid);
+    const p = this.metaPath(sid);
+    if (!existsSync(p)) return undefined;
+    try {
+      const t = Date.parse((JSON.parse(readFileSync(p, "utf8")) as { lastUsedAt: string }).lastUsedAt);
+      return Number.isNaN(t) ? undefined : t;
+    } catch {
+      return undefined;
+    }
+  }
+}
