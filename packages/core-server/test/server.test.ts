@@ -21,12 +21,24 @@ async function post(path: string, body: unknown, headers: Record<string, string>
   return { status: r.status, json: (await r.json()) as { ok: boolean; data?: unknown; error?: { code: string; message: string } } };
 }
 
+async function ready(base: string): Promise<void> {
+  for (let i = 0; i < 20; i++) {
+    try {
+      const h = await fetch(`${base}/healthz`);
+      if (h.ok) return;
+    } catch {
+      await new Promise((r) => setTimeout(r, 100));
+    }
+  }
+}
+
 beforeEach(async () => {
   dir = mkdtempSync(join(tmpdir(), "pf-core-srv-"));
   const keys = parseApiKeys(`t1:${KEY1},t2:${KEY2}`);
   const s = await startServer({ dataDir: dir, apiKeys: keys, port: 0 });
   base = `http://127.0.0.1:${s.port}`;
   close = s.close;
+  await ready(base);
 });
 
 afterEach(async () => {
