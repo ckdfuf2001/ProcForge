@@ -23,30 +23,53 @@ const H1 = {
 };
 const H2 = { ...H1, authorization: `Bearer ${KEY2}` };
 
+async function fetchRetry(url: string, init?: RequestInit): Promise<Response> {
+  let last: unknown;
+  for (let i = 0; i < 5; i++) {
+    try {
+      return await fetch(url, init);
+    } catch (e) {
+      last = e;
+      await new Promise((rr) => setTimeout(rr, 200));
+    }
+  }
+  throw last;
+}
+
 async function post(
   path: string,
   body: unknown,
   headers: Record<string, string> = H1,
 ) {
-  const r = await fetch(`${base}${path}`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify(body),
-  });
-  return {
-    status: r.status,
-    json: (await r.json()) as {
-      ok: boolean;
-      data?: unknown;
-      error?: { code: string; message: string };
-    },
-  };
+  // Windows loopback 순간 실패(connect EACCES 등)는 재시도.
+  let last: unknown;
+  for (let i = 0; i < 5; i++) {
+    try {
+      const r = await fetchRetry(`${base}${path}`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(body),
+      });
+      return {
+        status: r.status,
+        json: (await r.json()) as {
+          ok: boolean;
+          data?: unknown;
+          error?: { code: string; message: string };
+        },
+      };
+    } catch (e) {
+      last = e;
+      await new Promise((rr) => setTimeout(rr, 200));
+    }
+  }
+  throw last;
 }
 
 async function ready(base: string): Promise<void> {
   for (let i = 0; i < 20; i++) {
     try {
-      const h = await fetch(`${base}/healthz`);
+      const h = await fetchRetry(`${base}/healthz`);
       if (h.ok) return;
     } catch {
       await new Promise((r) => setTimeout(r, 100));
@@ -76,7 +99,7 @@ describe("core-server", () => {
   });
 
   it("healthz + 키 없음 401 + 버전 불일치 409", async () => {
-    const h = (await (await fetch(`${base}/healthz`)).json()) as {
+    const h = (await (await fetchRetry(`${base}/healthz`)).json()) as {
       ok: boolean;
       version: number;
     };
@@ -119,7 +142,7 @@ describe("core-server", () => {
     });
     expect(started.status).toBe(200);
     const sid = (started.json.data as { session: { id: string } }).session.id;
-    const mine = await fetch(`${base}/v1/getSession`, {
+    const mine = await fetchRetry(`${base}/v1/getSession`, {
       method: "POST",
       headers: H1,
       body: JSON.stringify({ sessionId: sid }),
