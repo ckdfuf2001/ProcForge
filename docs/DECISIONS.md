@@ -411,7 +411,7 @@
   개명 (반전 의미, 기본 false). `--no-` 형식은 Node parseArgs 미지원이므로 도입하지 않음.
 - M5.6.1-4 세그먼트 중간 리터럴: 자르지 않고 마지막 세그먼트 문자열 접두로 비교
   (URL·경로 공통, 나머지 세그먼트는 정확 일치). "https://h/x/item-" 패턴은
-  "https://h/y/..."·"https://h/x/other"에 거부.
+  "https://h/x/item-123"에 통과, "https://h/y/..."·"https://h/x/other"에 거부.
   마지막 "/"까지 자르는 안은 과승인이라 기각. ${} 2개 이상은 앞부분 과승인
   위험을 approve 출력 경고로 알림.
 - [M5.8.1-1] bash leaf 기본 거부·절차서 단위 opt-in: runner 실행 가능 집합은
