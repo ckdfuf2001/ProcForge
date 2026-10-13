@@ -109,6 +109,20 @@ Register-ScheduledTask -TaskName "procforge-daily" -Action $action -Trigger $tri
 0 6 * * * cd /srv/site && procforge run procedures/daily-crawl --unattended --out out >> /var/log/procforge.log 2>&1
 ```
 
+## @날짜 param (M6-0)
+
+매일 날짜를 손으로 바꾸지 않아도 된다. 아래 내장 표현은 live 시작 시 1회
+해석되고, 해석값이 run 기록(params)에 저장된다 (replay 등 다른 모드에서는
+해석하지 않는다):
+
+- `@today:utc` — UTC 오늘 (`YYYY-MM-DD`)
+- `@today:local` — 시스템 로컬 오늘
+- `@yesterday:utc` — UTC 어제
+
+```sh
+0 6 * * * cd /srv/site && procforge run procedures/hn-daily --param date=@today:utc --unattended >> /var/log/procforge.log 2>&1
+```
+
 ## 주의
 
 - `--unattended`에서는 `generated` 인자 노드가 하나라도 있으면 실행 전

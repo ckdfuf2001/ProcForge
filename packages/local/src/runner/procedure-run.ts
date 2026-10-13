@@ -3,6 +3,7 @@ import { dirname, join, resolve } from "node:path";
 import { ProcedureDocSchema, type ProcedureDoc } from "@procforge/shared/procedure.js";
 import { importProcedure } from "../procedure.js";
 import { runSession } from "./run.js";
+import { resolveDateParams } from "../services/date-params.js";
 import type { RunReport } from "./types.js";
 import type { RunMode } from "./types.js";
 
@@ -71,7 +72,12 @@ export async function runProcedureTest(
 ): Promise<{ report: RunReport; sessionId: string; procedureDir: string }> {
   const o = opts ?? {};
   const { doc, dir } = loadProcedureDoc(procforgeDir, ref);
-  const { sessionId } = importProcedure(procforgeDir, doc, o.params ?? {});
+  // M6-0: @날짜 param은 live 시작 시 1회 해석. 해석값이 run 기록(params)에 남는다.
+  // replay 등 다른 모드에서는 해석하지 않는다 (golden drift 방지).
+  const liveParams = o.mode === "live"
+    ? resolveDateParams(o.params ?? {}).params
+    : (o.params ?? {});
+  const { sessionId } = importProcedure(procforgeDir, doc, liveParams);
   const report = await runSession({
     procforgeDir,
     projectRoot,

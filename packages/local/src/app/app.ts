@@ -41,6 +41,7 @@ import { runProcedureTest } from "../runner/procedure-run.js";
 import { loadProcedureDoc } from "../runner/procedure-run.js";
 import { buildApprovalEntry, saveApproval, scopeWarnings, toHashable } from "../services/approvals.js";
 import { importProcedure } from "../procedure.js";
+import { resolveDateParams } from "../services/date-params.js";
 import { runnableTools } from "../services/runnable-tools.js";
 import { buildRefOutputs, checkProbingArgs, type RefNodeInfo, type RefVerdict } from "../services/ref-check.js";
 import { varRefNodeIds } from "@procforge/shared/deps.js";
@@ -981,15 +982,17 @@ export class ProcForgeApp {
     const ref = a.procedure as string;
     if (!ref) throw pfError("bad_request", "procedure가 필요하다.");
     const params = (a.params ?? {}) as Record<string, string>;
+    // M6-0: @날짜 param 1회 해석 (run 기록에는 해석값 저장).
+    const liveParams = resolveDateParams(params).params;
     const { doc, dir } = loadProcedureDoc(this.procforgeDir, ref);
-    const { sessionId } = importProcedure(this.procforgeDir, doc, params);
+    const { sessionId } = importProcedure(this.procforgeDir, doc, liveParams);
     const runId = randomUUID();
     writeRunState(this.procforgeDir, {
-      version: 1, runId, sessionId, procedure: doc.name, procedureDir: dir, params,
+      version: 1, runId, sessionId, procedure: doc.name, procedureDir: dir, params: liveParams,
       pending: [], done: [], supplied: {}, approved: [],
       status: "ready", updatedAt: new Date().toISOString(),
     });
-    return { runId, sessionId, procedure: doc.name, params };
+    return { runId, sessionId, procedure: doc.name, params: liveParams };
   }
 
   /** run 1스텝 진행 (M5, pf_run_next/supply 공용). 결정적 구간 자동 진행. */

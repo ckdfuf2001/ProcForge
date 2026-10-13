@@ -456,6 +456,14 @@
   finalize는 상류 resultJson으로 var ref 필드 존재 검증 (bad_ref_field).
   map/until 템플릿 probing과 map/until 대상 참조는 면제/제외 (런타임 출력이
   누적 수집이라 정적 해석과 다름).
+- [M6-0] 저장소 공개: 공개 유지 (사용자 지시). [!] 아님. 공개 운영 선택지
+  (사용자 결정 대기): (a) `.procforge/`는 gitignore라 세션·run 기록은 커밋 안
+  됨 — 현 상태 유지가 기본. (b) `procedures/` 승인·스크립트는 커밋됨 —
+  비밀 URL·키는 `$prefix`·환경 분리, 토큰 하드코딩 금지 (강제 검사 여부 미결정).
+  (c) 이슈·PR에 비밀 첨부 금지 문구 (템플릿 여부 미결정).
+- [M6-0] @날짜 param: `@today:utc`·`@today:local`·`@yesterday:utc` 3종.
+  live 시작 시 1회 해석, 해석값이 run 기록(params)에 남는다. replay 등에서는
+  해석하지 않는다 (golden drift 방지).
 - [M5.8.2-4] csv_rows(path, op, value|ref): CSV 데이터 행 수 검사. resultJson
   없이 판정 (행 세기만, 셀 파싱 없음). 헤더 1행 제외가 기본 (pptx skipHeader와
   동일). expected/ref 해결은 numeric_match와 같은 함수 재사용. core에는 fs가
