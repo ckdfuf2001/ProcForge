@@ -445,6 +445,12 @@
   (`$N.output.x` 접두 형태는 유지). 출력에 output 필드가 있으면 예전 의미와
   달라지므로, 전체가 필요하면 `$N`을 쓰라. E2E에서 `$1.1.output`이 필드가
   아니라 전체를 돌려줘 스크립트가 터진 것이 계기.
+- [M5.8.2-2] probing/run 차이 차단: pf_next가 ref 해석 인자(resolvedInputs)를
+  내려주고, 보고 인자는 attempt에 기록된다. confirm에서 argSpecs var를 상류
+  resultJson(저장 신설)으로 해석해 통과 attempt 인자와 다르면 거부.
+  finalize는 상류 resultJson으로 var ref 필드 존재 검증 (bad_ref_field).
+  map/until 템플릿 probing과 map/until 대상 참조는 면제/제외 (런타임 출력이
+  누적 수집이라 정적 해석과 다름).
 - M5.5-5: dogfood daily-crawl (fake board 날짜별 3페이지 + detail x3 실패).
   until 수집 → script 평탄화 → map 상세(external·threshold 0.5) → script 누적.
   run1(d1) x1,x2·run2(d2) x4 신규만, state seenIds 누적. (a) stale hash → fail

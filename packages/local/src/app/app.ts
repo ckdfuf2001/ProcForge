@@ -42,6 +42,8 @@ import { loadProcedureDoc } from "../runner/procedure-run.js";
 import { buildApprovalEntry, saveApproval, scopeWarnings, toHashable } from "../services/approvals.js";
 import { importProcedure } from "../procedure.js";
 import { runnableTools } from "../services/runnable-tools.js";
+import { varRefNodeIds } from "@procforge/shared/deps.js";
+import { resolveRefValue } from "@procforge/shared/validator.js";
 import { readRunState, writeRunState } from "../services/run-state.js";
 import { writeJUnitFile, resolveJUnitPath, copyRunFsToOut } from "../services/runner.js";
 import { repairDiscard } from "../services/repair.js";
@@ -151,6 +153,39 @@ export class ProcForgeApp {
       actor: (a.actor as Actor | undefined) ?? "host",
     });
     if (out.done) return { done: true, revision: out.revision, changedNodeIds: out.changedNodeIds };
+    // M5.8.2-2: ref 해석 인자 내려주기. suggestedArgs/args의 var를 상류
+    // resultJson으로 해석해 probing에 그대로 쓰게 한다. 해석 불가면 생략.
+    let resolvedInputs: Record<string, unknown> | undefined;
+    {
+      const specs = ((out.node as unknown as { suggestedArgs?: unknown }).suggestedArgs ??
+        (out.node as unknown as { args?: unknown }).args) as Record<string, { kind?: string; ref?: unknown }> | undefined;
+      if (specs !== null && typeof specs === "object" && !Array.isArray(specs)) {
+        const ids = varRefNodeIds(specs as never);
+        if (ids.length > 0) {
+          const outputs: Record<string, unknown> = {};
+          for (const id of ids) {
+            try {
+              const un = await this.core.getNode(sid, id);
+              // M5.8.2-2: 참조 대상이 map/until이면 정적 해석 제외 (누적 출력).
+              if ((un as { kind?: string }).kind === "map" || (un as { kind?: string }).kind === "until") continue;
+              const la = un.attempts[un.attempts.length - 1];
+              const rj = (la as { resultJson?: unknown } | undefined)?.resultJson;
+              if (rj !== undefined) outputs[id] = rj;
+            } catch {
+              // 상류 없음 → 해당 ref 해석 불가 (생략)
+            }
+          }
+          const ri: Record<string, unknown> = {};
+          for (const [k, spec] of Object.entries(specs)) {
+            const ref = (spec as { ref?: unknown } | null)?.ref;
+            if ((spec as { kind?: string } | null)?.kind !== "var" || typeof ref !== "string") continue;
+            const r = resolveRefValue(ref, (s.params ?? {}) as Record<string, string>, outputs);
+            if (r.ok) ri[k] = r.value;
+          }
+          if (Object.keys(ri).length > 0) resolvedInputs = ri;
+        }
+      }
+    }
     // M4.2-2.5.1-3: 처음 probing 진입 때만 사전 스냅샷 기록. 실패는 경고로 반환.
     // M4.1.1-1: strict 모드면 pf_next 시점 사본도 저장 (inout 원본 탐색용).
     const nextWarnings: string[] = [];
@@ -176,6 +211,7 @@ export class ProcForgeApp {
       revision: out.revision,
       changedNodeIds: out.changedNodeIds,
       ...(nextWarnings.length > 0 ? { warnings: nextWarnings } : {}),
+      ...(resolvedInputs ? { resolvedInputs } : {}),
     };
   }
 

@@ -1442,3 +1442,80 @@ describe("M5.8.1-4 dependsOn", () => {
     await expect(svc.pfEditNode({ sessionId: session.id, nodeId: "1.2", dependsOn: ["1.1"] })).rejects.toThrow(/cycle/);
   });
 });
+
+describe("M5.8.2-2 probing/run 차이 차단", () => {
+  const refCat: Session["toolCatalog"] = [
+    { server: "fs", name: "read", inputSchema: { type: "object", properties: { input: {} }, additionalProperties: true } as unknown as Record<string, unknown>, schemaHash: "h1" },
+  ];
+  async function twoLeaves() {
+    const svc = new CoreService(createMemoryStore(), passEval);
+    const { session } = await svc.pfStart({ request: "r", toolCatalog: refCat });
+    await svc.pfResolve({
+      sessionId: session.id, nodeId: "1", decision: "split",
+      children: [{ goal: "a" }, { goal: "b", dependsOn: ["1.1"] }],
+    });
+    await svc.pfReport({
+      ...rep(), sessionId: session.id, nodeId: "1.1",
+      tool: { server: "fs", name: "read" }, args: {},
+      resultSummary: "ok", resultJson: { raw: ["a"] },
+    });
+    return { svc, sid: session.id };
+  }
+  it("confirm: 손 주입 vs ref 해석 다르면 거부", async () => {
+    const { svc, sid } = await twoLeaves();
+    await svc.pfReport({
+      ...rep(), sessionId: sid, nodeId: "1.2",
+      tool: { server: "fs", name: "read" }, args: { input: "raw.json" },
+      resultSummary: "ok",
+    });
+    try {
+      await svc.pfResolve({
+        sessionId: sid, nodeId: "1.2", decision: "leaf",
+        tool: { server: "fs", name: "read" },
+        argSpecs: { input: { kind: "var", ref: "$1.1.raw" } } as never,
+      });
+      expect.unreachable();
+    } catch (e) {
+      expect((e as { code?: string }).code).toBe("bad_request");
+      expect((e as Error).message).toMatch(/probing 인자가 ref 해석값과 다름: 1\.2\.input/);
+    }
+  });
+  it("confirm: 해석값과 같으면 통과", async () => {
+    const { svc, sid } = await twoLeaves();
+    await svc.pfReport({
+      ...rep(), sessionId: sid, nodeId: "1.2",
+      tool: { server: "fs", name: "read" }, args: { input: ["a"] },
+      resultSummary: "ok",
+    });
+    const ok = await svc.pfResolve({
+      sessionId: sid, nodeId: "1.2", decision: "leaf",
+      tool: { server: "fs", name: "read" },
+      argSpecs: { input: { kind: "var", ref: "$1.1.raw" } } as never,
+    });
+    expect(ok.node.status).toBe("leaf");
+  });
+  it("finalize: 없는 필드 ref → bad_ref_field", async () => {
+    const { svc, sid } = await twoLeaves();
+    await svc.pfResolve({
+      sessionId: sid, nodeId: "1.1", decision: "leaf",
+      tool: { server: "fs", name: "read" }, argSpecs: {} as never,
+    });
+    await svc.pfReport({
+      ...rep(), sessionId: sid, nodeId: "1.2",
+      tool: { server: "fs", name: "read" }, args: {},
+      resultSummary: "ok",
+    });
+    await svc.pfResolve({
+      sessionId: sid, nodeId: "1.2", decision: "leaf",
+      tool: { server: "fs", name: "read" },
+      argSpecs: { input: { kind: "var", ref: "$1.1.nonexistent" } } as never,
+    });
+    try {
+      await svc.pfBuildProcedure(sid, "badref");
+      expect.unreachable();
+    } catch (e) {
+      expect((e as { code?: string }).code).toBe("bad_request");
+      expect((e as Error).message).toMatch(/bad_ref_field/);
+    }
+  });
+});

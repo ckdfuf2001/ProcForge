@@ -50,6 +50,7 @@ function err(code: ErrorCode, message: string): ProcForgeError {
 }
 
 import { checkUnknownKeys, readSchemaProps, selfAndAncestors, similarKey, varRefNodeId } from "@procforge/shared/args-schema.js";
+import { resolveRefValue } from "@procforge/shared/validator.js";
 import { checkFixedAgainstInputSchema } from "@procforge/shared/validator.js";
 
 import { PROCEDURE_NAME_RE, type ProcedureDoc } from "@procforge/shared/procedure.js";
@@ -508,6 +509,8 @@ export class CoreService implements CoreClient {
       resultSummary: input.resultSummary,
       artifacts: input.artifacts ?? [],
       ...(input.rubricReasons ? { rubricReasons: input.rubricReasons } : {}),
+      // M5.8.2-2: ref 해석·probing 대조용으로 결과 JSON 저장
+      ...(input.resultJson !== undefined ? { resultJson: input.resultJson } : {}),
     };
     if (missingReasons.length > 0) {
       // M1.5-3: 사유 없으면 needs_human (재시도 차감 없음 — 프로토콜 오류扱い)
@@ -760,6 +763,35 @@ export class CoreService implements CoreClient {
         if (!input.argSpecs) throw err("bad_request", "leaf requires argSpecs");
         const missing = Object.keys(last.args).filter((k) => !(k in input.argSpecs!));
         if (missing.length > 0) throw err("bad_request", `argSpecs missing: ${missing.join(",")}`);
+        // M5.8.2-2: probing 인자 vs ref 해석값 대조. 상류 resultJson이 있을 때만
+        // 판정 (없으면 건너뛰고 finalize의 bad_ref_field가 담당).
+        // map/until 템플릿 probing은 면제 (carry/self로 런타임 해결, 손값 정당).
+        // 참조 대상이 map/until이면 정적 해석 제외 (런타임 출력은 누적 수집).
+        if (last && (n as { kind?: string }).kind !== "map" && (n as { kind?: string }).kind !== "until") {
+          const all = this.store.getNodes(s.id);
+          const outputs: Record<string, unknown> = {};
+          for (const x of all.values()) {
+            if ((x as { kind?: string }).kind === "map" || (x as { kind?: string }).kind === "until") continue;
+            const la = x.attempts[x.attempts.length - 1];
+            const rj = (la as { resultJson?: unknown } | undefined)?.resultJson;
+            if (rj !== undefined) outputs[x.id] = rj;
+          }
+          for (const [k, spec] of Object.entries(input.argSpecs)) {
+            const ref = (spec as { kind?: string; ref?: unknown }).kind === "var"
+              ? (spec as { ref?: unknown }).ref
+              : undefined;
+            if (typeof ref !== "string") continue;
+            const resolved = resolveRefValue(ref, s.params as Record<string, string>, outputs);
+            if (!resolved.ok) continue;
+            const actual = ((last.args ?? {}) as Record<string, unknown>)[k];
+            if (JSON.stringify(actual) !== JSON.stringify(resolved.value)) {
+              throw err("bad_request",
+                `probing 인자가 ref 해석값과 다름: ${n.id}.${k} ` +
+                `(probing=${JSON.stringify(actual)?.slice(0, 120)} 해석=${JSON.stringify(resolved.value)?.slice(0, 120)}). ` +
+                `probing에 ref 해석값을 그대로 쓰라.`);
+            }
+          }
+        }
         // M3.4.3-4: additionalProperties:false 스키마는 등록 외 키 거부 (공용 검사)
         const { unknownKeys, suggestions } = checkUnknownKeys(Object.keys(input.argSpecs), cat.inputSchema);
         if (unknownKeys.length > 0) {
@@ -1135,7 +1167,16 @@ export class CoreService implements CoreClient {
       throw err("bad_request", `미해결 노드: ${unresolved.join(", ")}`);
     }
     // M4.1-4: 구조 검증 (10종). 오류 있으면 목록과 함께 거부.
-    const violations = validateTree(session, nodes);
+    // M5.8.2-2: 상류 resultJson을 넘겨 var ref 필드 존재까지 검증 (bad_ref_field).
+    // map/until 출력은 누적 수집이라 정적 해석 제외.
+    const resultOutputs: Record<string, unknown> = {};
+    for (const x of nodes) {
+      if ((x as { kind?: string }).kind === "map" || (x as { kind?: string }).kind === "until") continue;
+      const la = x.attempts[x.attempts.length - 1];
+      const rj = (la as { resultJson?: unknown } | undefined)?.resultJson;
+      if (rj !== undefined) resultOutputs[x.id] = rj;
+    }
+    const violations = validateTree(session, nodes, { outputs: resultOutputs });
     if (violations.length > 0) {
       throw err(
         "bad_request",

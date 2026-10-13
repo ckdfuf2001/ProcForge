@@ -112,3 +112,51 @@ describe("M5.8.1-1 실행 불가 leaf 확정 거부", () => {
     expect(report.summary.pass).toBeGreaterThanOrEqual(1);
   }, 120000);
 });
+
+describe("M5.8.2-2 ref 해석 인자 내려주기", () => {
+  it("pf_next resolvedInputs (suggestedArgs 해석)", async () => {
+    const { client } = testStack(pfdir);
+    const app = new ProcForgeApp({ core: client, procforgeDir: pfdir, projectRoot: root });
+    const started = await client.pfStart({ request: "m582", params: {}, toolCatalog: CAT });
+    const sid = started.session.id;
+    await client.pfResolve({
+      sessionId: sid, nodeId: "1", decision: "split",
+      children: [{ goal: "a" }, { goal: "b", dependsOn: ["1.1"] }],
+    });
+    await client.pfNext({ sessionId: sid });
+    await client.pfReport({
+      sessionId: sid, nodeId: "1.1", tool: { server: "host", name: "script" },
+      args: { x: "a" }, resultSummary: "ok", resultJson: { raw: ["a"] },
+      selfVerdict: "pass", selfReason: "ok",
+    });
+    await app.confirmLeaf({
+      sessionId: sid, nodeId: "1.1", tool: { server: "host", name: "script" },
+      argSpecs: {
+        x: { kind: "fixed", value: "a" },
+        run: { kind: "script", file: "scripts/echo.py", runtime: "python" },
+      },
+    } as never);
+    await client.pfNext({ sessionId: sid });
+    await client.pfReport({
+      sessionId: sid, nodeId: "1.2", tool: { server: "host", name: "script" },
+      args: { input: ["a"] }, resultSummary: "ok", resultJson: { n: 1 },
+      selfVerdict: "pass", selfReason: "ok",
+    });
+    await app.confirmLeaf({
+      sessionId: sid, nodeId: "1.2", tool: { server: "host", name: "script" },
+      argSpecs: {
+        input: { kind: "var", ref: "$1.1.raw" },
+        run: { kind: "script", file: "scripts/echo.py", runtime: "python" },
+      },
+    } as never);
+    await client.pfEditArgs({
+      sessionId: sid, nodeId: "1.2",
+      patch: { set: { input: { kind: "var", ref: "$1.1.raw" } } },
+    } as never);
+    const nxt = await app.next({ sessionId: sid });
+    expect(nxt.done).toBe(false);
+    if (nxt.done) throw new Error("unreachable");
+    expect(nxt.node.id).toBe("1.2");
+    expect(nxt.resolvedInputs).toEqual({ input: ["a"] });
+  }, 120000);
+});

@@ -109,6 +109,47 @@ function getByDotPath(root: unknown, path: string): boolean {  const parts = pat
   return true;
 }
 
+function getByDotValue(root: unknown, path: string): { ok: boolean; value?: unknown } {
+  let cur: unknown = root;
+  for (const p of path.split(".")) {
+    if (cur === null || cur === undefined) return { ok: false };
+    if (Array.isArray(cur)) {
+      const idx = Number(p);
+      if (!Number.isInteger(idx) || idx < 0 || idx >= cur.length) return { ok: false };
+      cur = cur[idx];
+    } else if (typeof cur === "object") {
+      if (!(p in (cur as Record<string, unknown>))) return { ok: false };
+      cur = (cur as Record<string, unknown>)[p];
+    } else return { ok: false };
+  }
+  return { ok: true, value: cur };
+}
+
+/**
+ * ref 값 해석 (M5.8.2-2, core confirm 대조·finalize 검증 공용).
+ * ${params.k}·$N·$N.<field> (M5.8.2-1 의미). 해석 불가면 ok:false.
+ * ${item}/${state}/$self/템플릿 혼합은 runner 영역이라 다루지 않는다.
+ */
+export function resolveRefValue(
+  ref: string,
+  params: Record<string, string>,
+  outputs: Record<string, unknown>,
+): { ok: boolean; value?: unknown } {
+  if (typeof ref !== "string") return { ok: false };
+  const pm = /^\$\{params\.([A-Za-z0-9_.-]+)\}$/.exec(ref);
+  if (pm) {
+    return Object.prototype.hasOwnProperty.call(params, pm[1])
+      ? { ok: true, value: (params as Record<string, unknown>)[pm[1]] }
+      : { ok: false };
+  }
+  const parsed = parseRef(ref);
+  if (!parsed || !parsed.nodeId) return { ok: false };
+  if (!Object.prototype.hasOwnProperty.call(outputs, parsed.nodeId)) return { ok: false };
+  const base = (outputs as Record<string, unknown>)[parsed.nodeId];
+  if (!parsed.fieldPath) return { ok: true, value: base };
+  return getByDotValue(base, parsed.fieldPath);
+}
+
 export function checkFixedAgainstInputSchema(
   args: Node["args"],
   inputSchema: Record<string, unknown>,

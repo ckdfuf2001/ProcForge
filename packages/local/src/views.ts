@@ -95,6 +95,8 @@ export const PfNextOutputSchema = z.object({
   revision: z.number().optional(),
   changedNodeIds: z.array(z.string()).optional(),
   warnings: z.array(z.string()).optional(),
+  /** ref 해석 인자 (M5.8.2-2: probing에 그대로 쓸 값) */
+  resolvedInputs: z.record(z.unknown()).optional(),
 });
 export const PfReportOutputSchema = z.object({
   verdict: z.enum(["pass", "fail", "unverifiable"]),

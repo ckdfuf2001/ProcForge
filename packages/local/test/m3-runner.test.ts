@@ -934,8 +934,8 @@ describe("M3.4.4 runner", () => {
     });
     await client.pfReport({
       sessionId: sid, nodeId: "1.2",
-      tool: { server: "fake-ppt", name: "echo" }, args: { title: "b" },
-      resultSummary: JSON.stringify({ title: "b" }), resultJson: { title: "b" },
+      tool: { server: "fake-ppt", name: "echo" }, args: { title: "a" },
+      resultSummary: JSON.stringify({ title: "a" }), resultJson: { title: "a" },
       selfVerdict: "pass", selfReason: "ok",
     });
     await client.pfResolve({
