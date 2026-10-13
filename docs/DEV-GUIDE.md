@@ -578,8 +578,8 @@ c·d·j는 하네스 과제로 DECISIONS에 기록만.
 | M5.7 | 감사·종료·재시도 | [x] | `8075046` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38177878319 | 결정종 단언·fail-on-unverified·script opt-in |
 | M5.7.1 | rubric 경고·unverified 옵션 정리 | [x] | `0651476` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38203088600 | finalize rubric 경고(`a8b11da`)·--allow-unverified 단일화(`e413eb8`) |
 | M5.8 | OpenCode 실제 E2E | [ ] | | | (a) TUI+dist MCP 분해 (b) advise 부분 stale (c) finalize→무수정 approve→이틀 unattended exit 0 (d) docs/M5.8-opencode-e2e.md 기록 — [보류] 발견 1~3, M5.8.1 후 재시도. 성공 기준 유지 |
-| M5.8.1 | E2E 실행벽 해소 | [ ] | | | 0 사실확인·6 호출주체·1 실행불가 leaf 거부·2 메시지 정정·3 finalize 원인수정(manifest 복사)·4 dependsOn 편집 |
-| M5.8.2 | E2E 2회차 후속 | [ ] | | | 0 사실확인·1 ref 의미·2 probing/run 차단·3 script 승인·4 csv_rows·5 주석 정정 |
+| M5.8.1 | E2E 실행벽 해소 | [x] | `de9f004` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38401689793 | 0 사실확인·6 호출주체·1 실행불가 leaf 거부·2 메시지 정정·3 finalize 원인수정(manifest 복사)·4 dependsOn 편집 |
+| M5.8.2 | E2E 2회차 후속 | [ ] | | | 0 사실확인·1 ref 의미·2 probing/run 차단·3 script 승인·4 csv_rows·5 주석 정정 + 후속(golden 기준·검증불가·R8 분리·stable) |
 | M6 | core 분리 | [ ] | | | |
 | M7 | UI | [ ] | | | |
 
@@ -634,4 +634,5 @@ c·d·j는 하네스 과제로 DECISIONS에 기록만.
 | 2026-10-13 | 8 | M5.8.1-3 [!] 해제: 원인 확정. 보고 경로가 manifest를 만들고 fixtures/가 없으면 tests/ 미생성 상태로 manifest 복사 → ENOENT. c42d755 워크트리 MCP 재현으로 확정 | 재현 조건: App 경로 보고 3건 + finalize. core 직결 보고는 manifest가 안 생겨서 재현 안 됨 |
 | 2026-10-13 | 0 | dev-verify 로그 분리(.verify/) + --from 재개 | 장시간 실행이 인프라 절단으로 2회 중단돼 분할 실행을 정식으로 만듦 |
 | 2026-10-13 | 8 | M5.8 2회차 기록 (하위 에이전트): bash 거부→script 자가수정, Show/Ask 제외, 무인 1회차 exit 0. 2회차(내일) 남음 | (a) TUI 대신. clientInfo opencode 기록 |
+| 2026-10-13 | 8 | M5.8.1 완료 선언 + M5.8.2 후속 {(1) golden 기준·(2) 검증불가·(3) R8 분리·(4) stable} | M5.8.1 8절행 [x]+de9f004+run 38401689793. M6(원격 core) 전 R8 분리 필요 |
 | 2026-10-13 | 8 | M5.8.2 신설 (E2E 2회차 후속 0~5): ref 의미·probing/run 차단·script 승인·csv_rows·주석 정정. M5.8은 [ ] 유지 | 2회차에서 드러난 ref·실행 간극·승인 공백 메우기 |
