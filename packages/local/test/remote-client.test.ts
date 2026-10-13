@@ -24,6 +24,14 @@ beforeEach(async () => {
   const s = await startServer({ dataDir: dir, apiKeys: parseApiKeys(`t1:${KEY}`), port: 0 });
   base = `http://127.0.0.1:${s.port}`;
   close = s.close;
+  for (let i = 0; i < 20; i++) {
+    try {
+      const h = await fetch(`${base}/healthz`);
+      if (h.ok) break;
+    } catch {
+      await new Promise((r) => setTimeout(r, 100));
+    }
+  }
 });
 
 afterEach(async () => {

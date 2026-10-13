@@ -495,11 +495,16 @@
   실패 400, 출력 불일치는 500 sanitized. 타 테넌트 sessionId →
   session_not_found (격리는 디렉터리 분리로 구조 보장).   평가는 shared 판정기.
 - [M6-3] RemoteCoreClient: `PROCFORGE_CORE_URL` 있으면 remote, 기본 inprocess
-  (core-inprocess 분기. 로컬 FileStore는 그대로). 읽
+  (core-inprocess 분기. 로컬 FileStore는 그대로).   읽
   기(getSession/getNode/pfTree/getEvents/pfBuildProcedure)만 재시도
   (fetch 실패·타임아웃·502/503/504, 3회). 쓰기는 재시도 금지
   (expectedRevision 충돌 판단은 호출자가). 네트워크 실패 → io_error degraded.
   로컬 파일 쓰기를 하지 않으므로 로컬 상태 불변. 송신 탭(onSend) 내장.
+- [M6-4] egress guard: core행 요청을 RemoteCoreClient 송신 한 곳에서 검사.
+  구조 위반은 차단 bad_request (pfReport 바깥 resultJson 실데이터, 절대경로.
+  산문·resultJson은 절대경로 검사 제외). 민감값은 교정 후 전송
+  (토큰 패턴 전역. 이메일은 평가·실행 입력(resultJson/resultSummary/params/
+  args) 제외). 메타 형태는 파생 요약이라 면제.
 - M5.5-5: dogfood daily-crawl (fake board 날짜별 3페이지 + detail x3 실패).
   until 수집 → script 평탄화 → map 상세(external·threshold 0.5) → script 누적.
   run1(d1) x1,x2·run2(d2) x4 신규만, state seenIds 누적. (a) stale hash → fail

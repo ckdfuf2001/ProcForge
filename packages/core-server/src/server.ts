@@ -63,8 +63,8 @@ function statusFor(code: string): number {
   return 500;
 }
 
-async function dispatch(svc: CoreService, name: WireMethodName, body: Record<string, never>): Promise<unknown> {
-  const b = body as Record<string, never>;
+async function dispatch(svc: CoreService, name: WireMethodName, body: Record<string, unknown>): Promise<unknown> {
+  const b = body;
   switch (name) {
     case "pfStart": return svc.pfStart(b as never);
     case "pfNext": return svc.pfNext(b as never);
@@ -141,7 +141,7 @@ export function createCoreServer(opts: { dataDir: string; apiKeys: TenantKeys })
       }
       const store = new FileStore(join(opts.dataDir, "tenants", tid));
       const svc = new CoreService(store, baseEvaluate);
-      const out = await dispatch(svc, name, parsed.data as Record<string, never>);
+      const out = await dispatch(svc, name, parsed.data as Record<string, unknown>);
       const ovalid = def.output.safeParse(out);
       if (!ovalid.success) {
         return send(res, 500, { ok: false, error: toWireError(new Error("internal")) });

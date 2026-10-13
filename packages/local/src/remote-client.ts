@@ -3,6 +3,7 @@ import {
   WireMethods, PROTOCOL_VERSION, PROTOCOL_VERSION_HEADER,
   throwWireError, type WireMethodName, type WireError,
 } from "@procforge/shared/wire.js";
+import { guardEgress } from "./services/egress.js";
 
 // M6-3: HTTP CoreClient 구현. 기본 inprocess, 설정(PROCFORGE_CORE_URL)으로 remote.
 // - 읽기만 재시도 (getSession/getNode/pfTree/getEvents/pfBuildProcedure).
@@ -41,7 +42,9 @@ export function createRemoteCoreClient(opts: RemoteCoreClientOpts): CoreClient {
 
   async function call<M extends WireMethodName>(method: M, body: Record<string, unknown>): Promise<unknown> {
     const def = WireMethods[method];
-    const payload = JSON.stringify(body);
+    // M6-4: 송신 전 egress 검사 (위반 차단·민감값 교정).
+    const guarded = guardEgress(method, body);
+    const payload = JSON.stringify(guarded.body);
     opts.onSend?.(method, Buffer.byteLength(payload, "utf8"));
     const retryable = READ_METHODS.has(method);
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
