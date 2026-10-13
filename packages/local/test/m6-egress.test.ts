@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { startServer, parseApiKeys } from "../../core-server/dist/server.js";
 import { createRemoteCoreClient } from "../src/remote-client.js";
+import { withNetRetry } from "./net-retry.js";
 import { ProcForgeApp } from "../src/app/app.js";
 
 // M6-4 계약: 전체 E2E를 remote 모드로 돌리면서 송신 바이트를 수집해
@@ -40,7 +41,11 @@ afterEach(() => {
 describe("M6-4 egress 계약", () => {
   it("remote E2E 송신 위반 0건", async () => {
     const dataDir = mkdtempSync(join(tmpdir(), "pf-m6esrv-"));
-    const srv = await startServer({ dataDir, apiKeys: parseApiKeys(`t1:${KEY}`), port: 0 });
+    const srv = await startServer({
+      dataDir,
+      apiKeys: parseApiKeys(`t1:${KEY}`),
+      port: 0,
+    });
     const sent: { method: string; bytes: number }[] = [];
     try {
       const baseUrl = `http://127.0.0.1:${srv.port}`;
@@ -53,32 +58,63 @@ describe("M6-4 egress 계약", () => {
           await new Promise((r) => setTimeout(r, 100));
         }
       }
-      const client = createRemoteCoreClient({
-        baseUrl, apiKey: KEY, onSend: (m, b) => sent.push({ method: m, bytes: b }),
+      const client = withNetRetry(
+        createRemoteCoreClient({
+          baseUrl,
+          apiKey: KEY,
+          onSend: (m, b) => sent.push({ method: m, bytes: b }),
+        }),
+      );
+      const app = new ProcForgeApp({
+        core: client,
+        procforgeDir: pfdir,
+        projectRoot: root,
       });
-      const app = new ProcForgeApp({ core: client, procforgeDir: pfdir, projectRoot: root });
-      const started = await client.pfStart({ request: "m64", params: { day: "d1" }, toolCatalog: CAT });
+      const started = await client.pfStart({
+        request: "m64",
+        params: { day: "d1" },
+        toolCatalog: CAT,
+      });
       const sid = started.session.id;
-      await client.pfResolve({ sessionId: sid, nodeId: "1", decision: "split", children: [{ goal: "a" }, { goal: "b", dependsOn: ["1.1"] }] });
+      await client.pfResolve({
+        sessionId: sid,
+        nodeId: "1",
+        decision: "split",
+        children: [{ goal: "a" }, { goal: "b", dependsOn: ["1.1"] }],
+      });
       await client.pfNext({ sessionId: sid });
       await client.pfReport({
-        sessionId: sid, nodeId: "1.1", tool: { server: "fake", name: "echo" },
-        args: { v: "a" }, resultSummary: "a", resultJson: { v: "a" },
-        selfVerdict: "pass", selfReason: "ok",
+        sessionId: sid,
+        nodeId: "1.1",
+        tool: { server: "fake", name: "echo" },
+        args: { v: "a" },
+        resultSummary: "a",
+        resultJson: { v: "a" },
+        selfVerdict: "pass",
+        selfReason: "ok",
       });
       await client.pfResolve({
-        sessionId: sid, nodeId: "1.1", decision: "leaf",
+        sessionId: sid,
+        nodeId: "1.1",
+        decision: "leaf",
         tool: { server: "fake", name: "echo" },
         argSpecs: { v: { kind: "fixed", value: "a" } } as never,
       });
       await client.pfNext({ sessionId: sid });
       await client.pfReport({
-        sessionId: sid, nodeId: "1.2", tool: { server: "fake", name: "echo" },
-        args: { w: "b" }, resultSummary: "b", resultJson: { w: "b" },
-        selfVerdict: "pass", selfReason: "ok",
+        sessionId: sid,
+        nodeId: "1.2",
+        tool: { server: "fake", name: "echo" },
+        args: { w: "b" },
+        resultSummary: "b",
+        resultJson: { w: "b" },
+        selfVerdict: "pass",
+        selfReason: "ok",
       });
       await client.pfResolve({
-        sessionId: sid, nodeId: "1.2", decision: "leaf",
+        sessionId: sid,
+        nodeId: "1.2",
+        decision: "leaf",
         tool: { server: "fake", name: "echo" },
         argSpecs: { w: { kind: "fixed", value: "b" } } as never,
       });
