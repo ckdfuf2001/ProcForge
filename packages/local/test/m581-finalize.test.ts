@@ -23,7 +23,7 @@ function minDoc(name: string) {
 }
 
 describe("M5.8.1-3 export 계약", () => {
-  it("swapDir 실패 → bad_request (raw ENOENT 금지)", () => {
+  it("swapDir 실패 → io_error (raw ENOENT 금지)", () => {
     const tmp = join(root, "t");
     mkdirSync(tmp, { recursive: true });
     let code = "";
@@ -32,10 +32,10 @@ describe("M5.8.1-3 export 계약", () => {
     } catch (e) {
       code = (e as { code?: string }).code ?? "";
     }
-    expect(code).toBe("bad_request");
+    expect(code).toBe("io_error");
   });
 
-  it("writeProcedure hostile fs → bad_request (internal 금지)", () => {
+  it("writeProcedure hostile fs → io_error (internal 금지)", () => {
     const fileAsDir = join(root, "file");
     writeFileSync(fileAsDir, "x");
     let code = "";
@@ -46,7 +46,7 @@ describe("M5.8.1-3 export 계약", () => {
       code = (e as { code?: string }).code ?? "";
       msg = e instanceof Error ? e.message : String(e);
     }
-    expect(code).toBe("bad_request");
+    expect(code).toBe("io_error");
     expect(msg).toMatch(/export 실패/);
   });
 

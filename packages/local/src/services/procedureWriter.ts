@@ -43,13 +43,13 @@ export function swapDir(tmpDir: string, finalDir: string): void {
   }
 }
 
-/** 코드 없는 fs 예외를 bad_request로 (internal 금지). coded는 그대로. */
+/** 코드 없는 fs 예외를 io_error로 (internal 금지). coded는 그대로. */
 export function codedFs(e: unknown, what: string): Error {
   const code = (e as { code?: string } | null)?.code;
-  if (typeof code === "string" && ["bad_request", "conflict", "not_found", "bad_args"].includes(code)) {
+  if (typeof code === "string" && ["bad_request", "conflict", "not_found", "bad_args", "io_error"].includes(code)) {
     return e as Error;
   }
-  return Object.assign(new Error(`${what}: ${e instanceof Error ? e.message : String(e)}`), { code: "bad_request" });
+  return Object.assign(new Error(`${what}: ${e instanceof Error ? e.message : String(e)}`), { code: "io_error" });
 }
 
 const RETRYABLE_FS = new Set(["EPERM", "EBUSY", "ENOTEMPTY", "EACCES"]);

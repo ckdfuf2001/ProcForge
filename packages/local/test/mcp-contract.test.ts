@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { buildServer, TOOL_NAMES, READ_ONLY_TOOLS, PROMPT_TEXT } from "../src/server.js";
+import { buildServer, TOOL_NAMES, READ_ONLY_TOOLS, PROMPT_TEXT, HINTS } from "../src/server.js";
 import { ProcForgeApp } from "../src/app/app.js";
 import { OUTPUT_SCHEMAS } from "../src/views.js";
 import { parseErrorText, ERROR_CODE_LIST } from "@procforge/shared/errors.js";
@@ -161,6 +161,12 @@ describe("도구 응답 계약 (outputSchema 통과)", () => {
     } finally {
       await close();
     }
+  });
+  it("M5.8.1-3 전 코드 hint 매핑 + io_error 문구", () => {
+    for (const code of ERROR_CODE_LIST as readonly string[]) {
+      expect(typeof HINTS[code] === "string" && HINTS[code].length > 0, `hint missing: ${code}`).toBe(true);
+    }
+    expect(HINTS["io_error"]).toBe("입력 수정으로 해결 안 됨, 재시도 또는 디스크/권한 확인.");
   });
   it("전체 플로우", async () => {
     const { mcp, close } = await linked();

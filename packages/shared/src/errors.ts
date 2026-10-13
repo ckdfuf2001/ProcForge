@@ -27,6 +27,8 @@ export const ERROR_CODE_LIST = [
   "session_not_found",
   "unimplemented",
   "internal",
+  /** fs 실패 (M5.8.1-3: 입력 수정으로 해결 안 됨, 재시도 또는 디스크/권한 확인) */
+  "io_error",
 ] as const;
 export type ErrorCode = (typeof ERROR_CODE_LIST)[number];
 

@@ -69,7 +69,7 @@ export const TOOL_NAMES = [
 
 export const READ_ONLY_TOOLS = ["pf_tree", "pf_get_node"] as const;
 
-const HINTS: Record<string, string> = {
+export const HINTS: Record<string, string> = {
   bad_request: "입력을 고쳐 재호출하라.",
   bad_args: "등록된 인자만 사용하라. 오타·유사 키를 확인하고 pf_confirm_leaf 재호출.",
   conflict: "pf_tree로 현재 상태를 확인하고 상태에 맞는 도구를 호출하라.",
@@ -77,6 +77,7 @@ const HINTS: Record<string, string> = {
   session_not_found: "pf_start로 새 세션을 시작하라.",
   unimplemented: "해당 마일스톤 구현 후 사용하라.",
   internal: "다시 시도하라. 계속되면 pf_tree로 상태를 확인하라.",
+  io_error: "입력 수정으로 해결 안 됨, 재시도 또는 디스크/권한 확인.",
 };
 
 function errResult(e: unknown) {

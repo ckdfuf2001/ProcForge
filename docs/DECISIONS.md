@@ -438,6 +438,7 @@
   fixtures/가 없으면 copyTree가 tests/를 안 만든 채 manifest 복사 → ENOENT.
   #5는 fixtures 복사가 tests/를 먼저 만들어 우연히 성공. core 직결 보고는
   manifest가 안 생겨서 기존 테스트가 가렸음. 수정: 복사 전 tests/ 생성.
+  fs 실패 코드는 io_error로 분리 (입력 수정 불가, 재시도·디스크/권한 확인).
   artifact 없음 자체는 거부 사유가 아니다 (M5.3-0-4 유지).
 - M5.5-5: dogfood daily-crawl (fake board 날짜별 3페이지 + detail x3 실패).
   until 수집 → script 평탄화 → map 상세(external·threshold 0.5) → script 누적.
