@@ -42,7 +42,9 @@ import { loadProcedureDoc } from "../runner/procedure-run.js";
 import { buildApprovalEntry, saveApproval, scopeWarnings, toHashable } from "../services/approvals.js";
 import { importProcedure } from "../procedure.js";
 import { runnableTools } from "../services/runnable-tools.js";
+import { buildRefOutputs, checkProbingArgs, type RefNodeInfo, type RefVerdict } from "../services/ref-check.js";
 import { varRefNodeIds } from "@procforge/shared/deps.js";
+import { varRefNodeId } from "@procforge/shared/args-schema.js";
 import { resolveRefValue } from "@procforge/shared/validator.js";
 import { readRunState, writeRunState } from "../services/run-state.js";
 import { writeJUnitFile, resolveJUnitPath, copyRunFsToOut } from "../services/runner.js";
@@ -154,27 +156,36 @@ export class ProcForgeApp {
     });
     if (out.done) return { done: true, revision: out.revision, changedNodeIds: out.changedNodeIds };
     // M5.8.2-2: ref 해석 인자 내려주기. suggestedArgs/args의 var를 상류
-    // resultJson으로 해석해 probing에 그대로 쓰게 한다. 해석 불가면 생략.
+    // resultJson 파일(golden→최종pass)로 해석해 probing에 그대로 쓰게 한다.
+    // 해석 불가면 생략.
     let resolvedInputs: Record<string, unknown> | undefined;
     {
       const specs = ((out.node as unknown as { suggestedArgs?: unknown }).suggestedArgs ??
         (out.node as unknown as { args?: unknown }).args) as Record<string, { kind?: string; ref?: unknown }> | undefined;
       if (specs !== null && typeof specs === "object" && !Array.isArray(specs)) {
+        const store = new FileStore(this.procforgeDir);
         const ids = varRefNodeIds(specs as never);
-        if (ids.length > 0) {
-          const outputs: Record<string, unknown> = {};
-          for (const id of ids) {
-            try {
-              const un = await this.core.getNode(sid, id);
-              // M5.8.2-2: 참조 대상이 map/until이면 정적 해석 제외 (누적 출력).
-              if ((un as { kind?: string }).kind === "map" || (un as { kind?: string }).kind === "until") continue;
-              const la = un.attempts[un.attempts.length - 1];
-              const rj = (la as { resultJson?: unknown } | undefined)?.resultJson;
-              if (rj !== undefined) outputs[id] = rj;
-            } catch {
-              // 상류 없음 → 해당 ref 해석 불가 (생략)
-            }
+        const nodes = new Map<string, RefNodeInfo>();
+        for (const id of ids) {
+          try {
+            const un = await this.core.getNode(sid, id);
+            nodes.set(id, {
+              id,
+              kind: (un as { kind?: string }).kind,
+              goldenAttemptId: (un as { golden?: { attemptId?: string } }).golden?.attemptId,
+              attempts: (un.attempts ?? []).map((x) => ({ id: x.id, verdict: x.verdict })),
+            });
+          } catch {
+            nodes.set(id, { id, attempts: [] });
           }
+        }
+        if (ids.length > 0) {
+          const { outputs } = buildRefOutputs({
+            specs: specs as Record<string, unknown>,
+            params: (s.params ?? {}) as Record<string, string>,
+            nodes,
+            loadJson: (aid: string) => store.readResultJson(sid, aid),
+          });
           const ri: Record<string, unknown> = {};
           for (const [k, spec] of Object.entries(specs)) {
             const ref = (spec as { ref?: unknown } | null)?.ref;
@@ -333,11 +344,54 @@ export class ProcForgeApp {
       expectedRevision: a.expectedRevision ?? sess.revision,
       actor: a.actor ?? "host",
     });
+    // M5.8.2 후속: resultJson 파일 저장 (ref 해석용. core는 메타만 가짐).
+    if (a.resultJson !== undefined) {
+      try {
+        new FileStore(this.procforgeDir).writeResultJson(sid, attemptId, a.resultJson);
+      } catch {
+        reportWarnings.push("resultJson 기록 실패: ref 검증 불가");
+      }
+    }
     return { ...(out as unknown as Record<string, unknown>), warnings: reportWarnings };
   }
 
-  async confirmLeaf(a: ConfirmLeafInput): Promise<OutputOf<"pf_confirm_leaf">> {
-    const sid = a.sessionId as string;
+  /**
+   * M5.8.2 후속: probing 대조용 ref 판정 계산 (R2: 계산만, 판정은 core).
+   * golden attempt resultJson → 없으면 마지막 pass attempt 파일 기준.
+   */
+  private async buildRefCheck(
+    sid: string,
+    s: { params?: Record<string, string> },
+    specs: Record<string, unknown>,
+    probingArgs: Record<string, unknown>,
+  ): Promise<RefVerdict[]> {
+    const store = new FileStore(this.procforgeDir);
+    const ids = varRefNodeIds(specs as never);
+    const nodes = new Map<string, RefNodeInfo>();
+    for (const id of ids) {
+      try {
+        const un = await this.core.getNode(sid, id);
+        nodes.set(id, {
+          id,
+          kind: (un as { kind?: string }).kind,
+          goldenAttemptId: (un as { golden?: { attemptId?: string } }).golden?.attemptId,
+          attempts: (un.attempts ?? []).map((x) => ({ id: x.id, verdict: x.verdict })),
+        });
+      } catch {
+        // 상류 없음 → 해당 ref 검증 불가 (checkProbingArgs가 판정)
+        nodes.set(id, { id, attempts: [] });
+      }
+    }
+    return checkProbingArgs({
+      specs,
+      probingArgs,
+      params: (s.params ?? {}) as Record<string, string>,
+      nodes,
+      loadJson: (aid: string) => store.readResultJson(sid, aid),
+    });
+  }
+
+  async confirmLeaf(a: ConfirmLeafInput): Promise<OutputOf<"pf_confirm_leaf">> {    const sid = a.sessionId as string;
     const s = await this.core.getSession(sid);
     if (!a.argSpecs) throw pfError("bad_request", "argSpecs가 없다.", "마지막 실행 인자 키를 모두 분류해 pf_confirm_leaf 재호출.");
     const norm = normalizeArgSpecs(a.argSpecs as Record<string, import("@procforge/shared/schema.js").ArgSpec>, {
@@ -470,6 +524,10 @@ export class ProcForgeApp {
         (s.toolCatalog ?? []) as { server: string; name: string }[],
         { allowBash: (a as { allowBash?: unknown }).allowBash === true },
       ),
+      // M5.8.2 후속: probing 대조는 LocalServices가 수행, 판정은 core.
+      // golden→최종pass 순서 resultJson 파일 기준.
+      refCheck: await this.buildRefCheck(sid, s, norm.specs as Record<string, unknown>, (last?.args ?? {}) as Record<string, unknown>),
+      strict: (a as { strict?: unknown }).strict === true,
       // M4.2-2.5.1-4: 생략 시 읽은 revision 전달 (도중 변경은 conflict)
       expectedRevision: a.expectedRevision ?? s.revision,
       actor: a.actor ?? "host",
@@ -864,6 +922,37 @@ export class ProcForgeApp {
     allAudit.push(...auditStateWrites(fullNodes as { id: string; constraints?: { kind?: string; source?: string }[]; stateWrites?: { key: string; from: string }[] }[]));
     // M5.7.1: llm_rubric 잔존 경고 (무인 실행 unverified → exit 1). strict면 아래에서 거부.
     allAudit.push(...auditRubricConstraints(fullNodes as { id: string; constraints?: { id?: string; kind?: string }[] }[]));
+    // M5.8.2 후속: var ref 필드 사전검사 (core에는 resultJson 실데이터가 없음).
+    // golden→최종pass 파일 기준. 출력은 있는데 필드가 없으면 bad_ref_field.
+    {
+      const store = new FileStore(this.procforgeDir);
+      const infos = new Map<string, RefNodeInfo>();
+      for (const x of fullNodes as { id: string; kind?: string; golden?: { attemptId?: string }; attempts?: { id: string; verdict?: string }[] }[]) {
+        infos.set(x.id, {
+          id: x.id,
+          kind: x.kind,
+          goldenAttemptId: x.golden?.attemptId,
+          attempts: (x.attempts ?? []).map((a) => ({ id: a.id, verdict: a.verdict })),
+        });
+      }
+      const { outputs } = buildRefOutputs({
+        specs: Object.assign({}, ...fullNodes.map((x) => ((x as { args?: unknown }).args ?? {}) as Record<string, unknown>)),
+        params: (sess.params ?? {}) as Record<string, string>,
+        nodes: infos,
+        loadJson: (aid: string) => store.readResultJson(sid, aid),
+      });
+      for (const x of fullNodes as { id: string; args?: Record<string, { kind?: string; ref?: unknown }> }[]) {
+        for (const [k, spec] of Object.entries(x.args ?? {})) {
+          if (spec?.kind !== "var" || typeof spec.ref !== "string") continue;
+          const tid = varRefNodeId(spec.ref);
+          if (tid === undefined || !Object.prototype.hasOwnProperty.call(outputs, tid)) continue;
+          const r = resolveRefValue(spec.ref, (sess.params ?? {}) as Record<string, string>, outputs);
+          if (!r.ok) {
+            throw pfError("bad_ref_field", `arg ${x.id}.${k}: field 없음 (상류 ${tid} 출력에 없음): ${spec.ref}`);
+          }
+        }
+      }
+    }
     // M5.8.1-1: bash leaf 포함 시 run에 --allow-bash 필요 경고 (기본 거부·opt-in은 DECISIONS).
     {
       const bashLeaves = (fullNodes as { id: string; tool?: { server?: string; name?: string } }[])

@@ -29,7 +29,9 @@
     "./hash": "./dist/hash.js",
     "./hash.js": "./dist/hash.js",
     "./procedure": "./dist/procedure.js",
-    "./procedure.js": "./dist/procedure.js"
+    "./procedure.js": "./dist/procedure.js",
+    "./stable": "./dist/stable.js",
+    "./stable.js": "./dist/stable.js"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",

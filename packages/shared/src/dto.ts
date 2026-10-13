@@ -102,6 +102,8 @@ export const ConfirmLeafInputSchema = z.object({
   ignore: z.array(z.string()).optional(),
   /** bash leaf opt-in 선언 (절차서 단위 의도, 기본 거부. DECISIONS M5.8.1-1) */
   allowBash: z.boolean().optional(),
+  /** 엄격 모드 (M5.8.2 후속: ref 검증 불가면 거부) */
+  strict: z.boolean().optional(),
 }).merge(RevisionOptsSchema);
 export type ConfirmLeafInput = z.infer<typeof ConfirmLeafInputSchema>;
 

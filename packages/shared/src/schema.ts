@@ -252,8 +252,15 @@ export const AttemptSchema = z.object({
   failedConstraints: z.array(z.string()).default([]),
   /** llm_rubric (M1.5-3) */
   rubricReasons: z.record(z.string()).optional(),
-  /** 실행 결과 JSON (M5.8.2-2: ref 해석·probing 대조용으로 저장) */
+  /** 실행 결과 JSON (구형 inline. 로드 시 분리 마이그레이션, 신규 저장 금지) */
   resultJson: z.unknown().optional(),
+  /** 실행 결과 메타 (M5.8.2 후속: 실데이터는 로컬 attempt 파일, core는 메타만) */
+  resultJsonMeta: z.object({
+    sha256: z.string(),
+    size: z.number().int().min(0),
+    /** JSON 미리보기 (R8: 최대 4KB) */
+    preview: z.string(),
+  }).optional(),
 });
 export type Attempt = z.infer<typeof AttemptSchema>;
 

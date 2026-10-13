@@ -1,6 +1,6 @@
 import { mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync, unlinkSync, statSync, appendFileSync, renameSync, openSync, writeSync, closeSync, utimesSync } from "node:fs";
 import { join, dirname } from "node:path";
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHash } from "node:crypto";
 import type { Store } from "@procforge/shared/store.js";
 import type { CommitChange } from "@procforge/shared/store.js";
 import type { Node, Session } from "@procforge/shared/schema.js";
@@ -95,6 +95,9 @@ export class FileStore implements Store {
       for (const f of readdirSync(dir)) {
         if (!f.endsWith(".json") || f === ".lock") continue;
         const n = NodeSchema.parse(JSON.parse(readFileSync(join(dir, f), "utf8")));
+        if (this.migrateAttemptResultJson(sessionId, n)) {
+          this.saveNode(sessionId, n);
+        }
         out.set(n.id, n);
       }
     }
@@ -116,12 +119,66 @@ export class FileStore implements Store {
       const found = (change.nodes ?? []).find((n) => n.id === nodeId);
       if (found) base = found;
     }
+    if (base && this.migrateAttemptResultJson(sessionId, base)) {
+      this.saveNode(sessionId, base);
+    }
     return base;
+  }
+
+  /** attempt resultJson 파일 경로 (M5.8.2 후속, R8) */
+  resultJsonPath(sessionId: string, attemptId: string): string {
+    assertSessionId(sessionId);
+    return join(this.sessionDir(sessionId), "resultJson", `${attemptId}.json`);
+  }
+
+  /** resultJson 파일 기록 (best-effort 아님. 실패 시 throw) */
+  writeResultJson(sessionId: string, attemptId: string, value: unknown): void {
+    assertSessionId(sessionId);
+    const p = this.resultJsonPath(sessionId, attemptId);
+    mkdirSync(dirname(p), { recursive: true });
+    this.writeAtomic(p, JSON.stringify(value));
+  }
+
+  /** resultJson 파일 읽기 (없음·손상 시 undefined) */
+  readResultJson(sessionId: string, attemptId: string): unknown | undefined {
+    try {
+      return JSON.parse(readFileSync(this.resultJsonPath(sessionId, attemptId), "utf8"));
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * 구형 inline resultJson 1회 분리 마이그레이션 (M5.8.2 후속).
+   * attempt.resultJson → resultJson/<id>.json + resultJsonMeta.
+   * 멱등. true면 노드가 바뀌어 저장 필요.
+   */
+  migrateAttemptResultJson(sessionId: string, n: Node): boolean {
+    let changed = false;
+    for (const a of n.attempts ?? []) {
+      const rec = a as { resultJson?: unknown; resultJsonMeta?: unknown };
+      if (rec.resultJson === undefined) continue;
+      try {
+        this.writeResultJson(sessionId, a.id, rec.resultJson);
+        const text = JSON.stringify(rec.resultJson) ?? "";
+        rec.resultJsonMeta = {
+          sha256: createHash("sha256").update(text, "utf8").digest("hex"),
+          size: Buffer.byteLength(text, "utf8"),
+          preview: (text as string).slice(0, 4096),
+        };
+        delete rec.resultJson;
+        changed = true;
+      } catch {
+        // 기록 실패 시 다음 기회에 (inline 유지)
+      }
+    }
+    return changed;
   }
 
   saveNode(sessionId: string, n: Node): void {
     assertSessionId(sessionId);
     assertNodeId(n.id);
+    this.migrateAttemptResultJson(sessionId, n);
     this.writeAtomic(join(this.sessionDir(sessionId), "nodes", `${n.id}.json`), JSON.stringify(n, null, 2));
   }
 

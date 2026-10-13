@@ -460,6 +460,17 @@
   없이 판정 (행 세기만, 셀 파싱 없음). 헤더 1행 제외가 기본 (pptx skipHeader와
   동일). expected/ref 해결은 numeric_match와 같은 함수 재사용. core에는 fs가
   없어 deferred. 결정적 단언 집합에 포함.
+- [M5.8.2 후속] 상류 출력 기준: golden attempt resultJson, 없으면 마지막 pass
+  attempt. fail 본은 사용 금지 (재시도로 마지막이 fail이어도 golden 기준 판정).
+  ref 해석 불가는 경고 "검증 불가: <node>.<key>", confirm strict면 거부.
+  finalize의 없는 필드는 bad_ref_field (App 사전검사. core에는 실데이터 없음).
+- [M5.8.2 후속 R8] resultJson 분리: 실데이터는 로컬 attempt 파일
+  (sessions/<sid>/resultJson/<attemptId>.json), core attempt에는
+  {sha256, size, 4KB 미리보기} 메타만. 기존 inline은 로드 시 1회 분리
+  마이그레이션. 대조 계산은 LocalServices, 판정 규칙은 core.
+  attempt = 메타のみ (preview ≤4KB cap).
+- [M5.8.2 후속] 비교는 stable 직렬화 (키 순서 무관). 삽입 순서에 따라
+  달라지는 JSON.stringify 동등 비교 금지.
 - M5.5-5: dogfood daily-crawl (fake board 날짜별 3페이지 + detail x3 실패).
   until 수집 → script 평탄화 → map 상세(external·threshold 0.5) → script 누적.
   run1(d1) x1,x2·run2(d2) x4 신규만, state seenIds 누적. (a) stale hash → fail

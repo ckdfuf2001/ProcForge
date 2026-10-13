@@ -29,6 +29,8 @@ export const ERROR_CODE_LIST = [
   "internal",
   /** fs 실패 (M5.8.1-3: 입력 수정으로 해결 안 됨, 재시도 또는 디스크/권한 확인) */
   "io_error",
+  /** ref 필드가 상류 출력에 없음 (M5.8.2 후속: 바인딩 수정으로 해결) */
+  "bad_ref_field",
 ] as const;
 export type ErrorCode = (typeof ERROR_CODE_LIST)[number];
 

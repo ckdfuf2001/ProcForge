@@ -1461,7 +1461,7 @@ describe("M5.8.2-2 probing/run 차이 차단", () => {
     });
     return { svc, sid: session.id };
   }
-  it("confirm: 손 주입 vs ref 해석 다르면 거부", async () => {
+  it("mismatch → 거부 (LocalServices 판정, core 규칙 적용)", async () => {
     const { svc, sid } = await twoLeaves();
     await svc.pfReport({
       ...rep(), sessionId: sid, nodeId: "1.2",
@@ -1473,6 +1473,7 @@ describe("M5.8.2-2 probing/run 차이 차단", () => {
         sessionId: sid, nodeId: "1.2", decision: "leaf",
         tool: { server: "fs", name: "read" },
         argSpecs: { input: { kind: "var", ref: "$1.1.raw" } } as never,
+        refCheck: [{ key: "input", verdict: "mismatch", probing: '"raw.json"', resolved: '["a"]' }],
       });
       expect.unreachable();
     } catch (e) {
@@ -1480,7 +1481,7 @@ describe("M5.8.2-2 probing/run 차이 차단", () => {
       expect((e as Error).message).toMatch(/probing 인자가 ref 해석값과 다름: 1\.2\.input/);
     }
   });
-  it("confirm: 해석값과 같으면 통과", async () => {
+  it("match → 통과", async () => {
     const { svc, sid } = await twoLeaves();
     await svc.pfReport({
       ...rep(), sessionId: sid, nodeId: "1.2",
@@ -1491,31 +1492,45 @@ describe("M5.8.2-2 probing/run 차이 차단", () => {
       sessionId: sid, nodeId: "1.2", decision: "leaf",
       tool: { server: "fs", name: "read" },
       argSpecs: { input: { kind: "var", ref: "$1.1.raw" } } as never,
+      refCheck: [{ key: "input", verdict: "match" }],
     });
     expect(ok.node.status).toBe("leaf");
   });
-  it("finalize: 없는 필드 ref → bad_ref_field", async () => {
+  it("unverifiable → 경고", async () => {
     const { svc, sid } = await twoLeaves();
-    await svc.pfResolve({
-      sessionId: sid, nodeId: "1.1", decision: "leaf",
-      tool: { server: "fs", name: "read" }, argSpecs: {} as never,
-    });
     await svc.pfReport({
       ...rep(), sessionId: sid, nodeId: "1.2",
-      tool: { server: "fs", name: "read" }, args: {},
+      tool: { server: "fs", name: "read" }, args: { input: ["a"] },
       resultSummary: "ok",
     });
-    await svc.pfResolve({
+    const warned = await svc.pfResolve({
       sessionId: sid, nodeId: "1.2", decision: "leaf",
       tool: { server: "fs", name: "read" },
-      argSpecs: { input: { kind: "var", ref: "$1.1.nonexistent" } } as never,
+      argSpecs: { input: { kind: "var", ref: "$1.1.raw" } } as never,
+      refCheck: [{ key: "input", verdict: "unverifiable" }],
+    });
+    expect(warned.node.status).toBe("leaf");
+    expect(warned.instruction).toMatch(/검증 불가: 1\.2\.input/);
+  });
+  it("unverifiable + strict → 거부", async () => {
+    const { svc, sid } = await twoLeaves();
+    await svc.pfReport({
+      ...rep(), sessionId: sid, nodeId: "1.2",
+      tool: { server: "fs", name: "read" }, args: { input: ["a"] },
+      resultSummary: "ok",
     });
     try {
-      await svc.pfBuildProcedure(sid, "badref");
+      await svc.pfResolve({
+        sessionId: sid, nodeId: "1.2", decision: "leaf",
+        tool: { server: "fs", name: "read" },
+        argSpecs: { input: { kind: "var", ref: "$1.1.raw" } } as never,
+        refCheck: [{ key: "input", verdict: "unverifiable" }],
+        strict: true,
+      });
       expect.unreachable();
     } catch (e) {
       expect((e as { code?: string }).code).toBe("bad_request");
-      expect((e as Error).message).toMatch(/bad_ref_field/);
+      expect((e as Error).message).toMatch(/ref 검증 불가/);
     }
   });
 });

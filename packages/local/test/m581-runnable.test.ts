@@ -5,6 +5,7 @@ import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { ProcForgeApp } from "../src/app/app.js";
+import { FileStore } from "../src/filestore.js";
 import { runProcedureTest } from "../src/runner/procedure-run.js";
 import { testStack } from "./client-mode.js";
 
@@ -129,6 +130,14 @@ describe("M5.8.2-2 ref 해석 인자 내려주기", () => {
       args: { x: "a" }, resultSummary: "ok", resultJson: { raw: ["a"] },
       selfVerdict: "pass", selfReason: "ok",
     });
+    // M5.8.2 후속: client 직결 보고는 파일을 안 쓰므로(App.report 경로만 기록)
+    // 해석용 파일을 직접 심는다.
+    {
+      const store = new FileStore(pfdir);
+      const n1 = await client.getNode(sid, "1.1");
+      const aid = n1.attempts[n1.attempts.length - 1].id;
+      store.writeResultJson(sid, aid, { raw: ["a"] });
+    }
     await app.confirmLeaf({
       sessionId: sid, nodeId: "1.1", tool: { server: "host", name: "script" },
       argSpecs: {

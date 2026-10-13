@@ -96,6 +96,10 @@ export type PfResolveInput = {
   artifacts?: string[];
   /** runner 실행 가능 도구 집합 ("server/name", M5.8.1-1). 있으면 core가 소속 판정 */
   runnableTools?: string[];
+  /** probing 대조 판정 (M5.8.2 후속. LocalServices 계산, core는 규칙 적용) */
+  refCheck?: { key: string; verdict: "match" | "mismatch" | "unverifiable"; probing?: string; resolved?: string }[];
+  /** 엄격 모드 (M5.8.2 후속: unverifiable이면 거부) */
+  strict?: boolean;
   expectedRevision?: number;
   actor?: Actor;
 };
