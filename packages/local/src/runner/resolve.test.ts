@@ -10,6 +10,14 @@ describe("resolveVar 템플릿", () => {
     expect(resolveVar("$1.1.output.total", {}, outputs)).toBe(5);
   });
 
+  it("M5.8.2-1 $N=전체, $N.field=필드 (.output 충돌 해소)", () => {
+    const outs = new Map<string, unknown>([["1.1", { raw: ["a"], output: "x" }]]);
+    expect(resolveVar("$1.1", {}, outs)).toEqual({ raw: ["a"], output: "x" });
+    expect(resolveVar("$1.1.raw", {}, outs)).toEqual(["a"]);
+    expect(resolveVar("$1.1.output", {}, outs)).toBe("x");
+    expect(resolveVar("$1.1.output.raw", {}, outs)).toEqual(["a"]);
+  });
+
   it("M5.5-1 ${item} 치환", () => {
     const item = { id: "a", v: 10 };
     expect(substituteItemVars("${item}", "item", item)).toEqual(item);

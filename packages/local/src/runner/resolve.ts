@@ -227,15 +227,16 @@ export function resolveVar(
       if (!outputs.has(c)) throw new Error(`split 자식 출력 없음: ${c}`);
       obj[c] = outputs.get(c);
     }
-    if (rest === "" || rest === ".output") return obj;
+    if (rest === "") return obj;
     if (rest.startsWith(".output.")) return getByDot(obj, rest.slice(".output.".length));
-    // M5.2-4 약식: $<id>.<field>
+    // M5.2-4 약식 + M5.8.2-1: ".output" 단독도 필드 ("$N.output"은 output 필드).
     if (/^\.[A-Za-z][A-Za-z0-9_.-]*$/.test(rest)) return getByDot(obj, rest.slice(1));
     throw new Error(`지원하지 않는 참조: ${ref}`);
   }
   if (!outputs.has(nid)) throw new Error(`노드 출력 없음: ${nid}`);
   const base = outputs.get(nid);
-  if (rest === "" || rest === ".output") return base;
+  // M5.8.2-1: "$N"만 전체. ".output" 단독은 output 필드.
+  if (rest === "") return base;
   if (rest.startsWith(".output.")) return getByDot(base, rest.slice(".output.".length));
   if (/^\.[A-Za-z][A-Za-z0-9_.-]*$/.test(rest)) return getByDot(base, rest.slice(1));
   throw new Error(`지원하지 않는 참조: ${ref}`);

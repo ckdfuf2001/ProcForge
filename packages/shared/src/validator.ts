@@ -14,7 +14,7 @@ export type ValidateOptions = {
 };
 
 function isValidRefSyntax(ref: string): boolean {
-  // 허용: ${params.xxx} | ${...} | $<id> | $<id>.output | $<id>.output.<dotpath>
+  // 허용: ${params.xxx} | ${...} | $<id> | $<id>.<field> (M5.8.2-1)
   // M5.1-B3: 문자열 내 ${params.k} 템플릿도 허용
   if (/^\$\{params\.[A-Za-z0-9_.-]+\}$/.test(ref)) return true;
   if (/^\$\{\}$/.test(ref)) return false;
@@ -24,12 +24,12 @@ function isValidRefSyntax(ref: string): boolean {
   if (!m) return false;
   const rest = m[2];
   if (rest === "") return true;
-  if (rest === ".output") return true;
   if (rest.startsWith(".output.")) {
     const field = rest.slice(".output.".length);
     return field.length > 0 && /^[A-Za-z0-9_.-]+$/.test(field);
   }
-  // M5.2-4 약식: $<id>.<field> (".output." 생략). 숫자 꼬리는 노드 id로 귀속
+  // M5.2-4 약식 + M5.8.2-1: $<id>.<field>. ".output" 단독도 필드로 취급
+  // ("$1.1.output"은 output 필드. 숫자 꼬리는 노드 id로 귀속
   // ("$1.1.2"는 노드 1.1.2. 필드가 숫자면 ".output."을 쓸 것).
   if (/^\.[A-Za-z][A-Za-z0-9_.-]*$/.test(rest)) return true;
   return false;
@@ -42,7 +42,8 @@ function parseRef(ref: string): { paramsKey?: string; nodeId?: string; fieldPath
   if (!m) return null;
   const nodeId = m[1];
   const rest = m[2];
-  if (rest === "" || rest === ".output") return { nodeId };
+  // M5.8.2-1: "$N"만 전체. ".output" 단독은 output 필드 (약식으로 처리).
+  if (rest === "") return { nodeId };
   if (rest.startsWith(".output.")) return { nodeId, fieldPath: rest.slice(".output.".length) };
   if (/^\.[A-Za-z][A-Za-z0-9_.-]*$/.test(rest)) return { nodeId, fieldPath: rest.slice(1) };
   return null;

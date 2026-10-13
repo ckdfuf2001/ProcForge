@@ -440,6 +440,11 @@
   manifest가 안 생겨서 기존 테스트가 가렸음. 수정: 복사 전 tests/ 생성.
   fs 실패 코드는 io_error로 분리 (입력 수정 불가, 재시도·디스크/권한 확인).
   artifact 없음 자체는 거부 사유가 아니다 (M5.3-0-4 유지).
+- [M5.8.2-1] ref 의미 확정: `$N` = 출력 전체, `$N.<field>` = 그 필드만.
+  종전 bare `$N.output`(= 전체) 특수 처리를 없애고 output도 일반 필드로 취급
+  (`$N.output.x` 접두 형태는 유지). 출력에 output 필드가 있으면 예전 의미와
+  달라지므로, 전체가 필요하면 `$N`을 쓰라. E2E에서 `$1.1.output`이 필드가
+  아니라 전체를 돌려줘 스크립트가 터진 것이 계기.
 - M5.5-5: dogfood daily-crawl (fake board 날짜별 3페이지 + detail x3 실패).
   until 수집 → script 평탄화 → map 상세(external·threshold 0.5) → script 누적.
   run1(d1) x1,x2·run2(d2) x4 신규만, state seenIds 누적. (a) stale hash → fail
