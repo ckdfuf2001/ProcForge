@@ -79,6 +79,7 @@ export const HINTS: Record<string, string> = {
   internal: "다시 시도하라. 계속되면 pf_tree로 상태를 확인하라.",
   io_error: "입력 수정으로 해결 안 됨, 재시도 또는 디스크/권한 확인.",
   bad_ref_field: "ref 필드가 상류 출력에 없음. 바인딩 수정 후 재확정하라.",
+  unauthorized: "API 키 확인 (Authorization: Bearer).",
 };
 
 function errResult(e: unknown) {

@@ -9,7 +9,7 @@ import { ERROR_CODE_LIST } from "../src/errors.js";
 // throw문 근처 400자에서 code를 찾는다. 반환용 코드(validator 10종 등)는 대상 아님.
 // pfError()/err() 호출은 ErrorCode 타입이 컴파일 타임에 보장하므로 throw 패턴으로 충분.
 
-const PACKAGES = ["shared", "core", "local"];
+const PACKAGES = ["shared", "core", "local", "core-server"];
 const CODE_RE = /(?:pfError|err)\(\s*["']([^"']+)["']|code:\s*["']([^"']+)["']/;
 
 function* walk(dir: string): Generator<string> {

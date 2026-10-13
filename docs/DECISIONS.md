@@ -489,6 +489,11 @@
   기존 import 경로는 re-export shim으로 유지 (adapter 검사·테스트 경로 보존).
   checker는 fs 2종만 local 래퍼에 두고 나머지는 shared로 (core-server는
   shared 판정기 + deferred 사용, 중복 구현 없음).
+- [M6-2] core-server: Node http, CoreClient 1:1 `POST /v1/<m>` (+GET /healthz).
+  테넌트별 FileStore(dataDir/tenants/<tid>), Bearer API 키(`tid:key`, bare는
+  default), 키 없으면 401(unauthorized 신규 코드), 버전 불일치 409, 입력 검증
+  실패 400, 출력 불일치는 500 sanitized. 타 테넌트 sessionId →
+  session_not_found (격리는 디렉터리 분리로 구조 보장). 평가는 shared 판정기.
 - M5.5-5: dogfood daily-crawl (fake board 날짜별 3페이지 + detail x3 실패).
   until 수집 → script 평탄화 → map 상세(external·threshold 0.5) → script 누적.
   run1(d1) x1,x2·run2(d2) x4 신규만, state seenIds 누적. (a) stale hash → fail

@@ -31,6 +31,8 @@ export const ERROR_CODE_LIST = [
   "io_error",
   /** ref 필드가 상류 출력에 없음 (M5.8.2 후속: 바인딩 수정으로 해결) */
   "bad_ref_field",
+  /** API 키 없음·불일치 (M6-2: core-server Bearer 인증) */
+  "unauthorized",
 ] as const;
 export type ErrorCode = (typeof ERROR_CODE_LIST)[number];
 

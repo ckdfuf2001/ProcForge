@@ -39,7 +39,9 @@
     "./filestore": "./dist/filestore.js",
     "./filestore.js": "./dist/filestore.js",
     "./check": "./dist/check.js",
-    "./check.js": "./dist/check.js"
+    "./check.js": "./dist/check.js",
+    "./wire": "./dist/wire.js",
+    "./wire.js": "./dist/wire.js"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
