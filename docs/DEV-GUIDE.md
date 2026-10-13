@@ -580,7 +580,7 @@ c·d·j는 하네스 과제로 DECISIONS에 기록만.
 | M5.8 | OpenCode 실제 E2E | [ ] | | | (a) TUI+dist MCP 분해 (b) advise 부분 stale (c) finalize→무수정 approve→이틀 unattended exit 0 (d) docs/M5.8-opencode-e2e.md 기록 — 비고: (a) TUI 1회, (c) 날짜 바뀐 뒤 1회 남음 — 사용자 수행 |
 | M5.8.1 | E2E 실행벽 해소 | [x] | `de9f004` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38401689793 | 0 사실확인·6 호출주체·1 실행불가 leaf 거부·2 메시지 정정·3 finalize 원인수정(manifest 복사)·4 dependsOn 편집 |
 | M5.8.2 | E2E 2회차 후속 | [ ] | | | 0 사실확인·1 ref 의미·2 probing/run 차단·3 script 승인·4 csv_rows·5 주석 정정 + 후속(golden 기준·검증불가·R8 분리·stable) |
-| M6 | 원격 core | [ ] | | | 0 준비(공개·@날짜) ·1 wire 계약·2 core-server·3 RemoteCoreClient·4 전송 감사·5 CI remote·6 p95 |
+| M6 | 원격 core | [x] | `f266942` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38459923601 | 0 준비(공개·@날짜)·1 wire·2 FileStore shared+core-server·3 RemoteCoreClient·4 egress·5 CI remote+check-deps·6 p95<1000ms·loopback 안정화 (docs/REVIEW-M6.md) |
 | M7 | UI | [ ] | | | |
 
 ---
@@ -637,3 +637,4 @@ c·d·j는 하네스 과제로 DECISIONS에 기록만.
 | 2026-10-13 | 8 | M5.8.1 완료 선언 + M5.8.2 후속 {(1) golden 기준·(2) 검증불가·(3) R8 분리·(4) stable} | M5.8.1 8절행 [x]+de9f004+run 38401689793. M6(원격 core) 전 R8 분리 필요 |
 | 2026-10-13 | 8 | M5.8.2 신설 (E2E 2회차 후속 0~5): ref 의미·probing/run 차단·script 승인·csv_rows·주석 정정. M5.8은 [ ] 유지 | 2회차에서 드러난 ref·실행 간극·승인 공백 메우기 |
 | 2026-10-14 | 8 | M6 신설 (원격 core 0~6) + M5.8 비고 갱신·정정. M5 [x] 확인 | (a) TUI 1회·(c) 날짜변경 1회는 사용자 수행으로 남김. (b) 충족·(c) 당일 반복만으로 정정 |
+| 2026-10-14 | 8 | M6 완료 (0~6 한 묶음): L3 green·CI run 38459923601 success·docs/REVIEW-M6.md. loopback 순간실패 안정화(서버공유·EACCES 재시도·fetch 재시도) | 전체 스위트 remote 이식은 M6.1 (import·golden API·테스트 이식 필요) |
