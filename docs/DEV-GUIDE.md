@@ -44,6 +44,7 @@
 - 로컬 vitest는 패키지 간 import를 dist로 해결한다. 그래서 core/shared 변경은 빌드 없이 검증되지 않는다. 푸시 전 `pnpm -r build`는 필수다.
 - `pnpm check:env`로 로컬 @types/node가 lockfile과 같은지 확인한다. (vitest는 타입체크를 하지 않아서, tsc 실패는 빌드에서만 잡힌다.)
 - `dev-verify.mjs`: NODE_ENV 해제, `--dns-result-order=ipv4first`. 재시도는 git push/clone만(3회 백오프) 하고, 테스트 재시도는 금지한다.
+  단계별 로그는 `.verify/<단계>.log`, 끊기면 `--from <단계>`로 재개한다.
 - 스위트는 hermetic하게 유지한다. 테스트가 외부 네트워크를 쓰면 실패로 본다.
 
 완료 선언
@@ -630,3 +631,4 @@ c·d·j는 하네스 과제로 DECISIONS에 기록만.
 | 2026-10-12 | 8 | M5.8 1회차 기록: docs/M5.8-opencode-e2e.md (세션 77c17c91, UTC advise, (a) 미충족-호스트가 에이전트) | M5.8.1 항목별 근거 + 재시도 기준 |
 | 2026-10-13 | 8 | M5.8.1-3 [!] 지정: 감싸기만 됨, 원인 미확정 | E2E internal 4회의 원래 예외를 못 찾음. 재현 시도 후 DECISIONS 기록 또는 수정 |
 | 2026-10-13 | 8 | M5.8.1-3 [!] 해제: 원인 확정. 보고 경로가 manifest를 만들고 fixtures/가 없으면 tests/ 미생성 상태로 manifest 복사 → ENOENT. c42d755 워크트리 MCP 재현으로 확정 | 재현 조건: App 경로 보고 3건 + finalize. core 직결 보고는 manifest가 안 생겨서 재현 안 됨 |
+| 2026-10-13 | 0 | dev-verify 로그 분리(.verify/) + --from 재개 | 장시간 실행이 인프라 절단으로 2회 중단돼 분할 실행을 정식으로 만듦 |
