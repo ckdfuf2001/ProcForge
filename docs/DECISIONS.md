@@ -440,6 +440,11 @@
   manifest가 안 생겨서 기존 테스트가 가렸음. 수정: 복사 전 tests/ 생성.
   fs 실패 코드는 io_error로 분리 (입력 수정 불가, 재시도·디스크/권한 확인).
   artifact 없음 자체는 거부 사유가 아니다 (M5.3-0-4 유지).
+- [M5.8.2-3] script 승인 기본 요구 (opt-out 없음): 스크립트는 임의 코드 실행이라
+  무인 live에서 script 노드도 approvals 항목(node id/hash + script sha256)이
+  필요. procforge approve가 script 노드를 지원 (sideEffect 무관, 내용은 해시로
+  커버). 스크립트 1글자 수정 → stale → exit 3. 대화형 live·record/replay는
+  기존 동작 유지.
 - [M5.8.2-1] ref 의미 확정: `$N` = 출력 전체, `$N.<field>` = 그 필드만.
   종전 bare `$N.output`(= 전체) 특수 처리를 없애고 output도 일반 필드로 취급
   (`$N.output.x` 접두 형태는 유지). 출력에 output 필드가 있으면 예전 의미와

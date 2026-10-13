@@ -429,8 +429,11 @@ export function buildApprovalEntry(
   readScript?: (rel: string) => string | undefined,
 ): ApprovalEntry {
   if (!docNode.tool) throw pfError("bad_request", `승인은 tool 노드만 가능: ${docNode.id}`);
-  if (docNode.sideEffect !== undefined && docNode.sideEffect !== "external") {
-    throw pfError("bad_request", `승인은 external 노드만: ${docNode.id} (sideEffect=${docNode.sideEffect})`);
+  // M5.8.2-3: script 노드도 승인 대상 (sideEffect 무관). 스크립트는 임의 코드
+  // 실행이라 무인 실행에 명시적 승인이 필요 (기본 요구, opt-out 없음).
+  const hasScript = Object.values(docNode.args ?? {}).some((s) => (s as { kind?: unknown }).kind === "script");
+  if (!hasScript && docNode.sideEffect !== undefined && docNode.sideEffect !== "external") {
+    throw pfError("bad_request", `승인은 external·script 노드만: ${docNode.id} (sideEffect=${docNode.sideEffect})`);
   }
   const allowed = new Set(allowWildcardKeys);
   const denied: string[] = [];

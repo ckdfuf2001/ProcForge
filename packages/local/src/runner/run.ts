@@ -500,6 +500,51 @@ export async function callWithRetry(
   );
 }
 
+/**
+ * M5.8.2-3: 무인 live 승인 게이트 (external + script 공용).
+ * approvals.json 일치 시 null (진행), 불일치 시 fail ["approval"] 결과.
+ * script 포함 결정: 스크립트는 임의 코드 실행이라 기본 요구, opt-out 없음.
+ */
+function requireUnattendedApproval(
+  opts: RunOptions,
+  byId: Map<string, Node>,
+  n: Node,
+  server: string,
+  tool: string,
+  args: Record<string, unknown>,
+  start: number,
+  kind: "external" | "script",
+): NodeResult | null {
+  // M5: live에서도 사람 승인 없이는 실행 금지. M5.5-4: 무인 실행은
+  // approvals.json 일치 시 실행, 불일치 시 중단 대신 fail ["approval"].
+  // M5.5-4.1-3: node pin(id+hash) 판정. 해시 불일치(stale)는 갱신 안내.
+  const parent = n.parentId ? byId.get(n.parentId) : undefined;
+  const readScript = (rel: string): string | undefined => {
+    try {
+      return readFileSync(join(opts.procforgeDir, "sessions", opts.sessionId, rel), "utf8");
+    } catch {
+      return undefined;
+    }
+  };
+  const verdict = checkApproval(
+    opts.approvals ?? [],
+    approvalPins(
+      n,
+      parent ? { id: parent.id, hash: parent.hash, kind: (parent as { kind?: string }).kind } : undefined,
+      toHashableMap(byId),
+      readScript,
+    ),
+    server, tool, args,
+  );
+  if (verdict === "stale") {
+    return { nodeId: n.id, status: "fail", failedConstraints: ["approval"], detail: `approval: 승인 갱신 필요 (노드 ${n.id} 해시 변경). procforge approve <procedure> --node ${n.id}로 갱신`, durationMs: Date.now() - start };
+  }
+  if (verdict !== "ok") {
+    return { nodeId: n.id, status: "fail", failedConstraints: ["approval"], detail: `approval: 무인 실행 미승인 ${kind} (${server}/${tool}). procedures/<name>/approvals.json에 tool·인자 등록 필요`, durationMs: Date.now() - start };
+  }
+  return null;
+}
+
 async function execNode(
   opts: RunOptions,
   params: Record<string, string>,
@@ -615,6 +660,11 @@ async function execNode(
         code: "bad_request",
       });
     }
+    // M5.8.2-3: 무인 live에서 script 노드도 승인 필요 (기본 요구).
+    if (mode === "live" && opts.unattended) {
+      const gate = requireUnattendedApproval(opts, byId, n, server, tool, logicalArgs as Record<string, unknown>, start, "script");
+      if (gate) return gate;
+    }
     const scriptAbs = join(opts.procforgeDir, "runs", runId, rel);
     // M5.7-3: script 재시도는 노드 retry:{attempts} 명시(멱등 opt-in)시에만.
     // 기본 미재시도. M5.6-f 판별·상한 재사용 (fs 밖 변경 등 확정 실패는 제외).
@@ -655,32 +705,9 @@ async function execNode(
   } else if (mode === "live" && n.sideEffect === "external" && !(opts.approvedNodeIds ?? []).includes(n.id)) {
     // M5: live에서도 사람 승인 없이는 실행 금지. M5.5-4: 무인 실행은
     // approvals.json 일치 시 실행, 불일치 시 중단 대신 fail ["approval"].
-    // M5.5-4.1-3: node pin(id+hash) 판정. 해시 불일치(stale)는 갱신 안내.
     if (opts.unattended) {
-      const parent = n.parentId ? byId.get(n.parentId) : undefined;
-      const readScript = (rel: string): string | undefined => {
-        try {
-          return readFileSync(join(opts.procforgeDir, "sessions", opts.sessionId, rel), "utf8");
-        } catch {
-          return undefined;
-        }
-      };
-      const verdict = checkApproval(
-        opts.approvals ?? [],
-        approvalPins(
-          n,
-          parent ? { id: parent.id, hash: parent.hash, kind: (parent as { kind?: string }).kind } : undefined,
-          toHashableMap(byId),
-          readScript,
-        ),
-        server, tool, logicalArgs as Record<string, unknown>,
-      );
-      if (verdict === "stale") {
-        return { nodeId: n.id, status: "fail", failedConstraints: ["approval"], detail: `approval: 승인 갱신 필요 (노드 ${n.id} 해시 변경). procforge approve <procedure> --node ${n.id}로 갱신`, durationMs: Date.now() - start };
-      }
-      if (verdict !== "ok") {
-        return { nodeId: n.id, status: "fail", failedConstraints: ["approval"], detail: `approval: 무인 실행 미승인 external (${server}/${tool}). procedures/<name>/approvals.json에 tool·인자 등록 필요`, durationMs: Date.now() - start };
-      }
+      const gate = requireUnattendedApproval(opts, byId, n, server, tool, logicalArgs as Record<string, unknown>, start, "external");
+      if (gate) return gate;
       // 승인 일치 → 아래 실제 호출로 진행하지 않고 여기서 직접 호출 (live는 녹화 없음).
       resp = await pool.call(server, tool, args);
     } else {

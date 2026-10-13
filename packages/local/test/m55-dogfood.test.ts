@@ -221,6 +221,9 @@ async function buildDogfood(): Promise<ProcForgeApp> {
   });
   const fin = await app.finalize({ sessionId: sid, name: "daily-crawl" });
   expect(fin.warnings.filter((w) => w.includes("bad_"))).toEqual([]);
+  // M5.8.2-3: 무인 실행에서 script 노드도 승인 필요. 1.2·1.4 approve.
+  await app.approveProcedureNode({ procedure: "daily-crawl", nodeId: "1.2", allowWildcard: ["pages"] });
+  await app.approveProcedureNode({ procedure: "daily-crawl", nodeId: "1.4", allowWildcard: ["details", "seen"] });
   return app;
 }
 
@@ -304,7 +307,7 @@ describe("M5.5-5 dogfood", () => {
     expect(runExitCode({ failed: r.report.summary.fail, suspended: 0, approvalBlocked: true })).toBe(3);
   }, 180000);
 
-  it("M5.5-4.4-1 평탄화 스크립트 1줄 수정 → 하류 map stale exit 3", async () => {
+  it("M5.5-4.4-1 평탄화 스크립트 1줄 수정 → stale exit 3", async () => {
     const app = await buildDogfood();
     await app.approveProcedureNode({ procedure: "daily-crawl", nodeId: "1.3", allowWildcard: ["id"] });
     const scriptFile = join(pfdir, "procedures", "daily-crawl", "scripts", "1_2.py");
@@ -314,10 +317,12 @@ describe("M5.5-5 dogfood", () => {
       procforgeDir: pfdir, projectRoot: root, mode: "live",
       params: { day: "d1", stateDefaults: '{"seenIds":[]}' }, unattended: true,
     });
-    const n = r.report.results.find((x) => x.nodeId === "1.3")!;
+    // M5.8.2-3: 스크립트 수정 → 해당 노드(1.2) 자체가 stale. 하류(1.3)는 blocked.
+    const n = r.report.results.find((x) => x.nodeId === "1.2")!;
     expect(n.status).toBe("fail");
     expect(n.failedConstraints).toContain("approval");
     expect(n.detail ?? "").toContain("갱신");
+    expect(r.report.results.find((x) => x.nodeId === "1.3")?.status).toBe("blocked");
     expect(runExitCode({ failed: r.report.summary.fail, suspended: 0, approvalBlocked: true })).toBe(3);
   }, 180000);
 });
