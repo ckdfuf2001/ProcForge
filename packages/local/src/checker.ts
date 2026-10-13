@@ -71,14 +71,19 @@ export function resolveNumericExpected(
   return { expected };
 }
 
-/** "$<id>.output[.path]" 참조 해결. ".output" 생략 약식도 허용 (M5.1-B2) */
+/** "$<id>[.field]" 참조 해결. M5.8.2-1: "$N"만 전체, ".output" 단독은 output 필드. */
 export function resolveNodeRef(ref: string, outputs: Record<string, unknown>): { found: boolean; value: unknown } {
-  const m = /^\$(\d+(?:\.\d+)*)(?:\.output)?\.?(.*)$/.exec(ref);
+  const m = /^\$(\d+(?:\.\d+)*)(.*)$/.exec(ref);
   if (!m) return { found: false, value: undefined };
   if (!(m[1] in outputs)) return { found: false, value: undefined };
   const base = outputs[m[1]];
-  if (!m[2]) return { found: true, value: base };
-  return getByDotPath(base, m[2]);
+  let rest = m[2];
+  if (!rest) return { found: true, value: base };
+  if (rest.startsWith(".output.")) rest = rest.slice(".output.".length);
+  else if (rest.startsWith(".")) rest = rest.slice(1);
+  else return { found: false, value: undefined };
+  if (!rest) return { found: false, value: undefined };
+  return getByDotPath(base, rest);
 }
 
 /** "${params.x}" 참조 해결 (M5.1-B2) */
@@ -417,6 +422,46 @@ export function evaluateConstraint(c: Constraint, ctx: CheckContext): CheckResul
       const target = ctx.resultJson;
       const r = matchesJsonSchema(target, c.spec.jsonSchema);
       return r.pass ? { pass: true } : { pass: false, reason: r.reason };
+    }
+    case "csv_rows": {
+      // M5.8.2-4: CSV 데이터 행 수 검사 (resultJson 불필요). 행 세기만 하고
+      // 셀 파싱은 안 한다 (따옴표 포함 콤마 무관). 헤더 1행 제외가 기본.
+      if (!ctx.fsDir) return { pass: false, reason: "deferred to runner (no fs)", deferred: true };
+      const raw = typeof c.spec.path === "string" ? c.spec.path : "";
+      const rel = substituteParams(raw, ctx.params ?? {}).split("\\").join("/");
+      if (rel === "" || isEscapeRel(rel, "/") || isAbsolute(rel) || /^[a-zA-Z]:/.test(rel)) {
+        return { pass: false, reason: `bad csv path: ${raw}` };
+      }
+      let text: string;
+      try {
+        text = readFileSync(join(ctx.fsDir, rel), "utf8");
+      } catch {
+        return { pass: false, reason: `csv file not found: ${rel}` };
+      }
+      const lines = text.split(/\r?\n/).filter((l) => l.trim() !== "");
+      const rows = lines.length - ((c.spec.skipHeader ?? true) && lines.length > 0 ? 1 : 0);
+      let expected: number | undefined;
+      if (typeof c.spec.value === "number") {
+        expected = c.spec.value;
+      } else {
+        const re = resolveNumericExpected(c.spec, ctx);
+        if (re.deferred) return { pass: false, reason: re.reason, deferred: true };
+        if (re.reason) return { pass: false, reason: re.reason };
+        expected = re.expected;
+      }
+      if (expected === undefined) return { pass: false, reason: "no expected given" };
+      const tol = typeof c.spec.tolerance === "number" ? c.spec.tolerance : 0;
+      const op = c.spec.op;
+      const ok =
+        op === "eq" ? Math.abs(rows - expected) <= tol :
+        op === "ne" ? Math.abs(rows - expected) > tol :
+        op === "gt" ? rows > expected :
+        op === "ge" ? rows >= expected :
+        op === "lt" ? rows < expected :
+        op === "le" ? rows <= expected :
+        false;
+      if (!ok) return { pass: false, reason: `csv rows ${rows} ${op} ${expected} failed (${rel})` };
+      return { pass: true };
     }
     case "llm_rubric": {
       return { pass: false, reason: "llm_rubric requires human review", needsHuman: true };

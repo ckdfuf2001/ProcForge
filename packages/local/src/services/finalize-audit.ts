@@ -35,6 +35,7 @@ export const OUTPUT_ASSERT_KINDS: ReadonlySet<string> = new Set([
   "regex",
   "pptx_table_sum",
   "schema",
+  "csv_rows",
 ]);
 
 /**

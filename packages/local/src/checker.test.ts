@@ -301,5 +301,25 @@ describe("checker kinds", () => {
     expect(resolveNodeRef("$1.1.total", { "1.1": { total: 5 } })).toEqual({ found: true, value: 5 });
     expect(resolveNodeRef("$1.output.gross", { "1": { gross: 5 } })).toEqual({ found: true, value: 5 });
     expect(resolveNodeRef("$9.x", {}).found).toBe(false);
+    // M5.8.2-1: ".output" 단독은 output 필드 (전체가 아님).
+    expect(resolveNodeRef("$1.output", { "1": { output: "x", n: 1 } })).toEqual({ found: true, value: "x" });
+    expect(resolveNodeRef("$1", { "1": { output: "x" } })).toEqual({ found: true, value: { output: "x" } });
+  });
+
+  it("M5.8.2-4 csv_rows: 헤더 제외 행 수 + ref", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pf-csv-"));
+    writeFileSync(join(dir, "d.csv"), "title,date\nt1,2026-10-13\nt2,2026-10-13\n");
+    const base = { id: "c", kind: "csv_rows", source: "human" } as never;
+    const ctx = { fsDir: dir };
+    expect(evaluateConstraint({ ...base, spec: { path: "d.csv", op: "eq", value: 2 } }, ctx).pass).toBe(true);
+    expect(evaluateConstraint({ ...base, spec: { path: "d.csv", op: "eq", value: 3 } }, ctx).pass).toBe(false);
+    expect(evaluateConstraint({ ...base, spec: { path: "d.csv", op: "ge", expected: "$1.n" } }, { ...ctx, nodeOutputs: { "1": { n: 2 } } }).pass).toBe(true);
+    expect(evaluateConstraint({ ...base, spec: { path: "d.csv", op: "ge", expected: "$1.n" } }, { ...ctx, nodeOutputs: { "1": { n: 3 } } }).pass).toBe(false);
+    expect(evaluateConstraint({ ...base, spec: { path: "nope.csv", op: "eq", value: 0 } }, ctx).pass).toBe(false);
+    expect(evaluateConstraint({ ...base, spec: { path: "d.csv", op: "eq", value: 3, skipHeader: false } }, ctx).pass).toBe(true);
+    // fs 없음 → deferred (core는 unverified)
+    const d = evaluateConstraint({ ...base, spec: { path: "d.csv", op: "eq", value: 2 } }, {});
+    expect(d.pass).toBe(false);
+    expect(d.deferred).toBe(true);
   });
 });

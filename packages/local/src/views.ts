@@ -20,6 +20,8 @@ export function constraintSummary(c: Constraint): string {
       return s["expected"] !== undefined ? `expected=${s["expected"]}` : `min=${s["min"] ?? "-"} max=${s["max"] ?? "-"}`;
     case "pptx_table_sum":
       return `path=${s["path"]} expected=${s["expected"]}`;
+    case "csv_rows":
+      return `path=${s["path"]} ${s["op"]} ${s["value"] ?? s["expected"] ?? s["expectedRef"] ?? "-"}`;
     case "schema":
       return "json-schema";
     case "llm_rubric":

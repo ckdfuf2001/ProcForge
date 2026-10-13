@@ -132,12 +132,29 @@ export const ConstraintNumericMatchSchema = ConstraintBase.extend({
   spec: z.object({
     path: z.string().optional(),
     value: z.number().optional(),
-    /** 고정값 또는 ref ("$노드[.경로]" 약식 포함, "${params.x}") (M5.1-B2) */
+    /** 결괏값 또는 ref ("$노드[.경로]" 약식 허용, "${params.x}") (M5.1-B2) */
     expected: z.union([z.number(), z.string()]).optional(),
     expectedRef: z.string().optional(),
     tolerance: z.number().min(0).optional(),
     min: z.number().optional(),
     max: z.number().optional(),
+  }),
+});
+export const ConstraintCsvRowsSchema = ConstraintBase.extend({
+  kind: z.literal("csv_rows"),
+  spec: z.object({
+    /** run fs 상대 CSV 경로 */
+    path: z.string().min(1),
+    /** 비교 연산 */
+    op: z.enum(["eq", "ne", "gt", "ge", "lt", "le"]),
+    /** 비교값 리터럴 */
+    value: z.number().optional(),
+    /** 비교값 또는 ref ("$노드[.경로]", "${params.x}") (M5.1-B2) */
+    expected: z.union([z.number(), z.string()]).optional(),
+    expectedRef: z.string().optional(),
+    tolerance: z.number().min(0).optional(),
+    /** 헤더 1행 제외 (기본 true, pptx skipHeader와 동일) */
+    skipHeader: z.boolean().optional(),
   }),
 });
 export const ConstraintSchemaKindSchema = ConstraintBase.extend({
@@ -172,6 +189,7 @@ export const ConstraintSchema = z.discriminatedUnion("kind", [
   ConstraintRegexSchema,
   ConstraintCountSchema,
   ConstraintNumericMatchSchema,
+  ConstraintCsvRowsSchema,
   ConstraintPptxTableSumSchema,
   ConstraintSchemaKindSchema,
   ConstraintLlmRubricSchema,
