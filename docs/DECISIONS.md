@@ -479,6 +479,11 @@
   attempt = 메타のみ (preview ≤4KB cap).
 - [M5.8.2 후속] 비교는 stable 직렬화 (키 순서 무관). 삽입 순서에 따라
   달라지는 JSON.stringify 동등 비교 금지.
+- [M6-1] wire 계약: CoreClient 17 메서드 1:1 `POST /v1/<method>` (JSON object
+  body. positional 인자도 명명 객체로). 요청·응답 모두 shared zod로 양쪽 검증
+  (공유 스키마 재사용 + 필수 키. 깊은 페이로드는 shared 그대로).
+  `x-procforge-version` 헤더, 불일치면 conflict + 업그레이드 힌트.
+  에러는 기존 코드 체계 그대로, internal은 고정 메시지만 (스택 비노출).
 - M5.5-5: dogfood daily-crawl (fake board 날짜별 3페이지 + detail x3 실패).
   until 수집 → script 평탄화 → map 상세(external·threshold 0.5) → script 누적.
   run1(d1) x1,x2·run2(d2) x4 신규만, state seenIds 누적. (a) stale hash → fail

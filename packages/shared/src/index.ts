@@ -12,3 +12,4 @@ export * from "./deps.js";
 export * from "./args-schema.js";
 export * from "./loopback.js";
 export * from "./stable.js";
+export * from "./wire.js";
