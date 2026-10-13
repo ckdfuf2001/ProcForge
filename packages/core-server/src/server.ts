@@ -266,5 +266,5 @@ export function startServer(opts: {
       });
     });
   };
-  return attempt(5);
+  return attempt(10);
 }
