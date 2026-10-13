@@ -6,7 +6,7 @@ import { swapDir, writeProcedure } from "../src/services/procedureWriter.js";
 
 // M5.8.1-3: finalize/export 경로 무명 예외 금지.
 // E2E 4회 internal 원인 확정: 보고 경로가 fixtures-manifest.json을 만들고
-// fixtures/가 없으면 tests/ 미생성 상태로 manifest 복사 → ENOENT (M5.8.1-2 수정).
+// fixtures/가 없으면 tests/ 미생성 상태로 manifest 복사 → ENOENT (M5.8.1-3 수정).
 
 let root: string;
 
@@ -50,7 +50,7 @@ describe("M5.8.1-3 export 계약", () => {
     expect(msg).toMatch(/export 실패/);
   });
 
-  it("M5.8.1-2 manifest 있으면 tests/ 생성 후 복사 (E2E internal 회귀)", () => {
+  it("M5.8.1-3 manifest 있으면 tests/ 생성 후 복사 (E2E internal 회귀)", () => {
     const pfdir = join(root, ".procforge");
     mkdirSync(join(pfdir, "sessions", "s"), { recursive: true });
     writeFileSync(join(pfdir, "sessions", "s", "fixtures-manifest.json"), "{}");

@@ -255,7 +255,7 @@ export function writeProcedure(input: {
   copyTree("cassettes", "tests/cassettes");
   const mf = join(sessDir, "fixtures-manifest.json");
   if (existsSync(mf)) {
-    // M5.8.1-2: 복사 전 tests/ 생성 (미생성 시 copyFileSync ENOENT → internal.
+    // M5.8.1-3: 복사 전 tests/ 생성 (미생성 시 copyFileSync ENOENT → internal.
     // E2E 4회 internal 원인: 보고 경로가 manifest를 만들고 fixtures/가 없어
     // copyTree가 tests/를 안 만들면 여기서 죽었다).
     mkdirSync(join(buildDir, "tests"), { recursive: true });
