@@ -54,7 +54,44 @@ jobs:
       - name: no console.log in local src (stderr logger only, cli.ts excepted)
         run: |
           ! grep -rn --exclude='*.test.ts' "console\.log" packages/local/src --exclude=cli.ts || (echo "console.log forbidden, use logger" && exit 1)
-      - name: no direct approval matching outside approvals service (M5.5-4.3-4)
-        run: |
-          ! grep -rn --include='*.ts' --exclude='*.test.ts' "matchApproval" packages/local/src | grep -v "services/approvals.ts" | grep -q . || (echo "direct matchApproval forbidden, use checkApproval" && exit 1)
-          ! grep -rn --include='*.ts' "\<isApproved>(" packages/local/src packages/local/test packages/shared/src packages/core/src || (echo "isApproved removed, use checkApproval" && exit 1)
+        - name: no direct approval matching outside approvals service (M5.5-4.3-4)
+          run: |
+            ! grep -rn --include='*.ts' --exclude='*.test.ts' "matchApproval" packages/local/src | grep -v "services/approvals.ts" | grep -q . || (echo "direct matchApproval forbidden, use checkApproval" && exit 1)
+            ! grep -rn --include='*.ts' "\<isApproved>(" packages/local/src packages/local/test packages/shared/src packages/core/src || (echo "isApproved removed, use checkApproval" && exit 1)
+  remote-mode:
+    # M6-5: 세 번째 모드. core-server 기동 + remote 전용 테스트 (wire·client·egress·remote 실행).
+    # 전체 스위트는 inprocess/loopback에서 검증, remote 전체 이식은 M6.1.
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+      fail-fast: true
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: pnpm store path
+        id: pnpm-store
+        run: echo "path=$(pnpm store path)" >> $GITHUB_OUTPUT
+      - name: pnpm store cache (M5.6)
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-store-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: pnpm-store-${{ runner.os }}-
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install openpyxl python-pptx
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm check:deps
+      - name: core-server tests
+        run: pnpm --filter @procforge/core-server exec vitest run --testTimeout=20000
+      - name: remote-mode tests (spawn in-test)
+        run: pnpm --filter @procforge/local exec vitest run test/remote-client.test.ts test/m6-egress.test.ts test/m6-remote-run.test.ts --testTimeout=60000 --hookTimeout=60000

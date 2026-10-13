@@ -36,6 +36,8 @@ export type RunOptions = {
   procedureDir?: string;
   /** 실행 간 상태 (M5.5-3. runSession이 로드, resolveArgs에 전달) */
   state?: Record<string, unknown>;
+  /** 원격 core (M6-5. 지정 시 세션·노드를 가져와 로컬에 하이드레이트 후 실행) */
+  core?: import("@procforge/shared/core-client.js").CoreClient;
 };
 
 export type NodeResultStatus = "pass" | "fail" | "unverified" | "skipped" | "blocked" | "suspended";

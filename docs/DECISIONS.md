@@ -501,10 +501,18 @@
   (expectedRevision 충돌 판단은 호출자가). 네트워크 실패 → io_error degraded.
   로컬 파일 쓰기를 하지 않으므로 로컬 상태 불변. 송신 탭(onSend) 내장.
 - [M6-4] egress guard: core행 요청을 RemoteCoreClient 송신 한 곳에서 검사.
-  구조 위반은 차단 bad_request (pfReport 바깥 resultJson 실데이터, 절대경로.
-  산문·resultJson은 절대경로 검사 제외). 민감값은 교정 후 전송
-  (토큰 패턴 전역. 이메일은 평가·실행 입력(resultJson/resultSummary/params/
-  args) 제외). 메타 형태는 파생 요약이라 면제.
+  구조 위반은 차단 bad_request (pfReport 바깥 resultJson 실데이터, 확정·제약
+  경로(argSpecs·spec.path·artifacts)의 절대경로. params/args/resultJson/
+  resultSummary는 실행·평가·바인딩 입력이라 원문 유지).
+  민감값은 교정 후 전송 (토큰 패턴 전역. 이메일은 위 입력 제외).
+  메타 형태는 파생 요약이라 면제.
+- [M6-5] CI remote 모드: 별도 job (ubuntu·windows). core-server 테스트 +
+  remote 전용 테스트 3종 (remote-client·m6-egress·m6-remote-run, 서버 자체
+  기동). 전체 스위트 remote 이식은 M6.1 (import API·golden 쓰기 API·테스트
+  이식 필요). check-deps에 core-server→local import 금지 추가.
+- [M6-6] p95 (로컬 loopback remote, 2026-10-14): getSession 30.4ms,
+  pfTree 8.7ms, getNode 7.5ms, pfNext 27.9ms (첫 호출 워밍업 포함).
+  목표: p95 < 1000ms (여유 30배. CI 변동 감안, 초과 시 조사).
 - M5.5-5: dogfood daily-crawl (fake board 날짜별 3페이지 + detail x3 실패).
   until 수집 → script 평탄화 → map 상세(external·threshold 0.5) → script 누적.
   run1(d1) x1,x2·run2(d2) x4 신규만, state seenIds 누적. (a) stale hash → fail

@@ -56,6 +56,36 @@ if (violations.length > 0) {
   console.log("check-deps: OK (no local->core imports)");
 }
 
+// M6-5: core-server는 local을 import 금지 (shared·core만 사용).
+const CS_SRC = join(dirname(fileURLToPath(import.meta.url)), "..", "packages", "core-server", "src");
+const csFiles = listFiles(CS_SRC);
+const csViolations = [];
+for (const f of csFiles) {
+  if (f.endsWith(".test.ts")) continue;
+  const lines = readFileSync(f, "utf8").split("\n");
+  lines.forEach((line, i) => {
+    const stripped = line.trim();
+    if (stripped.startsWith("//")) return;
+    if (
+      stripped.includes("@procforge/local") ||
+      stripped.includes("packages/local") ||
+      stripped.includes("../local/") ||
+      stripped.includes("../../local/")
+    ) {
+      csViolations.push(`${f}:${i + 1}: ${stripped}`);
+    }
+  });
+}
+
+if (csViolations.length > 0) {
+  console.error("DEP VIOLATION (M6-5): packages/core-server must not import local.");
+  console.error("Use @procforge/shared and @procforge/core only.");
+  for (const v of csViolations) console.error("  " + v);
+  process.exit(1);
+} else {
+  console.log("check-deps: OK (no core-server->local imports)");
+}
+
 // M4.2-4-1: 어댑터(server.ts, cli.ts, ui/**) import 허용 목록.
 // 허용: app/, shared의 schema·dto·errors, logger, MCP SDK, zod.
 // 금지: filestore, services/**, runner/**, node:fs 등 나머지 local 내부·node 내장.

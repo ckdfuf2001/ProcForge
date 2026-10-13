@@ -4,7 +4,7 @@ import { inspectEgress, guardEgress } from "./egress.js";
 // M6-4: 전송 감사 규칙 단위 테스트.
 
 describe("egress", () => {
-  it("절대경로 차단 (URL·산문 제외)", () => {
+  it("절대경로 차단 (URL·산문·실행입력 제외)", () => {
     const bad = inspectEgress("pfResolve", { argSpecs: { p: { kind: "fixed", value: "C:\\x\\y" } } });
     expect(bad.violations.length).toBeGreaterThan(0);
     const posix = inspectEgress("pfResolve", { argSpecs: { p: { kind: "fixed", value: "/etc/passwd" } } });
@@ -15,6 +15,11 @@ describe("egress", () => {
     expect(prose.violations).toEqual([]);
     const rel = inspectEgress("pfResolve", { argSpecs: { p: { kind: "fixed", value: "output/x.csv" } } });
     expect(rel.violations).toEqual([]);
+    // 실행 입력(params/args)은 절대경로 허용 (--param 정상 사용).
+    const params = inspectEgress("pfStart", { request: "r", params: { feed: "D:\\data\\feed.json" } });
+    expect(params.violations).toEqual([]);
+    const args = inspectEgress("pfReport", { args: { path: "/tmp/x.json" } });
+    expect(args.violations).toEqual([]);
   });
 
   it("resultJson 실데이터: pfReport만 허용", () => {

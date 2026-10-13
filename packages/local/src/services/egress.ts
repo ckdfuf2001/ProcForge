@@ -1,9 +1,10 @@
 import { pfError } from "@procforge/shared/errors.js";
 
 // M6-4: core행 요청 전송 감사. RemoteCoreClient가 송신 전 한 곳에서 검사한다.
-// - 구조 위반(차단): pfReport 바깥의 resultJson 실데이터, 절대경로 문자열.
-// - 교정(redact, 차단 아님): 토큰 패턴 전역, 이메일은 평가 입력(resultJson/
-//   resultSummary) 제외.
+// - 구조 위반(차단): pfReport 바깥의 resultJson 실데이터,
+//   확정·제약 경로(argSpecs·spec.path·artifacts)의 절대경로.
+// - 교정(redact, 차단 아님): 토큰 패턴 전역, 이메일은 산문만
+//   (실행·평가 입력 params/args/resultJson/resultSummary는 원문 유지).
 // 위반이 있으면 전송하지 않고 bad_request (호출자 코드 수정 사항).
 
 export type EgressCheck = { body: unknown; violations: string[]; redactions: number };
@@ -32,13 +33,6 @@ const PROSE_KEYS = new Set([
   "summary", "goal", "instruction", "request",
 ]);
 
-/**
- * 교정 제외 필드 (실행·평가·바인딩 무결성).
- * resultJson/resultSummary: 평가 입력 (원문 유지).
- * params/args: 실행·재바인딩 입력 (원문 유지).
- * 절대경로 검사는 resultJson만 제외 (도구 출력 비제어).
- */
-
 const TOKEN_RES: { re: RegExp; label: string }[] = [
   { re: /sk-[A-Za-z0-9]{20,}/g, label: "token" },
   { re: /xox[bpas]-[A-Za-z0-9-]+/g, label: "token" },
@@ -55,8 +49,10 @@ export function inspectEgress(method: string, body: unknown): EgressCheck {
   const clone: unknown = JSON.parse(JSON.stringify(body));
   const inReport = method === "pfReport";
 
-  // mode: normal(검사+교정) | prose(교정만) | data(면제: 평가 원문) | frozen(검사만: 실행 입력).
-  type Mode = "normal" | "prose" | "data" | "frozen";
+  // mode: normal(검사+교정) | prose(교정만) | data(면제).
+  // params/args/resultJson은 실행·평가·바인딩 입력이라 원문 유지
+  // (--param 절대경로는 정상 사용. M3 상대경로 규칙은 runner가 담당).
+  type Mode = "normal" | "prose" | "data";
   const walk = (v: unknown, key: string | null, mode: Mode): unknown => {
     if (typeof v === "string") {
       let s = v;
@@ -74,7 +70,8 @@ export function inspectEgress(method: string, body: unknown): EgressCheck {
         }
         EMAIL_RE.lastIndex = 0;
       }
-      if ((mode === "normal" || mode === "frozen") && !URL_RE.test(s) && ABS_RE.test(s)) {
+      if (mode === "data") return v;
+      if ((mode === "normal") && !URL_RE.test(s) && ABS_RE.test(s)) {
         violations.push(`절대경로: ${key ?? "(root)"}="${s.slice(0, 80)}"`);
       }
       return s;
@@ -93,7 +90,7 @@ export function inspectEgress(method: string, body: unknown): EgressCheck {
           continue;
         }
         const next: Mode =
-          k === "params" || k === "args" ? "frozen"
+          k === "params" || k === "args" || k === "resultJson" ? "data"
           : PROSE_KEYS.has(k) ? "prose"
           : mode;
         out[k] = walk(x, k, next);

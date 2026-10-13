@@ -135,6 +135,17 @@ export async function runSession(opts: RunOptions): Promise<RunReport> {
     throw Object.assign(new Error("--update-golden은 record/passthrough에서만 허용 (replay 불가)"), { code: "bad_request" });
   }
   const store = new FileStore(opts.procforgeDir);
+  // M6-5: 원격 core면 세션·노드를 가져와 로컬에 하이드레이트 후 기존 경로
+  // 그대로 실행 (run fs·산출물은 로컬). record는 원격 미지원 (golden 쓰기 API 없음).
+  if (opts.core) {
+    if (mode === "record") {
+      throw Object.assign(new Error("remote record 미지원 (golden 쓰기 API 없음). replay/live만 가능"), { code: "bad_request" });
+    }
+    const rs = await opts.core.getSession(opts.sessionId);
+    store.saveSession(rs);
+    const tree = await opts.core.pfTree(opts.sessionId);
+    for (const n of tree.nodes) store.saveNode(opts.sessionId, n);
+  }
   const session = store.getSession(opts.sessionId);
   if (!session) throw Object.assign(new Error(`세션 없음: ${opts.sessionId}`), { code: "session_not_found" });
   // M5.5-4.1-4: 무인 실행은 generated 값을 공급받을 수 없으므로 실행 전 거부.
