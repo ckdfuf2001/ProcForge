@@ -50,6 +50,7 @@
 완료 선언
 - 완료 기준: GitHub Actions에서 ubuntu-latest·windows-latest × 양 모드가 모두 success.
 - `api.github.com/repos/ckdfuf2001/ProcForge/actions/runs?head_sha=<푸시한 head>`로 head_sha가 일치하는 run의 `conclusion=success`를 확인한 뒤에만 완료를 선언한다. 중간 커밋에는 run이 없을 수 있으니 묶음의 마지막 head로 확인한다.
+- 8절의 커밋은 코드 head(기능·수정 마지막 커밋. 문서 후속 커밋 제외)를 적는다. 완료 선언은 최종 head의 CI success 확인으로 한다 (8절=코드 head, 최종 head CI success 확인).
 - 실패한 run이 있었으면 감추지 말고 "정정" 항목으로 원인과 해소 커밋을 보고한다.
 
 보고 형식
@@ -580,7 +581,8 @@ c·d·j는 하네스 과제로 DECISIONS에 기록만.
 | M5.8 | OpenCode 실제 E2E | [ ] | | | (a) TUI+dist MCP 분해 (b) advise 부분 stale (c) finalize→무수정 approve→이틀 unattended exit 0 (d) docs/M5.8-opencode-e2e.md 기록 — 비고: (a) TUI 1회, (c) 날짜 바뀐 뒤 1회 남음 — 사용자 수행 |
 | M5.8.1 | E2E 실행벽 해소 | [x] | `de9f004` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38401689793 | 0 사실확인·6 호출주체·1 실행불가 leaf 거부·2 메시지 정정·3 finalize 원인수정(manifest 복사)·4 dependsOn 편집 |
 | M5.8.2 | E2E 2회차 후속 | [ ] | | | 0 사실확인·1 ref 의미·2 probing/run 차단·3 script 승인·4 csv_rows·5 주석 정정 + 후속(golden 기준·검증불가·R8 분리·stable) |
-| M6 | 원격 core | [x] | `f266942` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38459923601 | 0 준비(공개·@날짜)·1 wire·2 FileStore shared+core-server·3 RemoteCoreClient·4 egress·5 CI remote+check-deps·6 p95<1000ms·loopback 안정화 (docs/REVIEW-M6.md) |
+| M6 | 원격 core | [ ] | | | egress R8 위반·전체 remote 미이식 → M6.1 |
+| M6.1 | 원격 core 후속 | [ ] | | | 1 egress R8 일치·2 전체 스위트 remote 이식·3 테스트 재시도 제거·4 인증 강화·5 저장소 공개 결정 |
 | M7 | UI | [ ] | | | |
 
 ---
@@ -638,3 +640,4 @@ c·d·j는 하네스 과제로 DECISIONS에 기록만.
 | 2026-10-13 | 8 | M5.8.2 신설 (E2E 2회차 후속 0~5): ref 의미·probing/run 차단·script 승인·csv_rows·주석 정정. M5.8은 [ ] 유지 | 2회차에서 드러난 ref·실행 간극·승인 공백 메우기 |
 | 2026-10-14 | 8 | M6 신설 (원격 core 0~6) + M5.8 비고 갱신·정정. M5 [x] 확인 | (a) TUI 1회·(c) 날짜변경 1회는 사용자 수행으로 남김. (b) 충족·(c) 당일 반복만으로 정정 |
 | 2026-10-14 | 8 | M6 완료 (0~6 한 묶음): L3 green·CI run 38459923601 success·docs/REVIEW-M6.md. loopback 순간실패 안정화(서버공유·EACCES 재시도·fetch 재시도) | 전체 스위트 remote 이식은 M6.1 (import·golden API·테스트 이식 필요) |
+| 2026-10-14 | 0, 8 | M6 [ ] 환원 + M6.1 신설 (원격 core 후속 1~5). 0.2 완료 선언 문구 개정 (8절=코드 head, 최종 head CI success 확인) | egress R8 위반(원문 송신)·전체 remote 미이식 해소 전 완료 선언 불가 |

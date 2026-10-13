@@ -456,6 +456,8 @@
   finalize는 상류 resultJson으로 var ref 필드 존재 검증 (bad_ref_field).
   map/until 템플릿 probing과 map/until 대상 참조는 면제/제외 (런타임 출력이
   누적 수집이라 정적 해석과 다름).
+- [M6.1-5] 저장소 공개: 공개 유지 (사용자 결정, 2026-10-14).
+  비밀 URL·키는 `$prefix`·환경 분리, 토큰 하드코딩 금지 유지.
 - [M6-0] 저장소 공개: 공개 유지 (사용자 지시). [!] 아님. 공개 운영 선택지
   (사용자 결정 대기): (a) `.procforge/`는 gitignore라 세션·run 기록은 커밋 안
   됨 — 현 상태 유지가 기본. (b) `procedures/` 승인·스크립트는 커밋됨 —
