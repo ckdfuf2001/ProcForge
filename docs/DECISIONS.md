@@ -424,6 +424,10 @@
   (미지원 내장·allowBash 없는 bash)는 fixture 게이트보다 먼저 "실행 불가"로
   실패. record/live 모드의 fixture 에러에서는 "record로 재녹화" 힌트를 내지
   않는다   (replay/passthrough는 유지).
+- [M5.8.1-5] CI 수정: export 정리 실패가 본 에러 마스킹. `rmSync(force)`는
+  ENOENT만 삼키고 ENOTDIR(파일 밑 통과, Linux)은 그대로 던져서, catch 안의
+  정리가 원본 에러를 덮고 raw가 전파됐다 (Windows는 ENOENT라 통과, ubuntu만
+  실패). 정리 rmSync는 전부 best-effort로. E2E 잔재(.tmp-*)와도 일치.
 - [M5.8.1-4] dependsOn 사후 편집: pf_split에서 형제 2개 이상인데 전부 의존이
   비어 있으면 경고 + instruction에 연결 문구. pf_edit_node에 dependsOn 추가
   (CoreClient 경유, 기존 노드만·자기참조/순환 거부, 해시 재계산·stale 전파·

@@ -259,17 +259,27 @@ export function writeProcedure(input: {
     files.push("tests/fixtures-manifest.json");
   }
   // M4.1-5: tmp에 빌드 후 원자 교체 (실패 시 tmp 정리)
+  // 정리 실패는 본 에러를 가리면 안 되므로 best-effort (M5.8.1-5:
+  // force도 ENOTDIR 등은 못 삼킨다).
   try {
     swapDir(buildDir, dir);
   } catch (e) {
-    rmSync(buildDir, { recursive: true, force: true });
+    try {
+      rmSync(buildDir, { recursive: true, force: true });
+    } catch {
+      // 정리 실패 무시
+    }
     throw e;
   }
   mkdirSync(dirname(commandFile), { recursive: true });
   writeFileSync(commandFile, commandMd);
   return { dir, files: files.sort(), commandFile };
   } catch (e) {
-    rmSync(buildDir, { recursive: true, force: true });
+    try {
+      rmSync(buildDir, { recursive: true, force: true });
+    } catch {
+      // 정리 실패 무시
+    }
     throw codedFs(e, "export 실패");
   }
 }
