@@ -632,3 +632,4 @@ c·d·j는 하네스 과제로 DECISIONS에 기록만.
 | 2026-10-13 | 8 | M5.8.1-3 [!] 지정: 감싸기만 됨, 원인 미확정 | E2E internal 4회의 원래 예외를 못 찾음. 재현 시도 후 DECISIONS 기록 또는 수정 |
 | 2026-10-13 | 8 | M5.8.1-3 [!] 해제: 원인 확정. 보고 경로가 manifest를 만들고 fixtures/가 없으면 tests/ 미생성 상태로 manifest 복사 → ENOENT. c42d755 워크트리 MCP 재현으로 확정 | 재현 조건: App 경로 보고 3건 + finalize. core 직결 보고는 manifest가 안 생겨서 재현 안 됨 |
 | 2026-10-13 | 0 | dev-verify 로그 분리(.verify/) + --from 재개 | 장시간 실행이 인프라 절단으로 2회 중단돼 분할 실행을 정식으로 만듦 |
+| 2026-10-13 | 8 | M5.8 2회차 기록 (하위 에이전트): bash 거부→script 자가수정, Show/Ask 제외, 무인 1회차 exit 0. 2회차(내일) 남음 | (a) TUI 대신. clientInfo opencode 기록 |
