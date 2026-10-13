@@ -434,9 +434,11 @@
   revision 증가는 공용 경로).
 - [M5.8.1-3] finalize export 무명 예외 제거: E2E에서 artifact 없는 leaf 트리로
   finalize 4회 internal (완성 .tmp-* 잔재, 교체 안 됨. 유령 재시도 1회 포함).
-  확정 원인은 못 잡음. 빌드~교체 사이 fs 실패와 일치하므로 swapDir에
-  EPERM/EBUSY/ENOTEMPTY 재시도 + export 경로 전체를 coded 에러로 감싼다
-  (coded는 유지). artifact 없음 자체는 거부 사유가 아니다 (M5.3-0-4 유지).
+  원인 확정: 보고 경로(ingestReportJobs→appendManifest)가 manifest를 무조건 만들고,
+  fixtures/가 없으면 copyTree가 tests/를 안 만든 채 manifest 복사 → ENOENT.
+  #5는 fixtures 복사가 tests/를 먼저 만들어 우연히 성공. core 직결 보고는
+  manifest가 안 생겨서 기존 테스트가 가렸음. 수정: 복사 전 tests/ 생성.
+  artifact 없음 자체는 거부 사유가 아니다 (M5.3-0-4 유지).
 - M5.5-5: dogfood daily-crawl (fake board 날짜별 3페이지 + detail x3 실패).
   until 수집 → script 평탄화 → map 상세(external·threshold 0.5) → script 누적.
   run1(d1) x1,x2·run2(d2) x4 신규만, state seenIds 누적. (a) stale hash → fail
