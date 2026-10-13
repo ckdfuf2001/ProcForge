@@ -493,7 +493,13 @@
   테넌트별 FileStore(dataDir/tenants/<tid>), Bearer API 키(`tid:key`, bare는
   default), 키 없으면 401(unauthorized 신규 코드), 버전 불일치 409, 입력 검증
   실패 400, 출력 불일치는 500 sanitized. 타 테넌트 sessionId →
-  session_not_found (격리는 디렉터리 분리로 구조 보장). 평가는 shared 판정기.
+  session_not_found (격리는 디렉터리 분리로 구조 보장).   평가는 shared 판정기.
+- [M6-3] RemoteCoreClient: `PROCFORGE_CORE_URL` 있으면 remote, 기본 inprocess
+  (core-inprocess 분기. 로컬 FileStore는 그대로). 읽
+  기(getSession/getNode/pfTree/getEvents/pfBuildProcedure)만 재시도
+  (fetch 실패·타임아웃·502/503/504, 3회). 쓰기는 재시도 금지
+  (expectedRevision 충돌 판단은 호출자가). 네트워크 실패 → io_error degraded.
+  로컬 파일 쓰기를 하지 않으므로 로컬 상태 불변. 송신 탭(onSend) 내장.
 - M5.5-5: dogfood daily-crawl (fake board 날짜별 3페이지 + detail x3 실패).
   until 수집 → script 평탄화 → map 상세(external·threshold 0.5) → script 누적.
   run1(d1) x1,x2·run2(d2) x4 신규만, state seenIds 누적. (a) stale hash → fail
