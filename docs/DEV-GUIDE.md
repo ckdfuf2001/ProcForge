@@ -581,9 +581,9 @@ c·d·j는 하네스 과제로 DECISIONS에 기록만.
 | M5.8 | OpenCode 실제 E2E | [ ] | | | (a) TUI+dist MCP 분해 (b) advise 부분 stale (c) finalize→무수정 approve→이틀 unattended exit 0 (d) docs/M5.8-opencode-e2e.md 기록 — 비고: (a) TUI 1회, (c) 날짜 바뀐 뒤 1회 남음 — 사용자 수행 |
 | M5.8.1 | E2E 실행벽 해소 | [x] | `de9f004` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38401689793 | 0 사실확인·6 호출주체·1 실행불가 leaf 거부·2 메시지 정정·3 finalize 원인수정(manifest 복사)·4 dependsOn 편집 |
 | M5.8.2 | E2E 2회차 후속 | [ ] | | | 0 사실확인·1 ref 의미·2 probing/run 차단·3 script 승인·4 csv_rows·5 주석 정정 + 후속(golden 기준·검증불가·R8 분리·stable) |
-| M6 | 원격 core | [ ] | | | egress R8 위반·전체 remote 미이식 → M6.1 |
+| M6 | 원격 core | [x] | `9458704` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38604361482 | 0~6 + M6.1 후속(1~5) 완료 (docs/REVIEW-M6.md) |
 | M6.1 | 원격 core 후속 | [x] | `9458704` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38604361482 | 1 egress R8·2 전체 remote+egress 단언·3 재시도 제거·4 인증·5 공개유지 (docs/REVIEW-M6.md) |
-| M7 | UI | [ ] | | | |
+| M7 | UI | [ ] | | | 0 SDK 확인(opencode serve 세션 메시지·pf_next 재개) · 1 `procforge ui` 로컬 서버+SPA · 2 트리+SSE · 3 노드 상세 · 4 텍스트 편집/의견+stale 미리보기 · 5 실행 화면 · 6 Playwright E2E |
 
 ---
 
@@ -642,3 +642,4 @@ c·d·j는 하네스 과제로 DECISIONS에 기록만.
 | 2026-10-14 | 8 | M6 완료 (0~6 한 묶음): L3 green·CI run 38459923601 success·docs/REVIEW-M6.md. loopback 순간실패 안정화(서버공유·EACCES 재시도·fetch 재시도) | 전체 스위트 remote 이식은 M6.1 (import·golden API·테스트 이식 필요) |
 | 2026-10-14 | 0, 8 | M6 [ ] 환원 + M6.1 신설 (원격 core 후속 1~5). 0.2 완료 선언 문구 개정 (8절=코드 head, 최종 head CI success 확인) | egress R8 위반(원문 송신)·전체 remote 미이식 해소 전 완료 선언 불가 |
 | 2026-10-14 | 8 | M6.1 완료 (1~5 한 묶음): L3 green·CI run 38604361482 success(remote 전체 포함)·docs/REVIEW-M6.md 갱신 | EACCES 원인 확정 (burst connect·stale keep-alive·EXCLUSIVEADDRUSE+TIME_WAIT). product connect-phase 재시도 유지 |
+| 2026-10-14 | 8 | M6 [x] + M7 신설 (UI 0~6). 신뢰경계·keep-alive·재시도범위 DECISIONS 기록 | M6.1 완료 후속. 4(b) 방식은 M7-0 SDK 확인 결과 보고 결정 |
