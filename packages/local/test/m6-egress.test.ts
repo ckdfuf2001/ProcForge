@@ -4,7 +4,6 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { startServer, parseApiKeys } from "../../core-server/dist/server.js";
 import { createRemoteCoreClient } from "../src/remote-client.js";
-import { withNetRetry } from "./net-retry.js";
 import { ProcForgeApp } from "../src/app/app.js";
 
 // M6-4 계약: 전체 E2E를 remote 모드로 돌리면서 송신 바이트를 수집해
@@ -49,22 +48,11 @@ describe("M6-4 egress 계약", () => {
     const sent: { method: string; bytes: number }[] = [];
     try {
       const baseUrl = `http://127.0.0.1:${srv.port}`;
-      // 바인드 경합 대비 healthz 대기.
-      for (let i = 0; i < 20; i++) {
-        try {
-          const h = await fetch(`${baseUrl}/healthz`);
-          if (h.ok) break;
-        } catch {
-          await new Promise((r) => setTimeout(r, 100));
-        }
-      }
-      const client = withNetRetry(
-        createRemoteCoreClient({
-          baseUrl,
-          apiKey: KEY,
-          onSend: (m, b) => sent.push({ method: m, bytes: b }),
-        }),
-      );
+      const client = createRemoteCoreClient({
+        baseUrl,
+        apiKey: KEY,
+        onSend: (m, b) => sent.push({ method: m, bytes: b }),
+      });
       const app = new ProcForgeApp({
         core: client,
         procforgeDir: pfdir,

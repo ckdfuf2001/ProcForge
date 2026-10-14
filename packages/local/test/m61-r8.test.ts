@@ -14,7 +14,6 @@ import { randomUUID } from "node:crypto";
 import { startServer, parseApiKeys } from "../../core-server/dist/server.js";
 import { createRemoteCoreClient } from "../src/remote-client.js";
 import { ProcForgeApp } from "../src/app/app.js";
-import { withNetRetry } from "./net-retry.js";
 
 // M6.1-1 (R8): 10KB 크롤링 본문을 report → 서버 수신 본문에 원문 0바이트.
 // 메타+판정만 전송, 평가는 local, 원문은 로컬 attempt 파일에만.
@@ -35,14 +34,6 @@ beforeAll(async () => {
     port: 0,
   });
   baseUrl = `http://127.0.0.1:${srv.port}`;
-  for (let i = 0; i < 20; i++) {
-    try {
-      const h = await fetch(`${baseUrl}/healthz`);
-      if (h.ok) break;
-    } catch {
-      await new Promise((r) => setTimeout(r, 100));
-    }
-  }
 });
 
 afterAll(async () => {
@@ -85,9 +76,11 @@ describe("M6.1-1 egress R8", () => {
       if (init?.body !== undefined) sentBodies.push(String(init.body));
       return fetch(url, init);
     }) as typeof fetch;
-    const client = withNetRetry(
-      createRemoteCoreClient({ baseUrl, apiKey: KEY, fetchImpl: spyFetch }),
-    );
+    const client = createRemoteCoreClient({
+      baseUrl,
+      apiKey: KEY,
+      fetchImpl: spyFetch,
+    });
     const app = new ProcForgeApp({
       core: client,
       procforgeDir: pfdir,

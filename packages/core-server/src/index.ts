@@ -1,1 +1,7 @@
-export { createCoreServer, startServer, parseApiKeys, type TenantKeys } from "./server.js";
+export {
+  createCoreServer,
+  startServer,
+  parseApiKeys,
+  findTenant,
+  type TenantKeys,
+} from "./server.js";

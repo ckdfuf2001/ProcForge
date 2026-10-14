@@ -4,6 +4,7 @@ import {
   type Server,
   type ServerResponse,
 } from "node:http";
+import { createHash, timingSafeEqual } from "node:crypto";
 import { join } from "node:path";
 import { CoreService } from "@procforge/core";
 import { FileStore } from "@procforge/shared/filestore.js";
@@ -21,14 +22,18 @@ import {
 // 테넌트별 FileStore (dataDir/tenants/<tid>), Bearer API 키, 버전 헤더 검사.
 // 평가는 fs 없는 shared 판정기 (local checker와 동일 로직, fs 2종은 deferred).
 
-export type TenantKeys = Map<string, string>;
+export type TenantKeys = { tid: string; hash: Buffer }[];
 
 const TID_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const BODY_LIMIT = 32 * 1024 * 1024;
 
-/** "tid:key,tid2:key2" 또는 bare "key"(= tenant "default") 파싱. */
+function keyHash(key: string): Buffer {
+  return createHash("sha256").update(key, "utf8").digest();
+}
+
+/** "tid:key,tid2:key2" 또는 bare "key"(= tenant "default") 파싱. 키는 해시만 보관. */
 export function parseApiKeys(raw: string | undefined): TenantKeys {
-  const out = new Map<string, string>();
+  const out: TenantKeys = [];
   for (const part of (raw ?? "")
     .split(",")
     .map((s) => s.trim())
@@ -38,10 +43,35 @@ export function parseApiKeys(raw: string | undefined): TenantKeys {
     const key = i === -1 ? part : part.slice(i + 1);
     if (!TID_RE.test(tid)) throw new Error(`bad tenant id: ${tid}`);
     if (key.length === 0) throw new Error(`empty api key for tenant: ${tid}`);
-    if (out.has(key)) throw new Error("duplicate api key");
-    out.set(key, tid);
+    const hash = keyHash(key);
+    if (
+      out.some(
+        (e) => e.hash.length === hash.length && timingSafeEqual(e.hash, hash),
+      )
+    )
+      throw new Error("duplicate api key");
+    out.push({ tid, hash });
   }
   return out;
+}
+
+/**
+ * Bearer 키 → 테넌트. 해시 비교는 timingSafeEqual.
+ * default 테넌트(bare 키 포함)는 PROCFORGE_DEV_AUTH=1에서만 허용.
+ */
+export function findTenant(
+  keys: TenantKeys,
+  presented: string,
+): string | undefined {
+  const h = keyHash(presented);
+  for (const e of keys) {
+    if (e.hash.length !== h.length) continue;
+    if (!timingSafeEqual(e.hash, h)) continue;
+    if (e.tid === "default" && process.env.PROCFORGE_DEV_AUTH !== "1")
+      return undefined;
+    return e.tid;
+  }
+  return undefined;
 }
 
 function send(res: ServerResponse, status: number, body: unknown): void {
@@ -176,7 +206,7 @@ export function createCoreServer(opts: {
         return send(res, 409, { ok: false, error: w });
       }
       const m = /^Bearer (.+)$/.exec(req.headers.authorization ?? "");
-      const tid = m ? opts.apiKeys.get(m[1]) : undefined;
+      const tid = m ? findTenant(opts.apiKeys, m[1]) : undefined;
       if (!tid) {
         return send(res, 401, {
           ok: false,
@@ -239,7 +269,12 @@ export function createCoreServer(opts: {
 }
 
 /** 테스트·CLI용 기동. 포트 0이면 자동 할당 후 실제 포트 반환.
- * Windows loopback 순간 고갈(EACCES)은 짧게 재시도 후 전달. */
+ * M6.1-3 실험: 포트 0만으로 부족하다. Windows에서 listen EACCES가 재현
+ * 되므로 listen만 재시도한다 (bind는 멱등·안전).
+ * 어서션 재시도(withNetRetry·fetchRetry)는 제거 유지.
+ * EACCES 정체는 SO_EXCLUSIVEADDRUSE + TIME_WAIT 충돌이 유력
+ * (ephemeral 재사용 시 EACCES가 EADDRINUSE 대신 나온다). loopback
+ * 테스트 서버라 exclusive:false로 TIME_WAIT 충돌을 허용한다. */
 export function startServer(opts: {
   dataDir: string;
   apiKeys: TenantKeys;
@@ -251,7 +286,7 @@ export function startServer(opts: {
     left: number,
   ): Promise<{ server: Server; port: number; close: () => Promise<void> }> => {
     const server = createCoreServer(opts);
-    // M6.1-2: loopback 풀 재사용 중 stale socket 방지. 서버가 먼저 끊으면
+    // loopback 풀 재사용 중 stale socket 방지. 서버가 먼저 끊으면
     // 클라이언트 풀에 죽은 소켓이 남아 fetch failed가 된다 (기본 5s < 클라 30s).
     // loopback 전용 서버라 길게 잡는다.
     server.keepAliveTimeout = 120000;
@@ -264,19 +299,26 @@ export function startServer(opts: {
           reject(e);
         }
       });
-      server.listen(opts.port ?? 0, opts.host ?? "127.0.0.1", () => {
-        const addr = server.address();
-        const port =
-          typeof addr === "object" && addr ? addr.port : (opts.port ?? 0);
-        resolve({
-          server,
-          port,
-          close: () =>
-            new Promise<void>((res2, rej2) =>
-              server.close((e) => (e ? rej2(e) : res2())),
-            ),
-        });
-      });
+      server.listen(
+        {
+          port: opts.port ?? 0,
+          host: opts.host ?? "127.0.0.1",
+          exclusive: false,
+        },
+        () => {
+          const addr = server.address();
+          const port =
+            typeof addr === "object" && addr ? addr.port : (opts.port ?? 0);
+          resolve({
+            server,
+            port,
+            close: () =>
+              new Promise<void>((res2, rej2) =>
+                server.close((e) => (e ? rej2(e) : res2())),
+              ),
+          });
+        },
+      );
     });
   };
   return attempt(10);

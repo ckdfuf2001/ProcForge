@@ -23,58 +23,25 @@ const H1 = {
 };
 const H2 = { ...H1, authorization: `Bearer ${KEY2}` };
 
-async function fetchRetry(url: string, init?: RequestInit): Promise<Response> {
-  let last: unknown;
-  for (let i = 0; i < 5; i++) {
-    try {
-      return await fetch(url, init);
-    } catch (e) {
-      last = e;
-      await new Promise((rr) => setTimeout(rr, 200));
-    }
-  }
-  throw last;
-}
-
 async function post(
   path: string,
   body: unknown,
   headers: Record<string, string> = H1,
 ) {
-  // Windows loopback 순간 실패(connect EACCES 등)는 재시도.
-  let last: unknown;
-  for (let i = 0; i < 5; i++) {
-    try {
-      const r = await fetchRetry(`${base}${path}`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify(body),
-      });
-      return {
-        status: r.status,
-        json: (await r.json()) as {
-          ok: boolean;
-          data?: unknown;
-          error?: { code: string; message: string };
-        },
-      };
-    } catch (e) {
-      last = e;
-      await new Promise((rr) => setTimeout(rr, 200));
-    }
-  }
-  throw last;
-}
-
-async function ready(base: string): Promise<void> {
-  for (let i = 0; i < 20; i++) {
-    try {
-      const h = await fetchRetry(`${base}/healthz`);
-      if (h.ok) return;
-    } catch {
-      await new Promise((r) => setTimeout(r, 100));
-    }
-  }
+  // M6.1-3: 재시도 없음. listen 콜백이면 수신 가능이 전제 (포트 0 + 할당 포트).
+  const r = await fetch(`${base}${path}`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(body),
+  });
+  return {
+    status: r.status,
+    json: (await r.json()) as {
+      ok: boolean;
+      data?: unknown;
+      error?: { code: string; message: string };
+    },
+  };
 }
 
 // 소켓 고갈(EACCES) 방지: 파일당 서버 1개 공유 (세션 id는 uuid라 충돌 없음).
@@ -84,7 +51,6 @@ beforeAll(async () => {
   const s = await startServer({ dataDir: dir, apiKeys: keys, port: 0 });
   base = `http://127.0.0.1:${s.port}`;
   close = s.close;
-  await ready(base);
 });
 
 afterAll(async () => {
@@ -92,14 +58,64 @@ afterAll(async () => {
 });
 
 describe("core-server", () => {
-  it("parseApiKeys: bare 키는 default 테넌트", () => {
-    expect([...parseApiKeys("abc").entries()]).toEqual([["abc", "default"]]);
+  it("parseApiKeys: bare 키는 default 테넌트 (해시 보관)", () => {
+    const ks = parseApiKeys("abc");
+    expect(ks.map((e) => e.tid)).toEqual(["default"]);
+    expect(ks[0].hash).toBeInstanceOf(Buffer);
+    expect(ks[0].hash.toString("hex")).not.toContain("abc");
     expect(() => parseApiKeys("bad tid!:k")).toThrow();
     expect(() => parseApiKeys("t1:k,t1:k")).toThrow();
   });
 
+  it("M6.1-4: dev 플래그 없으면 bare 키 401, 있으면 통과", async () => {
+    const dir2 = mkdtempSync(join(tmpdir(), "pf-core-srv-bare-"));
+    const s = await startServer({
+      dataDir: dir2,
+      apiKeys: parseApiKeys("barekey"),
+      port: 0,
+    });
+    const b = `http://127.0.0.1:${s.port}`;
+    const old = process.env.PROCFORGE_DEV_AUTH;
+    try {
+      delete process.env.PROCFORGE_DEV_AUTH;
+      const denied = await fetch(`${b}/v1/pfTree`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: "Bearer barekey",
+          [PROTOCOL_VERSION_HEADER]: "1",
+        },
+        body: JSON.stringify({
+          sessionId: "123e4567-e89b-42d3-a456-426614174000",
+        }),
+      });
+      expect(denied.status).toBe(401);
+      process.env.PROCFORGE_DEV_AUTH = "1";
+      const allowed = await fetch(`${b}/v1/pfTree`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: "Bearer barekey",
+          [PROTOCOL_VERSION_HEADER]: "1",
+        },
+        body: JSON.stringify({
+          sessionId: "123e4567-e89b-42d3-a456-426614174000",
+        }),
+      });
+      // 키는 통과, 세션 없음은 core 판정 (401이 아님).
+      expect(allowed.status).toBe(400);
+      expect(
+        ((await allowed.json()) as { error?: { code?: string } }).error?.code,
+      ).toBe("not_found");
+    } finally {
+      if (old === undefined) delete process.env.PROCFORGE_DEV_AUTH;
+      else process.env.PROCFORGE_DEV_AUTH = old;
+      await s.close();
+    }
+  });
+
   it("healthz + 키 없음 401 + 버전 불일치 409", async () => {
-    const h = (await (await fetchRetry(`${base}/healthz`)).json()) as {
+    const h = (await (await fetch(`${base}/healthz`)).json()) as {
       ok: boolean;
       version: number;
     };
@@ -142,7 +158,7 @@ describe("core-server", () => {
     });
     expect(started.status).toBe(200);
     const sid = (started.json.data as { session: { id: string } }).session.id;
-    const mine = await fetchRetry(`${base}/v1/getSession`, {
+    const mine = await fetch(`${base}/v1/getSession`, {
       method: "POST",
       headers: H1,
       body: JSON.stringify({ sessionId: sid }),

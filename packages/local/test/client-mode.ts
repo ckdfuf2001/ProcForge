@@ -50,35 +50,8 @@ function ensureRemoteServer(sessionTtlMs?: number): Promise<string> {
       port: 0,
       sessionTtlMs,
     });
-      const base = `http://127.0.0.1:${s.port}`;
-      for (let i = 0; i < 20; i++) {
-        try {
-          const h = await fetch(`${base}/healthz`);
-          if (h.ok) break;
-        } catch {
-          await new Promise((r) => setTimeout(r, 100));
-        }
-      }
-      // 첫 호출 플레이크 방지: accept 경로 워밍업 (bogus 세션, 응답만 확인).
-      // EACCES 등 순간 실패는 여기서 소진한다 (테스트 어서션 재시도가 아님).
-      for (let i = 0; i < 50; i++) {
-        try {
-          const r = await fetch(`${base}/v1/getSession`, {
-            method: "POST",
-            headers: {
-              "content-type": "application/json",
-              authorization: `Bearer ${REMOTE_KEY}`,
-              "x-procforge-version": "1",
-            },
-            body: JSON.stringify({ sessionId: "123e4567-e89b-42d3-a456-426614174000" }),
-          });
-          await r.text();
-          break;
-        } catch {
-          await new Promise((r) => setTimeout(r, 200));
-          if (i === 49) throw new Error("remote test server accept 경로 확인 실패");
-        }
-      }
+    const base = `http://127.0.0.1:${s.port}`;
+    // M6.1-3: 대기는 healthz 1회가 아니라 listen 전제. 할당 포트면 수신 가능.
     // createLocalStack 직접 사용자(MCP 등)도 같은 서버를 보게 환경 전파.
     // resolve 전에 설정해야 레이스가 없다.
     process.env.PROCFORGE_CORE_URL = base;

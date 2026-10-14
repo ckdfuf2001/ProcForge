@@ -5,7 +5,6 @@ import { tmpdir } from "node:os";
 import { startServer, parseApiKeys } from "../../core-server/dist/server.js";
 import { createRemoteCoreClient } from "../src/remote-client.js";
 import { ProcForgeApp } from "../src/app/app.js";
-import { withNetRetry } from "./net-retry.js";
 import { testStack } from "./client-mode.js";
 
 // M6-3: RemoteCoreClient 선택·재시도·degraded.
@@ -31,14 +30,6 @@ beforeAll(async () => {
   });
   base = `http://127.0.0.1:${s.port}`;
   close = s.close;
-  for (let i = 0; i < 20; i++) {
-    try {
-      const h = await fetch(`${base}/healthz`);
-      if (h.ok) break;
-    } catch {
-      await new Promise((r) => setTimeout(r, 100));
-    }
-  }
 });
 
 afterAll(async () => {
@@ -51,9 +42,7 @@ afterAll(async () => {
 
 describe("remote-client", () => {
   it("왕복: start→split→report→confirm→tree (R8 사전평가 경로)", async () => {
-    const client = withNetRetry(
-      createRemoteCoreClient({ baseUrl: base, apiKey: KEY }),
-    );
+    const client = createRemoteCoreClient({ baseUrl: base, apiKey: KEY });
     const started = await client.pfStart({
       request: "r",
       params: {},
@@ -127,13 +116,11 @@ describe("remote-client", () => {
 
   it("onSend 탭에 송신 바이트", async () => {
     const sent: { method: string; bytes: number }[] = [];
-    const client = withNetRetry(
-      createRemoteCoreClient({
-        baseUrl: base,
-        apiKey: KEY,
-        onSend: (m, b) => sent.push({ method: m, bytes: b }),
-      }),
-    );
+    const client = createRemoteCoreClient({
+      baseUrl: base,
+      apiKey: KEY,
+      onSend: (m, b) => sent.push({ method: m, bytes: b }),
+    });
     await client.pfStart({ request: "r", params: {}, toolCatalog: [] });
     expect(sent.length).toBeGreaterThan(0);
     expect(sent[0].method).toBe("pfStart");
@@ -145,7 +132,7 @@ describe("remote-client", () => {
     process.env.PROCFORGE_CORE_API_KEY = KEY;
     const pfdir = join(dir, "local");
     const { client } = testStack(pfdir);
-    const started = await withNetRetry(client).pfStart({
+    const started = await client.pfStart({
       request: "r",
       params: {},
       toolCatalog: [],

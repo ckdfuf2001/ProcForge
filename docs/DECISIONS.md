@@ -148,7 +148,7 @@
 
 - [M4.1-1] 명령 파일은 `<projectRoot>/.opencode/command/<name>.md`에 출력
   (projectRoot 생략 시 procforgeDir 부모). 기존 파일 + force 없음 → 쓰기 전
-  거부.   procedures/<name>/ 안에는 `command.md` 사본만.
+  거부. procedures/<name>/ 안에는 `command.md` 사본만.
 - [M4.1-2] PROCEDURE.md 단계·목차는 compareNodeIds 정렬 (문자열 정렬의
   1.10 < 1.2 전도 방지).
 - [M4.1-3] params 경고 확대 — fixed 문자열의 부분 포함(길이 3 이상 값만) +
@@ -156,7 +156,7 @@
 - [M4.1-4] finalize 전 validateTree 실행. 오류 있으면 bad_request + 목록
   (resolved 검사 이후).
 - [M4.1-5] 재-finalize는 `procedures/<name>.tmp-<uuid>`에 생성 후 원자 교체.
-  Windows rename 덮어쓰기 불가 →   기존 폴더를 `.old`로 이동 후 교체·삭제,
+  Windows rename 덮어쓰기 불가 → 기존 폴더를 `.old`로 이동 후 교체·삭제,
   실패 시 롤백 시도.
 - [M4.1-6] 절차 이름 규칙 `^[a-z0-9][a-z0-9-]{0,63}$` (skill 호환). 위반은
   bad_request. 기존 대문자·언더스코어 이름은 거부된다.
@@ -302,7 +302,7 @@
   따른다 (M3.5 관찰 2).
   결정: `script` 리프 도입 (M5에서 구현). 형식 제안: 노드 tool을
   `{server: "host", name: "script"}`로 두고 args에 `{script: <run fs 상대경로>,
-  argv: [...]}` 고정. runner는 run fs에서 직접 실행해 stdout을 golden으로
+argv: [...]}` 고정. runner는 run fs에서 직접 실행해 stdout을 golden으로
   삼는다 (바이너리 출력은 sha/size 지문). 호스트 자의 실행은 pf_report 대상이
   아니며, 스크립트 없는 단계는 ask_human으로 전환한다.
 - M3.5.2-1: lockfile 원자 획득 (openSync wx, 존재확인→쓰기 금지).
@@ -423,7 +423,7 @@
 - [M5.8.1-2] 실행 불가 vs 녹화본 없음 구분: runner가 도구를 실행할 수 없는 경우
   (미지원 내장·allowBash 없는 bash)는 fixture 게이트보다 먼저 "실행 불가"로
   실패. record/live 모드의 fixture 에러에서는 "record로 재녹화" 힌트를 내지
-  않는다   (replay/passthrough는 유지).
+  않는다 (replay/passthrough는 유지).
 - [M5.8.1-5] CI 수정: export 정리 실패가 본 에러 마스킹. `rmSync(force)`는
   ENOENT만 삼키고 ENOTDIR(파일 밑 통과, Linux)은 그대로 던져서, catch 안의
   정리가 원본 에러를 덮고 raw가 전파됐다 (Windows는 ENOENT라 통과, ubuntu만
@@ -458,6 +458,21 @@
   누적 수집이라 정적 해석과 다름).
 - [M6.1-5] 저장소 공개: 공개 유지 (사용자 결정, 2026-10-14).
   비밀 URL·키는 `$prefix`·환경 분리, 토큰 하드코딩 금지 유지.
+- [M6.1-3] 테스트 재시도 제거: withNetRetry·fetchRetry·healthz 대기·
+  perf 성공시도 기록을 없애고 포트 0 + 할당 포트만 사용.
+  product connect-phase 재시도(EACCES·ECONNREFUSED, 서버가 못 봄)는 유지
+  (정확히 1회 의미 보존).
+  실험 결과 listen EACCES 재현 (m55-map·state·external·m582 등 파일 전체
+  실패. 원인: Windows 병렬 bind 경합. connect 측이 아니라 listen 측).
+  대응: startServer listen 재시도만 복원 (bind 멱등·안전, 어서션과 무관).
+  어서션 재시도는 제거 유지. [!] 지정 없음 (전면 실패라 해당 테스트만
+  지정하는 방식이 안 맞음).
+  후속 특정: SO_EXCLUSIVEADDRUSE + TIME_WAIT 충돌이 유력
+  (ephemeral 재사용 시 EACCES가 EADDRINUSE 대신. 순차 300·병렬 120
+  bind는 재현 안 됨, 전체 스위트에서만 재현). exclusive:false로 허용.
+- [M6.1-4] 인증 강화: 키는 sha256 해시만 보관, 비교는 timingSafeEqual.
+  default 테넌트(bare 키 포함)는 PROCFORGE_DEV_AUTH=1에서만 허용,
+  없으면 401. TenantKeys는 Map에서 배열로 변경 (cli size→length).
 - [M6.1-2] 전체 스위트 remote 이식: PROCFORGE_CLIENT=remote면 testStack이
   파일당 서버 1대 지연 기동 + 서버 저장소를 메타 단언에 사용.
   runSession은 core 주입 시 하이드레이트 후 실행 (runTestSession 별칭),
@@ -524,9 +539,9 @@
   테넌트별 FileStore(dataDir/tenants/<tid>), Bearer API 키(`tid:key`, bare는
   default), 키 없으면 401(unauthorized 신규 코드), 버전 불일치 409, 입력 검증
   실패 400, 출력 불일치는 500 sanitized. 타 테넌트 sessionId →
-  session_not_found (격리는 디렉터리 분리로 구조 보장).   평가는 shared 판정기.
+  session_not_found (격리는 디렉터리 분리로 구조 보장). 평가는 shared 판정기.
 - [M6-3] RemoteCoreClient: `PROCFORGE_CORE_URL` 있으면 remote, 기본 inprocess
-  (core-inprocess 분기. 로컬 FileStore는 그대로).   읽
+  (core-inprocess 분기. 로컬 FileStore는 그대로). 읽
   기(getSession/getNode/pfTree/getEvents/pfBuildProcedure)만 재시도
   (fetch 실패·타임아웃·502/503/504, 3회). 쓰기는 재시도 금지
   (expectedRevision 충돌 판단은 호출자가). 네트워크 실패 → io_error degraded.
@@ -763,7 +778,7 @@
 - [M3.4.2-4] writeAtomic EPERM/EBUSY/EACCES 재시도 (최대 5회, 50ms 간격).
   local/src/fsutil.ts로 일원화 (filestore/artifacts/recordings/catalog/run).
 - [M3.4.2-5] 테스트 명령을 CI와 동일하게 `pnpm -r run test -- --run
-  --testTimeout=20000 --hookTimeout=20000` (`pnpm -r test --` 형식은 pnpm이
+--testTimeout=20000 --hookTimeout=20000` (`pnpm -r test --` 형식은 pnpm이
   옵션을 거부하므로 `run` 경유).
 - [M3.4.2-6] README CI 배지 추가. 이후 보고에는 Actions run URL 포함.
 

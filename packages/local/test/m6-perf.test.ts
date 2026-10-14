@@ -24,28 +24,14 @@ describe("M6-6 remote p95", () => {
     });
     try {
       const baseUrl = `http://127.0.0.1:${srv.port}`;
-      for (let i = 0; i < 10; i++) {
-        try {
-          const h = await fetch(`${baseUrl}/healthz`);
-          if (h.ok) break;
-        } catch {
-          await new Promise((r) => setTimeout(r, 100));
-        }
-      }
       const client = createRemoteCoreClient({ baseUrl, apiKey: KEY });
-      // loopback 순간 실패는 성공 시도만 기록 (재시도 시간은 측정 제외).
+      // M6.1-3: 재시도 없음. 단일 시도 시간 기록.
       const timed = async <T>(
         fn: () => Promise<T>,
       ): Promise<{ v: T; ms: number }> => {
-        for (let k = 0; ; k++) {
-          const t = performance.now();
-          try {
-            return { v: await fn(), ms: performance.now() - t };
-          } catch (e) {
-            if ((e as { code?: string })?.code !== "io_error" || k >= 2)
-              throw e;
-          }
-        }
+        const t = performance.now();
+        const v = await fn();
+        return { v, ms: performance.now() - t };
       };
       const started = (
         await timed(() =>

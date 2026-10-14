@@ -12,7 +12,6 @@ import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { startServer, parseApiKeys } from "../../core-server/dist/server.js";
 import { createRemoteCoreClient } from "../src/remote-client.js";
-import { withNetRetry } from "./net-retry.js";
 import { ProcForgeApp } from "../src/app/app.js";
 import { runTestSession as runSession } from "./client-mode.js";
 
@@ -42,14 +41,6 @@ beforeAll(async () => {
     port: 0,
   });
   baseUrl = `http://127.0.0.1:${srv.port}`;
-  for (let i = 0; i < 20; i++) {
-    try {
-      const h = await fetch(`${baseUrl}/healthz`);
-      if (h.ok) break;
-    } catch {
-      await new Promise((r) => setTimeout(r, 100));
-    }
-  }
 });
 
 afterAll(async () => {
@@ -81,9 +72,7 @@ afterEach(() => {
 
 describe("M6-5 remote 실행", () => {
   it("분해(remote) → runSession live(core 하이드레이트) → pass", async () => {
-    const client = withNetRetry(
-      createRemoteCoreClient({ baseUrl, apiKey: KEY }),
-    );
+    const client = createRemoteCoreClient({ baseUrl, apiKey: KEY });
     const app = new ProcForgeApp({
       core: client,
       procforgeDir: pfdir,
@@ -130,9 +119,7 @@ describe("M6-5 remote 실행", () => {
   }, 120000);
 
   it("remote + record → 허용 (golden은 pfWriteGolden으로 반영)", async () => {
-    const client = withNetRetry(
-      createRemoteCoreClient({ baseUrl, apiKey: KEY }),
-    );
+    const client = createRemoteCoreClient({ baseUrl, apiKey: KEY });
     const started = await client.pfStart({
       request: "m65",
       params: {},
