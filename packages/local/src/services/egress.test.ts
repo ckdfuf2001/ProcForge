@@ -5,14 +5,10 @@ import { inspectEgress, guardEgress } from "./egress.js";
 
 describe("egress", () => {
   it("절대경로 차단 (URL·산문·정의 입력 제외)", () => {
-    const bad = inspectEgress("pfResolve", {
-      argSpecs: { p: { kind: "fixed", value: "C:\\x\\y" } },
+    const spec = inspectEgress("pfAdvise", {
+      proposedConstraints: [{ spec: { path: "/etc/passwd" } }],
     });
-    expect(bad.violations.length).toBeGreaterThan(0);
-    const posix = inspectEgress("pfResolve", {
-      argSpecs: { p: { kind: "fixed", value: "/etc/passwd" } },
-    });
-    expect(posix.violations.length).toBeGreaterThan(0);
+    expect(spec.violations.length).toBeGreaterThan(0);
     const url = inspectEgress("pfResolve", {
       argSpecs: { u: { kind: "fixed", value: "https://a.com/x" } },
     });
@@ -23,7 +19,7 @@ describe("egress", () => {
       argSpecs: { p: { kind: "fixed", value: "output/x.csv" } },
     });
     expect(rel.violations).toEqual([]);
-    // 정의 입력(params/args)은 절대경로 허용 (--param 정상 사용).
+    // 정의 입력(params/args/argSpecs)은 절대경로 허용 (스위트 필수 흐름·args 일관성).
     const params = inspectEgress("pfStart", {
       request: "r",
       params: { feed: "D:\\data\\feed.json" },
@@ -31,6 +27,14 @@ describe("egress", () => {
     expect(params.violations).toEqual([]);
     const args = inspectEgress("pfReport", { args: { path: "/tmp/x.json" } });
     expect(args.violations).toEqual([]);
+    const fixed = inspectEgress("pfResolve", {
+      argSpecs: { p: { kind: "fixed", value: "D:\\tmp\\data.pptx" } },
+    });
+    expect(fixed.violations).toEqual([]);
+    const xpath = inspectEgress("pfResolve", {
+      argSpecs: { p: { kind: "fixed", value: "//title" } },
+    });
+    expect(xpath.violations).toEqual([]);
   });
 
   it("resultJson 실데이터: pfReport 포함 전부 차단 (메타만 허용)", () => {
@@ -83,8 +87,8 @@ describe("egress", () => {
 
   it("위반이면 전송 차단", () => {
     expect(() =>
-      guardEgress("pfResolve", {
-        argSpecs: { p: { kind: "fixed", value: "/x" } },
+      guardEgress("pfAdvise", {
+        proposedConstraints: [{ spec: { path: "/x" } }],
       }),
     ).toThrow(/egress 위반/);
     expect(() => guardEgress("pfReport", { resultJson: { raw: 1 } })).toThrow(

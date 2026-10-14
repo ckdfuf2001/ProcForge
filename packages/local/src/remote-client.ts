@@ -8,10 +8,12 @@ import {
   type WireError,
 } from "@procforge/shared/wire.js";
 import { guardEgress } from "./services/egress.js";
+import { convertReportForRemote } from "./report-convert.js";
 
 // M6-3: HTTP CoreClient 구현. 기본 inprocess, 설정(PROCFORGE_CORE_URL)으로 remote.
-// - 읽기만 재시도 (getSession/getNode/pfTree/getEvents/pfBuildProcedure).
-//   쓰기는 재시도 금지 (expectedRevision 충돌 판단은 호출자가).
+// - 읽기는 재시도. 쓰기는 연결 단계 실패(EACCES·ECONNREFUSED: 서버가 요청을
+//   못 봐서 재시도 안전)만 재시도, 그 외 fetch 실패는 즉시 degraded (정확히 1회).
+//   (M6.1-2: Windows loopback 순간 EACCES 대응)
 // - 네트워크 실패 → io_error (degraded). 로컬 파일 상태는 건드리지 않는다
 //   (이 클라이언트는 core 호출만 하고 파일 쓰기를 하지 않는다).
 
@@ -56,8 +58,21 @@ export function createRemoteCoreClient(opts: RemoteCoreClientOpts): CoreClient {
     body: Record<string, unknown>,
   ): Promise<unknown> {
     const def = WireMethods[method];
+    // M6.1-2: pfReport 원문은 wire 전에 메타+판정으로 변환 (유일한 원격 경로).
+    let outgoing = body;
+    if (method === "pfReport") {
+      outgoing = await convertReportForRemote(body, async (sid, nid) => {
+        const got = (await call("getNode", {
+          sessionId: sid,
+          nodeId: nid,
+        })) as {
+          constraints?: import("@procforge/shared/schema.js").Constraint[];
+        };
+        return got;
+      });
+    }
     // M6-4: 송신 전 egress 검사 (위반 차단·민감값 교정).
-    const guarded = guardEgress(method, body);
+    const guarded = guardEgress(method, outgoing);
     const payload = JSON.stringify(guarded.body);
     opts.onSend?.(method, Buffer.byteLength(payload, "utf8"));
     const retryable = READ_METHODS.has(method);
@@ -77,9 +92,13 @@ export function createRemoteCoreClient(opts: RemoteCoreClientOpts): CoreClient {
           signal: ctrl.signal,
         });
       } catch (e) {
-        // fetch 실패·타임아웃: 읽기만 재시도. 쓰기는 즉시 degraded.
+        // fetch 실패·타임아웃: 읽기는 재시도. 쓰기는 연결 단계 실패
+        // (EACCES·ECONNREFUSED: 서버가 못 봄, 재시도 안전)만 재시도하고
+        // 그 외(서버 처리 후 응답 손실 가능)는 즉시 degraded (정확히 1회).
         clearTimeout(timer);
-        if (!retryable || attempt >= MAX_ATTEMPTS)
+        const code = (e as { cause?: { code?: string } })?.cause?.code;
+        const unseen = code === "EACCES" || code === "ECONNREFUSED";
+        if ((!retryable && !unseen) || attempt >= MAX_ATTEMPTS)
           throw netError(e instanceof Error ? e.message : String(e));
         await sleep(100 * attempt);
         continue;
@@ -152,7 +171,9 @@ export function createRemoteCoreClient(opts: RemoteCoreClientOpts): CoreClient {
     pfBuildProcedure: (sid, name) =>
       call("pfBuildProcedure", { sessionId: sid, name }) as never,
     pfApprove: (i) => call("pfApprove", i as Record<string, unknown>) as never,
-    /** 원격 표시 (M6.1-1. App.report가 사전평가 경로 선택) */
-    isRemote: true,
+    pfImportProcedure: (i) =>
+      call("pfImportProcedure", i as Record<string, unknown>) as never,
+    pfWriteGolden: (i) =>
+      call("pfWriteGolden", i as Record<string, unknown>) as never,
   } as CoreClient;
 }

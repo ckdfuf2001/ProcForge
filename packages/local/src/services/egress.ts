@@ -5,8 +5,10 @@ import { pfError } from "@procforge/shared/errors.js";
 //   (메타 {sha256,size,preview}만 허용. pfReport 포함).
 // - 상한+교정(차단 아님): resultSummary·rubricReasons 값은 4KB 상한 후
 //   토큰·키·이메일 교정. 예외 없음.
-// - 정의 유지+교정: params/args는 정의이므로 원문 유지하되 토큰·키·이메일
-//   교정 적용 (절대경로·구조 위반 검사는 면제).
+// - 정의 유지+교정: params/args/argSpecs는 정의이므로 원문 유지하되
+//   토큰·키·이메일 교정 적용 (절대경로·구조 위반 검사는 면제).
+//   argSpecs fixed 값이 args와 같은 문자열이라 차단하면 일관성이 깨진다.
+//   (M6.1-2: 스위트 필수 흐름. 경로 안의 사용자명 노출은 감수, 토큰은 교정)
 // 위반이 있으면 전송하지 않고 bad_request (호출자 코드 수정 사항).
 
 export type EgressCheck = {
@@ -17,7 +19,7 @@ export type EgressCheck = {
 
 const RESULT_JSON_META_KEYS = ["sha256", "size", "preview"];
 
-function isMetaShape(v: unknown): boolean {
+export function isMetaShape(v: unknown): boolean {
   if (v === null || typeof v !== "object" || Array.isArray(v)) return false;
   const o = v as Record<string, unknown>;
   const keys = Object.keys(o);
@@ -82,7 +84,7 @@ export function inspectEgress(method: string, body: unknown): EgressCheck {
 
   // mode: normal(검사+교정) | prose(교정만) | def(정의: 교정만, 구조면제)
   //   | cap(상한+교정) | data(면제).
-  // params/args는 정의이므로 교정만 (절대경로 정상 사용).
+  // params/args/argSpecs는 정의이므로 교정만 (절대경로 정상 사용).
   // resultSummary·rubricReasons 값은 4KB 상한+교정, 예외 없음.
   type Mode = "normal" | "prose" | "def" | "cap" | "data";
   const walk = (v: unknown, key: string | null, mode: Mode): unknown => {
@@ -129,7 +131,7 @@ export function inspectEgress(method: string, body: unknown): EgressCheck {
           continue;
         }
         const next: Mode =
-          k === "params" || k === "args"
+          k === "params" || k === "args" || k === "argSpecs"
             ? "def"
             : PROSE_KEYS.has(k)
               ? "prose"

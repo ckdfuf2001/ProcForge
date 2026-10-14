@@ -81,7 +81,9 @@ export type WireMethodName =
   | "getSession"
   | "getNode"
   | "pfBuildProcedure"
-  | "pfApprove";
+  | "pfApprove"
+  | "pfImportProcedure"
+  | "pfWriteGolden";
 
 export type WireDef = {
   path: string;
@@ -327,6 +329,30 @@ export const WireMethods: Record<WireMethodName, WireDef> = {
       nodeId: NodeIdSchema,
       approved: z.boolean(),
       note: z.string().optional(),
+      ...RevActor,
+    }),
+    output: z.object({ node: NodeSchema, ...ChangeMeta }),
+  },
+  pfImportProcedure: {
+    path: "/v1/pfImportProcedure",
+    input: z.object({
+      doc: ProcedureDocSchema,
+      params: z.record(z.string()).optional(),
+      ...RevActor,
+    }),
+    output: z.object({ sessionId: SessionIdSchema }),
+  },
+  pfWriteGolden: {
+    path: "/v1/pfWriteGolden",
+    input: z.object({
+      sessionId: SessionIdSchema,
+      nodeId: NodeIdSchema,
+      golden: z.object({
+        fixtures: z.array(z.string()),
+        output: z.string(),
+        attemptId: z.string().uuid().optional(),
+        ignore: z.array(z.string()).default([]),
+      }),
       ...RevActor,
     }),
     output: z.object({ node: NodeSchema, ...ChangeMeta }),

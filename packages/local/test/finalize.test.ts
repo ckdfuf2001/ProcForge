@@ -1,14 +1,23 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import {
+  mkdtempSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  writeFileSync,
+} from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { collectCatalog } from "../src/catalog.js";
-import { testStack } from "./client-mode.js";
-import { importProcedure } from "../src/procedure.js";
+import { testStack, importProc, metaStore } from "./client-mode.js";
 import { ProcedureDocSchema } from "@procforge/shared/procedure.js";
 import { ProcForgeApp } from "../src/app/app.js";
-import { runProcedureTest, loadProcedureDoc } from "../src/runner/procedure-run.js";
-import { runSession } from "../src/runner/run.js";
+import {
+  runProcedureTest,
+  loadProcedureDoc,
+} from "../src/runner/procedure-run.js";
+import { runTestSession as runSession } from "./client-mode.js";
 import { FileStore } from "../src/filestore.js";
 import type { CoreClient } from "@procforge/shared/core-client.js";
 
@@ -41,11 +50,18 @@ afterEach(() => {
 });
 
 function writeOpencodeConfig(cmd: string[]) {
-  writeFileSync(join(root, "opencode.json"), JSON.stringify({ mcp: { "fake-ppt": { type: "local", command: cmd } } }));
+  writeFileSync(
+    join(root, "opencode.json"),
+    JSON.stringify({ mcp: { "fake-ppt": { type: "local", command: cmd } } }),
+  );
 }
 
 function appFor() {
-  return new ProcForgeApp({ core: client, procforgeDir: pfdir, projectRoot: root });
+  return new ProcForgeApp({
+    core: client,
+    procforgeDir: pfdir,
+    projectRoot: root,
+  });
 }
 
 async function scripted(): Promise<string> {
@@ -58,33 +74,84 @@ async function scripted(): Promise<string> {
     limits: { maxDepth: 3, maxRetries: 2, maxNodes: 20 },
   });
   const sid = started.session.id;
-  await client.pfResolve({ sessionId: sid, nodeId: "1", decision: "split", children: [{ goal: "목록" }, { goal: "읽기", dependsOn: ["1.1"] }] });
-  const leaf = async (id: string, tool: string, args: Record<string, unknown>, rj: unknown, specs: Record<string, never>) => {
-    await client.pfReport({
-      sessionId: sid, nodeId: id, tool: { server: "fake-ppt", name: tool }, args,
-      resultSummary: JSON.stringify(rj), resultJson: rj, selfVerdict: "pass", selfReason: "ok",
-    });
-    await client.pfResolve({ sessionId: sid, nodeId: id, decision: "leaf", tool: { server: "fake-ppt", name: tool }, argSpecs: specs as never });
-  };
-  await leaf("1.1", "list_slides", { file: "data.pptx" }, { slides: ["a"] }, { file: { kind: "fixed", value: "data.pptx" } });
-  await leaf("1.2", "read_slide", { file: "data.pptx", index: 1 }, { title: "t" }, {
-    file: { kind: "fixed", value: "2026-09" },
-    index: { kind: "fixed", value: 1 },
+  await client.pfResolve({
+    sessionId: sid,
+    nodeId: "1",
+    decision: "split",
+    children: [{ goal: "목록" }, { goal: "읽기", dependsOn: ["1.1"] }],
   });
+  const leaf = async (
+    id: string,
+    tool: string,
+    args: Record<string, unknown>,
+    rj: unknown,
+    specs: Record<string, never>,
+  ) => {
+    await client.pfReport({
+      sessionId: sid,
+      nodeId: id,
+      tool: { server: "fake-ppt", name: tool },
+      args,
+      resultSummary: JSON.stringify(rj),
+      resultJson: rj,
+      selfVerdict: "pass",
+      selfReason: "ok",
+    });
+    await client.pfResolve({
+      sessionId: sid,
+      nodeId: id,
+      decision: "leaf",
+      tool: { server: "fake-ppt", name: tool },
+      argSpecs: specs as never,
+    });
+  };
+  await leaf(
+    "1.1",
+    "list_slides",
+    { file: "data.pptx" },
+    { slides: ["a"] },
+    { file: { kind: "fixed", value: "data.pptx" } },
+  );
+  await leaf(
+    "1.2",
+    "read_slide",
+    { file: "data.pptx", index: 1 },
+    { title: "t" },
+    {
+      file: { kind: "fixed", value: "2026-09" },
+      index: { kind: "fixed", value: 1 },
+    },
+  );
   return sid;
 }
 
 describe("pf_finalize", () => {
   it("완료 세션 → 산출물 + procedure.json만으로 replay 통과", async () => {
     const sid = await scripted();
-    const rec = await runSession({ procforgeDir: pfdir, projectRoot: root, allowProjectRead: true, sessionId: sid, mode: "record" });
+    const rec = await runSession({
+      procforgeDir: pfdir,
+      projectRoot: root,
+      allowProjectRead: true,
+      sessionId: sid,
+      mode: "record",
+    });
     expect(rec.summary.fail).toBe(0);
-    const out = await appFor().finalize({ sessionId: sid, name: "monthly-test" });
+    const out = await appFor().finalize({
+      sessionId: sid,
+      name: "monthly-test",
+    });
     expect(out.warnings.some((w) => w.includes("2026-09"))).toBe(true);
-    for (const f of ["procedure.json", "PROCEDURE.md", "SKILL.md", "command.md"]) {
+    for (const f of [
+      "procedure.json",
+      "PROCEDURE.md",
+      "SKILL.md",
+      "command.md",
+    ]) {
       expect(existsSync(join(out.dir, f)), f).toBe(true);
     }
-    const doc = ProcedureDocSchema.parse(JSON.parse(readFileSync(join(out.dir, "procedure.json"), "utf8")));
+    const doc = ProcedureDocSchema.parse(
+      JSON.parse(readFileSync(join(out.dir, "procedure.json"), "utf8")),
+    );
     expect(doc.version).toBe(1);
     expect(doc.nodes.length).toBe(3);
     const md = readFileSync(join(out.dir, "PROCEDURE.md"), "utf8");
@@ -92,7 +159,13 @@ describe("pf_finalize", () => {
     // procedure.json만으로 replay (fake 서버 차단, 입력은 프로젝트 폴백 허용)
     // M5.3.1-3: month required이므로 명시
     writeOpencodeConfig(["nonexistent-procforge-tool-xyz"]);
-    const { report } = await runProcedureTest(pfdir, root, "monthly-test", { procforgeDir: pfdir, projectRoot: root, mode: "replay", allowProjectRead: true, params: { month: "2026-09" } });
+    const { report } = await runProcedureTest(pfdir, root, "monthly-test", {
+      procforgeDir: pfdir,
+      projectRoot: root,
+      mode: "replay",
+      allowProjectRead: true,
+      params: { month: "2026-09" },
+    });
     expect(report.summary.fail).toBe(0);
     expect(report.summary.pass).toBe(2);
   }, 30000);
@@ -101,14 +174,19 @@ describe("pf_finalize", () => {
     const sid = await scripted();
     // 1.2를 reopen하여 미해결 상태로
     await client.pfReopen({ sessionId: sid, nodeId: "1.2", reason: "test" });
-    await expect(appFor().finalize({ sessionId: sid, name: "bad" })).rejects.toThrow(/미해결 노드: 1\.2/);
+    await expect(
+      appFor().finalize({ sessionId: sid, name: "bad" }),
+    ).rejects.toThrow(/미해결 노드: 1\.2/);
   }, 30000);
 
   it("M4.1-4 검증 오류 시 bad_request + 목록", async () => {
     const sid = await scripted();
-    const store = new FileStore(pfdir);
+    const store = metaStore(pfdir);
     const n = store.getNode(sid, "1.1")!;
-    store.saveNode(sid, { ...n, tool: { server: "nope", name: "nope", schemaHash: "x" } });
+    store.saveNode(sid, {
+      ...n,
+      tool: { server: "nope", name: "nope", schemaHash: "x" },
+    });
     try {
       await appFor().finalize({ sessionId: sid, name: "invalid-test" });
       expect.unreachable();
@@ -131,11 +209,19 @@ describe("pf_finalize", () => {
     expect(readFileSync(a.commandFile, "utf8")).toContain("cmd-a");
     expect(readFileSync(b.commandFile, "utf8")).toContain("cmd-b");
     // procedures 안에는 사본만
-    expect(readFileSync(join(pfdir, "procedures", "cmd-a", "command.md"), "utf8")).toContain("cmd-a");
+    expect(
+      readFileSync(join(pfdir, "procedures", "cmd-a", "command.md"), "utf8"),
+    ).toContain("cmd-a");
     // 기존 파일 + force 없음 → 거부
-    await expect(appFor().finalize({ sessionId: sid, name: "cmd-a" })).rejects.toThrow(/--force/);
+    await expect(
+      appFor().finalize({ sessionId: sid, name: "cmd-a" }),
+    ).rejects.toThrow(/--force/);
     // force면 덮어쓰기
-    const again = await appFor().finalize({ sessionId: sid, name: "cmd-a", force: true });
+    const again = await appFor().finalize({
+      sessionId: sid,
+      name: "cmd-a",
+      force: true,
+    });
     expect(existsSync(again.commandFile)).toBe(true);
   }, 30000);
 
@@ -146,11 +232,15 @@ describe("pf_finalize", () => {
     // 기간성 값(2026-09)은 default 금지 → required
     expect(doc.params["month"].default).toBe(undefined);
     expect(doc.params["month"].required).toBe(true);
-    const { sessionId } = importProcedure(pfdir, doc, { month: "2026-10" });
-    const store = new FileStore(pfdir);
+    const { sessionId } = await importProc(client, pfdir, doc, {
+      month: "2026-10",
+    });
+    const store = metaStore(pfdir);
     expect(store.getSession(sessionId)!.params["month"]).toBe("2026-10");
     // 미지정 run은 bad_request
-    expect(() => importProcedure(pfdir, doc, {})).toThrow(/필수 params 누락: month/);
+    await expect(importProc(client, pfdir, doc, {})).rejects.toThrow(
+      /필수 params 누락: month/,
+    );
   }, 30000);
 
   it("M4.1-2 PROCEDURE.md는 노드 숫자 정렬 (1.2 < 1.10)", async () => {
@@ -162,19 +252,29 @@ describe("pf_finalize", () => {
     });
     const sid = started.session.id;
     await client.pfResolve({
-      sessionId: sid, nodeId: "1", decision: "split",
-      children: Array.from({ length: 11 }, (_, i) => ({ goal: `작업${i + 1}` })),
+      sessionId: sid,
+      nodeId: "1",
+      decision: "split",
+      children: Array.from({ length: 11 }, (_, i) => ({
+        goal: `작업${i + 1}`,
+      })),
     });
     for (let i = 1; i <= 11; i++) {
       const id = `1.${i}`;
       await client.pfReport({
-        sessionId: sid, nodeId: id,
-        tool: { server: "fake-ppt", name: "list_slides" }, args: { file: "data.pptx" },
-        resultSummary: JSON.stringify({ n: i }), resultJson: { n: i },
-        selfVerdict: "pass", selfReason: "ok",
+        sessionId: sid,
+        nodeId: id,
+        tool: { server: "fake-ppt", name: "list_slides" },
+        args: { file: "data.pptx" },
+        resultSummary: JSON.stringify({ n: i }),
+        resultJson: { n: i },
+        selfVerdict: "pass",
+        selfReason: "ok",
       });
       await client.pfResolve({
-        sessionId: sid, nodeId: id, decision: "leaf",
+        sessionId: sid,
+        nodeId: id,
+        decision: "leaf",
         tool: { server: "fake-ppt", name: "list_slides" },
         argSpecs: { file: { kind: "fixed", value: "data.pptx" } } as never,
       });
@@ -194,20 +294,36 @@ describe("pf_finalize", () => {
       limits: { maxDepth: 3, maxRetries: 2, maxNodes: 20 },
     });
     const sid = started.session.id;
-    await client.pfResolve({ sessionId: sid, nodeId: "1", decision: "split", children: [{ goal: "a" }] });
+    await client.pfResolve({
+      sessionId: sid,
+      nodeId: "1",
+      decision: "split",
+      children: [{ goal: "a" }],
+    });
     const summary = JSON.stringify({ f: "report-2026-09.pptx" });
     await client.pfReport({
-      sessionId: sid, nodeId: "1.1",
-      tool: { server: "fake-ppt", name: "list_slides" }, args: { file: "report-2026-09.pptx" },
-      resultSummary: summary, resultJson: JSON.parse(summary),
-      selfVerdict: "pass", selfReason: "ok",
+      sessionId: sid,
+      nodeId: "1.1",
+      tool: { server: "fake-ppt", name: "list_slides" },
+      args: { file: "report-2026-09.pptx" },
+      resultSummary: summary,
+      resultJson: JSON.parse(summary),
+      selfVerdict: "pass",
+      selfReason: "ok",
     });
     await client.pfResolve({
-      sessionId: sid, nodeId: "1.1", decision: "leaf",
+      sessionId: sid,
+      nodeId: "1.1",
+      decision: "leaf",
       tool: { server: "fake-ppt", name: "list_slides" },
-      argSpecs: { file: { kind: "fixed", value: "report-2026-09.pptx" } } as never,
+      argSpecs: {
+        file: { kind: "fixed", value: "report-2026-09.pptx" },
+      } as never,
     });
-    const out = await appFor().finalize({ sessionId: sid, name: "substr-test" });
+    const out = await appFor().finalize({
+      sessionId: sid,
+      name: "substr-test",
+    });
     expect(out.warnings.some((w) => w.includes("부분 포함"))).toBe(true);
     // M5.3.1-4: golden.output 경고는 발생하지 않는다 (원문·replay 전용)
     expect(out.warnings.some((w) => w.includes("golden.output"))).toBe(false);
@@ -215,29 +331,45 @@ describe("pf_finalize", () => {
 
   it("M4.1-5 재-finalize: 원자 교체, 잔재 없음", async () => {
     const sid = await scripted();
-    const first = await appFor().finalize({ sessionId: sid, name: "atomic-test" });
+    const first = await appFor().finalize({
+      sessionId: sid,
+      name: "atomic-test",
+    });
     expect(first.dir).toBe(join(pfdir, "procedures", "atomic-test"));
     // 세션 변경 후 재-finalize (force: 명령 파일 덮어쓰기)
-    const store = new FileStore(pfdir);
+    const store = metaStore(pfdir);
     const n = store.getNode(sid, "1.1")!;
     store.saveNode(sid, { ...n, goal: `${n.goal} v2` });
-    const again = await appFor().finalize({ sessionId: sid, name: "atomic-test", force: true });
+    const again = await appFor().finalize({
+      sessionId: sid,
+      name: "atomic-test",
+      force: true,
+    });
     expect(again.dir).toBe(first.dir);
     // 내용이 교체됐고 tmp/.old 잔재가 없음
-    expect(readFileSync(join(again.dir, "PROCEDURE.md"), "utf8")).toContain("v2");
-    const leftovers = readdirSync(join(pfdir, "procedures")).filter((e) => e.includes(".tmp-") || e.endsWith(".old"));
+    expect(readFileSync(join(again.dir, "PROCEDURE.md"), "utf8")).toContain(
+      "v2",
+    );
+    const leftovers = readdirSync(join(pfdir, "procedures")).filter(
+      (e) => e.includes(".tmp-") || e.endsWith(".old"),
+    );
     expect(leftovers).toEqual([]);
   }, 30000);
 
   it("M4.1-6 절차 이름 규칙 (skill 호환)", async () => {
     const sid = await scripted();
     for (const bad of ["Monthly", "a_b", "-x", "x!", "a".repeat(65), ""]) {
-      await expect(appFor().finalize({ sessionId: sid, name: bad })).rejects.toThrow(/bad procedure name/);
+      await expect(
+        appFor().finalize({ sessionId: sid, name: bad }),
+      ).rejects.toThrow(/bad procedure name/);
     }
-    await expect(appFor().finalize({ sessionId: sid, name: "ok-name-1" })).resolves.toBeDefined();
+    await expect(
+      appFor().finalize({ sessionId: sid, name: "ok-name-1" }),
+    ).resolves.toBeDefined();
   }, 30000);
 
-  it("M5-6 SKILL/command 문구는 run 지원 (M4.1-8 철회)", async () => {    const sid = await scripted();
+  it("M5-6 SKILL/command 문구는 run 지원 (M4.1-8 철회)", async () => {
+    const sid = await scripted();
     const out = await appFor().finalize({ sessionId: sid, name: "run-test" });
     const skill = readFileSync(join(out.dir, "SKILL.md"), "utf8");
     expect(skill).toContain("procforge run");
@@ -252,58 +384,125 @@ describe("pf_finalize", () => {
   it("M5.3.1-2 고정 날짜 템플릿 → fixture-source 감사 / strict 거부", async () => {
     const collected = await collectCatalog(root);
     const started = await client.pfStart({
-      request: "고정 템플릿", params: { month: "2026-09" },
+      request: "고정 템플릿",
+      params: { month: "2026-09" },
       toolCatalog: collected.entries,
       limits: { maxDepth: 3, maxRetries: 2, maxNodes: 20 },
     });
     const sid = started.session.id;
-    await client.pfResolve({ sessionId: sid, nodeId: "1", decision: "split", children: [{ goal: "읽기" }] });
+    await client.pfResolve({
+      sessionId: sid,
+      nodeId: "1",
+      decision: "split",
+      children: [{ goal: "읽기" }],
+    });
     writeFileSync(join(root, "data-2026-09.pptx"), "x");
     const { ingestArtifacts } = await import("../src/artifacts.js");
     const { randomUUID } = await import("node:crypto");
     const attemptId = randomUUID();
-    const ing = ingestArtifacts({ procforgeDir: pfdir, sessionId: sid, nodeId: "1.1", attemptId, baseDir: root, paths: ["data-2026-09.pptx"] });
+    const ing = ingestArtifacts({
+      procforgeDir: pfdir,
+      sessionId: sid,
+      nodeId: "1.1",
+      attemptId,
+      baseDir: root,
+      paths: ["data-2026-09.pptx"],
+    });
     await client.pfReport({
-      sessionId: sid, nodeId: "1.1",
-      tool: { server: "fake-ppt", name: "list_slides" }, args: { file: "data-2026-09.pptx" },
-      resultSummary: "1 slide", resultJson: { slides: ["a"] },
-      artifacts: ing.stored, artifactContents: ing.contents,
-      selfVerdict: "pass", selfReason: "ok", attemptId,
+      sessionId: sid,
+      nodeId: "1.1",
+      tool: { server: "fake-ppt", name: "list_slides" },
+      args: { file: "data-2026-09.pptx" },
+      resultSummary: "1 slide",
+      resultJson: { slides: ["a"] },
+      artifacts: ing.stored,
+      artifactContents: ing.contents,
+      selfVerdict: "pass",
+      selfReason: "ok",
+      attemptId,
     });
     await client.pfResolve({
-      sessionId: sid, nodeId: "1.1", decision: "leaf",
+      sessionId: sid,
+      nodeId: "1.1",
+      decision: "leaf",
       tool: { server: "fake-ppt", name: "list_slides" },
-      argSpecs: { file: { kind: "fixed", value: "data-2026-09.pptx" } } as never,
+      argSpecs: {
+        file: { kind: "fixed", value: "data-2026-09.pptx" },
+      } as never,
     });
-    const out = await appFor().finalize({ sessionId: sid, name: "fixed-date-test" });
-    expect(out.warnings.some((w) => w.includes("(fixture)") && w.includes("날짜 표현"))).toBe(true);
-    await expect(appFor().finalize({ sessionId: sid, name: "fixed-date-test", strict: true })).rejects.toThrow(/고정값 감사 실패/);
+    const out = await appFor().finalize({
+      sessionId: sid,
+      name: "fixed-date-test",
+    });
+    expect(
+      out.warnings.some(
+        (w) => w.includes("(fixture)") && w.includes("날짜 표현"),
+      ),
+    ).toBe(true);
+    await expect(
+      appFor().finalize({
+        sessionId: sid,
+        name: "fixed-date-test",
+        strict: true,
+      }),
+    ).rejects.toThrow(/고정값 감사 실패/);
   }, 30000);
 
   it("M5.3-1 스크립트 하드코딩 → 경고 / strict 거부", async () => {
     const { client } = testStack(pfdir);
-    const app = new ProcForgeApp({ core: client, procforgeDir: pfdir, projectRoot: root });
+    const app = new ProcForgeApp({
+      core: client,
+      procforgeDir: pfdir,
+      projectRoot: root,
+    });
     mkdirSync(join(root, "scripts"), { recursive: true });
-    writeFileSync(join(root, "scripts", "agg.py"), 'PERIOD = "2026-09"\nprint("{}")');
+    writeFileSync(
+      join(root, "scripts", "agg.py"),
+      'PERIOD = "2026-09"\nprint("{}")',
+    );
     const started = await client.pfStart({
-      request: "집계", params: { month: "2026-09" },
-      toolCatalog: [{ server: "host", name: "script", inputSchema: {}, schemaHash: "s" }],
+      request: "집계",
+      params: { month: "2026-09" },
+      toolCatalog: [
+        { server: "host", name: "script", inputSchema: {}, schemaHash: "s" },
+      ],
     });
     const sid = started.session.id;
-    await client.pfResolve({ sessionId: sid, nodeId: "1", decision: "split", children: [{ goal: "집계" }] });
+    await client.pfResolve({
+      sessionId: sid,
+      nodeId: "1",
+      decision: "split",
+      children: [{ goal: "집계" }],
+    });
     await client.pfReport({
-      sessionId: sid, nodeId: "1.1", tool: { server: "host", name: "script" },
-      args: { x: "a" }, resultSummary: "ok", resultJson: { n: 1 },
-      selfVerdict: "pass", selfReason: "ok",
+      sessionId: sid,
+      nodeId: "1.1",
+      tool: { server: "host", name: "script" },
+      args: { x: "a" },
+      resultSummary: "ok",
+      resultJson: { n: 1 },
+      selfVerdict: "pass",
+      selfReason: "ok",
     });
     await client.pfResolve({
-      sessionId: sid, nodeId: "1.1", decision: "leaf",
+      sessionId: sid,
+      nodeId: "1.1",
+      decision: "leaf",
       tool: { server: "host", name: "script" },
-      argSpecs: { x: { kind: "fixed", value: "a" }, run: { kind: "script", file: "scripts/agg.py" } } as never,
+      argSpecs: {
+        x: { kind: "fixed", value: "a" },
+        run: { kind: "script", file: "scripts/agg.py" },
+      } as never,
     });
     const out = await app.finalize({ sessionId: sid, name: "content-audit" });
-    expect(out.warnings.some((w) => w.includes("script:scripts/agg.py") && w.includes("날짜 표현"))).toBe(true);
-    await expect(app.finalize({ sessionId: sid, name: "content-audit", strict: true })).rejects.toThrow(/고정값 감사 실패/);
+    expect(
+      out.warnings.some(
+        (w) => w.includes("script:scripts/agg.py") && w.includes("날짜 표현"),
+      ),
+    ).toBe(true);
+    await expect(
+      app.finalize({ sessionId: sid, name: "content-audit", strict: true }),
+    ).rejects.toThrow(/고정값 감사 실패/);
   }, 30000);
 
   it("M5.1-B1 고정값 감사: 경고 + strict 거부", async () => {
@@ -314,6 +513,8 @@ describe("pf_finalize", () => {
     const proc = readFileSync(join(out.dir, "PROCEDURE.md"), "utf8");
     expect(proc).toContain("## 고정값 감사");
     expect(proc).toContain("날짜 표현");
-    await expect(appFor().finalize({ sessionId: sid, name: "audit-test", strict: true })).rejects.toThrow(/고정값 감사 실패/);
+    await expect(
+      appFor().finalize({ sessionId: sid, name: "audit-test", strict: true }),
+    ).rejects.toThrow(/고정값 감사 실패/);
   }, 30000);
 });

@@ -186,6 +186,24 @@ const Methods = {
     }).merge(RevActorSchema).passthrough(),
     out: z.object({ node: NodeSchema }).passthrough().and(ChangeMetaSchema),
   },
+  pfImportProcedure: {
+    in: z.object({
+      doc: ProcedureDocSchema, params: z.record(z.string()).optional(),
+    }).merge(RevActorSchema).passthrough(),
+    out: z.object({ sessionId: SessionIdSchema }).passthrough(),
+  },
+  pfWriteGolden: {
+    in: z.object({
+      sessionId: SessionIdSchema, nodeId: NodeIdSchema,
+      golden: z.object({
+        fixtures: z.array(z.string()),
+        output: z.string(),
+        attemptId: z.string().uuid().optional(),
+        ignore: z.array(z.string()).default([]),
+      }),
+    }).merge(RevActorSchema).passthrough(),
+    out: z.object({ node: NodeSchema }).passthrough().and(ChangeMetaSchema),
+  },
 } as const;
 
 /** JSON 직렬화 불가 값(Map/Set/함수·클래스 인스턴스) 거부 */
@@ -253,5 +271,7 @@ export function createLoopbackClient(inner: CoreClient): CoreClient {
     getNode: (sid, nid) => wrapArgs("getNode", [sid, nid], ([a, b]) => inner.getNode(a, b)),
     pfBuildProcedure: (sid, name) => wrapArgs("pfBuildProcedure", [sid, name], ([a, b]) => inner.pfBuildProcedure(a, b)),
     pfApprove: (i) => wrapObj("pfApprove", i, (x) => inner.pfApprove(x)),
+    pfImportProcedure: (i) => wrapObj("pfImportProcedure", i, (x) => inner.pfImportProcedure(x)),
+    pfWriteGolden: (i) => wrapObj("pfWriteGolden", i, (x) => inner.pfWriteGolden(x)),
   };
 }

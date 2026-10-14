@@ -163,6 +163,30 @@ export type PfAdviseOutput = {
   note?: string;
 } & ChangeMeta;
 
+/** 절차서 import (M6.1-2. CLI·테스트용. 세션 직접 저장의 core 경로) */
+export type PfImportProcedureInput = {
+  doc: unknown;
+  params?: Record<string, string>;
+};
+
+export type PfImportProcedureOutput = {
+  sessionId: string;
+};
+
+/** golden 쓰기 (M6.1-2. 원격 record 경로. output만 갱신, fixtures는 pf_report 소유) */
+export type PfWriteGoldenInput = {
+  sessionId: string;
+  nodeId: string;
+  golden: {
+    fixtures: string[];
+    output: string;
+    attemptId?: string;
+    ignore?: string[];
+  };
+  expectedRevision?: number;
+  actor?: Actor;
+};
+
 /** attempt artifacts 교체 (M4.2-1, 확정 보정용). golden은 이후 leaf 확정 시 재구성 */
 export type AmendAttemptArtifactsInput = {
   sessionId: string;
@@ -275,6 +299,14 @@ export interface CoreClient {
   ): Promise<{ doc: ProcedureDoc; warnings: string[] }>;
   /** external dry-run 계획 승인/거부 (M2.6-4) */
   pfApprove(input: PfApproveInput): Promise<{ node: Node } & ChangeMeta>;
+  /** 절차서 import (M6.1-2) */
+  pfImportProcedure(
+    input: PfImportProcedureInput,
+  ): Promise<PfImportProcedureOutput>;
+  /** golden 쓰기 (M6.1-2) */
+  pfWriteGolden(
+    input: PfWriteGoldenInput,
+  ): Promise<{ node: Node } & ChangeMeta>;
 }
 
 /** 객체 입력 (M4.2-2.5-5, 순서 인자 통일) */

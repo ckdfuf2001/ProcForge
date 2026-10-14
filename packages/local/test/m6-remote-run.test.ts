@@ -14,7 +14,7 @@ import { startServer, parseApiKeys } from "../../core-server/dist/server.js";
 import { createRemoteCoreClient } from "../src/remote-client.js";
 import { withNetRetry } from "./net-retry.js";
 import { ProcForgeApp } from "../src/app/app.js";
-import { runSession } from "../src/runner/run.js";
+import { runTestSession as runSession } from "./client-mode.js";
 
 // M6-5: remote core 분해 세션을 로컬 runner로 live 실행.
 
@@ -129,7 +129,7 @@ describe("M6-5 remote 실행", () => {
     expect(rep.results.find((r) => r.nodeId === "1.1")?.status).toBe("pass");
   }, 120000);
 
-  it("remote + record → 명시 거부", async () => {
+  it("remote + record → 허용 (golden은 pfWriteGolden으로 반영)", async () => {
     const client = withNetRetry(
       createRemoteCoreClient({ baseUrl, apiKey: KEY }),
     );
@@ -138,18 +138,13 @@ describe("M6-5 remote 실행", () => {
       params: {},
       toolCatalog: CAT,
     });
-    let code = "";
-    try {
-      await runSession({
-        procforgeDir: pfdir,
-        projectRoot: root,
-        sessionId: started.session.id,
-        mode: "record",
-        core: client,
-      });
-    } catch (e) {
-      code = (e as { code?: string }).code ?? "";
-    }
-    expect(code).toBe("bad_request");
+    const rep = await runSession({
+      procforgeDir: pfdir,
+      projectRoot: root,
+      sessionId: started.session.id,
+      mode: "record",
+      core: client,
+    });
+    expect(rep.summary.fail).toBe(0);
   }, 120000);
 });

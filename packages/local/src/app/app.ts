@@ -70,7 +70,7 @@ import {
   scopeWarnings,
   toHashable,
 } from "../services/approvals.js";
-import { importProcedure } from "../procedure.js";
+import { copyImportFiles } from "../procedure.js";
 import { resolveDateParams } from "../services/date-params.js";
 import { runnableTools } from "../services/runnable-tools.js";
 import {
@@ -103,12 +103,6 @@ import { buildTrace, formatTraceMarkdown } from "../trace.js";
 import { exportSession } from "../export.js";
 import { assertProjectPath } from "../artifacts.js";
 import { writeProcedure } from "../services/procedureWriter.js";
-import { checkerEvaluate } from "../checker.js";
-import {
-  autoConstraints,
-  decideReportVerdict,
-  resultJsonMetaOf,
-} from "@procforge/shared/report.js";
 
 // ProcForge 유스케이스층 (M4.2-1). 사용자 행동 1개 = 메서드 1개.
 // 어댑터(server/cli/ui)는 입력 검증·호출·응답 포맷만 하고 정책·파일 작업은 여기에 위임한다.
@@ -328,71 +322,6 @@ export class ProcForgeApp {
     };
   }
 
-  /**
-   * M6.1-1 (R8): 원격 사전평가 입력. resultJson 원문·artifactContents는
-   * 전송하지 않고 메타+로컬 판정+auto 제약만 core에 보낸다.
-   * 평가·ref 대조는 LocalServices, core는 저장·규칙 적용.
-   */
-  private async remoteReportInput(a: {
-    sid: string;
-    nid: string;
-    toolRef: { server: string; name: string };
-    args: Record<string, unknown>;
-    stored: string[];
-    sources: Record<string, string>;
-    verifiedJsonKeys: string[] | undefined;
-    attemptId: string;
-    sess: { revision: number };
-    resultSummary: string;
-    resultJson: unknown;
-    selfVerdict: "pass" | "fail";
-    selfReason: string;
-    rubricReasons: Record<string, string> | undefined;
-    expectedRevision: number | undefined;
-    actor: unknown;
-    contents: Record<string, string>;
-  }): Promise<Parameters<CoreClient["pfReport"]>[0]> {
-    const node = await this.core.getNode(a.sid, a.nid);
-    const storedConstraints = (node.constraints ??
-      []) as import("@procforge/shared/schema.js").Constraint[];
-    const freshAuto = autoConstraints(
-      a.resultJson,
-      a.stored,
-      a.sources,
-      a.verifiedJsonKeys,
-    );
-    const localEvaluation = decideReportVerdict({
-      storedConstraints,
-      freshAuto,
-      selfVerdict: a.selfVerdict,
-      evaluate: checkerEvaluate,
-      ctx: {
-        resultSummary: a.resultSummary,
-        resultJson: a.resultJson,
-        artifacts: a.contents,
-      },
-    });
-    return {
-      sessionId: a.sid,
-      nodeId: a.nid,
-      tool: a.toolRef,
-      args: a.args,
-      resultSummary: a.resultSummary,
-      resultJsonMeta: resultJsonMetaOf(a.resultJson),
-      localEvaluation,
-      autoConstraints: freshAuto,
-      artifacts: a.stored,
-      artifactSources: a.sources,
-      verifiedJsonKeys: a.verifiedJsonKeys,
-      selfVerdict: a.selfVerdict,
-      selfReason: a.selfReason,
-      rubricReasons: a.rubricReasons,
-      attemptId: a.attemptId,
-      expectedRevision: a.expectedRevision ?? a.sess.revision,
-      actor: a.actor as import("@procforge/shared/dto.js").Actor,
-    };
-  }
-
   async report(a: ReportInput): Promise<OutputOf<"pf_report">> {
     const sid = a.sessionId as string;
     const sess = await this.core.getSession(sid);
@@ -545,49 +474,25 @@ export class ProcForgeApp {
       if (contents[fx] !== undefined && contents[src] === undefined)
         contents[src] = contents[fx];
     }
-    const out = await this.core.pfReport(
-      (this.core as { isRemote?: boolean }).isRemote === true
-        ? await this.remoteReportInput({
-            sid,
-            nid,
-            toolRef,
-            args,
-            stored,
-            sources,
-            verifiedJsonKeys,
-            attemptId,
-            sess,
-            resultSummary: a.resultSummary as string,
-            resultJson: a.resultJson,
-            selfVerdict: a.selfVerdict as "pass" | "fail",
-            selfReason: a.selfReason as string,
-            rubricReasons: a.rubricReasons as
-              Record<string, string> | undefined,
-            expectedRevision: a.expectedRevision ?? sess.revision,
-            actor: a.actor ?? "host",
-            contents,
-          })
-        : {
-            sessionId: sid,
-            nodeId: nid,
-            tool: toolRef,
-            args,
-            resultSummary: a.resultSummary as string,
-            resultJson: a.resultJson,
-            artifacts: stored,
-            artifactContents: contents,
-            artifactSources: sources,
-            verifiedJsonKeys,
-            selfVerdict: a.selfVerdict as "pass" | "fail",
-            selfReason: a.selfReason as string,
-            rubricReasons: a.rubricReasons as
-              Record<string, string> | undefined,
-            attemptId,
-            // M4.2-2.5.1-4: 생략 시 읽은 revision 전달 (도중 변경은 conflict)
-            expectedRevision: a.expectedRevision ?? sess.revision,
-            actor: a.actor ?? "host",
-          },
-    );
+    const out = await this.core.pfReport({
+      sessionId: sid,
+      nodeId: nid,
+      tool: toolRef,
+      args,
+      resultSummary: a.resultSummary as string,
+      resultJson: a.resultJson,
+      artifacts: stored,
+      artifactContents: contents,
+      artifactSources: sources,
+      verifiedJsonKeys,
+      selfVerdict: a.selfVerdict as "pass" | "fail",
+      selfReason: a.selfReason as string,
+      rubricReasons: a.rubricReasons as Record<string, string> | undefined,
+      attemptId,
+      // M4.2-2.5.1-4: 생략 시 읽은 revision 전달 (도중 변경은 conflict)
+      expectedRevision: a.expectedRevision ?? sess.revision,
+      actor: a.actor ?? "host",
+    });
     // M5.8.2 후속: resultJson 파일 저장 (ref 해석용. core는 메타만 가짐).
     if (a.resultJson !== undefined) {
       try {
@@ -1249,6 +1154,8 @@ export class ProcForgeApp {
       updateGolden: (a.updateGolden as boolean | undefined) ?? false,
       allowProjectRead: (a.allowProjectRead as boolean | undefined) ?? false,
       changed: (a.changed as boolean | undefined) ?? false,
+      // M6.1-2: 원격 core면 하이드레이트 후 실행 (inprocess는 동일 상태라 무해).
+      core: this.core,
     });
     const reportPath = join(
       this.procforgeDir,
@@ -1406,10 +1313,9 @@ export class ProcForgeApp {
     }
     // M5.6-g: 누적(stateWrites) 노드는 출력 단언 constraint 필수. 없으면 경고,
     // strict면 위에서 거부. 빈 누적 결과가 그대로 통과하는 것을 막는다.
-    // tree 요약에는 stateWrites가 없으므로 전체 노드로 감사.
-    const fullNodes = await Promise.all(
-      nodes.map((n) => this.core.getNode(sid, n.id)),
-    );
+    // M6.1-2: pfTree가 전체 노드를 주므로 getNode 팬아웃 불필요
+    // (원격 burst EACCES 완화 + 왕복 절감).
+    const fullNodes = nodes;
     allAudit.push(
       ...auditStateWrites(
         fullNodes as {
@@ -1524,10 +1430,7 @@ export class ProcForgeApp {
   }
 
   /** 절차서 live 실행 시작 (M5). 실행은 pf_run_next/supply로 단계 진행. */
-  async runStart(a: {
-    procedure: unknown;
-    params?: unknown;
-  }): Promise<{
+  async runStart(a: { procedure: unknown; params?: unknown }): Promise<{
     runId: string;
     sessionId: string;
     procedure: string;
@@ -1539,7 +1442,13 @@ export class ProcForgeApp {
     // M6-0: @날짜 param 1회 해석 (run 기록에는 해석값 저장).
     const liveParams = resolveDateParams(params).params;
     const { doc, dir } = loadProcedureDoc(this.procforgeDir, ref);
-    const { sessionId } = importProcedure(this.procforgeDir, doc, liveParams);
+    // M6.1-2: import도 core 경로 (inprocess 포함 단일 경로).
+    // 파일 복사(fixtures·cassettes·scripts)는 로컬 runner용으로 병행.
+    const { sessionId } = await this.core.pfImportProcedure({
+      doc: doc as never,
+      params: liveParams,
+    });
+    copyImportFiles(this.procforgeDir, doc.name, sessionId);
     const runId = randomUUID();
     writeRunState(this.procforgeDir, {
       version: 1,
@@ -1559,9 +1468,7 @@ export class ProcForgeApp {
   }
 
   /** run 1스텝 진행 (M5, pf_run_next/supply 공용). 결정적 구간 자동 진행. */
-  async runStep(
-    runId: string,
-  ): Promise<
+  async runStep(runId: string): Promise<
     | {
         kind: "need_generated";
         runId: string;
@@ -1636,6 +1543,8 @@ export class ProcForgeApp {
       skipNodeIds: st.done,
       supplied: st.supplied,
       approvedNodeIds: st.approved,
+      // M6.1-2: 원격 core면 하이드레이트 후 실행.
+      core: this.core,
     });
     const doneNow = report.results
       .filter((r) => r.status === "pass")

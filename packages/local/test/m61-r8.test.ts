@@ -143,24 +143,34 @@ describe("M6.1-1 egress R8", () => {
     expect(stored).toContain(tail);
   }, 120000);
 
-  it("원문 pfReport 직접 전송은 차단", async () => {
+  it("원문 pfReport 직접 전송도 변환되어 메타만 서버에 (차단은 guard층)", async () => {
     const client = createRemoteCoreClient({ baseUrl, apiKey: KEY });
     const started = await client.pfStart({
       request: "m61b",
       params: {},
       toolCatalog: CAT,
     });
-    await expect(
-      client.pfReport({
-        sessionId: started.session.id,
-        nodeId: "1",
-        tool: { server: "fake", name: "echo" },
-        args: {},
-        resultSummary: "x",
-        resultJson: { raw: 1 },
-        selfVerdict: "pass",
-        selfReason: "ok",
-      } as never),
-    ).rejects.toThrow(/egress 위반/);
+    await client.pfResolve({
+      sessionId: started.session.id,
+      nodeId: "1",
+      decision: "split",
+      children: [{ goal: "d" }],
+    });
+    const out = (await client.pfReport({
+      sessionId: started.session.id,
+      nodeId: "1.1",
+      tool: { server: "fake", name: "echo" },
+      args: {},
+      resultSummary: "x",
+      resultJson: { raw: 1 },
+      selfVerdict: "pass",
+      selfReason: "ok",
+    } as never)) as { verdict: string };
+    expect(out.verdict).toBe("pass");
+    const un = (await client.getNode(started.session.id, "1.1")) as {
+      attempts: { resultJsonMeta?: unknown; resultJson?: unknown }[];
+    };
+    expect(un.attempts[un.attempts.length - 1].resultJsonMeta).toBeDefined();
+    expect(un.attempts[un.attempts.length - 1].resultJson).toBeUndefined();
   }, 60000);
 });

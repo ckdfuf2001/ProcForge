@@ -458,6 +458,20 @@
   누적 수집이라 정적 해석과 다름).
 - [M6.1-5] 저장소 공개: 공개 유지 (사용자 결정, 2026-10-14).
   비밀 URL·키는 `$prefix`·환경 분리, 토큰 하드코딩 금지 유지.
+- [M6.1-2] 전체 스위트 remote 이식: PROCFORGE_CLIENT=remote면 testStack이
+  파일당 서버 1대 지연 기동 + 서버 저장소를 메타 단언에 사용.
+  runSession은 core 주입 시 하이드레이트 후 실행 (runTestSession 별칭),
+  record도 허용 (golden은 pfWriteGolden 반영). importProcedure는
+  wire pfImportProcedure + 로컬 파일 복사 병행. app.runStart도 core 경로.
+  송신 수집 + 파일 끝 egress 위반 0건 단언 (setup-remote afterAll).
+  CI remote 잡이 전체 스위트를 돈다. loopback 순간 실패 원인 확정:
+  burst connect EACCES (200병렬 중 116) + stale keep-alive.
+  대응: 쓰기는 연결 단계 실패(EACCES·ECONNREFUSED, 서버가 못 봄)만 재시도,
+  그 외는 정확히 1회 (prod 의미 유지). 서버 keepAlive 120s.
+  finalize getNode 팬아웃 제거 (pfTree가 전체 노드. 왕복 절감+burst 제거).
+  CLI 서브프로세스 테스트는 spawnCli (spawnSync는 워커 루프를 막아
+  인프로세스 서버가 얼어붙는다). remote 병렬 4 (vitest.config).
+  runProcedureTest 흐름은 local-local이라 그대로 (서버 미사용).
 - [M6.1-1] egress R8 일치: pfReport 원문 resultJson 원격 전송 금지
   (메타+판정만. 직접 전송은 egress 차단). 평가는 LocalServices
   (checkerEvaluate), core는 저장·규칙 적용 (refCheck 패턴).
@@ -465,10 +479,14 @@
   옮겨 core·local이 같은 함수 사용 (parity).
   resultSummary·rubricReasons 값은 4KB 상한+교정, 예외 없음.
   params·args는 정의라 원문 유지+교정만.
-  남는 예외 목록: (a) params/args 안의 절대경로 (정의 입력. --param 정상 사용),
-  (b) PROSE_KEYS 산문 안의 절대경로, (c) 메타 형태 {sha256,size,preview},
-  (d) URL 문자열. 미리보기(≤4KB) 안의 원문 조각은 R8 설계상 허용.
+  남는 예외 목록: (a) params/args/argSpecs 안의 절대경로 (정의 입력.
+  argSpecs fixed가 args와 같은 문자열이라 차단하면 일관성 붕괴 + 스위트
+  필수 흐름 (m3 절대경로 replay·xpath //title). 경로 안 사용자명 노출은
+  감수, 토큰은 교정), (b) PROSE_KEYS 산문 안의 절대경로,
+  (c) 메타 형태 {sha256,size,preview}, (d) URL 문자열.
+  미리보기(≤4KB) 안의 원문 조각은 R8 설계상 허용.
   params/args 안의 resultJson 키도 차단 (예외 없음).
+  제약 spec.path·artifacts명의 절대경로는 계속 차단.
 - [M6-0] 저장소 공개: 공개 유지 (사용자 지시). [!] 아님. 공개 운영 선택지
   (사용자 결정 대기): (a) `.procforge/`는 gitignore라 세션·run 기록은 커밋 안
   됨 — 현 상태 유지가 기본. (b) `procedures/` 승인·스크립트는 커밋됨 —

@@ -133,6 +133,10 @@ async function dispatch(
     }
     case "pfApprove":
       return svc.pfApprove(b as never);
+    case "pfImportProcedure":
+      return svc.pfImportProcedure(b as never);
+    case "pfWriteGolden":
+      return svc.pfWriteGolden(b as never);
     default: {
       const _exhaustive: never = name;
       throw new Error(`unimplemented: ${_exhaustive}`);
@@ -143,6 +147,7 @@ async function dispatch(
 export function createCoreServer(opts: {
   dataDir: string;
   apiKeys: TenantKeys;
+  sessionTtlMs?: number;
 }): Server {
   return createServer(async (req, res) => {
     try {
@@ -210,7 +215,9 @@ export function createCoreServer(opts: {
         });
       }
       const store = new FileStore(join(opts.dataDir, "tenants", tid));
-      const svc = new CoreService(store, baseEvaluate);
+      const svc = new CoreService(store, baseEvaluate, {
+        sessionTtlMs: opts.sessionTtlMs,
+      });
       const out = await dispatch(
         svc,
         name,
@@ -238,11 +245,17 @@ export function startServer(opts: {
   apiKeys: TenantKeys;
   port?: number;
   host?: string;
+  sessionTtlMs?: number;
 }): Promise<{ server: Server; port: number; close: () => Promise<void> }> {
   const attempt = (
     left: number,
   ): Promise<{ server: Server; port: number; close: () => Promise<void> }> => {
     const server = createCoreServer(opts);
+    // M6.1-2: loopback 풀 재사용 중 stale socket 방지. 서버가 먼저 끊으면
+    // 클라이언트 풀에 죽은 소켓이 남아 fetch failed가 된다 (기본 5s < 클라 30s).
+    // loopback 전용 서버라 길게 잡는다.
+    server.keepAliveTimeout = 120000;
+    server.headersTimeout = 180000;
     return new Promise((resolve, reject) => {
       server.once("error", (e: NodeJS.ErrnoException) => {
         if (e?.code === "EACCES" && left > 0) {

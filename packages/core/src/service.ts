@@ -32,6 +32,9 @@ import type {
   AmendAttemptArtifactsInput,
   PfStartInput,
   PfStartOutput,
+  PfImportProcedureInput,
+  PfImportProcedureOutput,
+  PfWriteGoldenInput,
   ChangeMeta,
 } from "@procforge/shared/core-client.js";
 import { createMemoryStore } from "./store.js";
@@ -66,6 +69,7 @@ import { checkFixedAgainstInputSchema } from "@procforge/shared/validator.js";
 
 import {
   PROCEDURE_NAME_RE,
+  buildImportSession,
   type ProcedureDoc,
 } from "@procforge/shared/procedure.js";
 import { validateTree } from "@procforge/shared/validator.js";
@@ -1720,6 +1724,57 @@ export class CoreService implements CoreClient {
         return {
           result: next,
           summary: `amend ${input.nodeId} ${input.attemptId} ${input.artifacts.length}`,
+        };
+      },
+    );
+    return {
+      node: c.result,
+      revision: c.revision,
+      changedNodeIds: c.changedNodeIds,
+    };
+  }
+
+  /** 절차서 import (M6.1-2. CLI·테스트용. 세션 직접 저장의 core 경로) */
+  async pfImportProcedure(
+    input: PfImportProcedureInput,
+  ): Promise<PfImportProcedureOutput> {
+    const { session, nodes } = buildImportSession(
+      input.doc as ProcedureDoc,
+      input.params ?? {},
+    );
+    this.store.saveSession(session);
+    for (const n of nodes) this.store.saveNode(session.id, n);
+    return { sessionId: session.id };
+  }
+
+  /** golden 쓰기 (M6.1-2. 원격 record 경로. output만 갱신, fixtures는 pf_report 소유) */
+  async pfWriteGolden(
+    input: PfWriteGoldenInput,
+  ): Promise<{ node: Node } & ChangeMeta> {
+    const c = await this.change(
+      input.sessionId,
+      {
+        method: "pfWriteGolden",
+        expectedRevision: input.expectedRevision,
+        actor: input.actor,
+      },
+      () => {
+        const n = this.node(input.sessionId, input.nodeId);
+        if (n.locked) throw err("conflict", `node ${n.id} is locked`);
+        const next: Node = {
+          ...n,
+          golden: {
+            fixtures: [...input.golden.fixtures],
+            output: input.golden.output,
+            attemptId: input.golden.attemptId ?? n.golden?.attemptId,
+            ignore: input.golden.ignore ?? [],
+          },
+        };
+        next.hash = this.hashFor(input.sessionId, next);
+        this.store.saveNode(input.sessionId, next);
+        return {
+          result: next,
+          summary: `write-golden ${input.nodeId}`,
         };
       },
     );

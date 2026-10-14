@@ -1,12 +1,18 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, writeFileSync, mkdirSync, existsSync, readFileSync } from "node:fs";
+import {
+  mkdtempSync,
+  writeFileSync,
+  mkdirSync,
+  existsSync,
+  readFileSync,
+} from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { buildServer } from "../src/server.js";
 import { ProcForgeApp } from "../src/app/app.js";
-import { testStack } from "./client-mode.js";
+import { testStack, metaStore, serverSessionDir } from "./client-mode.js";
 import { validateTree } from "@procforge/shared/validator.js";
 import { FileStore } from "../src/filestore.js";
 
@@ -32,7 +38,9 @@ beforeEach(() => {
   writeFileSync(join(root, "template.j2"), "template {{month}}");
   writeFileSync(
     join(root, "opencode.json"),
-    JSON.stringify({ mcp: { "fake-ppt": { type: "local", command: ["node", serverMjs] } } }),
+    JSON.stringify({
+      mcp: { "fake-ppt": { type: "local", command: ["node", serverMjs] } },
+    }),
   );
 });
 
@@ -45,7 +53,11 @@ afterEach(() => {
 
 async function linked() {
   const { client } = testStack(pfdir);
-  const app = new ProcForgeApp({ core: client, procforgeDir: pfdir, projectRoot: root });
+  const app = new ProcForgeApp({
+    core: client,
+    procforgeDir: pfdir,
+    projectRoot: root,
+  });
   const server = buildServer({ app, procforgeDir: pfdir });
   const [ct, st] = InMemoryTransport.createLinkedPair();
   const mcp = new Client({ name: "e2e-host", version: "0.0.0" });
@@ -53,14 +65,27 @@ async function linked() {
   await mcp.connect(ct);
   const call = async (name: string, args: Record<string, unknown>) => {
     const r = await mcp.callTool({ name, arguments: args });
-    if (r.isError) throw new Error(`${name} failed: ${(r.content as { text: string }[])[0].text}`);
+    if (r.isError)
+      throw new Error(
+        `${name} failed: ${(r.content as { text: string }[])[0].text}`,
+      );
     return r.structuredContent as Record<string, unknown>;
   };
-  return { mcp, call, close: async () => { await mcp.close(); await server.close(); } };
+  return {
+    mcp,
+    call,
+    close: async () => {
+      await mcp.close();
+      await server.close();
+    },
+  };
 }
 
 async function doLeaf(
-  call: (name: string, args: Record<string, unknown>) => Promise<Record<string, unknown>>,
+  call: (
+    name: string,
+    args: Record<string, unknown>,
+  ) => Promise<Record<string, unknown>>,
   opts: {
     sessionId: string;
     nodeId: string;
@@ -109,7 +134,11 @@ describe("M2 E2E 월간보고서 (fake-ppt-mcp + scripted host, 신도구)", () 
       await call("pf_split", {
         sessionId: sid,
         nodeId: "1",
-        children: [{ goal: "슬라이드 목록 읽기" }, { goal: "2번 슬라이드 읽기", dependsOn: ["1.1"] }, { goal: "템플릿 채우기", dependsOn: ["1.1", "1.2"] }],
+        children: [
+          { goal: "슬라이드 목록 읽기" },
+          { goal: "2번 슬라이드 읽기", dependsOn: ["1.1"] },
+          { goal: "템플릿 채우기", dependsOn: ["1.1", "1.2"] },
+        ],
       });
 
       await doLeaf(call, {
@@ -128,7 +157,10 @@ describe("M2 E2E 월간보고서 (fake-ppt-mcp + scripted host, 신도구)", () 
         args: { file: "data/slides.pptx", index: 2 },
         resultSummary: "2번 슬라이드 읽기",
         resultJson: { title: "슬라이드2", body: "본문" },
-        argSpecs: { file: { kind: "fixed", value: "data/slides.pptx" }, index: { kind: "fixed", value: 2 } },
+        argSpecs: {
+          file: { kind: "fixed", value: "data/slides.pptx" },
+          index: { kind: "fixed", value: 2 },
+        },
       });
 
       writeFileSync(join(root, "out", "report-2026-09.pptx"), "placeholder");
@@ -144,23 +176,37 @@ describe("M2 E2E 월간보고서 (fake-ppt-mcp + scripted host, 신도구)", () 
         resultSummary: "템플릿 채우기 완료",
         resultJson: { output: "report-2026-09.pptx" },
         artifactPaths: ["out/report-2026-09.pptx"],
-        argSpecs: { template: { kind: "fixed", value: "template.j2" }, month: { kind: "var", ref: "${params.month}" } },
+        argSpecs: {
+          template: { kind: "fixed", value: "template.j2" },
+          month: { kind: "var", ref: "${params.month}" },
+        },
       });
 
-      expect(await call("pf_next", { sessionId: sid })).toMatchObject({ done: true });
+      expect(await call("pf_next", { sessionId: sid })).toMatchObject({
+        done: true,
+      });
 
       // .procforge 저장 검증 (서버와 별도 FileStore로 재읽기)
-      expect(existsSync(join(pfdir, "sessions", sid, "session.json"))).toBe(true);
+      expect(
+        existsSync(join(serverSessionDir(pfdir, sid), "session.json")),
+      ).toBe(true);
       for (const id of ["1", "1.1", "1.2", "1.3"]) {
-        expect(existsSync(join(pfdir, "sessions", sid, "nodes", `${id}.json`))).toBe(true);
+        expect(
+          existsSync(join(serverSessionDir(pfdir, sid), "nodes", `${id}.json`)),
+        ).toBe(true);
       }
-      const reread = new FileStore(pfdir);
+      const reread = metaStore(pfdir);
       const session = reread.getSession(sid)!;
       const nodes = [...reread.getNodes(sid).values()];
       const n13 = reread.getNode(sid, "1.3")!;
       expect(n13.status).toBe("leaf");
       expect(n13.golden?.fixtures.length).toBe(1);
-      expect(readFileSync(join(pfdir, "sessions", sid, n13.golden!.fixtures[0]), "utf8")).toBe("filled-report");
+      expect(
+        readFileSync(
+          join(pfdir, "sessions", sid, n13.golden!.fixtures[0]),
+          "utf8",
+        ),
+      ).toBe("filled-report");
       expect(validateTree(session, nodes)).toEqual([]);
     } finally {
       await close();
@@ -170,9 +216,16 @@ describe("M2 E2E 월간보고서 (fake-ppt-mcp + scripted host, 신도구)", () 
   it("실패 경로: fail 2회 → needs_human → advise → open → pass", async () => {
     const { call, close } = await linked();
     try {
-      const started = await call("pf_start", { request: "실패 경로", limits: { maxDepth: 3, maxRetries: 1, maxNodes: 10 } });
+      const started = await call("pf_start", {
+        request: "실패 경로",
+        limits: { maxDepth: 3, maxRetries: 1, maxNodes: 10 },
+      });
       const sid = started["sessionId"] as string;
-      await call("pf_split", { sessionId: sid, nodeId: "1", children: [{ goal: "읽기" }] });
+      await call("pf_split", {
+        sessionId: sid,
+        nodeId: "1",
+        children: [{ goal: "읽기" }],
+      });
 
       const fail = () =>
         call("pf_report", {
@@ -187,17 +240,28 @@ describe("M2 E2E 월간보고서 (fake-ppt-mcp + scripted host, 신도구)", () 
       // maxRetries=1 → 총 2회 시도. 1회 실패는 probing
       const r1 = await fail();
       expect(r1["verdict"]).toBe("fail");
-      let tree = (await call("pf_tree", { sessionId: sid, detail: "full" })) as {
+      let tree = (await call("pf_tree", {
+        sessionId: sid,
+        detail: "full",
+      })) as {
         entries: { id: string; node: { status: string } }[];
       };
-      expect(tree.entries.find((e) => e.id === "1.1")?.node.status).toBe("probing");
+      expect(tree.entries.find((e) => e.id === "1.1")?.node.status).toBe(
+        "probing",
+      );
       await fail();
       tree = (await call("pf_tree", { sessionId: sid, detail: "full" })) as {
         entries: { id: string; node: { status: string } }[];
       };
-      expect(tree.entries.find((e) => e.id === "1.1")?.node.status).toBe("needs_human");
+      expect(tree.entries.find((e) => e.id === "1.1")?.node.status).toBe(
+        "needs_human",
+      );
 
-      const adv = await call("pf_advise", { sessionId: sid, nodeId: "1.1", text: "슬라이드는 1개" });
+      const adv = await call("pf_advise", {
+        sessionId: sid,
+        nodeId: "1.1",
+        text: "슬라이드는 1개",
+      });
       expect((adv["constraints"] as unknown[]).length).toBeGreaterThan(0);
 
       writeFileSync(join(root, "out", "report.md"), "placeholder");
@@ -228,5 +292,3 @@ describe("M2 E2E 월간보고서 (fake-ppt-mcp + scripted host, 신도구)", () 
     }
   }, 30000);
 });
-
-

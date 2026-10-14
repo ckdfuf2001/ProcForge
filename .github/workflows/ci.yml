@@ -59,8 +59,9 @@ jobs:
           ! grep -rn --include='*.ts' --exclude='*.test.ts' "matchApproval" packages/local/src | grep -v "services/approvals.ts" | grep -q . || (echo "direct matchApproval forbidden, use checkApproval" && exit 1)
           ! grep -rn --include='*.ts' "\<isApproved>(" packages/local/src packages/local/test packages/shared/src packages/core/src || (echo "isApproved removed, use checkApproval" && exit 1)
   remote-mode:
-    # M6-5: 세 번째 모드. core-server 기동 + remote 전용 테스트 (wire·client·egress·remote 실행).
-    # 전체 스위트는 inprocess/loopback에서 검증, remote 전체 이식은 M6.1.
+    # M6.1-2: inprocess와 같은 스위트를 remote로 돈다 (파일당 서버 1대,
+    # 송신 수집 + 스위트 끝 egress 위반 단언. 병렬은 vitest.config가 4로 제한).
+    # 전체 스위트 remote 이식이 끝나면 이 잡이 곧 remote 커버리지다.
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest]
@@ -93,5 +94,7 @@ jobs:
       - run: pnpm check:deps
       - name: core-server tests
         run: pnpm --filter @procforge/core-server exec vitest run --testTimeout=20000
-      - name: remote-mode tests (spawn in-test)
-        run: pnpm --filter @procforge/local exec vitest run test/remote-client.test.ts test/m6-egress.test.ts test/m6-remote-run.test.ts --testTimeout=60000 --hookTimeout=60000
+      - name: full suite in remote mode
+        run: pnpm --filter @procforge/local exec vitest run --run --testTimeout=20000 --hookTimeout=20000
+        env:
+          PROCFORGE_CLIENT: remote

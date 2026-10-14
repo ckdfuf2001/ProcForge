@@ -6,10 +6,10 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { buildServer } from "../src/server.js";
 import { ProcForgeApp } from "../src/app/app.js";
-import { testStack } from "./client-mode.js";
+import { testStack, metaStore } from "./client-mode.js";
 import { FileStore } from "../src/filestore.js";
 import { fixtureFileExists } from "../src/artifacts.js";
-import { runSession } from "../src/runner/index.js";
+import { runTestSession as runSession } from "./client-mode.js";
 
 let root: string;
 let pfdir: string;
@@ -29,7 +29,12 @@ beforeEach(() => {
   process.env.USERPROFILE = home;
   writeFileSync(join(root, "data.pptx"), "PPTX-DATA");
   writeFileSync(join(root, "template.j2"), "template {{month}}");
-  writeFileSync(join(root, "opencode.json"), JSON.stringify({ mcp: { "fake-ppt": { type: "local", command: ["node", serverMjs] } } }));
+  writeFileSync(
+    join(root, "opencode.json"),
+    JSON.stringify({
+      mcp: { "fake-ppt": { type: "local", command: ["node", serverMjs] } },
+    }),
+  );
 });
 
 afterEach(() => {
@@ -41,7 +46,11 @@ afterEach(() => {
 
 async function linked() {
   const { client } = testStack(pfdir);
-  const app = new ProcForgeApp({ core: client, procforgeDir: pfdir, projectRoot: root });
+  const app = new ProcForgeApp({
+    core: client,
+    procforgeDir: pfdir,
+    projectRoot: root,
+  });
   const server = buildServer({ app, procforgeDir: pfdir });
   const [ct, st] = InMemoryTransport.createLinkedPair();
   const mcp = new Client({ name: "m36-host", version: "0.0.0" });
@@ -49,10 +58,19 @@ async function linked() {
   await mcp.connect(ct);
   const call = async (name: string, args: Record<string, unknown>) => {
     const r = await mcp.callTool({ name, arguments: args });
-    if (r.isError) throw new Error(`${name} failed: ${(r.content as { text: string }[])[0].text}`);
+    if (r.isError)
+      throw new Error(
+        `${name} failed: ${(r.content as { text: string }[])[0].text}`,
+      );
     return r.structuredContent as Record<string, unknown>;
   };
-  return { call, close: async () => { await mcp.close(); await server.close(); } };
+  return {
+    call,
+    close: async () => {
+      await mcp.close();
+      await server.close();
+    },
+  };
 }
 
 const slidesSummary = JSON.stringify({ slides: ["표지", "실적", "전망"] });
@@ -63,52 +81,88 @@ describe("M3.6-2 입력 자동 캡처", () => {
     const { call, close } = await linked();
     try {
       const started = await call("pf_start", {
-        request: "월간보고서", params: { month: "2026-09" }, seedFiles: ["data.pptx", "template.j2"],
+        request: "월간보고서",
+        params: { month: "2026-09" },
+        seedFiles: ["data.pptx", "template.j2"],
       });
       const sid = started["sessionId"] as string;
       await call("pf_split", {
-        sessionId: sid, nodeId: "1",
-        children: [{ goal: "목록" }, { goal: "읽기", dependsOn: ["1.1"] }, { goal: "채우기", dependsOn: ["1.1", "1.2"] }],
+        sessionId: sid,
+        nodeId: "1",
+        children: [
+          { goal: "목록" },
+          { goal: "읽기", dependsOn: ["1.1"] },
+          { goal: "채우기", dependsOn: ["1.1", "1.2"] },
+        ],
       });
-      const store = new FileStore(pfdir);
+      const store = metaStore(pfdir);
       // 1.1: artifacts 제출 없이 보고 → data.pptx 자동 캡처
       await call("pf_report", {
-        sessionId: sid, nodeId: "1.1",
-        tool: { server: "fake-ppt", name: "list_slides" }, args: { file: "data.pptx" },
-        resultSummary: slidesSummary, resultJson: JSON.parse(slidesSummary),
-        selfVerdict: "pass", selfReason: "ok",
+        sessionId: sid,
+        nodeId: "1.1",
+        tool: { server: "fake-ppt", name: "list_slides" },
+        args: { file: "data.pptx" },
+        resultSummary: slidesSummary,
+        resultJson: JSON.parse(slidesSummary),
+        selfVerdict: "pass",
+        selfReason: "ok",
       });
       const n11 = store.getNode(sid, "1.1")!;
       expect(n11.attempts[0].artifacts.length).toBe(1);
-      expect(readFileSync(join(pfdir, "sessions", sid, n11.attempts[0].artifacts[0]), "utf8")).toBe("PPTX-DATA");
+      expect(
+        readFileSync(
+          join(pfdir, "sessions", sid, n11.attempts[0].artifacts[0]),
+          "utf8",
+        ),
+      ).toBe("PPTX-DATA");
       await call("pf_confirm_leaf", {
-        sessionId: sid, nodeId: "1.1",
+        sessionId: sid,
+        nodeId: "1.1",
         tool: { server: "fake-ppt", name: "list_slides" },
         argSpecs: { file: { kind: "fixed", value: "data.pptx" } },
       });
       // 1.2
       await call("pf_report", {
-        sessionId: sid, nodeId: "1.2",
-        tool: { server: "fake-ppt", name: "read_slide" }, args: { file: "data.pptx", index: 1 },
-        resultSummary: slide1Summary, resultJson: JSON.parse(slide1Summary),
-        selfVerdict: "pass", selfReason: "ok",
+        sessionId: sid,
+        nodeId: "1.2",
+        tool: { server: "fake-ppt", name: "read_slide" },
+        args: { file: "data.pptx", index: 1 },
+        resultSummary: slide1Summary,
+        resultJson: JSON.parse(slide1Summary),
+        selfVerdict: "pass",
+        selfReason: "ok",
       });
       await call("pf_confirm_leaf", {
-        sessionId: sid, nodeId: "1.2",
+        sessionId: sid,
+        nodeId: "1.2",
         tool: { server: "fake-ppt", name: "read_slide" },
-        argSpecs: { file: { kind: "fixed", value: "data.pptx" }, index: { kind: "fixed", value: 1 } },
+        argSpecs: {
+          file: { kind: "fixed", value: "data.pptx" },
+          index: { kind: "fixed", value: 1 },
+        },
       });
       // 1.3: template.j2 자동 캡처 (sandbox 시드)
-      const outSummary = JSON.stringify({ output: "output/report.pptx", month: "2026-09" });
+      const outSummary = JSON.stringify({
+        output: "output/report.pptx",
+        month: "2026-09",
+      });
       await call("pf_report", {
-        sessionId: sid, nodeId: "1.3",
+        sessionId: sid,
+        nodeId: "1.3",
         tool: { server: "fake-ppt", name: "fill_template" },
-        args: { template: "template.j2", month: "2026-09", output: "output/report.pptx" },
-        resultSummary: outSummary, resultJson: JSON.parse(outSummary),
-        selfVerdict: "pass", selfReason: "ok",
+        args: {
+          template: "template.j2",
+          month: "2026-09",
+          output: "output/report.pptx",
+        },
+        resultSummary: outSummary,
+        resultJson: JSON.parse(outSummary),
+        selfVerdict: "pass",
+        selfReason: "ok",
       });
       await call("pf_confirm_leaf", {
-        sessionId: sid, nodeId: "1.3",
+        sessionId: sid,
+        nodeId: "1.3",
         tool: { server: "fake-ppt", name: "fill_template" },
         argSpecs: {
           template: { kind: "fixed", value: "template.j2" },
@@ -117,9 +171,17 @@ describe("M3.6-2 입력 자동 캡처", () => {
         },
         ignore: ["output"],
       });
-      expect(new FileStore(pfdir).getNode(sid, "1.3")!.golden?.fixtures.length).toBe(1);
+      expect(
+        metaStore(pfdir).getNode(sid, "1.3")!.golden?.fixtures.length,
+      ).toBe(1);
       // 프로젝트 폴백 없이 passthrough 전부 통과
-      const rep = await runSession({ procforgeDir: pfdir, projectRoot: root, allowProjectRead: false, sessionId: sid, mode: "passthrough" });
+      const rep = await runSession({
+        procforgeDir: pfdir,
+        projectRoot: root,
+        allowProjectRead: false,
+        sessionId: sid,
+        mode: "passthrough",
+      });
       expect(rep.summary.fail).toBe(0);
       expect(rep.summary.pass).toBe(3);
     } finally {
@@ -132,26 +194,42 @@ describe("M3.6-2 입력 자동 캡처", () => {
     try {
       const started = await call("pf_start", { request: "늦은 파일" });
       const sid = started["sessionId"] as string;
-      await call("pf_split", { sessionId: sid, nodeId: "1", children: [{ goal: "a" }] });
-      await call("pf_report", {
-        sessionId: sid, nodeId: "1.1",
-        tool: { server: "fake-ppt", name: "list_slides" }, args: { file: "late.pptx" },
-        resultSummary: slidesSummary, resultJson: JSON.parse(slidesSummary),
-        selfVerdict: "pass", selfReason: "ok",
+      await call("pf_split", {
+        sessionId: sid,
+        nodeId: "1",
+        children: [{ goal: "a" }],
       });
-      expect(new FileStore(pfdir).getNode(sid, "1.1")!.attempts[0].artifacts.length).toBe(0);
+      await call("pf_report", {
+        sessionId: sid,
+        nodeId: "1.1",
+        tool: { server: "fake-ppt", name: "list_slides" },
+        args: { file: "late.pptx" },
+        resultSummary: slidesSummary,
+        resultJson: JSON.parse(slidesSummary),
+        selfVerdict: "pass",
+        selfReason: "ok",
+      });
+      expect(
+        metaStore(pfdir).getNode(sid, "1.1")!.attempts[0].artifacts.length,
+      ).toBe(0);
       // 도구 실행 후 생긴 파일 (보고 이후)
       mkdirSync(join(pfdir, "sandbox", sid), { recursive: true });
       writeFileSync(join(pfdir, "sandbox", sid, "late.pptx"), "LATE");
       await call("pf_confirm_leaf", {
-        sessionId: sid, nodeId: "1.1",
+        sessionId: sid,
+        nodeId: "1.1",
         tool: { server: "fake-ppt", name: "list_slides" },
         argSpecs: { file: { kind: "fixed", value: "late.pptx", path: "in" } },
       });
-      const n = new FileStore(pfdir).getNode(sid, "1.1")!;
+      const n = metaStore(pfdir).getNode(sid, "1.1")!;
       expect(n.status).toBe("leaf");
       expect(n.golden?.fixtures.length).toBe(1);
-      expect(readFileSync(join(pfdir, "sessions", sid, n.golden!.fixtures[0]), "utf8")).toBe("LATE");
+      expect(
+        readFileSync(
+          join(pfdir, "sessions", sid, n.golden!.fixtures[0]),
+          "utf8",
+        ),
+      ).toBe("LATE");
     } finally {
       await close();
     }
@@ -163,30 +241,49 @@ describe("M3.6-3 출력 자동 캡처", () => {
     const { call, close } = await linked();
     try {
       const started = await call("pf_start", {
-        request: "출력 캡처", params: { month: "2026-09" }, seedFiles: ["template.j2"],
+        request: "출력 캡처",
+        params: { month: "2026-09" },
+        seedFiles: ["template.j2"],
       });
       const sid = started["sessionId"] as string;
       // 호스트가 도구를 실행해 sandbox에 산출물을 만든 상태
       mkdirSync(join(pfdir, "sandbox", sid, "out"), { recursive: true });
-      writeFileSync(join(pfdir, "sandbox", sid, "out", "report.pptx"), "PPTX-OUT-BYTES");
+      writeFileSync(
+        join(pfdir, "sandbox", sid, "out", "report.pptx"),
+        "PPTX-OUT-BYTES",
+      );
       await call("pf_report", {
-        sessionId: sid, nodeId: "1",
+        sessionId: sid,
+        nodeId: "1",
         tool: { server: "fake-ppt", name: "fill_template" },
-        args: { template: "template.j2", month: "2026-09", output: "out/report.pptx" },
-        resultSummary: JSON.stringify({ output: "out/report.pptx", month: "2026-09" }),
+        args: {
+          template: "template.j2",
+          month: "2026-09",
+          output: "out/report.pptx",
+        },
+        resultSummary: JSON.stringify({
+          output: "out/report.pptx",
+          month: "2026-09",
+        }),
         resultJson: { output: "out/report.pptx", month: "2026-09" },
-        selfVerdict: "pass", selfReason: "ok",
+        selfVerdict: "pass",
+        selfReason: "ok",
       });
-      const store = new FileStore(pfdir);
+      const store = metaStore(pfdir);
       const n = store.getNode(sid, "1")!;
       // in(template) + out(output, 응답 JSON 중복은 제거) = 2개
       expect(n.attempts[0].artifacts.length).toBe(2);
-      const bodies = n.attempts[0].artifacts.map((fx) => readFileSync(join(pfdir, "sessions", sid, fx), "utf8")).sort();
+      const bodies = n.attempts[0].artifacts
+        .map((fx) => readFileSync(join(pfdir, "sessions", sid, fx), "utf8"))
+        .sort();
       expect(bodies).toEqual(["PPTX-OUT-BYTES", "template {{month}}"]);
       // auto file_exists 부착 (첫 pass, 산출물마다)
-      expect(n.constraints.filter((c) => c.kind === "file_exists").length).toBe(2);
+      expect(n.constraints.filter((c) => c.kind === "file_exists").length).toBe(
+        2,
+      );
       await call("pf_confirm_leaf", {
-        sessionId: sid, nodeId: "1",
+        sessionId: sid,
+        nodeId: "1",
         tool: { server: "fake-ppt", name: "fill_template" },
         argSpecs: {
           template: { kind: "fixed", value: "template.j2" },
@@ -196,8 +293,20 @@ describe("M3.6-3 출력 자동 캡처", () => {
         ignore: ["output"],
       });
       // record 후 replay: 폴백 없이 통과 (file_exists는 존재+크기로 판정)
-      await runSession({ procforgeDir: pfdir, projectRoot: root, allowProjectRead: true, sessionId: sid, mode: "record" });
-      const rep = await runSession({ procforgeDir: pfdir, projectRoot: root, allowProjectRead: false, sessionId: sid, mode: "replay" });
+      await runSession({
+        procforgeDir: pfdir,
+        projectRoot: root,
+        allowProjectRead: true,
+        sessionId: sid,
+        mode: "record",
+      });
+      const rep = await runSession({
+        procforgeDir: pfdir,
+        projectRoot: root,
+        allowProjectRead: false,
+        sessionId: sid,
+        mode: "replay",
+      });
       expect(rep.summary.fail).toBe(0);
       expect(rep.summary.pass).toBe(1);
     } finally {
@@ -207,23 +316,39 @@ describe("M3.6-3 출력 자동 캡처", () => {
 
   it("M4.2-2.5.1-4 confirmLeaf 도중 변경 끼면 conflict + 결과물 불변", async () => {
     const { client } = testStack(pfdir);
-    const app = new ProcForgeApp({ core: client, procforgeDir: pfdir, projectRoot: root });
+    const app = new ProcForgeApp({
+      core: client,
+      procforgeDir: pfdir,
+      projectRoot: root,
+    });
     const started = await client.pfStart({
       request: "경쟁",
-      toolCatalog: [{ server: "opencode", name: "read", inputSchema: {}, schemaHash: "h" }],
+      toolCatalog: [
+        { server: "opencode", name: "read", inputSchema: {}, schemaHash: "h" },
+      ],
     });
     const sid = started.session.id;
-    await client.pfResolve({ sessionId: sid, nodeId: "1", decision: "split", children: [{ goal: "a" }] });
+    await client.pfResolve({
+      sessionId: sid,
+      nodeId: "1",
+      decision: "split",
+      children: [{ goal: "a" }],
+    });
     await app.report({
-      sessionId: sid, nodeId: "1.1",
-      tool: { server: "opencode", name: "read" }, args: { path: "x" },
-      resultSummary: "done", resultJson: { ok: true },
-      selfVerdict: "pass", selfReason: "ok",
+      sessionId: sid,
+      nodeId: "1.1",
+      tool: { server: "opencode", name: "read" },
+      args: { path: "x" },
+      resultSummary: "done",
+      resultJson: { ok: true },
+      selfVerdict: "pass",
+      selfReason: "ok",
     });
     const revBefore = (await client.pfTree(sid)).session.revision;
     // 확정 호출 시작 후 (읽은 revision 고정) 다른 변경 끼어들기
     const p = app.confirmLeaf({
-      sessionId: sid, nodeId: "1.1",
+      sessionId: sid,
+      nodeId: "1.1",
       tool: { server: "opencode", name: "read" },
       argSpecs: { path: { kind: "fixed", value: "x" } },
     });
@@ -237,7 +362,9 @@ describe("M3.6-3 출력 자동 캡처", () => {
     // 조언 1건만 반영, attempt 결과물 불변, leaf 아님
     const tree = await client.pfTree(sid);
     expect(tree.session.revision).toBe(revBefore + 1);
-    expect(tree.nodes.find((n) => n.id === "1.1")!.attempts[0].artifacts).toEqual([]);
+    expect(
+      tree.nodes.find((n) => n.id === "1.1")!.attempts[0].artifacts,
+    ).toEqual([]);
     expect(tree.nodes.find((n) => n.id === "1.1")!.status).toBe("probing");
   });
 
@@ -252,5 +379,3 @@ describe("M3.6-3 출력 자동 캡처", () => {
     expect(fixtureFileExists(join(dir, "missing.pptx"))).toBe(false);
   });
 });
-
-
