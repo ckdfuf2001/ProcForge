@@ -83,7 +83,7 @@ describe("M6-4 egress 계약", () => {
         children: [{ goal: "a" }, { goal: "b", dependsOn: ["1.1"] }],
       });
       await client.pfNext({ sessionId: sid });
-      await client.pfReport({
+      await app.report({
         sessionId: sid,
         nodeId: "1.1",
         tool: { server: "fake", name: "echo" },
@@ -101,7 +101,7 @@ describe("M6-4 egress 계약", () => {
         argSpecs: { v: { kind: "fixed", value: "a" } } as never,
       });
       await client.pfNext({ sessionId: sid });
-      await client.pfReport({
+      await app.report({
         sessionId: sid,
         nodeId: "1.2",
         tool: { server: "fake", name: "echo" },

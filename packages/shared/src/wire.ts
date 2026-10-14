@@ -56,16 +56,38 @@ const SplitChildSchema = z.object({
 const BlockedEntrySchema = z.object({
   nodeId: z.string(),
   waitingOn: z.array(z.string()),
-  reason: z.enum(["dep_failed", "dep_empty_split", "dep_missing", "dep_pending"]),
+  reason: z.enum([
+    "dep_failed",
+    "dep_empty_split",
+    "dep_missing",
+    "dep_pending",
+  ]),
 });
 
 export type WireMethodName =
-  | "pfStart" | "pfNext" | "pfReport" | "pfResolve" | "pfAdvise"
-  | "pfTree" | "pfLock" | "pfReopen" | "amendAttemptArtifacts"
-  | "pfUpdateCatalog" | "pfEditArgs" | "pfEditNode" | "getEvents"
-  | "getSession" | "getNode" | "pfBuildProcedure" | "pfApprove";
+  | "pfStart"
+  | "pfNext"
+  | "pfReport"
+  | "pfResolve"
+  | "pfAdvise"
+  | "pfTree"
+  | "pfLock"
+  | "pfReopen"
+  | "amendAttemptArtifacts"
+  | "pfUpdateCatalog"
+  | "pfEditArgs"
+  | "pfEditNode"
+  | "getEvents"
+  | "getSession"
+  | "getNode"
+  | "pfBuildProcedure"
+  | "pfApprove";
 
-export type WireDef = { path: string; input: z.ZodTypeAny; output: z.ZodTypeAny };
+export type WireDef = {
+  path: string;
+  input: z.ZodTypeAny;
+  output: z.ZodTypeAny;
+};
 
 export const WireMethods: Record<WireMethodName, WireDef> = {
   pfStart: {
@@ -77,31 +99,59 @@ export const WireMethods: Record<WireMethodName, WireDef> = {
       limits: LimitsSchema.optional(),
       opencodeVersion: z.string().optional(),
     }),
-    output: z.object({ session: SessionSchema, node: NodeSchema, instruction: z.string() }),
+    output: z.object({
+      session: SessionSchema,
+      node: NodeSchema,
+      instruction: z.string(),
+    }),
   },
   pfNext: {
     path: "/v1/pfNext",
     input: z.object({ sessionId: SessionIdSchema, ...RevActor }),
     output: z.union([
       z.object({
-        done: z.literal(false), node: NodeSchema, blocked: z.array(BlockedEntrySchema).optional(),
-        instruction: z.string(), enteredProbing: z.boolean(),
-        revision: z.number().int().min(0), changedNodeIds: z.array(z.string()),
+        done: z.literal(false),
+        node: NodeSchema,
+        blocked: z.array(BlockedEntrySchema).optional(),
+        instruction: z.string(),
+        enteredProbing: z.boolean(),
+        revision: z.number().int().min(0),
+        changedNodeIds: z.array(z.string()),
       }),
-      z.object({ done: z.literal(true), revision: z.number().int().min(0), changedNodeIds: z.array(z.string()) }),
+      z.object({
+        done: z.literal(true),
+        revision: z.number().int().min(0),
+        changedNodeIds: z.array(z.string()),
+      }),
     ]),
   },
   pfReport: {
     path: "/v1/pfReport",
     input: z.object({
-      sessionId: SessionIdSchema, nodeId: NodeIdSchema,
-      tool: ToolRefSchema, args: z.record(z.unknown()),
-      resultSummary: z.string(), resultJson: z.unknown().optional(),
+      sessionId: SessionIdSchema,
+      nodeId: NodeIdSchema,
+      tool: ToolRefSchema,
+      args: z.record(z.unknown()),
+      resultSummary: z.string(),
+      resultJson: z.unknown().optional(),
+      // M6.1-1: 원격 사전평가 경로 (resultJson과 병행 금지, core가 거부).
+      resultJsonMeta: z
+        .object({ sha256: z.string(), size: z.number(), preview: z.string() })
+        .optional(),
+      localEvaluation: z
+        .object({
+          verdict: z.enum(["pass", "fail"]),
+          failedConstraints: z.array(z.string()),
+          unverified: z.array(z.string()).optional(),
+        })
+        .optional(),
+      autoConstraints: z.array(ConstraintSchema).optional(),
       artifacts: z.array(z.string()).optional(),
       artifactContents: z.record(z.string()).optional(),
       artifactSources: z.record(z.string()).optional(),
       verifiedJsonKeys: z.array(z.string()).optional(),
-      selfVerdict: z.enum(["pass", "fail"]), selfReason: z.string().min(1),
+      selfVerdict: z.enum(["pass", "fail"]),
+      selfReason: z.string().min(1),
       rubricReasons: z.record(z.string()).optional(),
       attemptId: z.string().optional(),
       ...RevActor,
@@ -117,13 +167,16 @@ export const WireMethods: Record<WireMethodName, WireDef> = {
   pfResolve: {
     path: "/v1/pfResolve",
     input: z.object({
-      sessionId: SessionIdSchema, nodeId: NodeIdSchema,
+      sessionId: SessionIdSchema,
+      nodeId: NodeIdSchema,
       decision: z.enum(["leaf", "split", "retry", "ask_human"]),
       children: z.array(SplitChildSchema).optional(),
       argSpecs: z.record(ArgSpecSchema).optional(),
       sideEffect: SideEffectSchema.optional(),
       tool: ToolRefSchema.optional(),
-      plan: z.object({ tool: ToolRefSchema, args: z.record(z.unknown()) }).optional(),
+      plan: z
+        .object({ tool: ToolRefSchema, args: z.record(z.unknown()) })
+        .optional(),
       note: z.string().optional(),
       goldenIgnore: z.array(z.string()).optional(),
       artifacts: z.array(z.string()).optional(),
@@ -133,22 +186,29 @@ export const WireMethods: Record<WireMethodName, WireDef> = {
       ...RevActor,
     }),
     output: z.object({
-      node: NodeSchema, created: z.array(NodeSchema).optional(), instruction: z.string(),
+      node: NodeSchema,
+      created: z.array(NodeSchema).optional(),
+      instruction: z.string(),
       ...ChangeMeta,
     }),
   },
   pfAdvise: {
     path: "/v1/pfAdvise",
     input: z.object({
-      sessionId: SessionIdSchema, nodeId: NodeIdSchema, text: z.string(),
+      sessionId: SessionIdSchema,
+      nodeId: NodeIdSchema,
+      text: z.string(),
       proposedConstraints: z.array(z.unknown()).optional(),
       fixtureContents: z.record(z.string()).optional(),
       ...RevActor,
     }),
     output: z.object({
       constraints: z.array(ConstraintSchema),
-      rejected: z.array(z.object({ proposal: z.unknown(), reason: z.string() })),
-      node: NodeSchema, note: z.string().optional(),
+      rejected: z.array(
+        z.object({ proposal: z.unknown(), reason: z.string() }),
+      ),
+      node: NodeSchema,
+      note: z.string().optional(),
       ...ChangeMeta,
     }),
   },
@@ -159,19 +219,30 @@ export const WireMethods: Record<WireMethodName, WireDef> = {
   },
   pfLock: {
     path: "/v1/pfLock",
-    input: z.object({ sessionId: SessionIdSchema, nodeId: NodeIdSchema, ...RevActor }),
+    input: z.object({
+      sessionId: SessionIdSchema,
+      nodeId: NodeIdSchema,
+      ...RevActor,
+    }),
     output: z.object({ node: NodeSchema, ...ChangeMeta }),
   },
   pfReopen: {
     path: "/v1/pfReopen",
-    input: z.object({ sessionId: SessionIdSchema, nodeId: NodeIdSchema, reason: z.string().min(1), ...RevActor }),
+    input: z.object({
+      sessionId: SessionIdSchema,
+      nodeId: NodeIdSchema,
+      reason: z.string().min(1),
+      ...RevActor,
+    }),
     output: z.object({ node: NodeSchema, ...ChangeMeta }),
   },
   amendAttemptArtifacts: {
     path: "/v1/amendAttemptArtifacts",
     input: z.object({
-      sessionId: SessionIdSchema, nodeId: NodeIdSchema,
-      attemptId: z.string(), artifacts: z.array(z.string()),
+      sessionId: SessionIdSchema,
+      nodeId: NodeIdSchema,
+      attemptId: z.string(),
+      artifacts: z.array(z.string()),
       ...RevActor,
     }),
     output: z.object({ node: NodeSchema, ...ChangeMeta }),
@@ -179,7 +250,8 @@ export const WireMethods: Record<WireMethodName, WireDef> = {
   pfUpdateCatalog: {
     path: "/v1/pfUpdateCatalog",
     input: z.object({
-      sessionId: SessionIdSchema, entries: z.array(z.unknown()),
+      sessionId: SessionIdSchema,
+      entries: z.array(z.unknown()),
       ...RevActor,
     }),
     output: z.object({ ...ChangeMeta }),
@@ -187,16 +259,25 @@ export const WireMethods: Record<WireMethodName, WireDef> = {
   pfEditArgs: {
     path: "/v1/pfEditArgs",
     input: z.object({
-      sessionId: SessionIdSchema, nodeId: NodeIdSchema,
-      patch: z.object({ set: z.record(ArgSpecSchema).optional(), remove: z.array(z.string()).optional() }),
+      sessionId: SessionIdSchema,
+      nodeId: NodeIdSchema,
+      patch: z.object({
+        set: z.record(ArgSpecSchema).optional(),
+        remove: z.array(z.string()).optional(),
+      }),
       ...RevActor,
     }),
-    output: z.object({ node: NodeSchema, instruction: z.string(), ...ChangeMeta }),
+    output: z.object({
+      node: NodeSchema,
+      instruction: z.string(),
+      ...ChangeMeta,
+    }),
   },
   pfEditNode: {
     path: "/v1/pfEditNode",
     input: z.object({
-      sessionId: SessionIdSchema, nodeId: NodeIdSchema,
+      sessionId: SessionIdSchema,
+      nodeId: NodeIdSchema,
       goal: z.string().min(1).optional(),
       addConstraints: z.array(ConstraintSchema).optional(),
       removeConstraintIds: z.array(z.string()).optional(),
@@ -207,11 +288,18 @@ export const WireMethods: Record<WireMethodName, WireDef> = {
       dependsOn: z.array(z.string()).optional(),
       ...RevActor,
     }),
-    output: z.object({ node: NodeSchema, instruction: z.string(), ...ChangeMeta }),
+    output: z.object({
+      node: NodeSchema,
+      instruction: z.string(),
+      ...ChangeMeta,
+    }),
   },
   getEvents: {
     path: "/v1/getEvents",
-    input: z.object({ sessionId: SessionIdSchema, sinceSeq: z.number().int().min(0).optional() }),
+    input: z.object({
+      sessionId: SessionIdSchema,
+      sinceSeq: z.number().int().min(0).optional(),
+    }),
     output: z.array(EventEntrySchema),
   },
   getSession: {
@@ -227,13 +315,18 @@ export const WireMethods: Record<WireMethodName, WireDef> = {
   pfBuildProcedure: {
     path: "/v1/pfBuildProcedure",
     input: z.object({ sessionId: SessionIdSchema, name: z.string() }),
-    output: z.object({ doc: ProcedureDocSchema, warnings: z.array(z.string()) }),
+    output: z.object({
+      doc: ProcedureDocSchema,
+      warnings: z.array(z.string()),
+    }),
   },
   pfApprove: {
     path: "/v1/pfApprove",
     input: z.object({
-      sessionId: SessionIdSchema, nodeId: NodeIdSchema,
-      approved: z.boolean(), note: z.string().optional(),
+      sessionId: SessionIdSchema,
+      nodeId: NodeIdSchema,
+      approved: z.boolean(),
+      note: z.string().optional(),
       ...RevActor,
     }),
     output: z.object({ node: NodeSchema, ...ChangeMeta }),
@@ -270,6 +363,9 @@ export function toWireError(e: unknown): WireError {
 
 /** 클라이언트 측: 봉투를 에러로 되살린다 (code 보존). */
 export function throwWireError(w: WireError): never {
-  const hint = typeof w.hint === "string" && w.hint.length > 0 ? `\nhint: ${w.hint}` : "";
-  throw Object.assign(new Error(`${w.code}: ${w.message}${hint}`), { code: w.code });
+  const hint =
+    typeof w.hint === "string" && w.hint.length > 0 ? `\nhint: ${w.hint}` : "";
+  throw Object.assign(new Error(`${w.code}: ${w.message}${hint}`), {
+    code: w.code,
+  });
 }

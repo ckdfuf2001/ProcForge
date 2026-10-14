@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { startServer, parseApiKeys } from "../../core-server/dist/server.js";
 import { createRemoteCoreClient } from "../src/remote-client.js";
+import { ProcForgeApp } from "../src/app/app.js";
 import { withNetRetry } from "./net-retry.js";
 import { testStack } from "./client-mode.js";
 
@@ -49,7 +50,7 @@ afterAll(async () => {
 });
 
 describe("remote-client", () => {
-  it("왕복: start→split→report→confirm→tree", async () => {
+  it("왕복: start→split→report→confirm→tree (R8 사전평가 경로)", async () => {
     const client = withNetRetry(
       createRemoteCoreClient({ baseUrl: base, apiKey: KEY }),
     );
@@ -67,25 +68,41 @@ describe("remote-client", () => {
       decision: "split",
       children: [{ goal: "a" }],
     });
-    await client.pfReport({
+    const root = mkdtempSync(join(tmpdir(), "pf-remoter-"));
+    const app = new ProcForgeApp({
+      core: client,
+      procforgeDir: join(root, ".procforge"),
+      projectRoot: root,
+    });
+    // 원문 resultJson을 app.report에 주면 메타+판정만 core로 간다 (원문 차단 검증).
+    const rep = await app.report({
       sessionId: sid,
       nodeId: "1.1",
       tool: { server: "s", name: "t" },
       args: {},
       resultSummary: "ok",
+      resultJson: { v: "a".repeat(100) },
       selfVerdict: "pass",
       selfReason: "ok",
     });
-    const leaf = await client.pfResolve({
+    expect((rep as { verdict?: string }).verdict).toBe("pass");
+    const leaf = await app.confirmLeaf({
       sessionId: sid,
       nodeId: "1.1",
-      decision: "leaf",
       tool: { server: "s", name: "t" },
       argSpecs: {},
-    });
-    expect(leaf.node.status).toBe("leaf");
+    } as never);
+    expect((leaf as { node: { status: string } }).node.status).toBe("leaf");
     const tree = await client.pfTree(sid);
     expect(tree.nodes.map((n) => n.id)).toEqual(["1", "1.1"]);
+    // core attempt에는 메타만 (원문 없음).
+    const un = await client.getNode(sid, "1.1");
+    const atts = (
+      un as { attempts: { resultJsonMeta?: unknown; resultJson?: unknown }[] }
+    ).attempts;
+    expect(atts.length).toBeGreaterThan(0);
+    expect(atts[atts.length - 1].resultJsonMeta).toBeDefined();
+    expect(atts[atts.length - 1].resultJson).toBeUndefined();
   }, 60000);
 
   it("degraded: 닫힌 포트 → io_error (읽기·쓰기 모두)", async () => {

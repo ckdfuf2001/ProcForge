@@ -1,4 +1,20 @@
-import type { Constraint, Node, Session, ArgSpec, SideEffect } from "./schema.js";
+import type {
+  Constraint,
+  Node,
+  Session,
+  ArgSpec,
+  SideEffect,
+} from "./schema.js";
+
+/** R8 메타 (M6.1-1. 원격 사전평가 경로. resultJson과 병행 금지) */
+export type ResultJsonMeta = { sha256: string; size: number; preview: string };
+
+/** 로컬 사전 판정 (M6.1-1. LocalServices 계산, core는 저장·규칙 적용) */
+export type LocalEvaluation = {
+  verdict: "pass" | "fail";
+  failedConstraints: string[];
+  unverified?: string[];
+};
 import type { Actor, EventEntry } from "./dto.js";
 import type { ProcedureDoc } from "./procedure.js";
 
@@ -28,15 +44,30 @@ export type PfStartOutput = {
 };
 
 export type PfNextOutput =
-  | { done: false; node: Node; blocked?: BlockedEntry[]; instruction: string; enteredProbing: boolean; revision: number; changedNodeIds: string[] }
+  | {
+      done: false;
+      node: Node;
+      blocked?: BlockedEntry[];
+      instruction: string;
+      enteredProbing: boolean;
+      revision: number;
+      changedNodeIds: string[];
+    }
   | { done: true; revision: number; changedNodeIds: string[] };
 
 /** pfNext 본문 반환형 (메타 제외 유니온) */
 export type PfNextPayload =
-  | { done: false; node: Node; blocked?: BlockedEntry[]; instruction: string; enteredProbing: boolean }
+  | {
+      done: false;
+      node: Node;
+      blocked?: BlockedEntry[];
+      instruction: string;
+      enteredProbing: boolean;
+    }
   | { done: true };
 
-export type BlockedReason = "dep_failed" | "dep_empty_split" | "dep_missing" | "dep_pending";
+export type BlockedReason =
+  "dep_failed" | "dep_empty_split" | "dep_missing" | "dep_pending";
 
 export type BlockedEntry = {
   nodeId: string;
@@ -51,6 +82,12 @@ export type PfReportInput = {
   args: Record<string, unknown>;
   resultSummary: string;
   resultJson?: unknown;
+  /** R8 메타 (M6.1-1. 원격 사전평가 경로. resultJson과 병행 금지) */
+  resultJsonMeta?: ResultJsonMeta;
+  /** 로컬 사전 판정 (M6.1-1. LocalServices 계산, core는 저장·규칙 적용) */
+  localEvaluation?: LocalEvaluation;
+  /** 로컬 생성 auto 제약 (localEvaluation과 함께 전송, core 저장용) */
+  autoConstraints?: Constraint[];
   artifacts?: string[];
   artifactContents?: Record<string, string>;
   /** 호스트 자기 판정 (필수, M1.5-2). constraints가 비었으면 이 값을 사용. */
@@ -87,7 +124,10 @@ export type PfResolveInput = {
   sideEffect?: SideEffect;
   tool?: { server: string; name: string };
   /** ask_human용 dry-run 계획 (M2.6-4). attempt로 저장되고 실행되지 않음 */
-  plan?: { tool: { server: string; name: string }; args: Record<string, unknown> };
+  plan?: {
+    tool: { server: string; name: string };
+    args: Record<string, unknown>;
+  };
   /** retry/ask_human 사유 기록용 (M2.6-4) */
   note?: string;
   /** leaf 확정 시 golden.ignore로 기록할 JSON 경로 (M3.1-2) */
@@ -97,7 +137,12 @@ export type PfResolveInput = {
   /** runner 실행 가능 도구 집합 ("server/name", M5.8.1-1). 있으면 core가 소속 판정 */
   runnableTools?: string[];
   /** probing 대조 판정 (M5.8.2 후속. LocalServices 계산, core는 규칙 적용) */
-  refCheck?: { key: string; verdict: "match" | "mismatch" | "unverifiable"; probing?: string; resolved?: string }[];
+  refCheck?: {
+    key: string;
+    verdict: "match" | "mismatch" | "unverifiable";
+    probing?: string;
+    resolved?: string;
+  }[];
   /** 엄격 모드 (M5.8.2 후속: unverifiable이면 거부) */
   strict?: boolean;
   expectedRevision?: number;
@@ -177,8 +222,17 @@ export type PfAdviseInput = {
 // local checker → core 주입 계약. core·local 모두 shared 타입만 사용.
 export type EvaluateFn = (
   constraints: Constraint[],
-  ctx: { resultSummary?: string; resultJson?: unknown; artifacts?: Record<string, string>; fileExists?: (p: string) => boolean },
-) => { verdict: "pass" | "fail"; failedConstraints: string[]; unverified?: string[] };
+  ctx: {
+    resultSummary?: string;
+    resultJson?: unknown;
+    artifacts?: Record<string, string>;
+    fileExists?: (p: string) => boolean;
+  },
+) => {
+  verdict: "pass" | "fail";
+  failedConstraints: string[];
+  unverified?: string[];
+};
 
 export interface CoreClient {
   pfStart(input: PfStartInput): Promise<PfStartOutput>;
@@ -190,13 +244,24 @@ export interface CoreClient {
   pfLock(input: PfLockInput): Promise<{ node: Node } & ChangeMeta>;
   pfReopen(input: PfReopenInput): Promise<{ node: Node } & ChangeMeta>;
   /** attempt artifacts 교체 (server 직접 저장 대체) */
-  amendAttemptArtifacts(input: AmendAttemptArtifactsInput): Promise<{ node: Node } & ChangeMeta>;
+  amendAttemptArtifacts(
+    input: AmendAttemptArtifactsInput,
+  ): Promise<{ node: Node } & ChangeMeta>;
   /** 카탈로그 저장 (M4.2-2, 수집은 local). 세션 toolCatalog 교체 */
-  pfUpdateCatalog(input: { sessionId: string; entries: unknown[]; expectedRevision?: number; actor?: Actor }): Promise<ChangeMeta>;
+  pfUpdateCatalog(input: {
+    sessionId: string;
+    entries: unknown[];
+    expectedRevision?: number;
+    actor?: Actor;
+  }): Promise<ChangeMeta>;
   /** 확정 인자 수정 (M4.2-2) */
-  pfEditArgs(input: PfEditArgsInput): Promise<{ node: Node; instruction: string } & ChangeMeta>;
+  pfEditArgs(
+    input: PfEditArgsInput,
+  ): Promise<{ node: Node; instruction: string } & ChangeMeta>;
   /** 목표·검사 조건 직접 수정 (M4.2-2) */
-  pfEditNode(input: PfEditNodeInput): Promise<{ node: Node; instruction: string } & ChangeMeta>;
+  pfEditNode(
+    input: PfEditNodeInput,
+  ): Promise<{ node: Node; instruction: string } & ChangeMeta>;
   /** 상태 이벤트 조회 (M4.2-2, R7 히스토리 원천) */
   getEvents(sessionId: string, sinceSeq?: number): Promise<EventEntry[]>;
   /** 세션 조회 (M4.2-2.5, TTL 판정 포함) */
@@ -204,7 +269,10 @@ export interface CoreClient {
   /** 노드 조회 (M4.2-2.5) */
   getNode(sessionId: string, nodeId: string): Promise<Node>;
   /** 절차서 문서 조립 (M4.2-1, 검증·params 경고 포함. 파일 쓰기는 local) */
-  pfBuildProcedure(sessionId: string, name: string): Promise<{ doc: ProcedureDoc; warnings: string[] }>;
+  pfBuildProcedure(
+    sessionId: string,
+    name: string,
+  ): Promise<{ doc: ProcedureDoc; warnings: string[] }>;
   /** external dry-run 계획 승인/거부 (M2.6-4) */
   pfApprove(input: PfApproveInput): Promise<{ node: Node } & ChangeMeta>;
 }

@@ -29,33 +29,86 @@ import type {
   TreeInput,
 } from "@procforge/shared/dto.js";
 
-type OutputOf<K extends keyof typeof OUTPUT_SCHEMAS> = import("zod").infer<(typeof OUTPUT_SCHEMAS)[K]>;
+type OutputOf<K extends keyof typeof OUTPUT_SCHEMAS> = import("zod").infer<
+  (typeof OUTPUT_SCHEMAS)[K]
+>;
 import { seedSandbox } from "../services/workspace.js";
 import { logger } from "../logger.js";
-import { diffSnapshot, readCaptureRecord, readPreSnapshot, takeSandboxSnapshot, toBaseRel, writePreCopies, writePreSnapshot } from "../services/snapshot.js";
-import { appendCaptureRecord, absolutizePathArgs, classifyReportPaths, collectExistingPaths, collectResultFiles, ingestOriginalFixture, ingestReportJobs, readFixtureContents, resolveOriginal, roleForCapture } from "../services/artifacts.js";
-import { ingestArtifacts, normalizeArgSpecs, readManifest } from "../artifacts.js";
+import {
+  diffSnapshot,
+  readCaptureRecord,
+  readPreSnapshot,
+  takeSandboxSnapshot,
+  toBaseRel,
+  writePreCopies,
+  writePreSnapshot,
+} from "../services/snapshot.js";
+import {
+  appendCaptureRecord,
+  absolutizePathArgs,
+  classifyReportPaths,
+  collectExistingPaths,
+  collectResultFiles,
+  ingestOriginalFixture,
+  ingestReportJobs,
+  readFixtureContents,
+  resolveOriginal,
+  roleForCapture,
+} from "../services/artifacts.js";
+import {
+  ingestArtifacts,
+  normalizeArgSpecs,
+  readManifest,
+} from "../artifacts.js";
 import { runSession } from "../runner/index.js";
 import { loadCassette, recordKey } from "../runner/index.js";
 import { runProcedureTest } from "../runner/procedure-run.js";
 import { loadProcedureDoc } from "../runner/procedure-run.js";
-import { buildApprovalEntry, saveApproval, scopeWarnings, toHashable } from "../services/approvals.js";
+import {
+  buildApprovalEntry,
+  saveApproval,
+  scopeWarnings,
+  toHashable,
+} from "../services/approvals.js";
 import { importProcedure } from "../procedure.js";
 import { resolveDateParams } from "../services/date-params.js";
 import { runnableTools } from "../services/runnable-tools.js";
-import { buildRefOutputs, checkProbingArgs, type RefNodeInfo, type RefVerdict } from "../services/ref-check.js";
+import {
+  buildRefOutputs,
+  checkProbingArgs,
+  type RefNodeInfo,
+  type RefVerdict,
+} from "../services/ref-check.js";
 import { varRefNodeIds } from "@procforge/shared/deps.js";
 import { varRefNodeId } from "@procforge/shared/args-schema.js";
 import { resolveRefValue } from "@procforge/shared/validator.js";
 import { readRunState, writeRunState } from "../services/run-state.js";
-import { writeJUnitFile, resolveJUnitPath, copyRunFsToOut } from "../services/runner.js";
+import {
+  writeJUnitFile,
+  resolveJUnitPath,
+  copyRunFsToOut,
+} from "../services/runner.js";
 import { repairDiscard } from "../services/repair.js";
-import { auditFixedValues, auditRubricConstraints, auditStateWrites, findDateSample } from "../services/finalize-audit.js";
-import { auditContentTexts, collectAuditContent } from "../services/audit-content.js";
+import {
+  auditFixedValues,
+  auditRubricConstraints,
+  auditStateWrites,
+  findDateSample,
+} from "../services/finalize-audit.js";
+import {
+  auditContentTexts,
+  collectAuditContent,
+} from "../services/audit-content.js";
 import { buildTrace, formatTraceMarkdown } from "../trace.js";
 import { exportSession } from "../export.js";
 import { assertProjectPath } from "../artifacts.js";
 import { writeProcedure } from "../services/procedureWriter.js";
+import { checkerEvaluate } from "../checker.js";
+import {
+  autoConstraints,
+  decideReportVerdict,
+  resultJsonMetaOf,
+} from "@procforge/shared/report.js";
 
 // ProcForge 유스케이스층 (M4.2-1). 사용자 행동 1개 = 메서드 1개.
 // 어댑터(server/cli/ui)는 입력 검증·호출·응답 포맷만 하고 정책·파일 작업은 여기에 위임한다.
@@ -73,9 +126,9 @@ export const PROMPT_TEXT = [
   "5. 외부에 영향을 주는 실행은 직접 하지 말고 pf_ask_human으로 승인 요청.",
   "6. needs_human이면 사람 조언을 pf_advise로 등록한 뒤 계속한다.",
   "7. 입력 파일 경로·표지 문구처럼 기간이 들어간 값은 var로 분류한다.",
-  "   예: \"sales-${params.month}.xlsx\", \"월간보고서 ${params.month} (최종)\".",
+  '   예: "sales-${params.month}.xlsx", "월간보고서 ${params.month} (최종)".',
   "8. 앞 노드 출력과 같은 값은 fixed로 박지 말고 ref로 받아온다.",
-  "   예: 표 셀은 \"$1.1.rows\", 합계는 \"$1.1.total\".",
+  '   예: 표 셀은 "$1.1.rows", 합계는 "$1.1.total".',
 ].join("\n");
 
 export type AppDeps = {
@@ -114,16 +167,31 @@ export class ProcForgeApp {
     const clientName = (a as { clientName?: unknown }).clientName;
     const clientVersion = (a as { clientVersion?: unknown }).clientVersion;
     const clientOpencodeVersion =
-      typeof clientName === "string" && /opencode/i.test(clientName) && typeof clientVersion === "string"
+      typeof clientName === "string" &&
+      /opencode/i.test(clientName) &&
+      typeof clientVersion === "string"
         ? clientVersion
         : undefined;
     const collected = a.toolCatalog
       ? undefined
-      : await collectCatalog(this.projectRoot, { cacheDir: join(this.procforgeDir, "cache"), ...(this.catalogTimeoutMs !== undefined ? { timeoutMs: this.catalogTimeoutMs } : {}),
-        ...(clientOpencodeVersion !== undefined ? { opencodeVersion: clientOpencodeVersion } : {}) });
+      : await collectCatalog(this.projectRoot, {
+          cacheDir: join(this.procforgeDir, "cache"),
+          ...(this.catalogTimeoutMs !== undefined
+            ? { timeoutMs: this.catalogTimeoutMs }
+            : {}),
+          ...(clientOpencodeVersion !== undefined
+            ? { opencodeVersion: clientOpencodeVersion }
+            : {}),
+        });
     const catalog = a.toolCatalog ?? collected!.entries;
     const warnings = collected?.warnings ?? [];
-    const out = await this.core.pfStart({ request: a.request as string, params: a.params as Record<string, string> | undefined, toolCatalog: catalog as never, limits: a.limits as never, opencodeVersion: collected?.opencodeVersion });
+    const out = await this.core.pfStart({
+      request: a.request as string,
+      params: a.params as Record<string, string> | undefined,
+      toolCatalog: catalog as never,
+      limits: a.limits as never,
+      opencodeVersion: collected?.opencodeVersion,
+    });
     // M5.8.1-6: 세션 메타에 호출 주체 기록 (서버가 기입한 clientInfo 전달).
     if (typeof clientName === "string" || typeof clientVersion === "string") {
       new FileStore(this.procforgeDir).touchSession(out.session.id, {
@@ -142,7 +210,9 @@ export class ProcForgeApp {
       node: nodeSummary(out.node, out.session.limits),
       instruction: `${PROMPT_TEXT}\n\n${out.instruction}${sandboxNote}`,
       warnings,
-      sessionExpiresInDays: Math.round((this.sessionTtlMs ?? DEFAULT_SESSION_TTL_MS) / 86400000),
+      sessionExpiresInDays: Math.round(
+        (this.sessionTtlMs ?? DEFAULT_SESSION_TTL_MS) / 86400000,
+      ),
       opencodeVersion: out.session.opencodeVersion ?? "unknown",
     };
   }
@@ -155,15 +225,25 @@ export class ProcForgeApp {
       expectedRevision: a.expectedRevision as number | undefined,
       actor: (a.actor as Actor | undefined) ?? "host",
     });
-    if (out.done) return { done: true, revision: out.revision, changedNodeIds: out.changedNodeIds };
+    if (out.done)
+      return {
+        done: true,
+        revision: out.revision,
+        changedNodeIds: out.changedNodeIds,
+      };
     // M5.8.2-2: ref 해석 인자 내려주기. suggestedArgs/args의 var를 상류
     // resultJson 파일(golden→최종pass)로 해석해 probing에 그대로 쓰게 한다.
     // 해석 불가면 생략.
     let resolvedInputs: Record<string, unknown> | undefined;
     {
-      const specs = ((out.node as unknown as { suggestedArgs?: unknown }).suggestedArgs ??
-        (out.node as unknown as { args?: unknown }).args) as Record<string, { kind?: string; ref?: unknown }> | undefined;
-      if (specs !== null && typeof specs === "object" && !Array.isArray(specs)) {
+      const specs = ((out.node as unknown as { suggestedArgs?: unknown })
+        .suggestedArgs ?? (out.node as unknown as { args?: unknown }).args) as
+        Record<string, { kind?: string; ref?: unknown }> | undefined;
+      if (
+        specs !== null &&
+        typeof specs === "object" &&
+        !Array.isArray(specs)
+      ) {
         const store = new FileStore(this.procforgeDir);
         const ids = varRefNodeIds(specs as never);
         const nodes = new Map<string, RefNodeInfo>();
@@ -173,8 +253,12 @@ export class ProcForgeApp {
             nodes.set(id, {
               id,
               kind: (un as { kind?: string }).kind,
-              goldenAttemptId: (un as { golden?: { attemptId?: string } }).golden?.attemptId,
-              attempts: (un.attempts ?? []).map((x) => ({ id: x.id, verdict: x.verdict })),
+              goldenAttemptId: (un as { golden?: { attemptId?: string } })
+                .golden?.attemptId,
+              attempts: (un.attempts ?? []).map((x) => ({
+                id: x.id,
+                verdict: x.verdict,
+              })),
             });
           } catch {
             nodes.set(id, { id, attempts: [] });
@@ -190,8 +274,16 @@ export class ProcForgeApp {
           const ri: Record<string, unknown> = {};
           for (const [k, spec] of Object.entries(specs)) {
             const ref = (spec as { ref?: unknown } | null)?.ref;
-            if ((spec as { kind?: string } | null)?.kind !== "var" || typeof ref !== "string") continue;
-            const r = resolveRefValue(ref, (s.params ?? {}) as Record<string, string>, outputs);
+            if (
+              (spec as { kind?: string } | null)?.kind !== "var" ||
+              typeof ref !== "string"
+            )
+              continue;
+            const r = resolveRefValue(
+              ref,
+              (s.params ?? {}) as Record<string, string>,
+              outputs,
+            );
             if (r.ok) ri[k] = r.value;
           }
           if (Object.keys(ri).length > 0) resolvedInputs = ri;
@@ -204,14 +296,23 @@ export class ProcForgeApp {
     if (out.enteredProbing) {
       try {
         writePreSnapshot(
-          this.procforgeDir, sid, out.node.id,
+          this.procforgeDir,
+          sid,
+          out.node.id,
           takeSandboxSnapshot(join(this.procforgeDir, "sandbox", sid)),
         );
         if (this.strictSandbox) {
-          writePreCopies(this.procforgeDir, sid, out.node.id, join(this.procforgeDir, "sandbox", sid));
+          writePreCopies(
+            this.procforgeDir,
+            sid,
+            out.node.id,
+            join(this.procforgeDir, "sandbox", sid),
+          );
         }
       } catch (e) {
-        nextWarnings.push(`스냅샷 기록 실패: ${e instanceof Error ? e.message : String(e)}`);
+        nextWarnings.push(
+          `스냅샷 기록 실패: ${e instanceof Error ? e.message : String(e)}`,
+        );
       }
     }
     return {
@@ -227,6 +328,71 @@ export class ProcForgeApp {
     };
   }
 
+  /**
+   * M6.1-1 (R8): 원격 사전평가 입력. resultJson 원문·artifactContents는
+   * 전송하지 않고 메타+로컬 판정+auto 제약만 core에 보낸다.
+   * 평가·ref 대조는 LocalServices, core는 저장·규칙 적용.
+   */
+  private async remoteReportInput(a: {
+    sid: string;
+    nid: string;
+    toolRef: { server: string; name: string };
+    args: Record<string, unknown>;
+    stored: string[];
+    sources: Record<string, string>;
+    verifiedJsonKeys: string[] | undefined;
+    attemptId: string;
+    sess: { revision: number };
+    resultSummary: string;
+    resultJson: unknown;
+    selfVerdict: "pass" | "fail";
+    selfReason: string;
+    rubricReasons: Record<string, string> | undefined;
+    expectedRevision: number | undefined;
+    actor: unknown;
+    contents: Record<string, string>;
+  }): Promise<Parameters<CoreClient["pfReport"]>[0]> {
+    const node = await this.core.getNode(a.sid, a.nid);
+    const storedConstraints = (node.constraints ??
+      []) as import("@procforge/shared/schema.js").Constraint[];
+    const freshAuto = autoConstraints(
+      a.resultJson,
+      a.stored,
+      a.sources,
+      a.verifiedJsonKeys,
+    );
+    const localEvaluation = decideReportVerdict({
+      storedConstraints,
+      freshAuto,
+      selfVerdict: a.selfVerdict,
+      evaluate: checkerEvaluate,
+      ctx: {
+        resultSummary: a.resultSummary,
+        resultJson: a.resultJson,
+        artifacts: a.contents,
+      },
+    });
+    return {
+      sessionId: a.sid,
+      nodeId: a.nid,
+      tool: a.toolRef,
+      args: a.args,
+      resultSummary: a.resultSummary,
+      resultJsonMeta: resultJsonMetaOf(a.resultJson),
+      localEvaluation,
+      autoConstraints: freshAuto,
+      artifacts: a.stored,
+      artifactSources: a.sources,
+      verifiedJsonKeys: a.verifiedJsonKeys,
+      selfVerdict: a.selfVerdict,
+      selfReason: a.selfReason,
+      rubricReasons: a.rubricReasons,
+      attemptId: a.attemptId,
+      expectedRevision: a.expectedRevision ?? a.sess.revision,
+      actor: a.actor as import("@procforge/shared/dto.js").Actor,
+    };
+  }
+
   async report(a: ReportInput): Promise<OutputOf<"pf_report">> {
     const sid = a.sessionId as string;
     const sess = await this.core.getSession(sid);
@@ -234,8 +400,12 @@ export class ProcForgeApp {
     const attemptId = randomUUID();
     const toolRef = a.tool as { server: string; name: string };
     const args = (a.args ?? {}) as Record<string, unknown>;
-    const baseDir = this.strictSandbox ? join(this.procforgeDir, "sandbox", sid) : this.projectRoot;
-    const cat = sess.toolCatalog.find((t) => t.server === toolRef.server && t.name === toolRef.name);
+    const baseDir = this.strictSandbox
+      ? join(this.procforgeDir, "sandbox", sid)
+      : this.projectRoot;
+    const cat = sess.toolCatalog.find(
+      (t) => t.server === toolRef.server && t.name === toolRef.name,
+    );
     // M4.1-7 스냅샷 판정: 새로 생긴 파일 → out, 바뀐 파일 → inout (M4.1.1-1),
     // 그 외 자동분 → in. 호스트 제출분은 명시 입력(in) 유지.
     // 스냅샷 없으면 원본 대비 변경을 직접 비교해 inout 판정 (폴백).
@@ -247,7 +417,9 @@ export class ProcForgeApp {
       const pre = readPreSnapshot(this.procforgeDir, sid, nid);
       if (!pre) {
         snapshotMiss = true;
-        reportWarnings.push(`스냅샷 없음(${nid}): 기존 존재 기반 캡처로 폴백 (pf_next 경유 권장)`);
+        reportWarnings.push(
+          `스냅샷 없음(${nid}): 기존 존재 기반 캡처로 폴백 (pf_next 경유 권장)`,
+        );
       } else {
         const d = diffSnapshot(pre, baseDir);
         for (const r of d.created) createdRels.add(r);
@@ -256,16 +428,28 @@ export class ProcForgeApp {
     }
     const relOfReport = (p: string) => toBaseRel(baseDir, p);
     let treeCache: import("@procforge/shared/schema.js").Node[] | undefined;
-    const getTreeNodes = async () => treeCache ??= (await this.core.pfTree(sid)).nodes;
+    const getTreeNodes = async () =>
+      (treeCache ??= (await this.core.pfTree(sid)).nodes);
     const manifestNow = readManifest(this.procforgeDir, sid);
-    const resolveHere = (rel: string) => resolveOriginal({
-      procforgeDir: this.procforgeDir, sessionId: sid, nodeId: nid, rel,
-      nodes: treeCache ?? [], manifest: manifestNow,
-    });
+    const resolveHere = (rel: string) =>
+      resolveOriginal({
+        procforgeDir: this.procforgeDir,
+        sessionId: sid,
+        nodeId: nid,
+        rel,
+        nodes: treeCache ?? [],
+        manifest: manifestNow,
+      });
     if (snapshotMiss) {
       // 폴백: in/inout 후보·응답 파일 중 원본과 다르면 inout
       const cands = new Set<string>([
-        ...collectExistingPaths({ baseDir, tool: toolRef, args, catalogEntry: cat, roles: ["in", "inout"] }),
+        ...collectExistingPaths({
+          baseDir,
+          tool: toolRef,
+          args,
+          catalogEntry: cat,
+          roles: ["in", "inout"],
+        }),
         ...collectResultFiles({ baseDir, resultJson: a.resultJson }),
       ]);
       if (cands.size > 0) await getTreeNodes();
@@ -282,15 +466,25 @@ export class ProcForgeApp {
       }
     }
     const jobs = classifyReportPaths({
-      baseDir, tool: toolRef, args, catalogEntry: cat,
-      resultJson: a.resultJson, hostPaths: (a.artifacts ?? []) as string[],
-      createdRels, modifiedRels,
+      baseDir,
+      tool: toolRef,
+      args,
+      catalogEntry: cat,
+      resultJson: a.resultJson,
+      hostPaths: (a.artifacts ?? []) as string[],
+      createdRels,
+      modifiedRels,
     });
     if (jobs.some((j) => j.kind === "inout")) await getTreeNodes();
     // M3.5.1-3: resultJson 키를 녹화된 도구 응답과 대조. 미확인 키는 경고,
     // auto json 제약은 확인된 키에서만 생성.
     let verifiedJsonKeys: string[] | undefined;
-    if (a.resultJson !== undefined && a.resultJson !== null && typeof a.resultJson === "object" && !Array.isArray(a.resultJson)) {
+    if (
+      a.resultJson !== undefined &&
+      a.resultJson !== null &&
+      typeof a.resultJson === "object" &&
+      !Array.isArray(a.resultJson)
+    ) {
       let cassette: ReturnType<typeof loadCassette> = [];
       try {
         cassette = loadCassette(this.procforgeDir, sid, nid);
@@ -298,23 +492,47 @@ export class ProcForgeApp {
         // 손상 카세트는 대조 생략 (record 경로에서 처리)
       }
       if (cassette.length > 0) {
-        const liveKey = recordKey(baseDir, this.projectRoot, toolRef.server, toolRef.name, absolutizePathArgs(baseDir, args));
-        const entry = cassette.find((e) => e.server === toolRef.server && e.key === liveKey);
+        const liveKey = recordKey(
+          baseDir,
+          this.projectRoot,
+          toolRef.server,
+          toolRef.name,
+          absolutizePathArgs(baseDir, args),
+        );
+        const entry = cassette.find(
+          (e) => e.server === toolRef.server && e.key === liveKey,
+        );
         const recorded = entry?.response.json;
-        if (recorded !== undefined && recorded !== null && typeof recorded === "object" && !Array.isArray(recorded)) {
-          const recordedKeys = new Set(Object.keys(recorded as Record<string, unknown>));
-          const reportedKeys = Object.keys(a.resultJson as Record<string, unknown>);
+        if (
+          recorded !== undefined &&
+          recorded !== null &&
+          typeof recorded === "object" &&
+          !Array.isArray(recorded)
+        ) {
+          const recordedKeys = new Set(
+            Object.keys(recorded as Record<string, unknown>),
+          );
+          const reportedKeys = Object.keys(
+            a.resultJson as Record<string, unknown>,
+          );
           const unconfirmed = reportedKeys.filter((k) => !recordedKeys.has(k));
           if (unconfirmed.length > 0) {
-            reportWarnings.push(`resultJson 미확인 키: ${unconfirmed.join(", ")} (녹화 응답과 불일치)`);
+            reportWarnings.push(
+              `resultJson 미확인 키: ${unconfirmed.join(", ")} (녹화 응답과 불일치)`,
+            );
           }
           verifiedJsonKeys = reportedKeys.filter((k) => recordedKeys.has(k));
         }
       }
     }
     const { stored, contents } = await ingestReportJobs({
-      procforgeDir: this.procforgeDir, sessionId: sid, nodeId: nid,
-      attemptId, baseDir, jobs, maxBytes: this.maxArtifactBytes,
+      procforgeDir: this.procforgeDir,
+      sessionId: sid,
+      nodeId: nid,
+      attemptId,
+      baseDir,
+      jobs,
+      maxBytes: this.maxArtifactBytes,
       resolveOriginal: resolveHere,
     });
     // M3.5.1-1: fixture → 논리 경로 매핑 전달 + 논리 경로 alias (auto file_exists 판정용)
@@ -324,36 +542,68 @@ export class ProcForgeApp {
       const src = manifestAfter[fx];
       if (!src) continue;
       sources[fx] = src;
-      if (contents[fx] !== undefined && contents[src] === undefined) contents[src] = contents[fx];
+      if (contents[fx] !== undefined && contents[src] === undefined)
+        contents[src] = contents[fx];
     }
-    const out = await this.core.pfReport({
-      sessionId: sid,
-      nodeId: nid,
-      tool: toolRef,
-      args,
-      resultSummary: a.resultSummary as string,
-      resultJson: a.resultJson,
-      artifacts: stored,
-      artifactContents: contents,
-      artifactSources: sources,
-      verifiedJsonKeys,
-      selfVerdict: a.selfVerdict as "pass" | "fail",
-      selfReason: a.selfReason as string,
-      rubricReasons: a.rubricReasons as Record<string, string> | undefined,
-      attemptId,
-      // M4.2-2.5.1-4: 생략 시 읽은 revision 전달 (도중 변경은 conflict)
-      expectedRevision: a.expectedRevision ?? sess.revision,
-      actor: a.actor ?? "host",
-    });
+    const out = await this.core.pfReport(
+      (this.core as { isRemote?: boolean }).isRemote === true
+        ? await this.remoteReportInput({
+            sid,
+            nid,
+            toolRef,
+            args,
+            stored,
+            sources,
+            verifiedJsonKeys,
+            attemptId,
+            sess,
+            resultSummary: a.resultSummary as string,
+            resultJson: a.resultJson,
+            selfVerdict: a.selfVerdict as "pass" | "fail",
+            selfReason: a.selfReason as string,
+            rubricReasons: a.rubricReasons as
+              Record<string, string> | undefined,
+            expectedRevision: a.expectedRevision ?? sess.revision,
+            actor: a.actor ?? "host",
+            contents,
+          })
+        : {
+            sessionId: sid,
+            nodeId: nid,
+            tool: toolRef,
+            args,
+            resultSummary: a.resultSummary as string,
+            resultJson: a.resultJson,
+            artifacts: stored,
+            artifactContents: contents,
+            artifactSources: sources,
+            verifiedJsonKeys,
+            selfVerdict: a.selfVerdict as "pass" | "fail",
+            selfReason: a.selfReason as string,
+            rubricReasons: a.rubricReasons as
+              Record<string, string> | undefined,
+            attemptId,
+            // M4.2-2.5.1-4: 생략 시 읽은 revision 전달 (도중 변경은 conflict)
+            expectedRevision: a.expectedRevision ?? sess.revision,
+            actor: a.actor ?? "host",
+          },
+    );
     // M5.8.2 후속: resultJson 파일 저장 (ref 해석용. core는 메타만 가짐).
     if (a.resultJson !== undefined) {
       try {
-        new FileStore(this.procforgeDir).writeResultJson(sid, attemptId, a.resultJson);
+        new FileStore(this.procforgeDir).writeResultJson(
+          sid,
+          attemptId,
+          a.resultJson,
+        );
       } catch {
         reportWarnings.push("resultJson 기록 실패: ref 검증 불가");
       }
     }
-    return { ...(out as unknown as Record<string, unknown>), warnings: reportWarnings };
+    return {
+      ...(out as unknown as Record<string, unknown>),
+      warnings: reportWarnings,
+    };
   }
 
   /**
@@ -375,8 +625,12 @@ export class ProcForgeApp {
         nodes.set(id, {
           id,
           kind: (un as { kind?: string }).kind,
-          goldenAttemptId: (un as { golden?: { attemptId?: string } }).golden?.attemptId,
-          attempts: (un.attempts ?? []).map((x) => ({ id: x.id, verdict: x.verdict })),
+          goldenAttemptId: (un as { golden?: { attemptId?: string } }).golden
+            ?.attemptId,
+          attempts: (un.attempts ?? []).map((x) => ({
+            id: x.id,
+            verdict: x.verdict,
+          })),
         });
       } catch {
         // 상류 없음 → 해당 ref 검증 불가 (checkProbingArgs가 판정)
@@ -392,13 +646,25 @@ export class ProcForgeApp {
     });
   }
 
-  async confirmLeaf(a: ConfirmLeafInput): Promise<OutputOf<"pf_confirm_leaf">> {    const sid = a.sessionId as string;
+  async confirmLeaf(a: ConfirmLeafInput): Promise<OutputOf<"pf_confirm_leaf">> {
+    const sid = a.sessionId as string;
     const s = await this.core.getSession(sid);
-    if (!a.argSpecs) throw pfError("bad_request", "argSpecs가 없다.", "마지막 실행 인자 키를 모두 분류해 pf_confirm_leaf 재호출.");
-    const norm = normalizeArgSpecs(a.argSpecs as Record<string, import("@procforge/shared/schema.js").ArgSpec>, {
-      sandboxDir: join(this.procforgeDir, "sandbox", sid),
-      projectRoot: this.projectRoot,
-    });
+    if (!a.argSpecs)
+      throw pfError(
+        "bad_request",
+        "argSpecs가 없다.",
+        "마지막 실행 인자 키를 모두 분류해 pf_confirm_leaf 재호출.",
+      );
+    const norm = normalizeArgSpecs(
+      a.argSpecs as Record<
+        string,
+        import("@procforge/shared/schema.js").ArgSpec
+      >,
+      {
+        sandboxDir: join(this.procforgeDir, "sandbox", sid),
+        projectRoot: this.projectRoot,
+      },
+    );
     // M3.6-2 확정 시 추캡처: 명시 in/inout fixed 경로 중 미수집분.
     // M4.2-2.5-4: 결과물 수정과 leaf 확정을 core 변경 1회로 통합 (artifacts 전달)
     const nodeId = a.nodeId as string;
@@ -407,45 +673,77 @@ export class ProcForgeApp {
     let merged = last?.artifacts ?? [];
     if (cur && last) {
       // M4.1-7: 보고 시 out 판정분은 attempt에서 제외 (golden 입력 순수 유지, 증거 파일은 보존)
-      const sidecar = readCaptureRecord(this.procforgeDir, sid, nodeId, last.id);
+      const sidecar = readCaptureRecord(
+        this.procforgeDir,
+        sid,
+        nodeId,
+        last.id,
+      );
       // M4.1.1-1: 미해결 inout·소실된 원본이 있으면 확정 거부
       const unresolved = sidecar?.unresolvedInouts ?? [];
       if (unresolved.length > 0) {
-        throw pfError("bad_request", `inout 원본 없음: ${unresolved.join(", ")}`, "pf_next 경유 실행·seed 확인 후 다시 pf_report.");
+        throw pfError(
+          "bad_request",
+          `inout 원본 없음: ${unresolved.join(", ")}`,
+          "pf_next 경유 실행·seed 확인 후 다시 pf_report.",
+        );
       }
       for (const fx of sidecar?.inouts ?? []) {
         if (!existsSync(join(this.procforgeDir, "sessions", sid, fx))) {
-          throw pfError("bad_request", `inout fixture 없음: ${fx}`, "다시 pf_report.");
+          throw pfError(
+            "bad_request",
+            `inout fixture 없음: ${fx}`,
+            "다시 pf_report.",
+          );
         }
       }
       const outSet = new Set(sidecar?.outs ?? []);
       const kept = last.artifacts.filter((fx) => !outSet.has(fx));
       const fixedArgs: Record<string, unknown> = {};
       for (const [k, spec] of Object.entries(norm.specs)) {
-        if (spec.kind === "fixed") fixedArgs[k] = (spec as { value: unknown }).value;
+        if (spec.kind === "fixed")
+          fixedArgs[k] = (spec as { value: unknown }).value;
       }
-      const baseDir = this.strictSandbox ? join(this.procforgeDir, "sandbox", sid) : this.projectRoot;
+      const baseDir = this.strictSandbox
+        ? join(this.procforgeDir, "sandbox", sid)
+        : this.projectRoot;
       const manifest = readManifest(this.procforgeDir, sid);
       const covered = new Set(
-        last.artifacts.map((fx) => manifest[fx]).filter((v): v is string => typeof v === "string"),
+        last.artifacts
+          .map((fx) => manifest[fx])
+          .filter((v): v is string => typeof v === "string"),
       );
       const toolRef = a.tool as { server: string; name: string };
-      const cat = s.toolCatalog.find((t) => t.server === toolRef.server && t.name === toolRef.name);
+      const cat = s.toolCatalog.find(
+        (t) => t.server === toolRef.server && t.name === toolRef.name,
+      );
       const relOf = (p: string) => toBaseRel(baseDir, p);
       const fresh = collectExistingPaths({
-        baseDir, tool: toolRef, args: fixedArgs, specs: norm.specs, catalogEntry: cat, roles: ["in", "inout"],
+        baseDir,
+        tool: toolRef,
+        args: fixedArgs,
+        specs: norm.specs,
+        catalogEntry: cat,
+        roles: ["in", "inout"],
       }).filter((p) => !covered.has(relOf(p)));
       // M4.1.1-1: fresh 중 수정분은 inout → 원본 해결 (없으면 bad_request)
       let treeCacheC: import("@procforge/shared/schema.js").Node[] | undefined;
-      const getTreeC = async () => treeCacheC ??= (await this.core.pfTree(sid)).nodes;
-      const resolveC = (rel: string) => resolveOriginal({
-        procforgeDir: this.procforgeDir, sessionId: sid, nodeId, rel,
-        nodes: treeCacheC ?? [], manifest,
-      });
+      const getTreeC = async () =>
+        (treeCacheC ??= (await this.core.pfTree(sid)).nodes);
+      const resolveC = (rel: string) =>
+        resolveOriginal({
+          procforgeDir: this.procforgeDir,
+          sessionId: sid,
+          nodeId,
+          rel,
+          nodes: treeCacheC ?? [],
+          manifest,
+        });
       let snapshotModified: Set<string> | undefined;
       if (this.strictSandbox) {
         const pre = readPreSnapshot(this.procforgeDir, sid, nodeId);
-        if (pre) snapshotModified = new Set(diffSnapshot(pre, baseDir).modified);
+        if (pre)
+          snapshotModified = new Set(diffSnapshot(pre, baseDir).modified);
       }
       const freshIn: string[] = [];
       const freshInout: string[] = [];
@@ -457,7 +755,8 @@ export class ProcForgeApp {
           const orig = resolveC(rel);
           if (orig) {
             try {
-              if (!orig.buf.equals(readFileSync(resolve(baseDir, p)))) isInout = true;
+              if (!orig.buf.equals(readFileSync(resolve(baseDir, p))))
+                isInout = true;
             } catch {
               // 읽기 실패 무시
             }
@@ -473,8 +772,14 @@ export class ProcForgeApp {
       let nextIdx = last.artifacts.length;
       if (freshIn.length > 0) {
         const ing = ingestArtifacts({
-          procforgeDir: this.procforgeDir, sessionId: sid, nodeId, attemptId: last.id,
-          baseDir, paths: freshIn, maxBytes: this.maxArtifactBytes, startIndex: nextIdx,
+          procforgeDir: this.procforgeDir,
+          sessionId: sid,
+          nodeId,
+          attemptId: last.id,
+          baseDir,
+          paths: freshIn,
+          maxBytes: this.maxArtifactBytes,
+          startIndex: nextIdx,
         });
         nextIdx += freshIn.length;
         merged.push(...ing.stored);
@@ -483,8 +788,14 @@ export class ProcForgeApp {
       if (freshInout.length > 0) {
         // 증거(수정본) 먼저, 원본은 마지막
         const ev = ingestArtifacts({
-          procforgeDir: this.procforgeDir, sessionId: sid, nodeId, attemptId: last.id,
-          baseDir, paths: freshInout, maxBytes: this.maxArtifactBytes, startIndex: nextIdx,
+          procforgeDir: this.procforgeDir,
+          sessionId: sid,
+          nodeId,
+          attemptId: last.id,
+          baseDir,
+          paths: freshInout,
+          maxBytes: this.maxArtifactBytes,
+          startIndex: nextIdx,
         });
         nextIdx += freshInout.length;
         merged.push(...ev.stored);
@@ -493,11 +804,21 @@ export class ProcForgeApp {
           const rel = relOf(p);
           const orig = resolveC(rel);
           if (!orig) {
-            throw pfError("bad_request", `inout 원본 없음: ${rel}`, "pf_next 경유 실행·seed 확인 후 다시 pf_report.");
+            throw pfError(
+              "bad_request",
+              `inout 원본 없음: ${rel}`,
+              "pf_next 경유 실행·seed 확인 후 다시 pf_report.",
+            );
           }
           const o = ingestOriginalFixture({
-            procforgeDir: this.procforgeDir, sessionId: sid, nodeId, attemptId: last.id,
-            rel, buf: orig.buf, index: nextIdx++, maxBytes: this.maxArtifactBytes,
+            procforgeDir: this.procforgeDir,
+            sessionId: sid,
+            nodeId,
+            attemptId: last.id,
+            rel,
+            buf: orig.buf,
+            index: nextIdx++,
+            maxBytes: this.maxArtifactBytes,
           });
           merged.push(o.stored);
           addIns.push(o.stored);
@@ -506,7 +827,9 @@ export class ProcForgeApp {
       }
       if (addIns.length > 0 || addOuts.length > 0 || addInouts.length > 0) {
         appendCaptureRecord(this.procforgeDir, sid, nodeId, last.id, {
-          ins: addIns, outs: addOuts, inouts: addInouts,
+          ins: addIns,
+          outs: addOuts,
+          inouts: addInouts,
         });
       }
     }
@@ -516,7 +839,8 @@ export class ProcForgeApp {
       decision: "leaf",
       tool: a.tool as { server: string; name: string },
       argSpecs: norm.specs as never,
-      sideEffect: a.sideEffect as "none" | "local_write" | "external" | undefined,
+      sideEffect: a.sideEffect as
+        "none" | "local_write" | "external" | undefined,
       goldenIgnore: a.ignore as string[] | undefined,
       artifacts: merged,
       // M5.8.1-1: runner 실행 가능 집합을 core에 전달 (계산만, 판단은 core).
@@ -527,7 +851,12 @@ export class ProcForgeApp {
       ),
       // M5.8.2 후속: probing 대조는 LocalServices가 수행, 판정은 core.
       // golden→최종pass 순서 resultJson 파일 기준.
-      refCheck: await this.buildRefCheck(sid, s, norm.specs as Record<string, unknown>, (last?.args ?? {}) as Record<string, unknown>),
+      refCheck: await this.buildRefCheck(
+        sid,
+        s,
+        norm.specs as Record<string, unknown>,
+        (last?.args ?? {}) as Record<string, unknown>,
+      ),
       strict: (a as { strict?: unknown }).strict === true,
       // M4.2-2.5.1-4: 생략 시 읽은 revision 전달 (도중 변경은 conflict)
       expectedRevision: a.expectedRevision ?? s.revision,
@@ -545,7 +874,11 @@ export class ProcForgeApp {
   async retry(a: RetryInput): Promise<OutputOf<"pf_retry">> {
     const sid = a.sessionId as string;
     const s = await this.core.getSession(sid);
-    logger.info("pf_retry", { sessionId: sid, nodeId: a.nodeId, reason: a.reason });
+    logger.info("pf_retry", {
+      sessionId: sid,
+      nodeId: a.nodeId,
+      reason: a.reason,
+    });
     const out = await this.core.pfResolve({
       sessionId: sid,
       nodeId: a.nodeId as string,
@@ -558,14 +891,23 @@ export class ProcForgeApp {
     const retryWarnings: string[] = [];
     try {
       writePreSnapshot(
-        this.procforgeDir, sid, a.nodeId as string,
+        this.procforgeDir,
+        sid,
+        a.nodeId as string,
         takeSandboxSnapshot(join(this.procforgeDir, "sandbox", sid)),
       );
       if (this.strictSandbox) {
-        writePreCopies(this.procforgeDir, sid, a.nodeId as string, join(this.procforgeDir, "sandbox", sid));
+        writePreCopies(
+          this.procforgeDir,
+          sid,
+          a.nodeId as string,
+          join(this.procforgeDir, "sandbox", sid),
+        );
       }
     } catch (e) {
-      retryWarnings.push(`스냅샷 기록 실패: ${e instanceof Error ? e.message : String(e)}`);
+      retryWarnings.push(
+        `스냅샷 기록 실패: ${e instanceof Error ? e.message : String(e)}`,
+      );
     }
     return {
       node: nodeSummary(out.node, s.limits),
@@ -579,39 +921,64 @@ export class ProcForgeApp {
   async split(a: SplitInput): Promise<OutputOf<"pf_split">> {
     const sid = a.sessionId as string;
     const s = await this.core.getSession(sid);
-    const kids = a.children as { goal: string; dependsOn?: string[]; sideEffect?: "none" | "local_write" | "external" }[] | undefined;
-    if (!kids || kids.length === 0) throw pfError("bad_request", "children이 비었다.", "최소 1개의 {goal}을 넣어 pf_split 재호출.");
-      const out = await this.core.pfResolve({
-        sessionId: sid,
-        nodeId: a.nodeId as string,
-        decision: "split",
-        children: kids,
-        expectedRevision: a.expectedRevision as number | undefined,
-        actor: (a.actor as Actor | undefined) ?? "host",
-      });
-      return {
-        node: nodeSummary(out.node, s.limits),
-        created: (out.created ?? []).map((c) => nodeSummary(c, s.limits)),
-        instruction: out.instruction,
-        revision: out.revision,
-        changedNodeIds: out.changedNodeIds,
-      };
+    const kids = a.children as
+      | {
+          goal: string;
+          dependsOn?: string[];
+          sideEffect?: "none" | "local_write" | "external";
+        }[]
+      | undefined;
+    if (!kids || kids.length === 0)
+      throw pfError(
+        "bad_request",
+        "children이 비었다.",
+        "최소 1개의 {goal}을 넣어 pf_split 재호출.",
+      );
+    const out = await this.core.pfResolve({
+      sessionId: sid,
+      nodeId: a.nodeId as string,
+      decision: "split",
+      children: kids,
+      expectedRevision: a.expectedRevision as number | undefined,
+      actor: (a.actor as Actor | undefined) ?? "host",
+    });
+    return {
+      node: nodeSummary(out.node, s.limits),
+      created: (out.created ?? []).map((c) => nodeSummary(c, s.limits)),
+      instruction: out.instruction,
+      revision: out.revision,
+      changedNodeIds: out.changedNodeIds,
+    };
   }
 
   async askHuman(a: AskHumanInput): Promise<OutputOf<"pf_ask_human">> {
     const sid = a.sessionId as string;
     const s = await this.core.getSession(sid);
-      logger.info("pf_ask_human", { sessionId: sid, nodeId: a.nodeId, question: a.question });
-      const out = await this.core.pfResolve({
-        sessionId: sid,
-        nodeId: a.nodeId as string,
-        decision: "ask_human",
-        plan: a.plan as { tool: { server: string; name: string }; args: Record<string, unknown> } | undefined,
-        note: a.question as string,
-        expectedRevision: a.expectedRevision as number | undefined,
-        actor: (a.actor as Actor | undefined) ?? "host",
-      });
-      return { node: nodeSummary(out.node, s.limits), instruction: out.instruction, revision: out.revision, changedNodeIds: out.changedNodeIds };
+    logger.info("pf_ask_human", {
+      sessionId: sid,
+      nodeId: a.nodeId,
+      question: a.question,
+    });
+    const out = await this.core.pfResolve({
+      sessionId: sid,
+      nodeId: a.nodeId as string,
+      decision: "ask_human",
+      plan: a.plan as
+        | {
+            tool: { server: string; name: string };
+            args: Record<string, unknown>;
+          }
+        | undefined,
+      note: a.question as string,
+      expectedRevision: a.expectedRevision as number | undefined,
+      actor: (a.actor as Actor | undefined) ?? "host",
+    });
+    return {
+      node: nodeSummary(out.node, s.limits),
+      instruction: out.instruction,
+      revision: out.revision,
+      changedNodeIds: out.changedNodeIds,
+    };
   }
 
   async approve(a: ApproveInput): Promise<OutputOf<"pf_approve">> {
@@ -625,7 +992,11 @@ export class ProcForgeApp {
       expectedRevision: a.expectedRevision as number | undefined,
       actor: (a.actor as Actor | undefined) ?? "host",
     });
-    return { node: nodeSummary(out.node, s.limits), revision: out.revision, changedNodeIds: out.changedNodeIds };
+    return {
+      node: nodeSummary(out.node, s.limits),
+      revision: out.revision,
+      changedNodeIds: out.changedNodeIds,
+    };
   }
 
   async advise(a: AdviseInput): Promise<OutputOf<"pf_advise">> {
@@ -635,27 +1006,32 @@ export class ProcForgeApp {
     // 최신 attempt의 fixture 내용을 읽어 core 평가에 전달 (M4)
     const cur = await this.core.getNode(sid, nid);
     const fixtureContents = readFixtureContents({
-      procforgeDir: this.procforgeDir, sessionId: sid,
+      procforgeDir: this.procforgeDir,
+      sessionId: sid,
       artifacts: cur.attempts[cur.attempts.length - 1]?.artifacts ?? [],
     });
-      const out = await this.core.pfAdvise({
-        sessionId: sid,
-        nodeId: nid,
-        text: a.text as string,
-        proposedConstraints: a.proposedConstraints as unknown[] | undefined,
-        fixtureContents,
-        // M4.2-2.5.1-4: 생략 시 읽은 revision 전달 (도중 변경은 conflict)
-        expectedRevision: a.expectedRevision ?? s.revision,
-        actor: a.actor ?? "host",
-      });
-      return {
-        constraints: out.constraints.map((c) => ({ id: c.id, kind: c.kind, summary: constraintSummary(c) })),
-        rejected: out.rejected,
-        ...(out.note ? { note: out.note } : {}),
-        node: nodeSummary(out.node, s.limits),
-        revision: out.revision,
-        changedNodeIds: out.changedNodeIds,
-      };
+    const out = await this.core.pfAdvise({
+      sessionId: sid,
+      nodeId: nid,
+      text: a.text as string,
+      proposedConstraints: a.proposedConstraints as unknown[] | undefined,
+      fixtureContents,
+      // M4.2-2.5.1-4: 생략 시 읽은 revision 전달 (도중 변경은 conflict)
+      expectedRevision: a.expectedRevision ?? s.revision,
+      actor: a.actor ?? "host",
+    });
+    return {
+      constraints: out.constraints.map((c) => ({
+        id: c.id,
+        kind: c.kind,
+        summary: constraintSummary(c),
+      })),
+      rejected: out.rejected,
+      ...(out.note ? { note: out.note } : {}),
+      node: nodeSummary(out.node, s.limits),
+      revision: out.revision,
+      changedNodeIds: out.changedNodeIds,
+    };
   }
 
   async tree(a: TreeInput): Promise<OutputOf<"pf_tree">> {
@@ -703,7 +1079,12 @@ export class ProcForgeApp {
     await this.core.getSession(sid);
     const { nodes } = await this.core.pfTree(sid);
     const n = nodes.find((x) => x.id === (a.nodeId as string));
-    if (!n) throw pfError("not_found", `노드 없음: ${a.nodeId}`, "pf_tree로 id를 확인하라.");
+    if (!n)
+      throw pfError(
+        "not_found",
+        `노드 없음: ${a.nodeId}`,
+        "pf_tree로 id를 확인하라.",
+      );
     return { node: n };
   }
 
@@ -716,7 +1097,11 @@ export class ProcForgeApp {
       expectedRevision: a.expectedRevision as number | undefined,
       actor: (a.actor as Actor | undefined) ?? "host",
     });
-    return { node: nodeSummary(out.node, s.limits), revision: out.revision, changedNodeIds: out.changedNodeIds };
+    return {
+      node: nodeSummary(out.node, s.limits),
+      revision: out.revision,
+      changedNodeIds: out.changedNodeIds,
+    };
   }
 
   async reopen(a: ReopenInput): Promise<OutputOf<"pf_reopen">> {
@@ -729,7 +1114,11 @@ export class ProcForgeApp {
       expectedRevision: a.expectedRevision as number | undefined,
       actor: (a.actor as Actor | undefined) ?? "host",
     });
-    return { node: nodeSummary(out.node, s.limits), revision: out.revision, changedNodeIds: out.changedNodeIds };
+    return {
+      node: nodeSummary(out.node, s.limits),
+      revision: out.revision,
+      changedNodeIds: out.changedNodeIds,
+    };
   }
 
   async editArgs(a: EditArgsInput): Promise<OutputOf<"pf_edit_args">> {
@@ -739,13 +1128,20 @@ export class ProcForgeApp {
       sessionId: sid,
       nodeId: a.nodeId as string,
       patch: {
-        set: a.patch?.set as Record<string, import("@procforge/shared/schema.js").ArgSpec> | undefined,
+        set: a.patch?.set as
+          | Record<string, import("@procforge/shared/schema.js").ArgSpec>
+          | undefined,
         remove: a.patch?.remove as string[] | undefined,
       },
       expectedRevision: a.expectedRevision as number | undefined,
       actor: (a.actor as Actor | undefined) ?? "host",
     });
-    return { node: nodeSummary(out.node, s.limits), instruction: out.instruction, revision: out.revision, changedNodeIds: out.changedNodeIds };
+    return {
+      node: nodeSummary(out.node, s.limits),
+      instruction: out.instruction,
+      revision: out.revision,
+      changedNodeIds: out.changedNodeIds,
+    };
   }
 
   async editNode(a: EditNodeInput): Promise<OutputOf<"pf_edit_node">> {
@@ -755,19 +1151,37 @@ export class ProcForgeApp {
       sessionId: sid,
       nodeId: a.nodeId as string,
       goal: a.goal as string | undefined,
-      addConstraints: a.addConstraints as import("@procforge/shared/schema.js").Constraint[] | undefined,
+      addConstraints: a.addConstraints as
+        import("@procforge/shared/schema.js").Constraint[] | undefined,
       removeConstraintIds: a.removeConstraintIds as string[] | undefined,
       dependsOn: a.dependsOn as string[] | undefined,
       expectedRevision: a.expectedRevision as number | undefined,
       actor: (a.actor as Actor | undefined) ?? "host",
     });
-    return { node: nodeSummary(out.node, s.limits), instruction: out.instruction, revision: out.revision, changedNodeIds: out.changedNodeIds };
+    return {
+      node: nodeSummary(out.node, s.limits),
+      instruction: out.instruction,
+      revision: out.revision,
+      changedNodeIds: out.changedNodeIds,
+    };
   }
 
-  async refreshCatalog(_a: RefreshCatalogInput): Promise<OutputOf<"pf_refresh_catalog">> {
-    const c = await collectCatalog(this.projectRoot, { cacheDir: join(this.procforgeDir, "cache"), refresh: true, ...(this.catalogTimeoutMs !== undefined ? { timeoutMs: this.catalogTimeoutMs } : {}) });
+  async refreshCatalog(
+    _a: RefreshCatalogInput,
+  ): Promise<OutputOf<"pf_refresh_catalog">> {
+    const c = await collectCatalog(this.projectRoot, {
+      cacheDir: join(this.procforgeDir, "cache"),
+      refresh: true,
+      ...(this.catalogTimeoutMs !== undefined
+        ? { timeoutMs: this.catalogTimeoutMs }
+        : {}),
+    });
     return {
-      entries: c.entries.map((e) => ({ server: e.server, name: e.name, schemaHash: e.schemaHash })),
+      entries: c.entries.map((e) => ({
+        server: e.server,
+        name: e.name,
+        schemaHash: e.schemaHash,
+      })),
       warnings: c.warnings,
       cached: c.cached,
     };
@@ -775,15 +1189,29 @@ export class ProcForgeApp {
 
   async test(a: TestInput): Promise<OutputOf<"pf_test">> {
     if (a.procedure) {
-      const { report, sessionId: imported } = await runProcedureTest(this.procforgeDir, this.projectRoot, a.procedure as string, {
-        procforgeDir: this.procforgeDir,
-        projectRoot: this.projectRoot,
-        mode: (a.mode as "record" | "replay" | "passthrough" | "live" | undefined) ?? "replay",
-        params: (a.params as Record<string, string> | undefined) ?? {},
-        updateGolden: (a.updateGolden as boolean | undefined) ?? false,
-        allowProjectRead: (a.allowProjectRead as boolean | undefined) ?? false,
-      });
-      const junitPathProc = resolveJUnitPath(this.projectRoot, this.procforgeDir, a.junitPath as string | undefined, report.runId);
+      const { report, sessionId: imported } = await runProcedureTest(
+        this.procforgeDir,
+        this.projectRoot,
+        a.procedure as string,
+        {
+          procforgeDir: this.procforgeDir,
+          projectRoot: this.projectRoot,
+          mode:
+            (a.mode as
+              "record" | "replay" | "passthrough" | "live" | undefined) ??
+            "replay",
+          params: (a.params as Record<string, string> | undefined) ?? {},
+          updateGolden: (a.updateGolden as boolean | undefined) ?? false,
+          allowProjectRead:
+            (a.allowProjectRead as boolean | undefined) ?? false,
+        },
+      );
+      const junitPathProc = resolveJUnitPath(
+        this.projectRoot,
+        this.procforgeDir,
+        a.junitPath as string | undefined,
+        report.runId,
+      );
       writeJUnitFile(junitPathProc, report);
       return {
         runId: report.runId,
@@ -793,12 +1221,21 @@ export class ProcForgeApp {
         unverified: report.summary.unverified,
         skipped: report.summary.skipped,
         blocked: report.summary.blocked,
-        reportPath: join(this.procforgeDir, "runs", report.runId, "report.json"),
+        reportPath: join(
+          this.procforgeDir,
+          "runs",
+          report.runId,
+          "report.json",
+        ),
         junitPath: junitPathProc,
         sessionId: imported,
       };
     }
-    if (!a.sessionId) throw pfError("bad_request", "sessionId 또는 procedure 중 하나가 필요하다.");
+    if (!a.sessionId)
+      throw pfError(
+        "bad_request",
+        "sessionId 또는 procedure 중 하나가 필요하다.",
+      );
     const sid = a.sessionId as string;
     await this.core.getSession(sid);
     const report = await runSession({
@@ -806,13 +1243,25 @@ export class ProcForgeApp {
       projectRoot: this.projectRoot,
       sessionId: sid,
       nodeId: a.nodeId as string | undefined,
-      mode: (a.mode as "record" | "replay" | "passthrough" | "live" | undefined) ?? "replay",
+      mode:
+        (a.mode as "record" | "replay" | "passthrough" | "live" | undefined) ??
+        "replay",
       updateGolden: (a.updateGolden as boolean | undefined) ?? false,
       allowProjectRead: (a.allowProjectRead as boolean | undefined) ?? false,
       changed: (a.changed as boolean | undefined) ?? false,
     });
-    const reportPath = join(this.procforgeDir, "runs", report.runId, "report.json");
-    const junitPath = resolveJUnitPath(this.projectRoot, this.procforgeDir, a.junitPath as string | undefined, report.runId);
+    const reportPath = join(
+      this.procforgeDir,
+      "runs",
+      report.runId,
+      "report.json",
+    );
+    const junitPath = resolveJUnitPath(
+      this.projectRoot,
+      this.procforgeDir,
+      a.junitPath as string | undefined,
+      report.runId,
+    );
     writeJUnitFile(junitPath, report);
     return {
       runId: report.runId,
@@ -831,28 +1280,41 @@ export class ProcForgeApp {
    * 손상 rev 해제 (M4.2-4-0-1, CLI 전용. MCP 도구 없음).
    * .corrupt-<rev>-* + pending-<rev>.json 제거 후 human 이벤트 기록.
    */
-  async repair(a: { sessionId: unknown; discardRev: unknown }): Promise<{ removed: string[] }> {
+  async repair(a: {
+    sessionId: unknown;
+    discardRev: unknown;
+  }): Promise<{ removed: string[] }> {
     const sid = a.sessionId as string;
-    const rev = typeof a.discardRev === "number" ? a.discardRev : Number(a.discardRev);
-    if (!Number.isInteger(rev) || rev < 0) throw pfError("bad_request", `bad revision: ${String(a.discardRev)}`);
+    const rev =
+      typeof a.discardRev === "number" ? a.discardRev : Number(a.discardRev);
+    if (!Number.isInteger(rev) || rev < 0)
+      throw pfError("bad_request", `bad revision: ${String(a.discardRev)}`);
     return repairDiscard(this.procforgeDir, sid, rev);
   }
 
-    /** 호출 추적 마크다운 (M4.2-4-1, CLI trace용) */
-  async traceMarkdown(a: { sessionId: unknown }): Promise<{ markdown: string }> {
+  /** 호출 추적 마크다운 (M4.2-4-1, CLI trace용) */
+  async traceMarkdown(a: {
+    sessionId: unknown;
+  }): Promise<{ markdown: string }> {
     const sid = a.sessionId as string;
-    return { markdown: formatTraceMarkdown(buildTrace(this.procforgeDir, sid)) };
+    return {
+      markdown: formatTraceMarkdown(buildTrace(this.procforgeDir, sid)),
+    };
   }
 
   /** 세션 export (M4.2-4-1, CLI export용). outPath 지정 시 프로젝트 안만 허용. */
   async exportSession(a: {
-    sessionId: unknown; outPath?: unknown; redact?: unknown; includeOriginals?: unknown;
+    sessionId: unknown;
+    outPath?: unknown;
+    redact?: unknown;
+    includeOriginals?: unknown;
   }): Promise<{ outPath: string; files: number; redacted: boolean }> {
     const sid = a.sessionId as string;
     await this.core.getSession(sid);
-    const outPath = typeof a.outPath === "string" && a.outPath !== ""
-      ? assertProjectPath(this.projectRoot, a.outPath)
-      : join(this.procforgeDir, "exports", `${sid}.zip`);
+    const outPath =
+      typeof a.outPath === "string" && a.outPath !== ""
+        ? assertProjectPath(this.projectRoot, a.outPath)
+        : join(this.procforgeDir, "exports", `${sid}.zip`);
     return exportSession({
       procforgeDir: this.procforgeDir,
       sessionId: sid,
@@ -865,7 +1327,10 @@ export class ProcForgeApp {
   async finalize(a: FinalizeInput): Promise<OutputOf<"pf_finalize">> {
     const sid = a.sessionId as string;
     await this.core.getSession(sid);
-    const { doc, warnings } = await this.core.pfBuildProcedure(sid, a.name as string);
+    const { doc, warnings } = await this.core.pfBuildProcedure(
+      sid,
+      a.name as string,
+    );
     // M5.3.1-3: 기간성 params(감사가 날짜로 판정한 default 값)는 default 금지 → required.
     for (const [k, entry] of Object.entries(doc.params)) {
       const e = entry as { default?: string; required?: boolean };
@@ -877,7 +1342,10 @@ export class ProcForgeApp {
     // M5.1-B1: 고정값 감사 (params·날짜·녹화 수치). strict면 실패 시 거부.
     const sess = await this.core.getSession(sid);
     const { nodes } = await this.core.pfTree(sid);
-    const cassettes = new Map<string, { response: { summary: string; json?: unknown } }[]>();
+    const cassettes = new Map<
+      string,
+      { response: { summary: string; json?: unknown } }[]
+    >();
     for (const n of nodes) {
       try {
         cassettes.set(n.id, loadCassette(this.procforgeDir, sid, n.id));
@@ -887,8 +1355,15 @@ export class ProcForgeApp {
     }
     const audit = auditFixedValues({ params: sess.params, nodes, cassettes });
     // M5.3-1: 파일 내용 감사 (스크립트 + 비바인딩 템플릿). strict면 실패 시 거부.
-    const contentItems = collectAuditContent({ projectRoot: this.projectRoot, nodes });
-    const contentAudit = auditContentTexts({ params: sess.params, items: contentItems, cassettes });
+    const contentItems = collectAuditContent({
+      projectRoot: this.projectRoot,
+      nodes,
+    });
+    const contentAudit = auditContentTexts({
+      params: sess.params,
+      items: contentItems,
+      cassettes,
+    });
     const allAudit = [...audit, ...contentAudit];
     // M5.3.1-2: manifest source 문자열도 감사 (바인딩 해석분 제외).
     // fixtures/ 형태 file_exists는 시스템 경로라 건너뛰므로, 대응 source rel의
@@ -896,11 +1371,16 @@ export class ProcForgeApp {
     {
       const boundSrcs = new Set<string>();
       for (const n of nodes) {
-        const lastArgs = (n.attempts[n.attempts.length - 1]?.args ?? {}) as Record<string, unknown>;
+        const lastArgs = (n.attempts[n.attempts.length - 1]?.args ??
+          {}) as Record<string, unknown>;
         for (const [k, spec] of Object.entries(n.args ?? {})) {
           const s = spec as { kind?: string; ref?: unknown };
-          if (s.kind === "var" && typeof s.ref === "string" && s.ref.includes("${params.") &&
-            typeof lastArgs[k] === "string") {
+          if (
+            s.kind === "var" &&
+            typeof s.ref === "string" &&
+            s.ref.includes("${params.") &&
+            typeof lastArgs[k] === "string"
+          ) {
             boundSrcs.add(lastArgs[k] as string);
           }
         }
@@ -911,60 +1391,120 @@ export class ProcForgeApp {
         if (boundSrcs.has(src)) continue;
         const m = /^fixtures\/([^/]+)\//.exec(fx);
         if (!m) continue;
-        srcItems.push({ nodeId: m[1], where: `template:${src} (fixture)`, text: src });
+        srcItems.push({
+          nodeId: m[1],
+          where: `template:${src} (fixture)`,
+          text: src,
+        });
       }
-      const srcAudit = auditContentTexts({ params: sess.params, items: srcItems, cassettes });
+      const srcAudit = auditContentTexts({
+        params: sess.params,
+        items: srcItems,
+        cassettes,
+      });
       allAudit.push(...srcAudit);
     }
     // M5.6-g: 누적(stateWrites) 노드는 출력 단언 constraint 필수. 없으면 경고,
     // strict면 위에서 거부. 빈 누적 결과가 그대로 통과하는 것을 막는다.
     // tree 요약에는 stateWrites가 없으므로 전체 노드로 감사.
-    const fullNodes = await Promise.all(nodes.map((n) => this.core.getNode(sid, n.id)));
-    allAudit.push(...auditStateWrites(fullNodes as { id: string; constraints?: { kind?: string; source?: string }[]; stateWrites?: { key: string; from: string }[] }[]));
+    const fullNodes = await Promise.all(
+      nodes.map((n) => this.core.getNode(sid, n.id)),
+    );
+    allAudit.push(
+      ...auditStateWrites(
+        fullNodes as {
+          id: string;
+          constraints?: { kind?: string; source?: string }[];
+          stateWrites?: { key: string; from: string }[];
+        }[],
+      ),
+    );
     // M5.7.1: llm_rubric 잔존 경고 (무인 실행 unverified → exit 1). strict면 아래에서 거부.
-    allAudit.push(...auditRubricConstraints(fullNodes as { id: string; constraints?: { id?: string; kind?: string }[] }[]));
+    allAudit.push(
+      ...auditRubricConstraints(
+        fullNodes as {
+          id: string;
+          constraints?: { id?: string; kind?: string }[];
+        }[],
+      ),
+    );
     // M5.8.2 후속: var ref 필드 사전검사 (core에는 resultJson 실데이터가 없음).
     // golden→최종pass 파일 기준. 출력은 있는데 필드가 없으면 bad_ref_field.
     {
       const store = new FileStore(this.procforgeDir);
       const infos = new Map<string, RefNodeInfo>();
-      for (const x of fullNodes as { id: string; kind?: string; golden?: { attemptId?: string }; attempts?: { id: string; verdict?: string }[] }[]) {
+      for (const x of fullNodes as {
+        id: string;
+        kind?: string;
+        golden?: { attemptId?: string };
+        attempts?: { id: string; verdict?: string }[];
+      }[]) {
         infos.set(x.id, {
           id: x.id,
           kind: x.kind,
           goldenAttemptId: x.golden?.attemptId,
-          attempts: (x.attempts ?? []).map((a) => ({ id: a.id, verdict: a.verdict })),
+          attempts: (x.attempts ?? []).map((a) => ({
+            id: a.id,
+            verdict: a.verdict,
+          })),
         });
       }
       const { outputs } = buildRefOutputs({
-        specs: Object.assign({}, ...fullNodes.map((x) => ((x as { args?: unknown }).args ?? {}) as Record<string, unknown>)),
+        specs: Object.assign(
+          {},
+          ...fullNodes.map(
+            (x) =>
+              ((x as { args?: unknown }).args ?? {}) as Record<string, unknown>,
+          ),
+        ),
         params: (sess.params ?? {}) as Record<string, string>,
         nodes: infos,
         loadJson: (aid: string) => store.readResultJson(sid, aid),
       });
-      for (const x of fullNodes as { id: string; args?: Record<string, { kind?: string; ref?: unknown }> }[]) {
+      for (const x of fullNodes as {
+        id: string;
+        args?: Record<string, { kind?: string; ref?: unknown }>;
+      }[]) {
         for (const [k, spec] of Object.entries(x.args ?? {})) {
           if (spec?.kind !== "var" || typeof spec.ref !== "string") continue;
           const tid = varRefNodeId(spec.ref);
-          if (tid === undefined || !Object.prototype.hasOwnProperty.call(outputs, tid)) continue;
-          const r = resolveRefValue(spec.ref, (sess.params ?? {}) as Record<string, string>, outputs);
+          if (
+            tid === undefined ||
+            !Object.prototype.hasOwnProperty.call(outputs, tid)
+          )
+            continue;
+          const r = resolveRefValue(
+            spec.ref,
+            (sess.params ?? {}) as Record<string, string>,
+            outputs,
+          );
           if (!r.ok) {
-            throw pfError("bad_ref_field", `arg ${x.id}.${k}: field 없음 (상류 ${tid} 출력에 없음): ${spec.ref}`);
+            throw pfError(
+              "bad_ref_field",
+              `arg ${x.id}.${k}: field 없음 (상류 ${tid} 출력에 없음): ${spec.ref}`,
+            );
           }
         }
       }
     }
     // M5.8.1-1: bash leaf 포함 시 run에 --allow-bash 필요 경고 (기본 거부·opt-in은 DECISIONS).
     {
-      const bashLeaves = (fullNodes as { id: string; tool?: { server?: string; name?: string } }[])
+      const bashLeaves = (
+        fullNodes as { id: string; tool?: { server?: string; name?: string } }[]
+      )
         .filter((x) => x.tool?.server === "opencode" && x.tool?.name === "bash")
         .map((x) => x.id);
       if (bashLeaves.length > 0) {
-        allAudit.push(`bash leaf 포함(${bashLeaves.join(",")}): run에 --allow-bash 필요 (기본 거부, DECISIONS M5.8.1-1)`);
+        allAudit.push(
+          `bash leaf 포함(${bashLeaves.join(",")}): run에 --allow-bash 필요 (기본 거부, DECISIONS M5.8.1-1)`,
+        );
       }
     }
     if ((a.strict as boolean | undefined) === true && allAudit.length > 0) {
-      throw pfError("bad_request", `고정값 감사 실패(${allAudit.length}건): ${allAudit.slice(0, 3).join("; ")}`);
+      throw pfError(
+        "bad_request",
+        `고정값 감사 실패(${allAudit.length}건): ${allAudit.slice(0, 3).join("; ")}`,
+      );
     }
     const written = writeProcedure({
       procforgeDir: this.procforgeDir,
@@ -974,11 +1514,25 @@ export class ProcForgeApp {
       force: (a.force as boolean | undefined) ?? false,
       auditFindings: allAudit,
     });
-    return { name: doc.name, dir: written.dir, warnings: [...warnings, ...allAudit], files: written.files, commandFile: written.commandFile };
+    return {
+      name: doc.name,
+      dir: written.dir,
+      warnings: [...warnings, ...allAudit],
+      files: written.files,
+      commandFile: written.commandFile,
+    };
   }
 
   /** 절차서 live 실행 시작 (M5). 실행은 pf_run_next/supply로 단계 진행. */
-  async runStart(a: { procedure: unknown; params?: unknown }): Promise<{ runId: string; sessionId: string; procedure: string; params: Record<string, string> }> {
+  async runStart(a: {
+    procedure: unknown;
+    params?: unknown;
+  }): Promise<{
+    runId: string;
+    sessionId: string;
+    procedure: string;
+    params: Record<string, string>;
+  }> {
     const ref = a.procedure as string;
     if (!ref) throw pfError("bad_request", "procedure가 필요하다.");
     const params = (a.params ?? {}) as Record<string, string>;
@@ -988,29 +1542,87 @@ export class ProcForgeApp {
     const { sessionId } = importProcedure(this.procforgeDir, doc, liveParams);
     const runId = randomUUID();
     writeRunState(this.procforgeDir, {
-      version: 1, runId, sessionId, procedure: doc.name, procedureDir: dir, params: liveParams,
-      pending: [], done: [], supplied: {}, approved: [],
-      status: "ready", updatedAt: new Date().toISOString(),
+      version: 1,
+      runId,
+      sessionId,
+      procedure: doc.name,
+      procedureDir: dir,
+      params: liveParams,
+      pending: [],
+      done: [],
+      supplied: {},
+      approved: [],
+      status: "ready",
+      updatedAt: new Date().toISOString(),
     });
     return { runId, sessionId, procedure: doc.name, params: liveParams };
   }
 
   /** run 1스텝 진행 (M5, pf_run_next/supply 공용). 결정적 구간 자동 진행. */
-  async runStep(runId: string): Promise<
-    | { kind: "need_generated"; runId: string; sessionId: string; nodeId: string; instruction: string; inputs: Record<string, unknown> }
-    | { kind: "need_approval"; runId: string; sessionId: string; nodeId: string; instruction: string; approvalHint: string }
-    | { kind: "done"; runId: string; sessionId: string; pass: number; fail: number; unverified: number; skipped: number; blocked: number; suspended: number }
-    | { kind: "failed"; runId: string; sessionId: string; nodeId: string; detail: string; hint: string }
+  async runStep(
+    runId: string,
+  ): Promise<
+    | {
+        kind: "need_generated";
+        runId: string;
+        sessionId: string;
+        nodeId: string;
+        instruction: string;
+        inputs: Record<string, unknown>;
+      }
+    | {
+        kind: "need_approval";
+        runId: string;
+        sessionId: string;
+        nodeId: string;
+        instruction: string;
+        approvalHint: string;
+      }
+    | {
+        kind: "done";
+        runId: string;
+        sessionId: string;
+        pass: number;
+        fail: number;
+        unverified: number;
+        skipped: number;
+        blocked: number;
+        suspended: number;
+      }
+    | {
+        kind: "failed";
+        runId: string;
+        sessionId: string;
+        nodeId: string;
+        detail: string;
+        hint: string;
+      }
   > {
     const st = readRunState(this.procforgeDir, runId);
     if (!st) throw pfError("not_found", `run ${runId} not found`);
     if (st.status === "done") {
-      return { kind: "done", runId, sessionId: st.sessionId, ...(st.summary ?? { pass: 0, fail: 0, unverified: 0, skipped: 0, blocked: 0, suspended: 0 }) };
+      return {
+        kind: "done",
+        runId,
+        sessionId: st.sessionId,
+        ...(st.summary ?? {
+          pass: 0,
+          fail: 0,
+          unverified: 0,
+          skipped: 0,
+          blocked: 0,
+          suspended: 0,
+        }),
+      };
     }
     if (st.status === "failed") {
       return {
-        kind: "failed", runId, sessionId: st.sessionId, nodeId: st.failedNodeId ?? "",
-        detail: st.failedDetail ?? "", hint: this.repairHint(st.failedNodeId ?? ""),
+        kind: "failed",
+        runId,
+        sessionId: st.sessionId,
+        nodeId: st.failedNodeId ?? "",
+        detail: st.failedDetail ?? "",
+        hint: this.repairHint(st.failedNodeId ?? ""),
       };
     }
     const report = await runSession({
@@ -1025,51 +1637,94 @@ export class ProcForgeApp {
       supplied: st.supplied,
       approvedNodeIds: st.approved,
     });
-    const doneNow = report.results.filter((r) => r.status === "pass").map((r) => r.nodeId);
+    const doneNow = report.results
+      .filter((r) => r.status === "pass")
+      .map((r) => r.nodeId);
     const done = [...new Set([...st.done, ...doneNow])];
     const susp = report.results.find((r) => r.status === "suspended");
     const failed = report.results.find((r) => r.status === "fail");
     if (susp) {
       const m = /^need_generated:(.*)$/.exec(susp.detail ?? "");
-      const kind = m ? "need_generated" as const : "need_approval" as const;
+      const kind = m ? ("need_generated" as const) : ("need_approval" as const);
       const missing = m ? m[1].split(",").filter((s) => s.length > 0) : [];
-      const pending = report.results.filter((r) => r.status === "suspended" || (r.status === "skipped" && !done.includes(r.nodeId))).map((r) => r.nodeId);
+      const pending = report.results
+        .filter(
+          (r) =>
+            r.status === "suspended" ||
+            (r.status === "skipped" && !done.includes(r.nodeId)),
+        )
+        .map((r) => r.nodeId);
       writeRunState(this.procforgeDir, {
-        ...st, pending, done, status: "suspended",
-        suspended: { nodeId: susp.nodeId, kind, ...(missing.length > 0 ? { missing } : {}) },
+        ...st,
+        pending,
+        done,
+        status: "suspended",
+        suspended: {
+          nodeId: susp.nodeId,
+          kind,
+          ...(missing.length > 0 ? { missing } : {}),
+        },
       });
       const node = await this.core.getNode(st.sessionId, susp.nodeId);
       if (kind === "need_generated") {
         const inputs: Record<string, unknown> = {};
         for (const k of missing) {
-          const spec = (node.args ?? {})[k] as { instruction?: string; inputs?: unknown; constraints?: unknown } | undefined;
-          inputs[k] = { ...(spec?.instruction !== undefined ? { instruction: spec.instruction } : {}) };
+          const spec = (node.args ?? {})[k] as
+            | { instruction?: string; inputs?: unknown; constraints?: unknown }
+            | undefined;
+          inputs[k] = {
+            ...(spec?.instruction !== undefined
+              ? { instruction: spec.instruction }
+              : {}),
+          };
         }
         return {
-          kind, runId, sessionId: st.sessionId, nodeId: susp.nodeId,
+          kind,
+          runId,
+          sessionId: st.sessionId,
+          nodeId: susp.nodeId,
           instruction: `노드 ${susp.nodeId}에 생성값이 필요하다 (${missing.join(", ")}). pf_run_supply(runId, nodeId, value)로 제공하라.`,
           inputs,
         };
       }
       return {
-        kind, runId, sessionId: st.sessionId, nodeId: susp.nodeId,
+        kind,
+        runId,
+        sessionId: st.sessionId,
+        nodeId: susp.nodeId,
         instruction: `노드 ${susp.nodeId}는 external 부작용이라 승인이 필요하다.`,
         approvalHint: `procforge approve ${runId} ${susp.nodeId} 또는 pf_run_supply(runId, nodeId, true) 후 pf_run_next(runId).`,
       };
     }
     if (failed) {
-      const pending = report.results.filter((r) => r.status !== "pass" && !done.includes(r.nodeId)).map((r) => r.nodeId);
+      const pending = report.results
+        .filter((r) => r.status !== "pass" && !done.includes(r.nodeId))
+        .map((r) => r.nodeId);
       writeRunState(this.procforgeDir, {
-        ...st, pending, done, status: "failed",
-        failedNodeId: failed.nodeId, failedDetail: failed.detail ?? "",
+        ...st,
+        pending,
+        done,
+        status: "failed",
+        failedNodeId: failed.nodeId,
+        failedDetail: failed.detail ?? "",
         summary: report.summary,
       });
       return {
-        kind: "failed", runId, sessionId: st.sessionId, nodeId: failed.nodeId,
-        detail: failed.detail ?? "", hint: this.repairHint(failed.nodeId),
+        kind: "failed",
+        runId,
+        sessionId: st.sessionId,
+        nodeId: failed.nodeId,
+        detail: failed.detail ?? "",
+        hint: this.repairHint(failed.nodeId),
       };
     }
-    writeRunState(this.procforgeDir, { ...st, pending: [], done, status: "done", summary: report.summary });
+    writeRunState(this.procforgeDir, {
+      ...st,
+      pending: [],
+      done,
+      status: "done",
+      summary: report.summary,
+    });
     return { kind: "done", runId, sessionId: st.sessionId, ...report.summary };
   }
 
@@ -1078,7 +1733,9 @@ export class ProcForgeApp {
   }
 
   /** run 다음 단계 (M5, MCP pf_run_next) */
-  async runNext(a: { runId: unknown }): Promise<Awaited<ReturnType<ProcForgeApp["runStep"]>>> {
+  async runNext(a: {
+    runId: unknown;
+  }): Promise<Awaited<ReturnType<ProcForgeApp["runStep"]>>> {
     const runId = a.runId as string;
     if (!runId) throw pfError("bad_request", "runId가 필요하다.");
     const st = readRunState(this.procforgeDir, runId);
@@ -1090,17 +1747,28 @@ export class ProcForgeApp {
         const missing = st.suspended.missing ?? [];
         const inputs: Record<string, unknown> = {};
         for (const k of missing) {
-          const spec = (node.args ?? {})[k] as { instruction?: string } | undefined;
-          inputs[k] = { ...(spec?.instruction !== undefined ? { instruction: spec.instruction } : {}) };
+          const spec = (node.args ?? {})[k] as
+            { instruction?: string } | undefined;
+          inputs[k] = {
+            ...(spec?.instruction !== undefined
+              ? { instruction: spec.instruction }
+              : {}),
+          };
         }
         return {
-          kind: "need_generated", runId, sessionId: st.sessionId, nodeId: st.suspended.nodeId,
+          kind: "need_generated",
+          runId,
+          sessionId: st.sessionId,
+          nodeId: st.suspended.nodeId,
           instruction: `노드 ${st.suspended.nodeId}에 생성값이 필요하다 (${missing.join(", ")}). pf_run_supply(runId, nodeId, value)로 제공하라.`,
           inputs,
         };
       }
       return {
-        kind: "need_approval", runId, sessionId: st.sessionId, nodeId: st.suspended.nodeId,
+        kind: "need_approval",
+        runId,
+        sessionId: st.sessionId,
+        nodeId: st.suspended.nodeId,
         instruction: `노드 ${st.suspended.nodeId}는 external 부작용이라 승인이 필요하다.`,
         approvalHint: `procforge approve ${runId} ${st.suspended.nodeId} 또는 pf_run_supply(runId, nodeId, true) 후 pf_run_next(runId).`,
       };
@@ -1109,113 +1777,206 @@ export class ProcForgeApp {
   }
 
   /** 생성값 공급·승인 후 자동 진행 (M5, MCP pf_run_supply) */
-  async runSupply(a: { runId: unknown; nodeId: unknown; value: unknown }): Promise<Awaited<ReturnType<ProcForgeApp["runStep"]>>> {
+  async runSupply(a: {
+    runId: unknown;
+    nodeId: unknown;
+    value: unknown;
+  }): Promise<Awaited<ReturnType<ProcForgeApp["runStep"]>>> {
     const runId = a.runId as string;
     const nodeId = a.nodeId as string;
-    if (!runId || !nodeId) throw pfError("bad_request", "runId·nodeId가 필요하다.");
+    if (!runId || !nodeId)
+      throw pfError("bad_request", "runId·nodeId가 필요하다.");
     const st = readRunState(this.procforgeDir, runId);
     if (!st) throw pfError("not_found", `run ${runId} not found`);
     if (st.status === "done" || st.status === "failed") {
       throw pfError("bad_request", `run 이미 종료: ${st.status}`);
     }
     if (!st.suspended || st.suspended.nodeId !== nodeId) {
-      throw pfError("bad_request", `대기 중인 노드가 아님: ${nodeId}. pf_run_next로 먼저 진행하라.`);
+      throw pfError(
+        "bad_request",
+        `대기 중인 노드가 아님: ${nodeId}. pf_run_next로 먼저 진행하라.`,
+      );
     }
     if (st.suspended.kind === "need_approval") {
-      if (a.value !== true) throw pfError("bad_request", "승인은 value=true로 한다.");
+      if (a.value !== true)
+        throw pfError("bad_request", "승인은 value=true로 한다.");
       const approved = [...new Set([...st.approved, nodeId])];
-      writeRunState(this.procforgeDir, { ...st, approved, suspended: undefined, status: "ready" });
+      writeRunState(this.procforgeDir, {
+        ...st,
+        approved,
+        suspended: undefined,
+        status: "ready",
+      });
       return this.runStep(runId);
     }
     const missing = st.suspended.missing ?? [];
     let patch: Record<string, unknown>;
-    if (missing.length === 1 && (typeof a.value !== "object" || a.value === null)) {
+    if (
+      missing.length === 1 &&
+      (typeof a.value !== "object" || a.value === null)
+    ) {
       patch = { [missing[0]]: a.value };
     } else if (typeof a.value === "object" && a.value !== null) {
       const given = a.value as Record<string, unknown>;
       const absent = missing.filter((k) => !(k in given));
-      if (absent.length > 0) throw pfError("bad_request", `생성값 부족: ${absent.join(", ")}`);
+      if (absent.length > 0)
+        throw pfError("bad_request", `생성값 부족: ${absent.join(", ")}`);
       patch = { ...given };
     } else {
-      throw pfError("bad_request", `생성값 부족: ${missing.join(", ")} (객체로 제공)`);
+      throw pfError(
+        "bad_request",
+        `생성값 부족: ${missing.join(", ")} (객체로 제공)`,
+      );
     }
-    const supplied = { ...st.supplied, [nodeId]: { ...(st.supplied[nodeId] ?? {}), ...patch } };
-    writeRunState(this.procforgeDir, { ...st, supplied, suspended: undefined, status: "ready" });
+    const supplied = {
+      ...st.supplied,
+      [nodeId]: { ...(st.supplied[nodeId] ?? {}), ...patch },
+    };
+    writeRunState(this.procforgeDir, {
+      ...st,
+      supplied,
+      suspended: undefined,
+      status: "ready",
+    });
     return this.runStep(runId);
   }
 
   /** run external 승인 (M5, CLI 전용) */
-  async runApprove(a: { runId: unknown; nodeId: unknown }): Promise<{ runId: string; nodeId: string; approved: boolean }> {
+  async runApprove(a: {
+    runId: unknown;
+    nodeId: unknown;
+  }): Promise<{ runId: string; nodeId: string; approved: boolean }> {
     const runId = a.runId as string;
     const nodeId = a.nodeId as string;
-    if (!runId || !nodeId) throw pfError("bad_request", "runId·nodeId가 필요하다.");
+    if (!runId || !nodeId)
+      throw pfError("bad_request", "runId·nodeId가 필요하다.");
     const st = readRunState(this.procforgeDir, runId);
     if (!st) throw pfError("not_found", `run ${runId} not found`);
-    if (!st.pending.includes(nodeId)) throw pfError("bad_request", `대기 중인 노드가 아님: ${nodeId}`);
+    if (!st.pending.includes(nodeId))
+      throw pfError("bad_request", `대기 중인 노드가 아님: ${nodeId}`);
     const approved = [...new Set([...st.approved, nodeId])];
-    writeRunState(this.procforgeDir, { ...st, approved, suspended: undefined, status: "ready" });
+    writeRunState(this.procforgeDir, {
+      ...st,
+      approved,
+      suspended: undefined,
+      status: "ready",
+    });
     return { runId, nodeId, approved: true };
   }
 
   /** 절차서 노드 사전 승인 항목 생성 (M5.5-4.1-3, CLI approve 절차서 모드). */
   async approveProcedureNode(a: {
-    procedure: unknown; nodeId: unknown; allowWildcard?: unknown;
-  }): Promise<{ procedureDir: string; path: string; nodeId: string; hash: string; replaced: boolean; args: Record<string, unknown>; warnings: string[] }> {
+    procedure: unknown;
+    nodeId: unknown;
+    allowWildcard?: unknown;
+  }): Promise<{
+    procedureDir: string;
+    path: string;
+    nodeId: string;
+    hash: string;
+    replaced: boolean;
+    args: Record<string, unknown>;
+    warnings: string[];
+  }> {
     const procRef = a.procedure as string;
     const nodeId = a.nodeId as string;
     if (!procRef) throw pfError("bad_request", "procedure가 필요하다.");
     if (!nodeId) throw pfError("bad_request", "node가 필요하다 (--node <id>).");
-    const allowWildcard = Array.isArray(a.allowWildcard) ? (a.allowWildcard as string[]) : [];
+    const allowWildcard = Array.isArray(a.allowWildcard)
+      ? (a.allowWildcard as string[])
+      : [];
     const { doc, dir } = loadProcedureDoc(this.procforgeDir, procRef);
     const n = doc.nodes.find((x) => x.id === nodeId);
     if (!n) throw pfError("not_found", `노드 없음: ${nodeId} (${procRef})`);
     // M5.5-4.4-5: toHashable 단일 변환 (캐스팅 없음).
     const docById = new Map(doc.nodes.map((x) => [x.id, toHashable(x)]));
-    const entry = buildApprovalEntry({
-      id: n.id, goal: n.goal, tool: n.tool,
-      args: n.args, constraints: n.constraints, sideEffect: n.sideEffect,
-      map: n.map, until: n.until,
-    }, allowWildcard, docById, (rel: string) => {
-      try {
-        return readFileSync(join(dir, rel), "utf8");
-      } catch {
-        return undefined;
-      }
-    });
+    const entry = buildApprovalEntry(
+      {
+        id: n.id,
+        goal: n.goal,
+        tool: n.tool,
+        args: n.args,
+        constraints: n.constraints,
+        sideEffect: n.sideEffect,
+        map: n.map,
+        until: n.until,
+      },
+      allowWildcard,
+      docById,
+      (rel: string) => {
+        try {
+          return readFileSync(join(dir, rel), "utf8");
+        } catch {
+          return undefined;
+        }
+      },
+    );
     const { path, replaced } = saveApproval(dir, entry);
     // M5.6.1-4: 범위 경고를 함께 반환 (CLI 출력).
-    const scope = scopeWarnings({ id: n.id, args: n.args as Record<string, unknown> | undefined });
-    return { procedureDir: dir, path, nodeId, hash: entry.node.hash, replaced, args: entry.args ?? {}, warnings: scope };
+    const scope = scopeWarnings({
+      id: n.id,
+      args: n.args as Record<string, unknown> | undefined,
+    });
+    return {
+      procedureDir: dir,
+      path,
+      nodeId,
+      hash: entry.node.hash,
+      replaced,
+      args: entry.args ?? {},
+      warnings: scope,
+    };
   }
 
   /** 절차서 live 일괄 실행 (M5, CLI run용). 일시정지면 suspended 포함 반환. */
   async runProcedure(a: {
-    procedure: unknown; params?: unknown; out?: unknown; force?: unknown;
-    allowBash?: unknown; allowProjectRead?: unknown; unattended?: unknown;
-    toolRetry?: unknown; allowUnverified?: unknown;
+    procedure: unknown;
+    params?: unknown;
+    out?: unknown;
+    force?: unknown;
+    allowBash?: unknown;
+    allowProjectRead?: unknown;
+    unattended?: unknown;
+    toolRetry?: unknown;
+    allowUnverified?: unknown;
   }): Promise<{
-    runId: string; sessionId: string; mode: "live";
-    passed: number; failed: number; unverified: number; skipped: number; blocked: number; suspended: number;
+    runId: string;
+    sessionId: string;
+    mode: "live";
+    passed: number;
+    failed: number;
+    unverified: number;
+    skipped: number;
+    blocked: number;
+    suspended: number;
     approvalBlocked: boolean;
-    reportPath: string; outDir?: string;
+    reportPath: string;
+    outDir?: string;
   }> {
     const procRef = a.procedure as string;
     if (!procRef) throw pfError("bad_request", "procedure가 필요하다.");
-    const params = ((a.params ?? {}) as Record<string, string>);
+    const params = (a.params ?? {}) as Record<string, string>;
     const unattended = a.unattended === true;
     // M5.7-2: 무인 기본 on. M5.7.1: --allow-unverified 단일화 (runner가 unattended와 조합해 판단).
-    const { report, sessionId } = await runProcedureTest(this.procforgeDir, this.projectRoot, procRef, {
-      procforgeDir: this.procforgeDir,
-      projectRoot: this.projectRoot,
-      mode: "live",
-      params,
-      updateGolden: false,
-      allowBash: a.allowBash === true,
-      allowProjectRead: a.allowProjectRead === true,
-      unattended,
-      ...((a.toolRetry as { attempts?: number; baseMs?: number } | undefined) ? { toolRetry: a.toolRetry as { attempts?: number; baseMs?: number } } : {}),
-      allowUnverified: a.allowUnverified === true,
-    });
+    const { report, sessionId } = await runProcedureTest(
+      this.procforgeDir,
+      this.projectRoot,
+      procRef,
+      {
+        procforgeDir: this.procforgeDir,
+        projectRoot: this.projectRoot,
+        mode: "live",
+        params,
+        updateGolden: false,
+        allowBash: a.allowBash === true,
+        allowProjectRead: a.allowProjectRead === true,
+        unattended,
+        ...((a.toolRetry as { attempts?: number; baseMs?: number } | undefined)
+          ? { toolRetry: a.toolRetry as { attempts?: number; baseMs?: number } }
+          : {}),
+        allowUnverified: a.allowUnverified === true,
+      },
+    );
     let outDir: string | undefined;
     const outOpt = a.out as string | undefined;
     if (outOpt !== undefined && outOpt !== "") {
@@ -1223,11 +1984,18 @@ export class ProcForgeApp {
       copyRunFsToOut(this.procforgeDir, report.runId, outDir, a.force === true);
     }
     return {
-      runId: report.runId, sessionId, mode: "live",
-      passed: report.summary.pass, failed: report.summary.fail,
-      unverified: report.summary.unverified, skipped: report.summary.skipped,
-      blocked: report.summary.blocked, suspended: report.summary.suspended,
-      approvalBlocked: report.results.some((r) => r.failedConstraints.includes("approval")),
+      runId: report.runId,
+      sessionId,
+      mode: "live",
+      passed: report.summary.pass,
+      failed: report.summary.fail,
+      unverified: report.summary.unverified,
+      skipped: report.summary.skipped,
+      blocked: report.summary.blocked,
+      suspended: report.summary.suspended,
+      approvalBlocked: report.results.some((r) =>
+        r.failedConstraints.includes("approval"),
+      ),
       reportPath: join(this.procforgeDir, "runs", report.runId, "report.json"),
       ...(outDir ? { outDir } : {}),
     };

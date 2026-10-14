@@ -17,3 +17,4 @@ export * from "./logger.js";
 export * from "./fsutil.js";
 export * from "./filestore.js";
 export * from "./check.js";
+export * from "./report.js";

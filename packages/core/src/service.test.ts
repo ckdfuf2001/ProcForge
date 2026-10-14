@@ -1534,3 +1534,56 @@ describe("M5.8.2-2 probing/run 차이 차단", () => {
     }
   });
 });
+
+describe("M6.1-1 원격 사전평가 신뢰 경로", () => {
+  async function splitOnce() {
+    const svc = new CoreService(createMemoryStore(), passEval);
+    const { session } = await svc.pfStart({ request: "r", toolCatalog: catalog });
+    await svc.pfResolve({
+      sessionId: session.id, nodeId: "1", decision: "split",
+      children: [{ goal: "a" }],
+    });
+    return { svc, sid: session.id };
+  }
+  const meta = { sha256: "a".repeat(64), size: 100, preview: '{"v":1}' };
+  it("메타+판정 → 저장 (원문 없음)", async () => {
+    const { svc, sid } = await splitOnce();
+    const out = await svc.pfReport({
+      ...rep(), sessionId: sid, nodeId: "1.1",
+      resultJsonMeta: meta,
+      localEvaluation: { verdict: "pass", failedConstraints: [] },
+      autoConstraints: [],
+    });
+    expect(out.verdict).toBe("pass");
+    const un = await svc.getNode(sid, "1.1");
+    const last = un.attempts[un.attempts.length - 1];
+    expect(last.resultJsonMeta).toEqual(meta);
+    expect((last as { resultJson?: unknown }).resultJson).toBeUndefined();
+  });
+  it("원문 병행 → bad_request", async () => {
+    const { svc, sid } = await splitOnce();
+    await expect(svc.pfReport({
+      ...rep(), sessionId: sid, nodeId: "1.1",
+      resultJson: { raw: 1 },
+      resultJsonMeta: meta,
+      localEvaluation: { verdict: "pass", failedConstraints: [] },
+    })).rejects.toThrow(/병행 금지/);
+  });
+  it("메타 없음 → bad_request", async () => {
+    const { svc, sid } = await splitOnce();
+    await expect(svc.pfReport({
+      ...rep(), sessionId: sid, nodeId: "1.1",
+      localEvaluation: { verdict: "pass", failedConstraints: [] },
+    })).rejects.toThrow(/Meta 필수/);
+  });
+  it("self fail 보존 (local 누락 시 core가 추가)", async () => {
+    const { svc, sid } = await splitOnce();
+    const out = await svc.pfReport({
+      ...rep(), sessionId: sid, nodeId: "1.1", selfVerdict: "fail",
+      resultJsonMeta: meta,
+      localEvaluation: { verdict: "fail", failedConstraints: [] },
+    });
+    expect(out.verdict).toBe("fail");
+    expect(out.failedConstraints).toContain("self");
+  });
+});

@@ -1,7 +1,11 @@
 import type { CoreClient } from "@procforge/shared/core-client.js";
 import {
-  WireMethods, PROTOCOL_VERSION, PROTOCOL_VERSION_HEADER,
-  throwWireError, type WireMethodName, type WireError,
+  WireMethods,
+  PROTOCOL_VERSION,
+  PROTOCOL_VERSION_HEADER,
+  throwWireError,
+  type WireMethodName,
+  type WireError,
 } from "@procforge/shared/wire.js";
 import { guardEgress } from "./services/egress.js";
 
@@ -21,7 +25,11 @@ export type RemoteCoreClientOpts = {
 };
 
 const READ_METHODS: ReadonlySet<WireMethodName> = new Set([
-  "getSession", "getNode", "pfTree", "getEvents", "pfBuildProcedure",
+  "getSession",
+  "getNode",
+  "pfTree",
+  "getEvents",
+  "pfBuildProcedure",
 ]);
 
 const RETRYABLE_STATUS = new Set([502, 503, 504]);
@@ -32,7 +40,10 @@ function sleep(ms: number): Promise<void> {
 }
 
 function netError(detail: string): Error {
-  return Object.assign(new Error(`core 연결 실패 (remote degraded): ${detail}`), { code: "io_error" });
+  return Object.assign(
+    new Error(`core 연결 실패 (remote degraded): ${detail}`),
+    { code: "io_error" },
+  );
 }
 
 export function createRemoteCoreClient(opts: RemoteCoreClientOpts): CoreClient {
@@ -40,7 +51,10 @@ export function createRemoteCoreClient(opts: RemoteCoreClientOpts): CoreClient {
   const doFetch = opts.fetchImpl ?? fetch;
   const base = opts.baseUrl.replace(/\/$/, "");
 
-  async function call<M extends WireMethodName>(method: M, body: Record<string, unknown>): Promise<unknown> {
+  async function call<M extends WireMethodName>(
+    method: M,
+    body: Record<string, unknown>,
+  ): Promise<unknown> {
     const def = WireMethods[method];
     // M6-4: 송신 전 egress 검사 (위반 차단·민감값 교정).
     const guarded = guardEgress(method, body);
@@ -65,7 +79,8 @@ export function createRemoteCoreClient(opts: RemoteCoreClientOpts): CoreClient {
       } catch (e) {
         // fetch 실패·타임아웃: 읽기만 재시도. 쓰기는 즉시 degraded.
         clearTimeout(timer);
-        if (!retryable || attempt >= MAX_ATTEMPTS) throw netError(e instanceof Error ? e.message : String(e));
+        if (!retryable || attempt >= MAX_ATTEMPTS)
+          throw netError(e instanceof Error ? e.message : String(e));
         await sleep(100 * attempt);
         continue;
       } finally {
@@ -80,7 +95,11 @@ export function createRemoteCoreClient(opts: RemoteCoreClientOpts): CoreClient {
       }
       let env: { ok?: boolean; data?: unknown; error?: WireError };
       try {
-        env = (await r.json()) as { ok?: boolean; data?: unknown; error?: WireError };
+        env = (await r.json()) as {
+          ok?: boolean;
+          data?: unknown;
+          error?: WireError;
+        };
       } catch {
         throw netError(`응답 파싱 실패 (HTTP ${r.status})`);
       }
@@ -88,7 +107,11 @@ export function createRemoteCoreClient(opts: RemoteCoreClientOpts): CoreClient {
         // 서버 판정(코드 보존): 재시도 없음. expectedRevision 충돌 판단은 호출자가.
         const e = env?.error;
         if (e && typeof e.code === "string") {
-          throwWireError({ code: e.code, message: String(e.message ?? ""), hint: typeof e.hint === "string" ? e.hint : undefined });
+          throwWireError({
+            code: e.code,
+            message: String(e.message ?? ""),
+            hint: typeof e.hint === "string" ? e.hint : undefined,
+          });
         }
         throw netError(`이상 응답 (HTTP ${r.status})`);
       }
@@ -108,14 +131,28 @@ export function createRemoteCoreClient(opts: RemoteCoreClientOpts): CoreClient {
     pfTree: (sid) => call("pfTree", { sessionId: sid }) as never,
     pfLock: (i) => call("pfLock", i as Record<string, unknown>) as never,
     pfReopen: (i) => call("pfReopen", i as Record<string, unknown>) as never,
-    amendAttemptArtifacts: (i) => call("amendAttemptArtifacts", i as Record<string, unknown>) as never,
-    pfUpdateCatalog: (i) => call("pfUpdateCatalog", i as Record<string, unknown>) as never,
-    pfEditArgs: (i) => call("pfEditArgs", i as Record<string, unknown>) as never,
-    pfEditNode: (i) => call("pfEditNode", i as Record<string, unknown>) as never,
-    getEvents: (sid, since) => call("getEvents", since === undefined ? { sessionId: sid } : { sessionId: sid, sinceSeq: since }) as never,
+    amendAttemptArtifacts: (i) =>
+      call("amendAttemptArtifacts", i as Record<string, unknown>) as never,
+    pfUpdateCatalog: (i) =>
+      call("pfUpdateCatalog", i as Record<string, unknown>) as never,
+    pfEditArgs: (i) =>
+      call("pfEditArgs", i as Record<string, unknown>) as never,
+    pfEditNode: (i) =>
+      call("pfEditNode", i as Record<string, unknown>) as never,
+    getEvents: (sid, since) =>
+      call(
+        "getEvents",
+        since === undefined
+          ? { sessionId: sid }
+          : { sessionId: sid, sinceSeq: since },
+      ) as never,
     getSession: (sid) => call("getSession", { sessionId: sid }) as never,
-    getNode: (sid, nid) => call("getNode", { sessionId: sid, nodeId: nid }) as never,
-    pfBuildProcedure: (sid, name) => call("pfBuildProcedure", { sessionId: sid, name }) as never,
+    getNode: (sid, nid) =>
+      call("getNode", { sessionId: sid, nodeId: nid }) as never,
+    pfBuildProcedure: (sid, name) =>
+      call("pfBuildProcedure", { sessionId: sid, name }) as never,
     pfApprove: (i) => call("pfApprove", i as Record<string, unknown>) as never,
+    /** 원격 표시 (M6.1-1. App.report가 사전평가 경로 선택) */
+    isRemote: true,
   } as CoreClient;
 }

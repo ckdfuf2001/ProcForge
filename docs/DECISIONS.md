@@ -458,6 +458,17 @@
   누적 수집이라 정적 해석과 다름).
 - [M6.1-5] 저장소 공개: 공개 유지 (사용자 결정, 2026-10-14).
   비밀 URL·키는 `$prefix`·환경 분리, 토큰 하드코딩 금지 유지.
+- [M6.1-1] egress R8 일치: pfReport 원문 resultJson 원격 전송 금지
+  (메타+판정만. 직접 전송은 egress 차단). 평가는 LocalServices
+  (checkerEvaluate), core는 저장·규칙 적용 (refCheck 패턴).
+  resultJsonMetaOf·autoConstraints·decideReportVerdict를 shared/report.ts로
+  옮겨 core·local이 같은 함수 사용 (parity).
+  resultSummary·rubricReasons 값은 4KB 상한+교정, 예외 없음.
+  params·args는 정의라 원문 유지+교정만.
+  남는 예외 목록: (a) params/args 안의 절대경로 (정의 입력. --param 정상 사용),
+  (b) PROSE_KEYS 산문 안의 절대경로, (c) 메타 형태 {sha256,size,preview},
+  (d) URL 문자열. 미리보기(≤4KB) 안의 원문 조각은 R8 설계상 허용.
+  params/args 안의 resultJson 키도 차단 (예외 없음).
 - [M6-0] 저장소 공개: 공개 유지 (사용자 지시). [!] 아님. 공개 운영 선택지
   (사용자 결정 대기): (a) `.procforge/`는 gitignore라 세션·run 기록은 커밋 안
   됨 — 현 상태 유지가 기본. (b) `procedures/` 승인·스크립트는 커밋됨 —

@@ -102,7 +102,7 @@ describe("M6-5 remote 실행", () => {
       children: [{ goal: "echo" }],
     });
     await client.pfNext({ sessionId: sid });
-    await client.pfReport({
+    await app.report({
       sessionId: sid,
       nodeId: "1.1",
       tool: { server: "fake-ppt", name: "echo" },
