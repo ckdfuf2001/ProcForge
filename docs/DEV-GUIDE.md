@@ -582,7 +582,7 @@ c·d·j는 하네스 과제로 DECISIONS에 기록만.
 | M5.8.1 | E2E 실행벽 해소 | [x] | `de9f004` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38401689793 | 0 사실확인·6 호출주체·1 실행불가 leaf 거부·2 메시지 정정·3 finalize 원인수정(manifest 복사)·4 dependsOn 편집 |
 | M5.8.2 | E2E 2회차 후속 | [ ] | | | 0 사실확인·1 ref 의미·2 probing/run 차단·3 script 승인·4 csv_rows·5 주석 정정 + 후속(golden 기준·검증불가·R8 분리·stable) |
 | M6 | 원격 core | [ ] | | | egress R8 위반·전체 remote 미이식 → M6.1 |
-| M6.1 | 원격 core 후속 | [ ] | | | 1 egress R8 일치·2 전체 스위트 remote 이식·3 테스트 재시도 제거·4 인증 강화·5 저장소 공개 결정 |
+| M6.1 | 원격 core 후속 | [x] | `9458704` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38604361482 | 1 egress R8·2 전체 remote+egress 단언·3 재시도 제거·4 인증·5 공개유지 (docs/REVIEW-M6.md) |
 | M7 | UI | [ ] | | | |
 
 ---
@@ -641,3 +641,4 @@ c·d·j는 하네스 과제로 DECISIONS에 기록만.
 | 2026-10-14 | 8 | M6 신설 (원격 core 0~6) + M5.8 비고 갱신·정정. M5 [x] 확인 | (a) TUI 1회·(c) 날짜변경 1회는 사용자 수행으로 남김. (b) 충족·(c) 당일 반복만으로 정정 |
 | 2026-10-14 | 8 | M6 완료 (0~6 한 묶음): L3 green·CI run 38459923601 success·docs/REVIEW-M6.md. loopback 순간실패 안정화(서버공유·EACCES 재시도·fetch 재시도) | 전체 스위트 remote 이식은 M6.1 (import·golden API·테스트 이식 필요) |
 | 2026-10-14 | 0, 8 | M6 [ ] 환원 + M6.1 신설 (원격 core 후속 1~5). 0.2 완료 선언 문구 개정 (8절=코드 head, 최종 head CI success 확인) | egress R8 위반(원문 송신)·전체 remote 미이식 해소 전 완료 선언 불가 |
+| 2026-10-14 | 8 | M6.1 완료 (1~5 한 묶음): L3 green·CI run 38604361482 success(remote 전체 포함)·docs/REVIEW-M6.md 갱신 | EACCES 원인 확정 (burst connect·stale keep-alive·EXCLUSIVEADDRUSE+TIME_WAIT). product connect-phase 재시도 유지 |
