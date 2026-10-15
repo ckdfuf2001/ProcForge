@@ -7,7 +7,7 @@ import { resolveStoreDir } from "./app/store-dir.js";
 const projectRoot = resolve(
   process.env.PROCFORGE_PROJECT_ROOT ?? process.argv[2] ?? process.cwd(),
 );
-// M7-1-6: cli-args와 같은 단일 규칙 (PROCFORGE_HOME 우선).
+// M7-1-6: cli-args와 같은 단일 규칙 (PROCFORGE_DIR 우선).
 const procforgeDir = resolveStoreDir({
   flag: process.argv[3],
   env: process.env,

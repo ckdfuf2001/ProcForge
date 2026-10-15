@@ -75,7 +75,7 @@ export function resolveDirs(
   const projectRoot = resolve(
     values["project-root"] ?? env.PROCFORGE_PROJECT_ROOT ?? process.cwd(),
   );
-  // M7-1-6: PROCFORGE_HOME 우선 (opencode.json MCP env로 저장소 고정).
+  // M7-1-6: PROCFORGE_DIR 우선 (opencode.json MCP env로 저장소 고정).
   const procforgeDir = resolveStoreDir({
     flag: values["procforge-dir"],
     env,

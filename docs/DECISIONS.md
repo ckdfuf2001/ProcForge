@@ -473,7 +473,7 @@ argv: [...]}` 고정. runner는 run fs에서 직접 실행해 stdout을 golden�
   webui 쪽은 workspace 저장소에 따로 기록됐다 (207a8f93 rev 5 open vs
   5762fb44 leaf 진행). MCP 서버가 실행 위치(cwd) 기준으로 `.procforge/`를
   찾기 때문으로 보임. UI는 한쪽 저장소만 보면 다른 쪽 세션이 화면에서 사라진다.
-- [M7-1-저장소] 저장소 경로를 `opencode.json`의 MCP env(`PROCFORGE_HOME`)로
+- [M7-1-저장소] 저장소 경로를 `opencode.json`의 MCP env(`PROCFORGE_DIR`)로
   명시하고, 기본값 규칙을 하나로 정한다. 서버 시작 로그·`pf_start` 응답에
   실제 저장소 경로를 넣는다. 같은 프로젝트에서 저장소 2개가 감지되면 경고한다.
 - [M7-1] calls.jsonl 귀속: 세션 단위가 아니라 호출마다 다음 두 가지를 남긴다.

@@ -8,43 +8,34 @@ import { createApp } from "./bootstrap.js";
 // M7-1-6: 저장소 위치 단일화.
 
 describe("store-dir", () => {
-  it("우선순위: flag > PROCFORGE_HOME > PROCFORGE_DIR > 기본값", () => {
+  it("우선순위: flag > PROCFORGE_DIR > 기본값", () => {
     const cwd = mkdtempSync(join(tmpdir(), "pf-sd-"));
-    const home = mkdtempSync(join(tmpdir(), "pf-sdhome-"));
+    const dir = mkdtempSync(join(tmpdir(), "pf-sddir-"));
     expect(resolveStoreDir({ cwd })).toBe(join(cwd, ".procforge"));
     expect(
       resolveStoreDir({
         cwd,
-        env: { PROCFORGE_DIR: join(home, "custom") } as NodeJS.ProcessEnv,
+        env: { PROCFORGE_DIR: join(dir, "custom") } as NodeJS.ProcessEnv,
       }),
-    ).toBe(join(home, "custom"));
+    ).toBe(join(dir, "custom"));
     expect(
       resolveStoreDir({
+        flag: join(dir, "flag"),
         cwd,
-        env: {
-          PROCFORGE_HOME: home,
-          PROCFORGE_DIR: join(home, "custom"),
-        } as NodeJS.ProcessEnv,
+        env: { PROCFORGE_DIR: dir } as NodeJS.ProcessEnv,
       }),
-    ).toBe(join(home, ".procforge"));
-    expect(
-      resolveStoreDir({
-        flag: join(home, "flag"),
-        cwd,
-        env: { PROCFORGE_HOME: home } as NodeJS.ProcessEnv,
-      }),
-    ).toBe(join(home, "flag"));
+    ).toBe(join(dir, "flag"));
   });
 
-  it("cwd가 달라도 PROCFORGE_HOME이면 같은 저장소", () => {
-    const home = mkdtempSync(join(tmpdir(), "pf-sdhome-"));
+  it("cwd가 달라도 PROCFORGE_DIR이면 같은 저장소", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pf-sddir-"));
     const a = mkdtempSync(join(tmpdir(), "pf-sda-"));
     const b = mkdtempSync(join(tmpdir(), "pf-sdb-"));
-    const env = { PROCFORGE_HOME: home } as NodeJS.ProcessEnv;
+    const env = { PROCFORGE_DIR: dir } as NodeJS.ProcessEnv;
     expect(resolveStoreDir({ cwd: a, env })).toBe(
       resolveStoreDir({ cwd: b, env }),
     );
-    expect(resolveStoreDir({ cwd: a, env })).toBe(join(home, ".procforge"));
+    expect(resolveStoreDir({ cwd: a, env })).toBe(dir);
   });
 
   it("기본값이면 경고 없음, 다른 곳 + 기본값에 세션 있으면 경고", () => {

@@ -4,12 +4,11 @@ import { randomUUID } from "node:crypto";
 
 // M7-1-6: 저장소 위치 단일화. MCP 서버가 실행 위치(cwd) 기준으로
 // `.procforge/`를 찾아 TUI와 webui가 서로 다른 저장소에 쓰는 사고가 났다.
-// PROCFORGE_HOME(opencode.json MCP env)으로 저장소를 한 곳에 고정한다.
+// PROCFORGE_DIR(opencode.json MCP env)으로 저장소를 한 곳에 고정한다.
 
 /**
  * procforgeDir 결정. 우선순위:
- * 명시 플래그 > PROCFORGE_HOME(프로젝트 루트, 그 안 .procforge 사용)
- * > PROCFORGE_DIR(호환, 저장소 직접 지정) > <cwd>/.procforge (기본값 규칙 1개).
+ * 명시 플래그 > PROCFORGE_DIR(저장소 직접 지정) > <cwd>/.procforge (기본값 규칙 1개).
  */
 export function resolveStoreDir(opts: {
   flag?: string;
@@ -19,8 +18,6 @@ export function resolveStoreDir(opts: {
   const env = opts.env ?? process.env;
   const cwd = opts.cwd ?? process.cwd();
   if (opts.flag) return resolve(opts.flag);
-  const home = env.PROCFORGE_HOME;
-  if (home) return resolve(join(home, ".procforge"));
   if (env.PROCFORGE_DIR) return resolve(env.PROCFORGE_DIR);
   return resolve(join(cwd, ".procforge"));
 }
@@ -55,6 +52,6 @@ export function detectDuplicateStores(
   if (!hasSessions(def)) return null;
   return (
     `저장소가 2곳에 있음: 사용 중=${resolved}, 기존=${def}. ` +
-    `PROCFORGE_HOME으로 한 곳으로 고정하라. 기존 세션은 ${def}에 있다.`
+    `PROCFORGE_DIR로 한 곳으로 고정하라. 기존 세션은 ${def}에 있다.`
   );
 }
