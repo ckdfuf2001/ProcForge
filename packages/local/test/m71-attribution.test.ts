@@ -7,7 +7,10 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { buildServer } from "../src/server.js";
 import { ProcForgeApp } from "../src/app/app.js";
 import { recordCall, buildTrace, formatTraceMarkdown } from "../src/trace.js";
-import { testStack } from "./client-mode.js";
+// MCP 배선 검증이라 inprocess 고정 (trace.test.ts와 같은 예외.
+// remote 잡에서도 이 파일은 로컬로 돈다).
+import { createLocalStack } from "../src/core-inprocess.js";
+import { wrapClient } from "./client-mode.js";
 
 // M7-1-7: 호출 귀속. MCP 연결마다 connectionId, UI는 actor:"ui".
 
@@ -35,9 +38,9 @@ afterEach(() => {
 });
 
 async function linkedPair(connectionId: string) {
-  const { client } = testStack(pfdir);
+  const { client } = createLocalStack(pfdir);
   const app = new ProcForgeApp({
-    core: client,
+    core: wrapClient(client),
     procforgeDir: pfdir,
     projectRoot: root,
   });
