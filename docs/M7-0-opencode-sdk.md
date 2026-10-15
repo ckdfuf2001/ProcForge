@@ -60,7 +60,12 @@
 
 - `GET /event` → SSE 동작. 관측 type: `server.connected`,
   `file.watcher.updated`. 10초 수집 기준 그 외 없음.
-- 도구 호출 시작·종료 이벤트는 모델 실행 불가로 미확인.
+- 정적 인벤토리(SDK types, 40개): `message.part.updated`
+  (properties: part+delta. part 안에 sessionID·tool·상태),
+  `session.idle` (sessionID), `session.status` (sessionID+status),
+  `tui.prompt.append` (text).
+  짝짓기 대안 경로로 타입상 충분 (part.sessionID + tool 이름).
+  라이브 캡처(도구 실행 중 스트림)는 모델 실행 불가로 미확인.
 
 ## 제안: B 기본 + A 조건부 + C 상시 (M7-1 확정)
 
