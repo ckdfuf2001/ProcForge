@@ -196,6 +196,9 @@ export async function sendContinue(opts: {
     copyText: `${opts.text}\n${CONTINUE_COPY_FALLBACK}`,
   });
   if (!sid || opts.mode === "c") return fail("연결 없음");
+  // 클로저 안 narrowing 소멸 방지 (빌드 tsc).
+  const ocSid: string = sid;
+  const sigMode: "b" | "a" = opts.mode === "b" ? "b" : "a";
   // M7-1.1: default-deny. 버전을 모르면 가장 위험하니 전송하지 않는다.
   // 호출자(UI/CLI)가 연결의 clientInfo 버전(server.ts getClientVersion)을 넣는다.
   if (opts.serverVersion === undefined) return fail("버전 미확인. 전송하지 않음");
@@ -209,15 +212,15 @@ export async function sendContinue(opts: {
   // 문제를 막는다. 이후에 생긴 pf_*만 새 호출로 센다.
   let before = new Set<string>();
   try {
-    const parts = await opts.deps.listParts(sid);
+    const parts = await opts.deps.listParts(ocSid);
     before = new Set(parts.filter(isPfToolPart).map((p) => JSON.stringify(p)));
   } catch {
     before = new Set();
   }
-  if (opts.mode === "b") {
+  if (sigMode === "b") {
     // M7-1.1 실서버 확인 (1.18.18): POST /session/:id/message + {parts} → 200.
     // {"prompt":{...}} 래퍼는 이 경로에서 400 (래퍼는 /api/session/:id/prompt용).
-    const r = await postJson(doFetch, `${base}/session/${sid}/message`, {
+    const r = await postJson(doFetch, `${base}/session/${ocSid}/message`, {
       parts: [{ type: "text", text: opts.text }],
     });
     if (!r.ok) return fail("전송 실패");
@@ -235,12 +238,12 @@ export async function sendContinue(opts: {
   const isNewPfCall = (parts: unknown[]): boolean =>
     parts.some((p) => isPfToolPart(p) && !before.has(JSON.stringify(p)));
   // M7-1.1-6: SSE 1순위, messages 폴링은 폴백 (대용량 세션 빈 페이지 오탐 회피).
-  if (await sseNewPfCall({ baseUrl: base, sid, before, until: deadline, fetchImpl: doFetch })) {
+  if (await sseNewPfCall({ baseUrl: base, sid: ocSid, before, until: deadline, fetchImpl: doFetch })) {
     return paired();
   }
   for (;;) {
     try {
-      if (isNewPfCall(await opts.deps.listParts(sid))) return paired();
+      if (isNewPfCall(await opts.deps.listParts(ocSid))) return paired();
     } catch {
       // 폴링 실패 무시
     }
@@ -253,12 +256,12 @@ export async function sendContinue(opts: {
   async function paired(): Promise<LinkResult> {
     // 짝짓기 갱신 (best-effort).
     try {
-      const parts = await opts.deps.listParts(sid);
+      const parts = await opts.deps.listParts(ocSid);
       const pfSid = readLatestPfSessionId(parts);
-      if (pfSid) opts.deps.onPairing?.(sid, pfSid);
+      if (pfSid) opts.deps.onPairing?.(ocSid, pfSid);
     } catch {
       // 무시
     }
-    return { delivered: true, mode: opts.mode };
+    return { delivered: true, mode: sigMode };
   }
 }
