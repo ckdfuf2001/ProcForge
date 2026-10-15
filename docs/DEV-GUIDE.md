@@ -578,7 +578,7 @@ c·d·j는 하네스 과제로 DECISIONS에 기록만.
 | M5.6.1 | 재시도·승인 다듬기 | [x] | `9dcc1c3` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38172339664 | isError 판별·정규식 상한·기본값 고정·범위 경고 |
 | M5.7 | 감사·종료·재시도 | [x] | `8075046` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38177878319 | 결정종 단언·fail-on-unverified·script opt-in |
 | M5.7.1 | rubric 경고·unverified 옵션 정리 | [x] | `0651476` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38203088600 | finalize rubric 경고(`a8b11da`)·--allow-unverified 단일화(`e413eb8`) |
-| M5.8 | OpenCode 실제 E2E | [ ] | | | (a) TUI+dist MCP 분해 (b) advise 부분 stale (c) finalize→무수정 approve→이틀 unattended exit 0 (d) docs/M5.8-opencode-e2e.md 기록 — 비고: (a) TUI 1회, (c) 날짜 바뀐 뒤 1회 남음 — 사용자 수행 |
+| M5.8 | OpenCode 실제 E2E | [ ] | | | (a) TUI+dist MCP 분해 (b) advise 부분 stale (c) finalize→무수정 approve→이틀 unattended exit 0 (d) docs/M5.8-opencode-e2e.md 기록 — 비고: (a) 1.1만 leaf, 외부 조언 혼입 (webui 대행, build 세션에서 1.2·1.3+finalize 필요. 조언은 사용자 것만), (c) 날짜 바뀐 뒤 1회 남음 — 사용자 수행 |
 | M5.8.1 | E2E 실행벽 해소 | [x] | `de9f004` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38401689793 | 0 사실확인·6 호출주체·1 실행불가 leaf 거부·2 메시지 정정·3 finalize 원인수정(manifest 복사)·4 dependsOn 편집 |
 | M5.8.2 | E2E 2회차 후속 | [ ] | | | 0 사실확인·1 ref 의미·2 probing/run 차단·3 script 승인·4 csv_rows·5 주석 정정 + 후속(golden 기준·검증불가·R8 분리·stable) |
 | M6 | 원격 core | [x] | `9458704` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38604361482 | 0~6 + M6.1 후속(1~5) 완료 (docs/REVIEW-M6.md) |
@@ -643,3 +643,4 @@ c·d·j는 하네스 과제로 DECISIONS에 기록만.
 | 2026-10-14 | 0, 8 | M6 [ ] 환원 + M6.1 신설 (원격 core 후속 1~5). 0.2 완료 선언 문구 개정 (8절=코드 head, 최종 head CI success 확인) | egress R8 위반(원문 송신)·전체 remote 미이식 해소 전 완료 선언 불가 |
 | 2026-10-14 | 8 | M6.1 완료 (1~5 한 묶음): L3 green·CI run 38604361482 success(remote 전체 포함)·docs/REVIEW-M6.md 갱신 | EACCES 원인 확정 (burst connect·stale keep-alive·EXCLUSIVEADDRUSE+TIME_WAIT). product connect-phase 재시도 유지 |
 | 2026-10-14 | 8 | M6 [x] + M7 신설 (UI 0~6). 신뢰경계·keep-alive·재시도범위 DECISIONS 기록 | M6.1 완료 후속. 4(b) 방식은 M7-0 SDK 확인 결과 보고 결정 |
+| 2026-10-15 | 8 | M7-1 지시 수정: 모드 B>A>C, plan 모드 degraded, 짝짓기 재연결, M5.8(a) [ ] 유지 | M7-0 실측 근거 (webui 5552 대행, TUI 4096 무응답). (a)는 build 세션 1.2·1.3+finalize 남음 |

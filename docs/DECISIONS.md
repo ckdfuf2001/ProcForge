@@ -456,6 +456,26 @@ argv: [...]}` 고정. runner는 run fs에서 직접 실행해 stdout을 golden�
   finalize는 상류 resultJson으로 var ref 필드 존재 검증 (bad_ref_field).
   map/until 템플릿 probing과 map/until 대상 참조는 면제/제외 (런타임 출력이
   누적 수집이라 정적 해석과 다름).
+- [M7-1] UI→모델 연결 모드 순서: B>A>C (M7-0 ③④ 실측 근거).
+  B(session/:id/message, 기본): 처음부터 끝까지 동작 확인.
+  A(TUI append+submit): attach된 TUI 있을 때만, 화면 반영 미확인.
+  C: 상시 폴백 ("계속" 문구+복사 버튼).
+- [M7-1] plan 모드 무실행 위험: plan 모드 세션은 텍스트만 내고 도구를
+  실행하지 않는다 (M7-0에서 목격. 겉으로 성공처럼 보임).
+  B 전송 시 agent=build 지정, 지정 불가 버전이면 경고+C.
+  신호 후 60초 안에 해당 세션 pf_* 호출 0건이면 degraded
+  ("모델 무응답/plan 모드 의심")+C 문구. 가짜 서버 E2E에 plan 모드
+  (텍스트만 응답) 케이스 추가.
+- [M7-1] 짝짓기 재연결: OpenCode 세션이 바뀌어도 새 세션 첫 pf_* 호출의
+  ProcForge sessionId로 pairings.json 갱신, 이력 보존.
+  사례: 207a8f93(TUI 분해, repo 저장소, rev 5, open) → 5762fb44
+  (webui 대행 분해, workspace 저장소, leaf 진행). 전환이 아니라 별개
+  분해 2건 병행이었음. 같은 ProcForge 세션을 가리키게 되면 latest-wins.
+- [M7-1] calls.jsonl 귀속 한계: actor·clientName은 세션 단위 기록이라
+  외부 직접 호출(MCP 우회)과 모델 MCP 호출을 구분 못 한다
+  (M7-0 ④에서 확인. conflict→재시도는 스크립트, bad_request→수정은 모델).
+  UI 직접 호출은 actor 표기가 필요 ("ui" 등. MCP recorded와 구분).
+  TUI 기본 내장 서버 포트 4096 확인 (SDK server 기본값).
 - [M6.1-신뢰경계] 판정은 local이 하고 core는 그 판정을 믿는다.
   원본을 보내지 않으니 당연한 결과. 다만 클라이언트가 판정을 조작할 수
   있다는 뜻이기도 하니, 판정 신뢰 경계 = 테넌트 자신 으로 명시한다.

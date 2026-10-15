@@ -43,12 +43,18 @@
   UI 구현 시 export 또는 페이징/검색 방식을 쓸 것.
 - (c) `POST /api/session` 직접 생성도 가능 (실측). 처음부터 짝짓기 용이.
 
-## 4. 모델 루프 중 conflict — 미확인
+## 4. 모델 루프 중 conflict — 메커니즘 확인, 주체 구분 명시
 
-- 모델 실행이 위 403으로 불가해서 관측 못 함.
-- ProcForge 측 expectedRevision 충돌 자체는 기존 테스트 커버
-  (도중 변경은 conflict). 모델이 충돌 후 다시 읽고 계속하는지는
-  모델이 도는 환경에서 재확인 필요.
+- webui 서버(5552, big-pickle, 403 없음)에서 실측.
+- 외부 advise로 rev 16→17 상승 중 모델 루프와 교차시킴.
+- 낡은 rev 호출 → `conflict: revision mismatch: expected 16, actual 17`.
+- 새로 읽고 재시도 → 정상 진행. 이 conflict→재시도는 실험 스크립트가 수행
+  (주체 구분됨).
+- 모델 자체 회복도 관측: bad_request 5회 (bash 실행 불가·ref 불일치) →
+  힌트 읽고 수정 → confirm_leaf 통과, pf_next 완료.
+- calls.jsonl은 actor·clientName을 세션 단위로 기록해서 외부 직접 호출과
+  모델 MCP 호출을 구분 못 한다 (전부 actor=host·opencode 1.18.18).
+  UI 직접 호출의 actor 표기가 별도로 필요 (DECISIONS [M7-1]).
 
 ## 5. event.subscribe — 부분확인
 
@@ -56,15 +62,14 @@
   `file.watcher.updated`. 10초 수집 기준 그 외 없음.
 - 도구 호출 시작·종료 이벤트는 모델 실행 불가로 미확인.
 
-## 제안: A안 기본 (조건부) + C안 상시
+## 제안: B 기본 + A 조건부 + C 상시 (M7-1 확정)
 
-- A안: TUI를 열어 둔 상태에서 UI가 조언을 `pf_advise`로 기록하고
-  `tui.appendPrompt` + `submitPrompt`. append 수락까지 확인됨.
-  화면 반영·제출 동작은 M5.8 TUI 세션에서 사용자가 확인.
-- B안: TUI 없이 `session.prompt` + `event.subscribe` 표시.
-  메커니즘은 확인됐으나 모델 403이 풀려야 종단 검증 가능.
-- C안: 연결 불가 시 조언만 기록 + "OpenCode에서 '계속' 입력" 문구+복사 버튼.
-  상시 폴백으로 둔다.
+- B(기본): `POST /session/:id/message` — 처음부터 끝까지 동작 확인
+  (분해→조언 반영→1.1 leaf→실행, big-pickle 403 없음).
+  단 agent=build 지정 필수 (plan 모드는 텍스트만, 아래 참조).
+- A(조건부): attach된 TUI가 있을 때만. append 수락까지 확인,
+  화면 반영은 미확인.
+- C(상시): "계속" 문구+복사 버튼.
 - 공통: 상태 변경은 `pf_advise`(App 메서드)로만, OpenCode에는
   "계속하라" 신호만 (R1~R4 유지).
 
@@ -89,3 +94,22 @@
   이 경우 DECISIONS에 "SSE 도구 이벤트 = 짝짓기 대안 경로"로 기록한다.
   (관측된 type 목록과 필드 포함. R1~R4 불변: 상태 변경은 pf_advise로만)
 - 없으면: 2(b) 유지 (사용자 선택 또는 session.create 직접 생성).
+
+## plan 모드 함정 (실측)
+
+- plan 모드 세션(ses_ec0f...)은 텍스트 계획만 내고 pf_* 호출 0건.
+  겉으로 성공처럼 보인다 (완료 선언까지 함, 실제 파일 변경 0).
+- B 전송 시 agent=build 지정. 신호 후 60초 안에 pf_* 0건이면 degraded.
+
+## 세션 이중화 사례 (207a8f93 → 5762fb44)
+
+- 전환이 아니라 별개 분해 2건 병행: 207a8f93(TUI 분해, repo 저장소,
+  rev 5, open 유지) vs 5762fb44(webui 대행 분해, workspace 저장소,
+  1.1 leaf). TUI 세션과 webui 세션이 각자 pf_start한 것.
+- 짝짓기는 최신 pf_start 기준으로 갱신, 이력 보존 (DECISIONS [M7-1]).
+
+## TUI 기본 내장 서버 포트
+
+- SDK server 기본값 4096 확인. TUI URL이 localhost:4096인 것과 일치.
+- 단, TUI 프로세스 응답 없음 상태에서는 LISTEN만 되고 HTTP 무응답.
+  이 경우 TUI 재시작 후 attach.
