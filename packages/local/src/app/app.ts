@@ -33,6 +33,14 @@ type OutputOf<K extends keyof typeof OUTPUT_SCHEMAS> = import("zod").infer<
   (typeof OUTPUT_SCHEMAS)[K]
 >;
 import { seedSandbox } from "../services/workspace.js";
+import {
+  sendContinue,
+  httpLinkDeps,
+  type LinkDeps,
+  type LinkMode,
+  type LinkResult,
+} from "../services/opencode-link.js";
+import { savePairing } from "../services/pairings.js";
 import { logger } from "../logger.js";
 import {
   diffSnapshot,
@@ -939,6 +947,49 @@ export class ProcForgeApp {
       revision: out.revision,
       changedNodeIds: out.changedNodeIds,
     };
+  }
+
+  /**
+   * M7-1: 사람 조언 등록 + OpenCode에 "계속" 신호.
+   * 상태 변경은 advise로만 하고, advise가 실패(throw)하면 신호를 보내지
+   * 않는다. 신호 성공 시 pairings.json에 latest-wins로 기록 (UI 배선 없음).
+   */
+  async adviseAndSignal(
+    a: AdviseInput & {
+      link: {
+        baseUrl: string;
+        openCodeSessionId?: string;
+        mode: LinkMode;
+        text?: string;
+        timeoutMs?: number;
+        serverVersion?: string;
+        fetchImpl?: typeof fetch;
+        /** 테스트 주입 (미지정 시 http 실측형 기본값) */
+        deps?: Partial<LinkDeps>;
+      };
+    },
+  ): Promise<{ advise: OutputOf<"pf_advise">; signal: LinkResult }> {
+    const advised = await this.advise(a);
+    const link = a.link;
+    const http = httpLinkDeps(link.baseUrl, link.fetchImpl);
+    const signal = await sendContinue({
+      baseUrl: link.baseUrl,
+      openCodeSessionId: link.openCodeSessionId,
+      text: link.text ?? "계속",
+      mode: link.mode,
+      timeoutMs: link.timeoutMs,
+      serverVersion: link.serverVersion,
+      deps: {
+        fetchImpl: link.fetchImpl,
+        ...http,
+        ...link.deps,
+        onPairing: (openSid, pfSid) => {
+          link.deps?.onPairing?.(openSid, pfSid);
+          savePairing(this.procforgeDir, openSid, pfSid);
+        },
+      },
+    });
+    return { advise: advised, signal };
   }
 
   async tree(a: TreeInput): Promise<OutputOf<"pf_tree">> {

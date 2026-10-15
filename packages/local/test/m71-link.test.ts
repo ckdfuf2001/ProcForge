@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import { mkdtempSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -6,35 +6,48 @@ import { createServer, type Server } from "node:http";
 import {
   sendContinue,
   extractPfSessionId,
+  httpLinkDeps,
 } from "../src/services/opencode-link.js";
-import { savePairing, getPairing } from "../src/services/pairings.js";
+import {
+  savePairing,
+  getPairing,
+  loadPairings,
+} from "../src/services/pairings.js";
+import { ProcForgeApp } from "../src/app/app.js";
 
 // M7-1: UI→OpenCode 연결 B/A/C + plan 모드 E2E (가짜 opencode 서버).
+// M7-0 실측 재현: POST /session/:id/message body {"prompt":{text,parts}}
+// (parts만·text만은 400), /tui/append-prompt → true, GET /event SSE.
 
 type Part = Record<string, unknown>;
 type FakeScenario = "b-ok" | "plan" | "a-ok";
 
 function startFake(
   scenario: FakeScenario,
-  attachedSid?: string,
+  opts: { attachedSid?: string; pfIds?: string[] } = {},
 ): Promise<{
   baseUrl: string;
   close: () => Promise<void>;
   requests: string[];
+  bodies: unknown[];
   partsOf: (sid: string) => Part[];
 }> {
   const store = new Map<string, Part[]>();
   const requests: string[] = [];
+  const bodies: unknown[] = [];
+  const pfQueue = [...(opts.pfIds ?? ["pf-fake-1"])];
   const partsOf = (sid: string) => store.get(sid) ?? [];
   const push = (sid: string, p: Part) => {
     store.set(sid, [...partsOf(sid), p]);
   };
-  const toolPart = (): Part => ({
+  const toolPart = (sid: string): Part => ({
+    // 짝짓기는 pf_start output의 sessionId로 한다 (M7-0 §3, extractPfSessionId).
     type: "tool",
     tool: "procforge_pf_start",
+    part: { sessionID: sid, tool: "procforge_pf_start" },
     state: {
       status: "completed",
-      output: JSON.stringify({ sessionId: "pf-fake-1" }),
+      output: JSON.stringify({ sessionId: pfQueue.shift() ?? "pf-fake-x" }),
     },
   });
   const server: Server = createServer(async (req, res) => {
@@ -53,15 +66,31 @@ function startFake(
     const mMsg = /^\/session\/([^/]+)\/message$/.exec(url.pathname);
     if (req.method === "POST" && mMsg) {
       const sid = mMsg[1];
+      let parsed: { prompt?: { text?: unknown; parts?: unknown } } = {};
       try {
-        const parsed = JSON.parse(body) as { parts?: Part[] };
-        for (const p of parsed.parts ?? []) push(sid, p);
+        parsed = JSON.parse(body) as typeof parsed;
       } catch {
-        // 무시
+        send(400, { error: "bad body" });
+        return;
       }
-      if (scenario !== "plan") {
+      bodies.push(parsed);
+      // M7-0 §2: {"prompt":{...}} 래퍼 필수 (parts만·text만은 400).
+      if (
+        parsed.prompt === null ||
+        typeof parsed.prompt !== "object" ||
+        typeof (parsed.prompt as { text?: unknown }).text !== "string" ||
+        !Array.isArray((parsed.prompt as { parts?: unknown }).parts)
+      ) {
+        send(400, { error: "prompt wrapper required" });
+        return;
+      }
+      if (scenario === "b-ok") {
+        // 신호 시점에 동기 push (폴링-읽기 경쟁 제거. 실서버는 비동기).
+        push(sid, toolPart(sid));
+      } else if (scenario === "plan") {
+        // plan 모드: 텍스트만 응답, pf_* 호출 없음.
         setTimeout(() => {
-          push(sid, toolPart());
+          push(sid, { type: "text", text: "검토했습니다." });
         }, 30);
       }
       send(200, { data: { admittedSeq: 1 } });
@@ -72,17 +101,43 @@ function startFake(
       return;
     }
     if (req.method === "POST" && url.pathname === "/tui/append-prompt") {
+      try {
+        bodies.push(JSON.parse(body) as unknown);
+      } catch {
+        // 무시
+      }
       send(200, true);
       return;
     }
     if (req.method === "POST" && url.pathname === "/tui/submit-prompt") {
-      // attach된 세션에 모델이 동작한 것으로 간주 (TUI 화면).
-      if (scenario === "a-ok" && attachedSid) {
-        setTimeout(() => {
-          push(attachedSid, toolPart());
-        }, 30);
+      // attach된 세션에 모델이 동작한 것으로 간주 (TUI 화면). 동기 push.
+      if (scenario === "a-ok" && opts.attachedSid) {
+        push(opts.attachedSid, toolPart(opts.attachedSid));
       }
       send(200, true);
+      return;
+    }
+    if (req.method === "GET" && url.pathname === "/event") {
+      // M7-0 §5: server.connected + message.part.updated (part 안에 sessionID·tool).
+      const lines: string[] = [
+        'event: server.connected\ndata: {"type":"server.connected"}',
+      ];
+      for (const [sid, parts] of store) {
+        for (const p of parts) {
+          if (p["type"] !== "tool") continue;
+          lines.push(
+            `event: message.part.updated\ndata: ${JSON.stringify({
+              type: "message.part.updated",
+              properties: { sessionID: sid, part: p },
+            })}`,
+          );
+        }
+      }
+      res.writeHead(200, {
+        "content-type": "text/event-stream",
+        "cache-control": "no-cache",
+      });
+      res.end(lines.join("\n\n") + "\n\n");
       return;
     }
     send(404, { error: "nope" });
@@ -93,8 +148,13 @@ function startFake(
       const port = typeof addr === "object" && addr ? addr.port : 0;
       resolve({
         baseUrl: `http://127.0.0.1:${port}`,
-        close: () => new Promise<void>((r) => server.close(() => r())),
+        close: () =>
+          new Promise<void>((r) => {
+            server.closeAllConnections();
+            server.close(() => r());
+          }),
         requests,
+        bodies,
         partsOf,
       });
     });
@@ -105,10 +165,9 @@ let pfdir: string;
 beforeEach(() => {
   pfdir = join(mkdtempSync(join(tmpdir(), "pf-m71l-")), ".procforge");
 });
-afterEach(() => {});
 
 describe("M7-1 opencode-link", () => {
-  it("B-ok: 전송→pf 출현→delivered+짝짓기", async () => {
+  it("B-ok: 실측형 body→pf 출현→delivered+짝짓기", async () => {
     const fake = await startFake("b-ok");
     try {
       const paired: [string, string][] = [];
@@ -119,16 +178,9 @@ describe("M7-1 opencode-link", () => {
         mode: "b",
         timeoutMs: 2000,
         pollMs: 25,
+        serverVersion: "1.18.18",
         deps: {
-          hasPfCall: async (sid) =>
-            fake
-              .partsOf(sid)
-              .some(
-                (p) =>
-                  p["type"] === "tool" &&
-                  String(p["tool"] ?? "").includes("pf_"),
-              ),
-          readPfSessionId: async (sid) => extractPfSessionId(fake.partsOf(sid)),
+          ...httpLinkDeps(fake.baseUrl),
           onPairing: (a, b) => {
             paired.push([a, b]);
             savePairing(pfdir, a, b);
@@ -136,6 +188,13 @@ describe("M7-1 opencode-link", () => {
         },
       });
       expect(r).toEqual({ delivered: true, mode: "b" });
+      // M7-0 실측형 body 확인.
+      expect(fake.bodies).toHaveLength(1);
+      const sent = fake.bodies[0] as {
+        prompt: { text: string; parts: { type: string; text: string }[] };
+      };
+      expect(sent.prompt.text).toBe("계속");
+      expect(sent.prompt.parts).toEqual([{ type: "text", text: "계속" }]);
       expect(paired).toEqual([["ses-a", "pf-fake-1"]]);
       expect(getPairing(pfdir, "ses-a")?.pfSessionId).toBe("pf-fake-1");
     } finally {
@@ -143,7 +202,42 @@ describe("M7-1 opencode-link", () => {
     }
   });
 
-  it("B-plan: pf 출현 없음→degraded+복사 문구", async () => {
+  it("B body 변형(parts만)은 400 (실측 재현)", async () => {
+    const fake = await startFake("b-ok");
+    try {
+      const r = await fetch(`${fake.baseUrl}/session/ses-x/message`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ parts: [{ type: "text", text: "계속" }] }),
+      });
+      expect(r.status).toBe(400);
+    } finally {
+      await fake.close();
+    }
+  });
+
+  it("미확인 버전: 전송 없이 C 문구", async () => {
+    const fake = await startFake("b-ok");
+    try {
+      const r = await sendContinue({
+        baseUrl: fake.baseUrl,
+        openCodeSessionId: "ses-v",
+        text: "계속",
+        mode: "b",
+        timeoutMs: 500,
+        pollMs: 25,
+        serverVersion: "9.9.9",
+        deps: { ...httpLinkDeps(fake.baseUrl) },
+      });
+      expect(r.delivered).toBe(false);
+      if (!r.delivered) expect(r.degraded).toMatch(/미확인 버전/);
+      expect(fake.requests).toEqual([]);
+    } finally {
+      await fake.close();
+    }
+  });
+
+  it("B-plan: 텍스트만 응답→pf 0건→degraded+복사 문구", async () => {
     const fake = await startFake("plan");
     try {
       const r = await sendContinue({
@@ -153,10 +247,7 @@ describe("M7-1 opencode-link", () => {
         mode: "b",
         timeoutMs: 300,
         pollMs: 25,
-        deps: {
-          hasPfCall: async () => false,
-          readPfSessionId: async () => undefined,
-        },
+        deps: { ...httpLinkDeps(fake.baseUrl) },
       });
       expect(r.delivered).toBe(false);
       if (!r.delivered) {
@@ -164,13 +255,17 @@ describe("M7-1 opencode-link", () => {
         expect(r.copyText).toContain("계속");
         expect(r.copyText).toContain("계속'이라고 입력하세요");
       }
+      // plan 모드도 텍스트 part는 쌓인다 (pf_*만 없음).
+      expect(
+        fake.partsOf("ses-p").some((p) => p["type"] === "text"),
+      ).toBe(true);
     } finally {
       await fake.close();
     }
   });
 
   it("A-ok: append+submit→delivered", async () => {
-    const fake = await startFake("a-ok", "ses-a2");
+    const fake = await startFake("a-ok", { attachedSid: "ses-a2" });
     try {
       const r = await sendContinue({
         baseUrl: fake.baseUrl,
@@ -179,21 +274,12 @@ describe("M7-1 opencode-link", () => {
         mode: "a",
         timeoutMs: 2000,
         pollMs: 25,
-        deps: {
-          hasPfCall: async (sid) =>
-            fake
-              .partsOf(sid)
-              .some(
-                (p) =>
-                  p["type"] === "tool" &&
-                  String(p["tool"] ?? "").includes("pf_"),
-              ),
-          readPfSessionId: async (sid) => extractPfSessionId(fake.partsOf(sid)),
-        },
+        deps: { ...httpLinkDeps(fake.baseUrl) },
       });
       expect(r).toEqual({ delivered: true, mode: "a" });
       expect(fake.requests).toContain("POST /tui/append-prompt");
       expect(fake.requests).toContain("POST /tui/submit-prompt");
+      expect(fake.bodies).toEqual([{ text: "계속" }]);
     } finally {
       await fake.close();
     }
@@ -217,6 +303,31 @@ describe("M7-1 opencode-link", () => {
       });
       expect(r.delivered).toBe(false);
       expect(fake.requests).toEqual([]);
+    } finally {
+      await fake.close();
+    }
+  });
+
+  it("SSE: message.part.updated에 sessionID·tool 포함", async () => {
+    const fake = await startFake("b-ok");
+    try {
+      const r = await sendContinue({
+        baseUrl: fake.baseUrl,
+        openCodeSessionId: "ses-e",
+        text: "계속",
+        mode: "b",
+        timeoutMs: 2000,
+        pollMs: 25,
+        deps: { ...httpLinkDeps(fake.baseUrl) },
+      });
+      expect(r).toEqual({ delivered: true, mode: "b" });
+      const sse = await (
+        await fetch(`${fake.baseUrl}/event`)
+      ).text();
+      expect(sse).toContain("server.connected");
+      expect(sse).toContain("message.part.updated");
+      expect(sse).toContain("ses-e");
+      expect(sse).toContain("procforge_pf_start");
     } finally {
       await fake.close();
     }
@@ -250,5 +361,102 @@ describe("extractPfSessionId", () => {
       extractPfSessionId([{ type: "tool", tool: "bash" }]),
     ).toBeUndefined();
     expect(extractPfSessionId("junk")).toBeUndefined();
+  });
+});
+
+// ---- App: advise 성공 후에만 신호 + pairings 기록 (UI 배선 없음) ----
+
+function stubCore(opts: { failAdvise?: boolean } = {}) {
+  const node = {
+    id: "1.1",
+    goal: "g",
+    status: "open",
+    depth: 1,
+    dependsOn: [],
+    constraints: [],
+    advice: [],
+    attempts: [],
+  };
+  return {
+    getSession: async () => ({
+      revision: 1,
+      limits: { maxRetries: 2, maxDepth: 5, maxNodes: 50 },
+    }),
+    getNode: async () => node,
+    pfAdvise: async () => {
+      if (opts.failAdvise) throw new Error("advise boom");
+      return {
+        constraints: [],
+        rejected: [],
+        node,
+        revision: 2,
+        changedNodeIds: ["1.1"],
+      };
+    },
+  };
+}
+
+function stubApp(opts: { failAdvise?: boolean } = {}) {
+  return new ProcForgeApp({
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    core: stubCore(opts) as any,
+    procforgeDir: pfdir,
+    projectRoot: pfdir,
+  });
+}
+
+const adviseInput = {
+  sessionId: "pf-sid",
+  nodeId: "1.1",
+  text: "사람 조언",
+} as Parameters<ProcForgeApp["advise"]>[0];
+
+describe("M7-1 adviseAndSignal", () => {
+  it("advise 실패 → 신호 미전송", async () => {
+    const fake = await startFake("b-ok");
+    try {
+      const app = stubApp({ failAdvise: true });
+      await expect(
+        app.adviseAndSignal({
+          ...adviseInput,
+          link: {
+            baseUrl: fake.baseUrl,
+            openCodeSessionId: "ses-f",
+            mode: "b",
+            timeoutMs: 500,
+          },
+        }),
+      ).rejects.toThrow("advise boom");
+      expect(fake.requests).toEqual([]);
+    } finally {
+      await fake.close();
+    }
+  });
+
+  it("advise 성공 → 신호 + 짝짓기 기록, 재연결 latest-wins·이력 보존", async () => {
+    const fake = await startFake("b-ok", { pfIds: ["pf-1", "pf-2"] });
+    try {
+      const app = stubApp();
+      const link = {
+        baseUrl: fake.baseUrl,
+        openCodeSessionId: "ses-g",
+        mode: "b" as const,
+        timeoutMs: 2000,
+      };
+      const r1 = await app.adviseAndSignal({ ...adviseInput, link });
+      expect(r1.signal).toEqual({ delivered: true, mode: "b" });
+      expect(getPairing(pfdir, "ses-g")?.pfSessionId).toBe("pf-1");
+      const r2 = await app.adviseAndSignal({ ...adviseInput, link });
+      expect(r2.signal).toEqual({ delivered: true, mode: "b" });
+      expect(getPairing(pfdir, "ses-g")?.pfSessionId).toBe("pf-2");
+      const all = loadPairings(pfdir);
+      expect(
+        all.history
+          .filter((p) => p.openCodeSessionId === "ses-g")
+          .map((p) => p.pfSessionId),
+      ).toEqual(["pf-1", "pf-2"]);
+    } finally {
+      await fake.close();
+    }
   });
 });

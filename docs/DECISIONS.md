@@ -482,7 +482,13 @@ argv: [...]}` 고정. runner는 run fs에서 직접 실행해 stdout을 golden�
   세션 단위로는 부족하다. UI는 MCP를 거치지 않고 App을 직접 부르니
   actor:"ui"로 표시한다. 한 세션에 connectionId 2개 이상이면 pf_tree/UI에 표시.
   (M7-0 ④에서 확인. conflict→재시도는 스크립트, bad_request→수정은 모델).
-  TUI 기본 내장 서버 포트 4096 확인 (SDK server 기본값).
+   TUI 기본 내장 서버 포트 4096 확인 (SDK server 기본값).
+- [M7-1-신호] B body는 M7-0 §2 실측형 `{"prompt":{text,parts}}`
+  (parts만·text만은 실서버 400. 가짜 서버도 400으로 재현, 테스트 고정).
+  버전은 실측 1.18.18만 허용, 미확인 버전은 전송 없이 C 문구.
+  짝짓기 읽기는 최신 pf_start 기준 (latest-wins) — messages 뒤쪽이 이긴다.
+  advise 실패 시 신호 미전송 (App.adviseAndSignal이 순서 보장).
+  pairings UI 배선은 M7-2로 미룸 (App·pairings.json까지만).
 - [M6.1-신뢰경계] 판정은 local이 하고 core는 그 판정을 믿는다.
   원본을 보내지 않으니 당연한 결과. 다만 클라이언트가 판정을 조작할 수
   있다는 뜻이기도 하니, 판정 신뢰 경계 = 테넌트 자신 으로 명시한다.
