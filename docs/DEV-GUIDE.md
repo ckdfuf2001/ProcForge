@@ -645,3 +645,5 @@ c·d·j는 하네스 과제로 DECISIONS에 기록만.
 | 2026-10-14 | 8 | M6 [x] + M7 신설 (UI 0~6). 신뢰경계·keep-alive·재시도범위 DECISIONS 기록 | M6.1 완료 후속. 4(b) 방식은 M7-0 SDK 확인 결과 보고 결정 |
 | 2026-10-15 | 8 | M7-1 지시 수정: 모드 B>A>C, plan 모드 degraded, 짝짓기 재연결, M5.8(a) [ ] 유지 | M7-0 실측 근거 (webui 5552 대행, TUI 4096 무응답). (a)는 build 세션 1.2·1.3+finalize 남음 |
 | 2026-10-15 | 8 | M5.8.2 [x] 정합화 + M7-1 지시 보강 (저장소 단일화·호출 귀속·짝짓기 분리) | ec592a0 코드 head, b2a74e2(docs만) run 38429848946 success. M7-1 에이전트 투입 전 준비 |
+| 2026-10-16 | 8 | M5.8 (c) 3회차 (날짜 바뀐 뒤 1회) exit 0 + 사실확인 정정 (81행은 2회차 파일, 3회차는 fixture 시드 36행에서 시작 — 동일 파일 누적 미검증. 1_1.py 변경 후 approve 재생성, 해시 일치 — 승인 정상) | run c448fa05, docs/M5.8-opencode-e2e.md 3회차 절. 8절 (b)(c)(d) 충족·(a)만 남음 |
+| 2026-10-16 | 8 | M7-1 묶음 완료 (6 저장소 PROCFORGE_DIR 통일·7 connectionId·연결 B/A/C+plan 가짜서버 E2E·adviseAndSignal·pairings latest-wins) | e170d59 run 38768687844 + d5d7003 run 38807322716 success. pairings UI 배선은 M7-2, M5.8(a)는 M7-1 뒤 build 세션 |
