@@ -76,3 +76,16 @@
 4. `GET /api/session/:id/message` (소규모 세션), 대용량은 `opencode export`.
 5. `GET /event` (curl `--max-time 10`).
 6. `POST /tui/append-prompt` (`{"text": ...}` → `true`).
+
+## M7-1 지시서 추가분 (SSE 도구 이벤트)
+
+`GET /event` SSE에서 도구 실행 시 이벤트가 오는지 실측한다.
+모델이 도구를 호출하는 동안 스트림을 열어둔다 (curl `--max-time`으로 구간 캡처).
+
+- 찾는 것: `message.part.updated` (또는 tool 관련 type)에
+  sessionID·tool 이름·상태(시작/종료)가 들어 있는지.
+- 있으면: 짝짓기 2(b)(사용자가 UI에서 세션 선택)의 대안 경로가 된다.
+  UI가 SSE를 보고 "지금 도는 세션 + 도구"를 자동으로 가리킬 수 있기 때문.
+  이 경우 DECISIONS에 "SSE 도구 이벤트 = 짝짓기 대안 경로"로 기록한다.
+  (관측된 type 목록과 필드 포함. R1~R4 불변: 상태 변경은 pf_advise로만)
+- 없으면: 2(b) 유지 (사용자 선택 또는 session.create 직접 생성).
