@@ -1,5 +1,10 @@
 import { z } from "zod";
-import { NodeSchema, type Constraint, type Node, type Session } from "@procforge/shared/schema.js";
+import {
+  NodeSchema,
+  type Constraint,
+  type Node,
+  type Session,
+} from "@procforge/shared/schema.js";
 
 // 응답 크기 축소용 요약 뷰 (M2.5-5). full 노드는 pf_get_node에서만.
 
@@ -15,9 +20,13 @@ export function constraintSummary(c: Constraint): string {
     case "regex":
       return `pattern=${s["pattern"]}`;
     case "count":
-      return s["exact"] !== undefined ? `exact=${s["exact"]}` : `min=${s["min"] ?? "-"} max=${s["max"] ?? "-"}`;
+      return s["exact"] !== undefined
+        ? `exact=${s["exact"]}`
+        : `min=${s["min"] ?? "-"} max=${s["max"] ?? "-"}`;
     case "numeric_match":
-      return s["expected"] !== undefined ? `expected=${s["expected"]}` : `min=${s["min"] ?? "-"} max=${s["max"] ?? "-"}`;
+      return s["expected"] !== undefined
+        ? `expected=${s["expected"]}`
+        : `min=${s["min"] ?? "-"} max=${s["max"] ?? "-"}`;
     case "pptx_table_sum":
       return `path=${s["path"]} expected=${s["expected"]}`;
     case "csv_rows":
@@ -29,7 +38,11 @@ export function constraintSummary(c: Constraint): string {
   }
 }
 
-export const ConstraintSummarySchema = z.object({ id: z.string(), kind: z.string(), summary: z.string() });
+export const ConstraintSummarySchema = z.object({
+  id: z.string(),
+  kind: z.string(),
+  summary: z.string(),
+});
 export const AttemptSummarySchema = z.object({
   id: z.string(),
   at: z.string(),
@@ -55,7 +68,10 @@ export function retriesLeft(node: Node, limits: Session["limits"]): number {
   return Math.max(0, limits.maxRetries + 1 - node.attempts.length);
 }
 
-export function nodeSummary(node: Node, limits: Session["limits"]): NodeSummary {
+export function nodeSummary(
+  node: Node,
+  limits: Session["limits"],
+): NodeSummary {
   const last = node.attempts[node.attempts.length - 1];
   return {
     id: node.id,
@@ -63,10 +79,20 @@ export function nodeSummary(node: Node, limits: Session["limits"]): NodeSummary 
     status: node.status,
     depth: node.depth,
     dependsOn: node.dependsOn,
-    constraints: node.constraints.map((c) => ({ id: c.id, kind: c.kind, summary: constraintSummary(c) })),
+    constraints: node.constraints.map((c) => ({
+      id: c.id,
+      kind: c.kind,
+      summary: constraintSummary(c),
+    })),
     advice: node.advice,
     lastAttempt: last
-      ? { id: last.id, at: last.at, tool: last.tool, verdict: last.verdict, failedConstraints: last.failedConstraints }
+      ? {
+          id: last.id,
+          at: last.at,
+          tool: last.tool,
+          verdict: last.verdict,
+          failedConstraints: last.failedConstraints,
+        }
       : null,
     retriesLeft: retriesLeft(node, limits),
   };
@@ -75,7 +101,11 @@ export function nodeSummary(node: Node, limits: Session["limits"]): NodeSummary 
 // ---- 도구별 outputSchema (계약 테스트와 공유) ----
 
 export const ErrorEnvelopeShape = z.object({
-  error: z.object({ code: z.string(), message: z.string(), hint: z.string().optional() }),
+  error: z.object({
+    code: z.string(),
+    message: z.string(),
+    hint: z.string().optional(),
+  }),
 });
 
 export const PfStartOutputSchema = z.object({
@@ -85,12 +115,20 @@ export const PfStartOutputSchema = z.object({
   warnings: z.array(z.string()),
   sessionExpiresInDays: z.number(),
   opencodeVersion: z.string().optional(),
+  /** 실제 저장소 경로 (M7-1-6, TUI/webui 갈라짐 방지 확인용) */
+  storeDir: z.string(),
 });
 export const PfNextOutputSchema = z.object({
   done: z.boolean(),
   node: NodeSummarySchema.optional(),
   blocked: z
-    .array(z.object({ nodeId: z.string(), waitingOn: z.array(z.string()), reason: z.string() }))
+    .array(
+      z.object({
+        nodeId: z.string(),
+        waitingOn: z.array(z.string()),
+        reason: z.string(),
+      }),
+    )
     .optional(),
   instruction: z.string().optional(),
   enteredProbing: z.boolean().optional(),
@@ -185,7 +223,11 @@ export const PfApproveOutputSchema = z.object({
   revision: z.number().optional(),
   changedNodeIds: z.array(z.string()).optional(),
 });
-export const CatalogEntrySummarySchema = z.object({ server: z.string(), name: z.string(), schemaHash: z.string() });
+export const CatalogEntrySummarySchema = z.object({
+  server: z.string(),
+  name: z.string(),
+  schemaHash: z.string(),
+});
 export const PfRefreshCatalogOutputSchema = z.object({
   entries: z.array(CatalogEntrySummarySchema),
   warnings: z.array(z.string()),

@@ -1,7 +1,11 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { NodeIdSchema, SessionIdSchema, ConstraintSchema } from "@procforge/shared/schema.js";
+import {
+  NodeIdSchema,
+  SessionIdSchema,
+  ConstraintSchema,
+} from "@procforge/shared/schema.js";
 import {
   AdviseInputSchema,
   ApproveInputSchema,
@@ -27,9 +31,13 @@ import {
 } from "@procforge/shared/dto.js";
 import { errorCodeOf } from "@procforge/shared/errors.js";
 import { logger } from "./logger.js";
+import { detectDuplicateStores } from "./store-dir.js";
 import { OUTPUT_SCHEMAS } from "./app/surface.js";
 import { logEvent } from "./app/surface.js";
-import { PfRunNextMcpOutputSchema, PfRunSupplyMcpOutputSchema } from "./app/surface.js";
+import {
+  PfRunNextMcpOutputSchema,
+  PfRunSupplyMcpOutputSchema,
+} from "./app/surface.js";
 import { APP_METHODS } from "./app/tools.js";
 import type { ProcForgeApp } from "./app/app.js";
 import { PROMPT_TEXT, DEFAULT_SESSION_TTL_MS } from "./app/app.js";
@@ -40,6 +48,8 @@ export type ServerDeps = {
   app: ProcForgeApp;
   procforgeDir: string;
   readOnly?: boolean;
+  /** 중복 저장소 감지용 (M7-1-6, 생략 시 cwd) */
+  projectRoot?: string;
 };
 
 /** 도구 등록 순서 (결정적, 스냅샷 테스트 대상) */
@@ -71,7 +81,8 @@ export const READ_ONLY_TOOLS = ["pf_tree", "pf_get_node"] as const;
 
 export const HINTS: Record<string, string> = {
   bad_request: "입력을 고쳐 재호출하라.",
-  bad_args: "등록된 인자만 사용하라. 오타·유사 키를 확인하고 pf_confirm_leaf 재호출.",
+  bad_args:
+    "등록된 인자만 사용하라. 오타·유사 키를 확인하고 pf_confirm_leaf 재호출.",
   conflict: "pf_tree로 현재 상태를 확인하고 상태에 맞는 도구를 호출하라.",
   not_found: "pf_tree로 id를 확인하라.",
   session_not_found: "pf_start로 새 세션을 시작하라.",
@@ -84,9 +95,19 @@ export const HINTS: Record<string, string> = {
 
 function errResult(e: unknown) {
   const code = errorCodeOf(e);
-  const hint = (e as { hint?: string } | null)?.hint ?? HINTS[code] ?? HINTS["internal"];
-  const message = code === "internal" ? "내부 오류가 발생했다." : e instanceof Error ? e.message : String(e);
-  if (code === "internal") logger.error("internal", e instanceof Error ? (e.stack ?? e.message) : String(e));
+  const hint =
+    (e as { hint?: string } | null)?.hint ?? HINTS[code] ?? HINTS["internal"];
+  const message =
+    code === "internal"
+      ? "내부 오류가 발생했다."
+      : e instanceof Error
+        ? e.message
+        : String(e);
+  if (code === "internal")
+    logger.error(
+      "internal",
+      e instanceof Error ? (e.stack ?? e.message) : String(e),
+    );
   // 에러에는 structuredContent를 붙이지 않는다. SDK 출력 검증이 object 스키마만
   // 지원하고, 엄격한 클라이언트는 에러 봉투를 성공 스키마로 검증해 실제 에러를
   // -32602로 가린다. 형식 고정 (M5.3-0-3): 첫 줄 "<code>: <message>",
@@ -94,7 +115,10 @@ function errResult(e: unknown) {
   const hintText = `${hint}`.trim();
   // M5.3-6: message 내 줄바꿈은 "; "로 치환 (1줄 계약).
   const oneLine = `${message}`.replace(/\r?\n/g, "; ");
-  const text = hintText.length > 0 ? `${code}: ${oneLine}\nhint: ${hintText}` : `${code}: ${oneLine}`;
+  const text =
+    hintText.length > 0
+      ? `${code}: ${oneLine}\nhint: ${hintText}`
+      : `${code}: ${oneLine}`;
   return {
     isError: true as const,
     content: [{ type: "text" as const, text }],
@@ -102,26 +126,43 @@ function errResult(e: unknown) {
 }
 
 function ok(payload: Record<string, unknown>) {
-  return { content: [{ type: "text" as const, text: JSON.stringify(payload) }], structuredContent: payload };
+  return {
+    content: [{ type: "text" as const, text: JSON.stringify(payload) }],
+    structuredContent: payload,
+  };
 }
 
-const READ_ONLY_ANN = { readOnlyHint: true, idempotentHint: true, openWorldHint: false };
-const WRITE_ANN = { readOnlyHint: false, destructiveHint: false, openWorldHint: false };
+const READ_ONLY_ANN = {
+  readOnlyHint: true,
+  idempotentHint: true,
+  openWorldHint: false,
+};
+const WRITE_ANN = {
+  readOnlyHint: false,
+  destructiveHint: false,
+  openWorldHint: false,
+};
 
 export function buildServer(deps: ServerDeps): McpServer {
   const server = new McpServer({ name: "procforge-local", version: "0.2.0" });
   const { app } = deps;
-  const enabled = (name: string) => !deps.readOnly || (READ_ONLY_TOOLS as readonly string[]).includes(name);
+  const enabled = (name: string) =>
+    !deps.readOnly || (READ_ONLY_TOOLS as readonly string[]).includes(name);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const R = (name: string, config: any, cb: any) => {
-    if (enabled(name)) server.registerTool(name, config, logged(name, cb) as never);
+    if (enabled(name))
+      server.registerTool(name, config, logged(name, cb) as never);
   };
   // M4.2-4-3: APP_METHODS 디스패치 (1:1 매핑 단일 원천).
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const H = (name: keyof typeof APP_METHODS) => async (a: any) => {
     try {
       const method = APP_METHODS[name] as keyof ProcForgeApp;
-      return ok((await (app[method] as (arg: any) => Promise<Record<string, unknown>>)(a)) as Record<string, unknown>);
+      return ok(
+        (await (app[method] as (arg: any) => Promise<Record<string, unknown>>)(
+          a,
+        )) as Record<string, unknown>,
+      );
     } catch (e) {
       return errResult(e);
     }
@@ -130,9 +171,17 @@ export function buildServer(deps: ServerDeps): McpServer {
   // M5.8.1-6: actor + MCP initialize clientInfo 기록. clientInfo는
   // underlying Server.getClientVersion()에서 읽는다 (판단 없음, 전달만).
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const clientFields = (): { clientName: string; clientVersion: string } | Record<string, never> => {
+  const clientFields = ():
+    { clientName: string; clientVersion: string } | Record<string, never> => {
     try {
-      const cv = (server as unknown as { server?: { getClientVersion?: () => { name: string; version: string } | undefined } }).server?.getClientVersion?.();
+      const cv = (
+        server as unknown as {
+          server?: {
+            getClientVersion?: () =>
+              { name: string; version: string } | undefined;
+          };
+        }
+      ).server?.getClientVersion?.();
       if (cv && typeof cv.name === "string" && typeof cv.version === "string") {
         return { clientName: cv.name, clientVersion: cv.version };
       }
@@ -143,9 +192,15 @@ export function buildServer(deps: ServerDeps): McpServer {
   };
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const logged = (name: string, cb: any) => async (a: any, extra: any) => {
-    const r = (await cb(a, extra)) as { isError?: boolean; structuredContent?: { sessionId?: string } };
+    const r = (await cb(a, extra)) as {
+      isError?: boolean;
+      structuredContent?: { sessionId?: string };
+    };
     try {
-      const sid = (a.sessionId as string | undefined) ?? r.structuredContent?.sessionId ?? "";
+      const sid =
+        (a.sessionId as string | undefined) ??
+        r.structuredContent?.sessionId ??
+        "";
       if (sid) {
         logEvent(deps.procforgeDir, {
           at: new Date().toISOString(),
@@ -153,7 +208,10 @@ export function buildServer(deps: ServerDeps): McpServer {
           sessionId: sid,
           nodeId: a.nodeId as string | undefined,
           ok: !r.isError,
-          actor: typeof (a as { actor?: unknown }).actor === "string" ? (a as { actor: string }).actor : "host",
+          actor:
+            typeof (a as { actor?: unknown }).actor === "string"
+              ? (a as { actor: string }).actor
+              : "host",
           ...clientFields(),
         });
       }
@@ -170,9 +228,9 @@ export function buildServer(deps: ServerDeps): McpServer {
       description: [
         "새 분해 세션을 시작한다.",
         "선수 호출: 없음. 요청 1건당 세션 1개.",
-        "request(필수, 예: \"9월 월간보고서\"), params(선택, 예: {\"month\":\"2026-09\"}),",
+        'request(필수, 예: "9월 월간보고서"), params(선택, 예: {"month":"2026-09"}),',
         "toolCatalog(선택, 생략 시 자동 수집), seedFiles(선택, sandbox에 복사할 참조 파일),",
-        "limits(선택, 예: {\"maxDepth\":5,\"maxRetries\":2,\"maxNodes\":50}).",
+        'limits(선택, 예: {"maxDepth":5,"maxRetries":2,"maxNodes":50}).',
         "세션·루트 노드·수행 지침 반환. 세션은 30일 미사용 시 만료. 다음: pf_next.",
       ].join("\n"),
       inputSchema: StartInputSchema,
@@ -181,7 +239,11 @@ export function buildServer(deps: ServerDeps): McpServer {
     },
     // M5.8.1-6: 세션 메타·버전 판별용 clientInfo를 App 입력에 전달 (서버가 기입, 판단 없음).
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (async (a: any) => H("pf_start")({ ...(a as Record<string, unknown>), ...clientFields() })) as never,
+    (async (a: any) =>
+      H("pf_start")({
+        ...(a as Record<string, unknown>),
+        ...clientFields(),
+      })) as never,
   );
 
   R(
@@ -226,8 +288,8 @@ export function buildServer(deps: ServerDeps): McpServer {
       description: [
         "노드를 하위 작업으로 나눈다.",
         "선수: pf_next. 도구 1회로 안 될 때.",
-        "children(필수, 최소 1개, 예: [{\"goal\":\"슬라이드 목록 읽기\"}]).",
-        "외부 부작용 자식은 sideEffect 지정 (예: {\"goal\":\"발송\", \"sideEffect\":\"external\"}).",
+        'children(필수, 최소 1개, 예: [{"goal":"슬라이드 목록 읽기"}]).',
+        '외부 부작용 자식은 sideEffect 지정 (예: {"goal":"발송", "sideEffect":"external"}).',
         "부모와 생성된 자식 반환. 다음: pf_next로 자식 처리.",
       ].join("\n"),
       inputSchema: SplitInputSchema,
@@ -245,12 +307,12 @@ export function buildServer(deps: ServerDeps): McpServer {
         "통과한 시도를 leaf로 확정한다.",
         "선수: pf_report(verdict=pass).",
         "tool(마지막 실행과 동일), argSpecs(필수, 실행 인자 키 전체를 fixed/var/generated/script로 분류,",
-        "예: {\"month\":{\"kind\":\"var\",\"ref\":\"${params.month}\"}}), ignore(선택, 비교 제외 JSON 경로).",
+        '예: {"month":{"kind":"var","ref":"${params.month}"}}), ignore(선택, 비교 제외 JSON 경로).',
         "var/generated ref는 실제 params 키·노드 출력이어야 하며, 무관한 ref는 재바인딩을 깨뜨린다.",
         "sideEffect(선택): external 노드는 pf_confirm_leaf에 sideEffect 전달.",
         "external은 직접 실행·보고 금지 — dry-run 계획을 pf_ask_human으로 보고하고",
         "pf_approve 승인 후 확정한다 (미승인 확정 거부).",
-        "bash로 실행한 것은 script leaf로 확정하라 (kind:\"script\", scripts/<노드>.py|mjs).",
+        'bash로 실행한 것은 script leaf로 확정하라 (kind:"script", scripts/<노드>.py|mjs).',
         "runner 실행 불가 도구(opencode/bash 등)는 확정 거부된다 (allowBash opt-in 제외).",
         "leaf 확정과 golden 기록 반환. 다음: pf_next.",
       ].join("\n"),
@@ -319,9 +381,9 @@ export function buildServer(deps: ServerDeps): McpServer {
       description: [
         "사람 조언을 조건으로 등록한다.",
         "선수: needs_human 노드.",
-        "text(필수, 예: \"매출은 세전 기준\"), proposedConstraints(선택, 호스트 제안 조건 배열).",
+        'text(필수, 예: "매출은 세전 기준"), proposedConstraints(선택, 호스트 제안 조건 배열).',
         "제안은 최신 fixture로 평가해 채택/거부. needs_human이면 open 복귀. 다음: pf_next.",
-        "금액 비교 제안 시 expected에 참조 허용 (\"$노드.필드\" 약식, \"${params.x}\").",
+        '금액 비교 제안 시 expected에 참조 허용 ("$노드.필드" 약식, "${params.x}").',
       ].join("\n"),
       inputSchema: AdviseInputSchema,
       outputSchema: OUTPUT_SCHEMAS["pf_advise"] as never,
@@ -422,7 +484,7 @@ export function buildServer(deps: ServerDeps): McpServer {
         "goal(선택), addConstraints(선택), removeConstraintIds(선택, 하나 이상 필요).",
         "map/until/stateWrites/retry/dependsOn(선택, 해당 선언 설정).",
         "dependsOn은 기존 노드만 지정, 자기 참조·순환이면 거부. 변경 시 하류 stale 전파.",
-        "retry는 script 노드 전용 멱등 선언 (예: {\"attempts\": 3}).",
+        'retry는 script 노드 전용 멱등 선언 (예: {"attempts": 3}).',
         "목표 변경 시 leaf는 open으로. 다음: pf_next.",
       ].join("\n"),
       inputSchema: EditNodeInputSchema,
@@ -444,7 +506,11 @@ export function buildServer(deps: ServerDeps): McpServer {
       ].join("\n"),
       inputSchema: RefreshCatalogInputSchema,
       outputSchema: OUTPUT_SCHEMAS["pf_refresh_catalog"] as never,
-      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        openWorldHint: false,
+      },
     },
     H("pf_refresh_catalog"),
   );
@@ -463,7 +529,11 @@ export function buildServer(deps: ServerDeps): McpServer {
       ].join("\n"),
       inputSchema: TestInputSchema,
       outputSchema: OUTPUT_SCHEMAS["pf_test"] as never,
-      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        openWorldHint: false,
+      },
     },
     H("pf_test"),
   );
@@ -539,13 +609,23 @@ export function buildServer(deps: ServerDeps): McpServer {
     {
       title: "분해 루프 안내",
       description: "ProcForge 분해 루프 안내를 받는다. 세션 시작 전 1회.",
-      argsSchema: { request: z.string().optional(), params: z.string().optional() },
+      argsSchema: {
+        request: z.string().optional(),
+        params: z.string().optional(),
+      },
     },
     async (args) => {
-      const r = (args as { request?: string; params?: string } | undefined)?.request;
+      const r = (args as { request?: string; params?: string } | undefined)
+        ?.request;
       return {
         messages: [
-          { role: "user", content: { type: "text", text: r ? `${PROMPT_TEXT}\n\n요청: ${r}` : PROMPT_TEXT } },
+          {
+            role: "user",
+            content: {
+              type: "text",
+              text: r ? `${PROMPT_TEXT}\n\n요청: ${r}` : PROMPT_TEXT,
+            },
+          },
         ],
       };
     },
@@ -557,5 +637,14 @@ export function buildServer(deps: ServerDeps): McpServer {
 export async function runStdio(deps: ServerDeps): Promise<void> {
   const server = buildServer(deps);
   await server.connect(new StdioServerTransport());
-  logger.info("procforge-local started", { readOnly: deps.readOnly ?? false });
+  // M7-1-6: 실제 저장소 경로를 시작 로그에. 2곳이면 경고.
+  logger.info("procforge-local started", {
+    readOnly: deps.readOnly ?? false,
+    storeDir: deps.procforgeDir,
+  });
+  const dup = detectDuplicateStores(
+    deps.projectRoot ?? process.cwd(),
+    deps.procforgeDir,
+  );
+  if (dup) logger.warn("duplicate store", { warning: dup });
 }

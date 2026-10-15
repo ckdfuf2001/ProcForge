@@ -1,5 +1,6 @@
 import { parseArgs } from "node:util";
 import { resolve } from "node:path";
+import { resolveStoreDir } from "../store-dir.js";
 
 // CLI 인자 파싱 (M4.2-4-1). 어댑터는 node:util 직접 import 없이 이 모듈을 쓴다.
 
@@ -30,7 +31,10 @@ export type CliValues = {
   "allow-unverified"?: boolean;
 };
 
-export function parseCliArgs(argv: string[]): { values: CliValues; positionals: string[] } {
+export function parseCliArgs(argv: string[]): {
+  values: CliValues;
+  positionals: string[];
+} {
   const { values, positionals } = parseArgs({
     args: argv,
     options: {
@@ -68,8 +72,15 @@ export function resolveDirs(
   values: CliValues,
   env: NodeJS.ProcessEnv,
 ): { projectRoot: string; procforgeDir: string } {
-  const projectRoot = resolve(values["project-root"] ?? env.PROCFORGE_PROJECT_ROOT ?? process.cwd());
-  const procforgeDir = resolve(values["procforge-dir"] ?? env.PROCFORGE_DIR ?? `${projectRoot}/.procforge`);
+  const projectRoot = resolve(
+    values["project-root"] ?? env.PROCFORGE_PROJECT_ROOT ?? process.cwd(),
+  );
+  // M7-1-6: PROCFORGE_HOME 우선 (opencode.json MCP env로 저장소 고정).
+  const procforgeDir = resolveStoreDir({
+    flag: values["procforge-dir"],
+    env,
+    cwd: projectRoot,
+  });
   return { projectRoot, procforgeDir };
 }
 

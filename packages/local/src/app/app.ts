@@ -208,6 +208,8 @@ export class ProcForgeApp {
         (this.sessionTtlMs ?? DEFAULT_SESSION_TTL_MS) / 86400000,
       ),
       opencodeVersion: out.session.opencodeVersion ?? "unknown",
+      // M7-1-6: 실제 저장소 경로 (어느 저장소에 생겼는지 호출자가 확인).
+      storeDir: this.procforgeDir,
     };
   }
 
