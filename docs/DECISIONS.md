@@ -466,15 +466,22 @@ argv: [...]}` 고정. runner는 run fs에서 직접 실행해 stdout을 golden�
   신호 후 60초 안에 해당 세션 pf_* 호출 0건이면 degraded
   ("모델 무응답/plan 모드 의심")+C 문구. 가짜 서버 E2E에 plan 모드
   (텍스트만 응답) 케이스 추가.
-- [M7-1] 짝짓기 재연결: OpenCode 세션이 바뀌어도 새 세션 첫 pf_* 호출의
-  ProcForge sessionId로 pairings.json 갱신, 이력 보존.
-  사례: 207a8f93(TUI 분해, repo 저장소, rev 5, open) → 5762fb44
-  (webui 대행 분해, workspace 저장소, leaf 진행). 전환이 아니라 별개
-  분해 2건 병행이었음. 같은 ProcForge 세션을 가리키게 되면 latest-wins.
-- [M7-1] calls.jsonl 귀속 한계: actor·clientName은 세션 단위 기록이라
-  외부 직접 호출(MCP 우회)과 모델 MCP 호출을 구분 못 한다
+- [M7-1] 짝짓기 재연결(latest-wins): OpenCode 세션 1개 ↔ ProcForge 세션 1개를
+  다시 짝지을 때의 규칙. 새 세션 첫 pf_* 호출의 ProcForge sessionId로
+  pairings.json 갱신, 이력 보존.
+- [M7-1] 병행 세션은 저장소 위치 문제다: 같은 작업인데 TUI 쪽은 repo 저장소,
+  webui 쪽은 workspace 저장소에 따로 기록됐다 (207a8f93 rev 5 open vs
+  5762fb44 leaf 진행). MCP 서버가 실행 위치(cwd) 기준으로 `.procforge/`를
+  찾기 때문으로 보임. UI는 한쪽 저장소만 보면 다른 쪽 세션이 화면에서 사라진다.
+- [M7-1-저장소] 저장소 경로를 `opencode.json`의 MCP env(`PROCFORGE_HOME`)로
+  명시하고, 기본값 규칙을 하나로 정한다. 서버 시작 로그·`pf_start` 응답에
+  실제 저장소 경로를 넣는다. 같은 프로젝트에서 저장소 2개가 감지되면 경고한다.
+- [M7-1] calls.jsonl 귀속: 세션 단위가 아니라 호출마다 다음 두 가지를 남긴다.
+  연결 id (MCP 연결마다 `randomUUID`로 부여) + 그 연결의 clientInfo.
+  스크립트가 MCP로 호출하면 그 호출도 `opencode 1.18.18`로 찍힐 수 있어서
+  세션 단위로는 부족하다. UI는 MCP를 거치지 않고 App을 직접 부르니
+  actor:"ui"로 표시한다. 한 세션에 connectionId 2개 이상이면 pf_tree/UI에 표시.
   (M7-0 ④에서 확인. conflict→재시도는 스크립트, bad_request→수정은 모델).
-  UI 직접 호출은 actor 표기가 필요 ("ui" 등. MCP recorded와 구분).
   TUI 기본 내장 서버 포트 4096 확인 (SDK server 기본값).
 - [M6.1-신뢰경계] 판정은 local이 하고 core는 그 판정을 믿는다.
   원본을 보내지 않으니 당연한 결과. 다만 클라이언트가 판정을 조작할 수
