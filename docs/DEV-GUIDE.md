@@ -578,14 +578,14 @@ c·d·j는 하네스 과제로 DECISIONS에 기록만.
 | M5.6.1 | 재시도·승인 다듬기 | [x] | `9dcc1c3` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38172339664 | isError 판별·정규식 상한·기본값 고정·범위 경고 |
 | M5.7 | 감사·종료·재시도 | [x] | `8075046` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38177878319 | 결정종 단언·fail-on-unverified·script opt-in |
 | M5.7.1 | rubric 경고·unverified 옵션 정리 | [x] | `0651476` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38203088600 | finalize rubric 경고(`a8b11da`)·--allow-unverified 단일화(`e413eb8`) |
-| M5.8 | OpenCode 실제 E2E | [ ] | | | (a) TUI+dist MCP 분해 (b) advise 부분 stale (c) finalize→무수정 approve→서로 다른 UTC 날짜 2회 unattended exit 0 (d) docs/M5.8-opencode-e2e.md 기록 — (b)(c)(d) 충족. 남음: (a) 1.1만 leaf, 외부 조언 혼입 (webui 대행, build 세션에서 1.2·1.3+finalize 필요. 조언은 사용자 것만. M7-1 저장소 통일 뒤 수행) — 사용자 수행 |
+| M5.8 | OpenCode 실제 E2E | [ ] | | | (a) TUI+dist MCP 분해 (b) advise 부분 stale (c) finalize→무수정 approve→서로 다른 UTC 날짜 2회 unattended exit 0 (d) docs/M5.8-opencode-e2e.md 기록 — (b)(c)(d) 충족. 남음: (a) 1.1만 leaf, 외부 조언 혼입 (webui 대행, build 세션에서 1.2·1.3+finalize 필요. 조언은 사용자 것만. M7-0.1 저장소 통일 뒤 수행) — 사용자 수행 |
 | M5.8.1 | E2E 실행벽 해소 | [x] | `de9f004` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38401689793 | 0 사실확인·6 호출주체·1 실행불가 leaf 거부·2 메시지 정정·3 finalize 원인수정(manifest 복사)·4 dependsOn 편집 |
 | M5.8.2 | E2E 2회차 후속 | [x] | `ec592a0` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38429848946 | 0 사실확인·1 ref 의미·2 probing/run 차단·3 script 승인·4 csv_rows·5 주석 정정 + 후속(golden 기준·검증불가·R8 분리·stable). 코드 head 기준, 최종 head b2a74e2(docs만) CI success |
 | M6 | 원격 core | [x] | `9458704` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38604361482 | 0~6 + M6.1 후속(1~5) 완료 (docs/REVIEW-M6.md) |
 | M6.1 | 원격 core 후속 | [x] | `9458704` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38604361482 | 1 egress R8·2 전체 remote+egress 단언·3 재시도 제거·4 인증·5 공개유지 (docs/REVIEW-M6.md) |
-| M7 | UI | [ ] | | | 0 SDK 확인(opencode serve 세션 메시지·pf_next 재개) · 1 `procforge ui` 로컬 서버+SPA · 2 트리+SSE · 3 노드 상세 · 4 텍스트 편집/의견+stale 미리보기 · 5 실행 화면 · 6 Playwright E2E |
-| M7-1 | OpenCode 연결 (UI 없이 App·CLI까지) | [ ] | | | B/A/C 신호+plan degraded+짝짓기 latest-wins·이력+저장소 PROCFORGE_DIR 통일+connectionId 기록 — d5d7003 선행 구현에서 실서버 오동작 6건 발견되어 M7-1.1로 보정 중 (9절) |
-| M7-1.1 | "계속" 신호 실서버 보정 | [x] | `d73988f` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38814839031 | 1 plan 감지 기준점 · 2 버전 default-deny · 3 짝 검증 · 4 실서버 4조합 확정(msg+parts) · 5 R5 생성자 주입 · 6 SSE 우선·폴링 폴백 (+tsc narrowing 빌드 수정) |
+| M7 | UI | [ ] | | | 0 SDK 확인(opencode serve 세션 메시지·pf_next 재개) · 1 `procforge ui` 로컬 서버+SPA+pairings 세션 목록 배선 · 2 트리+SSE · 3 노드 상세 · 4 텍스트 편집/의견+stale 미리보기 · 5 실행 화면 · 6 Playwright E2E |
+| M7-0.1 | OpenCode 연결 (UI 없이 App·CLI까지) | [ ] | | | B/A/C 신호+plan degraded+짝짓기 latest-wins·이력+저장소 PROCFORGE_DIR 통일+connectionId 기록 — d5d7003 선행 구현에서 실서버 오동작 6건 발견되어 M7-0.2로 보정 완료 (9절) |
+| M7-0.2 | "계속" 신호 실서버 보정 | [x] | `d73988f` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38814839031 | 1 plan 감지 기준점 · 2 버전 default-deny · 3 짝 검증 · 4 실서버 4조합 확정(msg+parts) · 5 R5 생성자 주입 · 6 SSE 우선·폴링 폴백 (+tsc narrowing 빌드 수정) |
 
 ---
 
@@ -650,3 +650,4 @@ c·d·j는 하네스 과제로 DECISIONS에 기록만.
 | 2026-10-16 | 8 | M5.8 (c) 3회차 (날짜 바뀐 뒤 1회) exit 0 + 사실확인 정정 (81행은 2회차 파일, 3회차는 fixture 시드 36행에서 시작 — 동일 파일 누적 미검증. 1_1.py 변경 후 approve 재생성, 해시 일치 — 승인 정상) | run c448fa05, docs/M5.8-opencode-e2e.md 3회차 절. 8절 (b)(c)(d) 충족·(a)만 남음 |
 | 2026-10-16 | 8 | M7-1 묶음 완료 (6 저장소 PROCFORGE_DIR 통일·7 connectionId·연결 B/A/C+plan 가짜서버 E2E·adviseAndSignal·pairings latest-wins) | e170d59 run 38768687844 + d5d7003 run 38807322716 success. pairings UI 배선은 M7-2, M5.8(a)는 M7-1 뒤 build 세션 |
 | 2026-10-16 | 8 | M7-1 [ ] 환원 + M7-1.1 신설 ("계속" 신호 실서버 보정 6건: plan 기준점·버전 조회·짝 검증·실서버 4조합·R5·SSE 우선) | d5d7003 선행 구현이 실서버에서 틀어짐 (빈 세션 가짜 테스트가 가림). M5.8(a)는 신호 코드와 무관해 병행 가능 |
+| 2026-10-16 | 8 | 8절 번호 충돌 정리: "M7-1 OpenCode 연결"→"M7-0.1", "M7-1.1"→"M7-0.2" (M7 1번과 번호 겹침 해소. 9절·DECISIONS 태그는 이력 유지). pairings 화면 배선은 M7 1번에 포함 | M7-0.2는 [x] 유지 (6건 완료·run 38814839031 success). 코드 변경 없음 |
