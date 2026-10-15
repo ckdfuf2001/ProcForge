@@ -585,7 +585,7 @@ c·d·j는 하네스 과제로 DECISIONS에 기록만.
 | M6.1 | 원격 core 후속 | [x] | `9458704` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38604361482 | 1 egress R8·2 전체 remote+egress 단언·3 재시도 제거·4 인증·5 공개유지 (docs/REVIEW-M6.md) |
 | M7 | UI | [ ] | | | 0 SDK 확인(opencode serve 세션 메시지·pf_next 재개) · 1 `procforge ui` 로컬 서버+SPA · 2 트리+SSE · 3 노드 상세 · 4 텍스트 편집/의견+stale 미리보기 · 5 실행 화면 · 6 Playwright E2E |
 | M7-1 | OpenCode 연결 (UI 없이 App·CLI까지) | [ ] | | | B/A/C 신호+plan degraded+짝짓기 latest-wins·이력+저장소 PROCFORGE_DIR 통일+connectionId 기록 — d5d7003 선행 구현에서 실서버 오동작 6건 발견되어 M7-1.1로 보정 중 (9절) |
-| M7-1.1 | "계속" 신호 실서버 보정 | [ ] | | | 1 plan 감지 기준점(이후 새 pf_*만) · 2 버전 미지정시 조회·불가=미확인→C · 3 짝 검증(다르면 무전송+C) · 4 실서버 4조합 확정 · 5 R5(fetch/deps 생성자 주입) · 6 SSE 우선·폴링 폴백 |
+| M7-1.1 | "계속" 신호 실서버 보정 | [x] | `d73988f` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38814839031 | 1 plan 감지 기준점 · 2 버전 default-deny · 3 짝 검증 · 4 실서버 4조합 확정(msg+parts) · 5 R5 생성자 주입 · 6 SSE 우선·폴링 폴백 (+tsc narrowing 빌드 수정) |
 
 ---
 
