@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { resolveStoreDir, detectDuplicateStores } from "./store-dir.js";
-import { createApp } from "./app/bootstrap.js";
+import { createApp } from "./bootstrap.js";
 
 // M7-1-6: 저장소 위치 단일화.
 

@@ -2,7 +2,7 @@
 import { resolve } from "node:path";
 import { createApp, DEFAULT_SESSION_TTL_MS } from "./app/bootstrap.js";
 import { runStdio } from "./server.js";
-import { resolveStoreDir } from "./store-dir.js";
+import { resolveStoreDir } from "./app/store-dir.js";
 
 const projectRoot = resolve(
   process.env.PROCFORGE_PROJECT_ROOT ?? process.argv[2] ?? process.cwd(),

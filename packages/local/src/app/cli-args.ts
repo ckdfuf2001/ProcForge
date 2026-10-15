@@ -1,6 +1,6 @@
 import { parseArgs } from "node:util";
 import { resolve } from "node:path";
-import { resolveStoreDir } from "../store-dir.js";
+import { resolveStoreDir } from "./store-dir.js";
 
 // CLI 인자 파싱 (M4.2-4-1). 어댑터는 node:util 직접 import 없이 이 모듈을 쓴다.
 

@@ -1,5 +1,6 @@
 import { existsSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { randomUUID } from "node:crypto";
 
 // M7-1-6: 저장소 위치 단일화. MCP 서버가 실행 위치(cwd) 기준으로
 // `.procforge/`를 찾아 TUI와 webui가 서로 다른 저장소에 쓰는 사고가 났다.
@@ -22,6 +23,11 @@ export function resolveStoreDir(opts: {
   if (home) return resolve(join(home, ".procforge"));
   if (env.PROCFORGE_DIR) return resolve(env.PROCFORGE_DIR);
   return resolve(join(cwd, ".procforge"));
+}
+
+/** 연결 id 발급 (M7-1-7. 어댑터는 node: 직접 import 금지라 여기서 제공) */
+export function newConnectionId(): string {
+  return randomUUID();
 }
 
 /** 세션 존재 여부 (저장소 판별용) */

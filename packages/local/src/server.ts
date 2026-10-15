@@ -31,8 +31,7 @@ import {
 } from "@procforge/shared/dto.js";
 import { errorCodeOf } from "@procforge/shared/errors.js";
 import { logger } from "./logger.js";
-import { detectDuplicateStores } from "./store-dir.js";
-import { randomUUID } from "node:crypto";
+import { detectDuplicateStores, newConnectionId } from "./app/store-dir.js";
 import { OUTPUT_SCHEMAS } from "./app/surface.js";
 import { logEvent } from "./app/surface.js";
 import {
@@ -150,7 +149,7 @@ export function buildServer(deps: ServerDeps): McpServer {
   const server = new McpServer({ name: "procforge-local", version: "0.2.0" });
   const { app } = deps;
   // M7-1-7: 연결마다 id 부여 (호출 귀속). 생략 시 서버당 1개 발급.
-  const connectionId = deps.connectionId ?? randomUUID();
+  const connectionId = deps.connectionId ?? newConnectionId();
   const enabled = (name: string) =>
     !deps.readOnly || (READ_ONLY_TOOLS as readonly string[]).includes(name);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
