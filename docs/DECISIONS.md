@@ -483,9 +483,19 @@ argv: [...]}` 고정. runner는 run fs에서 직접 실행해 stdout을 golden�
   actor:"ui"로 표시한다. 한 세션에 connectionId 2개 이상이면 pf_tree/UI에 표시.
   (M7-0 ④에서 확인. conflict→재시도는 스크립트, bad_request→수정은 모델).
    TUI 기본 내장 서버 포트 4096 확인 (SDK server 기본값).
-- [M7-1-신호] B body는 M7-0 §2 실측형 `{"prompt":{text,parts}}`
-  (parts만·text만은 실서버 400. 가짜 서버도 400으로 재현, 테스트 고정).
-  버전은 실측 1.18.18만 허용, 미확인 버전은 전송 없이 C 문구.
+- [M7-1-신호] B는 `POST /session/:id/message` + `{parts}`
+  (M7-1.1 실서버 1.18.18 확인: 200. `{"prompt":{...}}` 래퍼는 이 경로에서
+  400 — 래퍼는 `/api/session/:id/prompt`용. M7-0 §B에 측정 기록).
+- [M7-1.1-1] plan 감지는 신호 전 기준점 이후의 새 pf_*만 센다.
+  짝 세션의 기존 pf_start 때문에 항상 통과하던 문제를 막는다.
+- [M7-1.1-2] 버전 default-deny. serverVersion 없으면 미확인→무전송+C.
+  호출자가 연결의 clientInfo 버전을 넣는다 (읽지 못하면 넣지 마라).
+- [M7-1.1-3] 신호 전 짝 검증. pairings의 pfSessionId ≠ 조언 세션이면
+  무전송+C ("다른 세션과 짝"). 짝이 없으면 허용 (첫 신호가 짝을 만든다).
+  재연결은 OpenCode 세션의 새 pf_start가 먼저 관찰돼 짝이 갱신된 뒤 허용.
+- [M7-1.1-5] R5: adviseAndSignal 입력은 JSON만. fetch 주입은 App 생성자.
+- [M7-1.1-6] 감지는 SSE message.part.updated 우선, messages 폴링은 폴백
+  (대용량 세션 빈 페이지 오탐 회피. M7-0 §3).
   짝짓기 읽기는 최신 pf_start 기준 (latest-wins) — messages 뒤쪽이 이긴다.
   advise 실패 시 신호 미전송 (App.adviseAndSignal이 순서 보장).
   pairings UI 배선은 M7-2로 미룸 (App·pairings.json까지만).

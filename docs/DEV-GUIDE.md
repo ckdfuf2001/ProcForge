@@ -584,6 +584,8 @@ c·d·j는 하네스 과제로 DECISIONS에 기록만.
 | M6 | 원격 core | [x] | `9458704` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38604361482 | 0~6 + M6.1 후속(1~5) 완료 (docs/REVIEW-M6.md) |
 | M6.1 | 원격 core 후속 | [x] | `9458704` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38604361482 | 1 egress R8·2 전체 remote+egress 단언·3 재시도 제거·4 인증·5 공개유지 (docs/REVIEW-M6.md) |
 | M7 | UI | [ ] | | | 0 SDK 확인(opencode serve 세션 메시지·pf_next 재개) · 1 `procforge ui` 로컬 서버+SPA · 2 트리+SSE · 3 노드 상세 · 4 텍스트 편집/의견+stale 미리보기 · 5 실행 화면 · 6 Playwright E2E |
+| M7-1 | OpenCode 연결 (UI 없이 App·CLI까지) | [ ] | | | B/A/C 신호+plan degraded+짝짓기 latest-wins·이력+저장소 PROCFORGE_DIR 통일+connectionId 기록 — d5d7003 선행 구현에서 실서버 오동작 6건 발견되어 M7-1.1로 보정 중 (9절) |
+| M7-1.1 | "계속" 신호 실서버 보정 | [ ] | | | 1 plan 감지 기준점(이후 새 pf_*만) · 2 버전 미지정시 조회·불가=미확인→C · 3 짝 검증(다르면 무전송+C) · 4 실서버 4조합 확정 · 5 R5(fetch/deps 생성자 주입) · 6 SSE 우선·폴링 폴백 |
 
 ---
 
@@ -647,3 +649,4 @@ c·d·j는 하네스 과제로 DECISIONS에 기록만.
 | 2026-10-15 | 8 | M5.8.2 [x] 정합화 + M7-1 지시 보강 (저장소 단일화·호출 귀속·짝짓기 분리) | ec592a0 코드 head, b2a74e2(docs만) run 38429848946 success. M7-1 에이전트 투입 전 준비 |
 | 2026-10-16 | 8 | M5.8 (c) 3회차 (날짜 바뀐 뒤 1회) exit 0 + 사실확인 정정 (81행은 2회차 파일, 3회차는 fixture 시드 36행에서 시작 — 동일 파일 누적 미검증. 1_1.py 변경 후 approve 재생성, 해시 일치 — 승인 정상) | run c448fa05, docs/M5.8-opencode-e2e.md 3회차 절. 8절 (b)(c)(d) 충족·(a)만 남음 |
 | 2026-10-16 | 8 | M7-1 묶음 완료 (6 저장소 PROCFORGE_DIR 통일·7 connectionId·연결 B/A/C+plan 가짜서버 E2E·adviseAndSignal·pairings latest-wins) | e170d59 run 38768687844 + d5d7003 run 38807322716 success. pairings UI 배선은 M7-2, M5.8(a)는 M7-1 뒤 build 세션 |
+| 2026-10-16 | 8 | M7-1 [ ] 환원 + M7-1.1 신설 ("계속" 신호 실서버 보정 6건: plan 기준점·버전 조회·짝 검증·실서버 4조합·R5·SSE 우선) | d5d7003 선행 구현이 실서버에서 틀어짐 (빈 세션 가짜 테스트가 가림). M5.8(a)는 신호 코드와 무관해 병행 가능 |

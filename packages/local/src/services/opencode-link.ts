@@ -9,10 +9,8 @@ export type LinkResult =
 
 export type LinkDeps = {
   fetchImpl?: typeof fetch;
-  /** 해당 OpenCode 세션에 pf_* 호출이 관측되는지 (폴링 주입) */
-  hasPfCall: (openCodeSessionId: string) => Promise<boolean>;
-  /** 최신 ProcForge sessionId 추출 (주입. messages/export 훑기) */
-  readPfSessionId: (openCodeSessionId: string) => Promise<string | undefined>;
+  /** 세션 part 목록 (신호 전 기준점·신호 후 새 호출 감지용) */
+  listParts: (openCodeSessionId: string) => Promise<unknown[]>;
   /** 짝짓기 갱신 (주입. savePairing) */
   onPairing?: (openCodeSessionId: string, pfSessionId: string) => void;
   /** 실측 버전 목록 (미지정 시 M7-0 실측 1.18.18만 허용) */
@@ -75,49 +73,103 @@ export function extractPfSessionId(parts: unknown): string | undefined {
 
 /**
  * M7-0 실측형 읽기. GET /session/:id/message → {data: parts[]}.
- * 대용량 세션은 빈 페이지를 돌려줄 수 있어 (M7-0 §3) export/검색으로
- * 바꿔야 한다. 기본값일 뿐, 주입(deps)으로 교체 가능.
+ * 대용량 세션은 빈 페이지를 돌려줄 수 있어 (M7-0 §3) 폴백일 뿐이다.
+ * 1순위는 SSE message.part.updated (아래 sseNewPfCall).
  */
 export function httpLinkDeps(
   baseUrl: string,
   fetchImpl?: typeof fetch,
-): Pick<LinkDeps, "hasPfCall" | "readPfSessionId"> {
+): Pick<LinkDeps, "listParts"> {
   const doFetch = fetchImpl ?? fetch;
   const base = baseUrl.replace(/\/$/, "");
-  const loadParts = async (sid: string): Promise<unknown> => {
-    try {
+  return {
+    listParts: async (sid) => {
       const r = await doFetch(
         `${base}/session/${encodeURIComponent(sid)}/message`,
         { headers: { accept: "application/json" } },
       );
-      if (!r.ok) return undefined;
-      return (await r.json()) as unknown;
-    } catch {
-      return undefined;
+      if (!r.ok) return [];
+      const v = (await r.json()) as unknown;
+      if (v !== null && typeof v === "object") {
+        const data = (v as Record<string, unknown>)["data"];
+        if (Array.isArray(data)) return data;
+      }
+      return [];
+    },
+  };
+}
+
+/** pf_ tool part 판정 */
+export function isPfToolPart(p: unknown): boolean {
+  return (
+    p !== null &&
+    typeof p === "object" &&
+    (p as Record<string, unknown>)["type"] === "tool" &&
+    String((p as Record<string, unknown>)["tool"] ?? "").includes("pf_")
+  );
+}
+
+/** 최신 pf_start 기준 sessionId (latest-wins. 재연결 시 새 세션이 이긴다) */
+export function readLatestPfSessionId(parts: unknown[]): string | undefined {
+  return extractPfSessionId([...parts].reverse());
+}
+
+/**
+ * SSE 1순위 감지. GET /event에서 message.part.updated를 읽어
+ * 기준점 이후의 새 pf_ 호출이면 true. 스트림 종료·에러·기한 초과는
+ * false (폴링 폴백으로 넘긴다).
+ */
+async function sseNewPfCall(o: {
+  baseUrl: string;
+  sid: string;
+  before: Set<string>;
+  until: number;
+  fetchImpl: typeof fetch;
+}): Promise<boolean> {
+  const ctrl = new AbortController();
+  const timer = setTimeout(
+    () => ctrl.abort(),
+    Math.max(0, o.until - Date.now()),
+  );
+  try {
+    const r = await o.fetchImpl(`${o.baseUrl}/event`, {
+      headers: { accept: "text/event-stream" },
+      signal: ctrl.signal,
+    });
+    if (!r.ok || !r.body) return false;
+    const reader = r.body.getReader();
+    const dec = new TextDecoder();
+    let buf = "";
+    for (;;) {
+      if (Date.now() >= o.until) return false;
+      const { done, value } = await reader.read();
+      if (done) return false;
+      buf += dec.decode(value, { stream: true });
+      const blocks = buf.split("\n\n");
+      buf = blocks.pop() ?? "";
+      for (const b of blocks) {
+        const m = /^event: ([^\n]+)\ndata: ([\s\S]*)$/.exec(b.trim());
+        if (!m || m[1] !== "message.part.updated") continue;
+        try {
+          const ev = JSON.parse(m[2]) as {
+            properties?: { sessionID?: unknown; part?: unknown };
+          };
+          const props = ev.properties;
+          if (props?.sessionID !== o.sid) continue;
+          const part = props?.part;
+          if (!isPfToolPart(part)) continue;
+          if (o.before.has(JSON.stringify(part))) continue;
+          return true;
+        } catch {
+          // 다음 블록
+        }
+      }
     }
-  };
-  const partsOf = (v: unknown): unknown[] => {
-    if (v !== null && typeof v === "object") {
-      const data = (v as Record<string, unknown>)["data"];
-      if (Array.isArray(data)) return data;
-    }
-    return [];
-  };
-  return {
-    hasPfCall: async (sid) =>
-      partsOf(await loadParts(sid)).some(
-        (p) =>
-          p !== null &&
-          typeof p === "object" &&
-          (p as Record<string, unknown>)["type"] === "tool" &&
-          String((p as Record<string, unknown>)["tool"] ?? "").includes(
-            "pf_",
-          ),
-      ),
-    readPfSessionId: async (sid) =>
-      // 짝짓기는 최신 pf_start 기준 (latest-wins. 재연결 시 새 세션이 이긴다).
-      extractPfSessionId([...partsOf(await loadParts(sid))].reverse()),
-  };
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /**
@@ -133,7 +185,7 @@ export async function sendContinue(opts: {
   mode: LinkMode;
   timeoutMs?: number;
   pollMs?: number;
-  /** 연결의 OpenCode 버전 (미지정 시 판정 생략) */
+  /** 연결의 OpenCode 버전 (연결의 clientInfo에서 호출자가 넣어라. 없으면 미확인→C) */
   serverVersion?: string;
   deps: LinkDeps;
 }): Promise<LinkResult> {
@@ -144,20 +196,29 @@ export async function sendContinue(opts: {
     copyText: `${opts.text}\n${CONTINUE_COPY_FALLBACK}`,
   });
   if (!sid || opts.mode === "c") return fail("연결 없음");
-  // M7-0 실측 1.18.18 외 버전은 경로·body가 다를 수 있어 전송하지 않는다.
+  // M7-1.1: default-deny. 버전을 모르면 가장 위험하니 전송하지 않는다.
+  // 호출자(UI/CLI)가 연결의 clientInfo 버전(server.ts getClientVersion)을 넣는다.
+  if (opts.serverVersion === undefined) return fail("버전 미확인. 전송하지 않음");
   const known = opts.deps.knownVersions ?? ["1.18.18"];
-  if (
-    opts.serverVersion !== undefined &&
-    !known.some((v) => opts.serverVersion === v)
-  ) {
+  if (!known.some((v) => opts.serverVersion === v)) {
     return fail(`미확인 버전(${opts.serverVersion}). 전송하지 않음`);
   }
   const doFetch = opts.deps.fetchImpl ?? fetch;
   const base = opts.baseUrl.replace(/\/$/, "");
+  // M7-1.1-1: 신호 전 기준점. 이미 있는 pf_start 때문에 항상 통과하던
+  // 문제를 막는다. 이후에 생긴 pf_*만 새 호출로 센다.
+  let before = new Set<string>();
+  try {
+    const parts = await opts.deps.listParts(sid);
+    before = new Set(parts.filter(isPfToolPart).map((p) => JSON.stringify(p)));
+  } catch {
+    before = new Set();
+  }
   if (opts.mode === "b") {
-    // M7-0 §2 실측형: {"prompt":{text,parts}} 래퍼 필수 (parts만·text만은 400).
+    // M7-1.1 실서버 확인 (1.18.18): POST /session/:id/message + {parts} → 200.
+    // {"prompt":{...}} 래퍼는 이 경로에서 400 (래퍼는 /api/session/:id/prompt용).
     const r = await postJson(doFetch, `${base}/session/${sid}/message`, {
-      prompt: { text: opts.text, parts: [{ type: "text", text: opts.text }] },
+      parts: [{ type: "text", text: opts.text }],
     });
     if (!r.ok) return fail("전송 실패");
   } else {
@@ -171,9 +232,15 @@ export async function sendContinue(opts: {
   const timeoutMs = opts.timeoutMs ?? 60000;
   const pollMs = opts.pollMs ?? 1000;
   const deadline = Date.now() + timeoutMs;
+  const isNewPfCall = (parts: unknown[]): boolean =>
+    parts.some((p) => isPfToolPart(p) && !before.has(JSON.stringify(p)));
+  // M7-1.1-6: SSE 1순위, messages 폴링은 폴백 (대용량 세션 빈 페이지 오탐 회피).
+  if (await sseNewPfCall({ baseUrl: base, sid, before, until: deadline, fetchImpl: doFetch })) {
+    return paired();
+  }
   for (;;) {
     try {
-      if (await opts.deps.hasPfCall(sid)) break;
+      if (isNewPfCall(await opts.deps.listParts(sid))) return paired();
     } catch {
       // 폴링 실패 무시
     }
@@ -182,12 +249,16 @@ export async function sendContinue(opts: {
     }
     await new Promise((r) => setTimeout(r, pollMs));
   }
-  // 짝짓기 갱신 (best-effort).
-  try {
-    const pfSid = await opts.deps.readPfSessionId(sid);
-    if (pfSid) opts.deps.onPairing?.(sid, pfSid);
-  } catch {
-    // 무시
+
+  async function paired(): Promise<LinkResult> {
+    // 짝짓기 갱신 (best-effort).
+    try {
+      const parts = await opts.deps.listParts(sid);
+      const pfSid = readLatestPfSessionId(parts);
+      if (pfSid) opts.deps.onPairing?.(sid, pfSid);
+    } catch {
+      // 무시
+    }
+    return { delivered: true, mode: opts.mode };
   }
-  return { delivered: true, mode: opts.mode };
 }

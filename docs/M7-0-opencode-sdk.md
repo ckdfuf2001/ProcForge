@@ -118,3 +118,15 @@
 - SDK server 기본값 4096 확인. TUI URL이 localhost:4096인 것과 일치.
 - 단, TUI 프로세스 응답 없음 상태에서는 LISTEN만 되고 HTTP 무응답.
   이 경우 TUI 재시작 후 attach.
+
+## M7-1.1 경로·body 4조합 확인 (1.18.18, `serve --port 40999`, 2026-10-16)
+
+- `POST /session/:id/message` + `{parts}` → **200**
+  (assistant msg 생성, mode/agent build).
+- `POST /session/:id/message` + `{"prompt":{text,parts}}` → **400**.
+- `POST /api/session/:id/prompt` + `{parts}` → **400**.
+- `POST /api/session/:id/prompt` + `{"prompt":{text,parts}}` → **200**
+  (`admittedSeq`, §2와 일치).
+- 결론: B는 `/session/:id/message` + `{parts}`로 고정.
+  `{"prompt":{...}}` 래퍼를 message 경로에 붙인 구현(d5d7003)은
+  실서버에서 400이 나므로 M7-1.1에서 원복. 가짜 서버도 이 조합으로 재현.

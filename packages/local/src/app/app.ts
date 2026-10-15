@@ -36,11 +36,10 @@ import { seedSandbox } from "../services/workspace.js";
 import {
   sendContinue,
   httpLinkDeps,
-  type LinkDeps,
   type LinkMode,
   type LinkResult,
 } from "../services/opencode-link.js";
-import { savePairing } from "../services/pairings.js";
+import { savePairing, getPairing } from "../services/pairings.js";
 import { logger } from "../logger.js";
 import {
   diffSnapshot,
@@ -143,6 +142,8 @@ export type AppDeps = {
   maxArtifactBytes?: number;
   /** 카탈로그 수집 타임아웃 (M3.5.1-4) */
   catalogTimeoutMs?: number;
+  /** M7-1.1-5: 신호 전송용 fetch (R5. 테스트 주입은 생성자로만. 입력은 JSON) */
+  linkFetchImpl?: typeof fetch;
 };
 
 export class ProcForgeApp {
@@ -153,6 +154,7 @@ export class ProcForgeApp {
   private strictSandbox: boolean;
   private maxArtifactBytes: number;
   private catalogTimeoutMs: number | undefined;
+  private linkFetchImpl: typeof fetch | undefined;
 
   constructor(deps: AppDeps) {
     this.core = deps.core;
@@ -162,6 +164,7 @@ export class ProcForgeApp {
     this.strictSandbox = deps.strictSandbox ?? true;
     this.maxArtifactBytes = deps.maxArtifactBytes ?? 5 * 1024 * 1024;
     this.catalogTimeoutMs = deps.catalogTimeoutMs;
+    this.linkFetchImpl = deps.linkFetchImpl;
   }
 
   async start(a: StartInput): Promise<OutputOf<"pf_start">> {
@@ -953,6 +956,8 @@ export class ProcForgeApp {
    * M7-1: 사람 조언 등록 + OpenCode에 "계속" 신호.
    * 상태 변경은 advise로만 하고, advise가 실패(throw)하면 신호를 보내지
    * 않는다. 신호 성공 시 pairings.json에 latest-wins로 기록 (UI 배선 없음).
+   * M7-1.1: 입력 link는 JSON만 (R5). fetch 주입은 생성자로.
+   * 신호 전 짝을 조회해 다른 ProcForge 세션과 짝이면 보내지 않는다.
    */
   async adviseAndSignal(
     a: AdviseInput & {
@@ -962,16 +967,32 @@ export class ProcForgeApp {
         mode: LinkMode;
         text?: string;
         timeoutMs?: number;
+        /** 연결의 clientInfo 버전 (없으면 미확인→C. 호출자가 넣어라) */
         serverVersion?: string;
-        fetchImpl?: typeof fetch;
-        /** 테스트 주입 (미지정 시 http 실측형 기본값) */
-        deps?: Partial<LinkDeps>;
       };
     },
   ): Promise<{ advise: OutputOf<"pf_advise">; signal: LinkResult }> {
     const advised = await this.advise(a);
+    const sid = a.sessionId as string;
     const link = a.link;
-    const http = httpLinkDeps(link.baseUrl, link.fetchImpl);
+    const noSend = (degraded: string): LinkResult => ({
+      delivered: false,
+      degraded,
+      copyText: `${link.text ?? "계속"}\nOpenCode에서 '계속'이라고 입력하세요.`,
+    });
+    // M7-1.1-3: 엉뚱한 세션에 "계속" 금지. 짝이 없으면 허용(첫 신호가 짝을 만든다).
+    if (link.openCodeSessionId) {
+      const pair = getPairing(this.procforgeDir, link.openCodeSessionId);
+      if (pair && pair.pfSessionId !== sid) {
+        return {
+          advise: advised,
+          signal: noSend(
+            `다른 세션과 짝(${pair.pfSessionId}). 전송하지 않음`,
+          ),
+        };
+      }
+    }
+    const http = httpLinkDeps(link.baseUrl, this.linkFetchImpl);
     const signal = await sendContinue({
       baseUrl: link.baseUrl,
       openCodeSessionId: link.openCodeSessionId,
@@ -980,11 +1001,9 @@ export class ProcForgeApp {
       timeoutMs: link.timeoutMs,
       serverVersion: link.serverVersion,
       deps: {
-        fetchImpl: link.fetchImpl,
+        fetchImpl: this.linkFetchImpl,
         ...http,
-        ...link.deps,
         onPairing: (openSid, pfSid) => {
-          link.deps?.onPairing?.(openSid, pfSid);
           savePairing(this.procforgeDir, openSid, pfSid);
         },
       },
