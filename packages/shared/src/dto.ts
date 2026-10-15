@@ -12,8 +12,8 @@ import { PROCEDURE_NAME_RE } from "./procedure.js";
 // CoreClient·MCP outputSchema·UI API 공용 DTO (M4.2-0, 가이드 2절 목표 형태).
 // R5: 입출력 JSON 직렬화 가능 (Date, Map, Buffer, 함수 금지).
 
-/** 변경 주체 (R7 actor) */
-export const ActorSchema = z.enum(["host", "human", "runner"]);
+/** 변경 주체 (R7 actor). ui는 MCP를 거치지 않는 UI 직접 호출 (M7-1-7) */
+export const ActorSchema = z.enum(["host", "human", "runner", "ui"]);
 export type Actor = z.infer<typeof ActorSchema>;
 
 /** 상태 변경 이벤트 1건 (R7, events.jsonl 한 줄). seq == revision */
@@ -58,84 +58,112 @@ export const StartInputSchema = z.object({
   params: z.record(z.string()).optional(),
   toolCatalog: z.array(ToolCatalogEntrySchema).optional(),
   seedFiles: z.array(z.string()).optional(),
-  limits: z.object({ maxDepth: z.number().int().min(1), maxRetries: z.number().int().min(0), maxNodes: z.number().int().min(1) }).optional(),
+  limits: z
+    .object({
+      maxDepth: z.number().int().min(1),
+      maxRetries: z.number().int().min(0),
+      maxNodes: z.number().int().min(1),
+    })
+    .optional(),
   /** MCP initialize clientInfo. 서버가 자동 기입, 모델이 직접 넣지 말 것 (M5.8.1-6) */
   clientName: z.string().optional(),
   clientVersion: z.string().optional(),
 });
 export type StartInput = z.infer<typeof StartInputSchema>;
 
-export const NextInputSchema = z.object({ sessionId: SessionIdSchema }).merge(RevisionOptsSchema);
+export const NextInputSchema = z
+  .object({ sessionId: SessionIdSchema })
+  .merge(RevisionOptsSchema);
 export type NextInput = z.infer<typeof NextInputSchema>;
 
-export const ReportInputSchema = z.object({
-  sessionId: SessionIdSchema,
-  nodeId: NodeIdSchema,
-  tool: ToolRefSchema,
-  args: z.record(z.unknown()),
-  resultSummary: z.string(),
-  resultJson: z.unknown().optional(),
-  artifacts: z.array(z.string()).optional(),
-  selfVerdict: z.enum(["pass", "fail"]),
-  selfReason: z.string().min(1),
-  rubricReasons: z.record(z.string()).optional(),
-}).merge(RevisionOptsSchema);
+export const ReportInputSchema = z
+  .object({
+    sessionId: SessionIdSchema,
+    nodeId: NodeIdSchema,
+    tool: ToolRefSchema,
+    args: z.record(z.unknown()),
+    resultSummary: z.string(),
+    resultJson: z.unknown().optional(),
+    artifacts: z.array(z.string()).optional(),
+    selfVerdict: z.enum(["pass", "fail"]),
+    selfReason: z.string().min(1),
+    rubricReasons: z.record(z.string()).optional(),
+  })
+  .merge(RevisionOptsSchema);
 export type ReportInput = z.infer<typeof ReportInputSchema>;
 
-export const SplitInputSchema = z.object({
-  sessionId: SessionIdSchema,
-  nodeId: NodeIdSchema,
-  children: z.array(z.object({
-    goal: z.string().min(1),
-    dependsOn: z.array(z.string()).optional(),
-    sideEffect: z.enum(["none", "local_write", "external"]).optional(),
-  })).min(1),
-}).merge(RevisionOptsSchema);
+export const SplitInputSchema = z
+  .object({
+    sessionId: SessionIdSchema,
+    nodeId: NodeIdSchema,
+    children: z
+      .array(
+        z.object({
+          goal: z.string().min(1),
+          dependsOn: z.array(z.string()).optional(),
+          sideEffect: z.enum(["none", "local_write", "external"]).optional(),
+        }),
+      )
+      .min(1),
+  })
+  .merge(RevisionOptsSchema);
 export type SplitInput = z.infer<typeof SplitInputSchema>;
 
-export const ConfirmLeafInputSchema = z.object({
-  sessionId: SessionIdSchema,
-  nodeId: NodeIdSchema,
-  tool: ToolRefSchema,
-  argSpecs: z.record(ArgSpecSchema),
-  sideEffect: z.enum(["none", "local_write", "external"]).optional(),
-  ignore: z.array(z.string()).optional(),
-  /** bash leaf opt-in 선언 (절차서 단위 의도, 기본 거부. DECISIONS M5.8.1-1) */
-  allowBash: z.boolean().optional(),
-  /** 엄격 모드 (M5.8.2 후속: ref 검증 불가면 거부) */
-  strict: z.boolean().optional(),
-}).merge(RevisionOptsSchema);
+export const ConfirmLeafInputSchema = z
+  .object({
+    sessionId: SessionIdSchema,
+    nodeId: NodeIdSchema,
+    tool: ToolRefSchema,
+    argSpecs: z.record(ArgSpecSchema),
+    sideEffect: z.enum(["none", "local_write", "external"]).optional(),
+    ignore: z.array(z.string()).optional(),
+    /** bash leaf opt-in 선언 (절차서 단위 의도, 기본 거부. DECISIONS M5.8.1-1) */
+    allowBash: z.boolean().optional(),
+    /** 엄격 모드 (M5.8.2 후속: ref 검증 불가면 거부) */
+    strict: z.boolean().optional(),
+  })
+  .merge(RevisionOptsSchema);
 export type ConfirmLeafInput = z.infer<typeof ConfirmLeafInputSchema>;
 
-export const RetryInputSchema = z.object({
-  sessionId: SessionIdSchema,
-  nodeId: NodeIdSchema,
-  reason: z.string().min(1),
-}).merge(RevisionOptsSchema);
+export const RetryInputSchema = z
+  .object({
+    sessionId: SessionIdSchema,
+    nodeId: NodeIdSchema,
+    reason: z.string().min(1),
+  })
+  .merge(RevisionOptsSchema);
 export type RetryInput = z.infer<typeof RetryInputSchema>;
 
-export const AskHumanInputSchema = z.object({
-  sessionId: SessionIdSchema,
-  nodeId: NodeIdSchema,
-  question: z.string().min(1),
-  plan: z.object({ tool: ToolRefSchema, args: z.record(z.unknown()) }).optional(),
-}).merge(RevisionOptsSchema);
+export const AskHumanInputSchema = z
+  .object({
+    sessionId: SessionIdSchema,
+    nodeId: NodeIdSchema,
+    question: z.string().min(1),
+    plan: z
+      .object({ tool: ToolRefSchema, args: z.record(z.unknown()) })
+      .optional(),
+  })
+  .merge(RevisionOptsSchema);
 export type AskHumanInput = z.infer<typeof AskHumanInputSchema>;
 
-export const ApproveInputSchema = z.object({
-  sessionId: SessionIdSchema,
-  nodeId: NodeIdSchema,
-  approved: z.boolean(),
-  note: z.string().optional(),
-}).merge(RevisionOptsSchema);
+export const ApproveInputSchema = z
+  .object({
+    sessionId: SessionIdSchema,
+    nodeId: NodeIdSchema,
+    approved: z.boolean(),
+    note: z.string().optional(),
+  })
+  .merge(RevisionOptsSchema);
 export type ApproveInput = z.infer<typeof ApproveInputSchema>;
 
-export const AdviseInputSchema = z.object({
-  sessionId: SessionIdSchema,
-  nodeId: NodeIdSchema,
-  text: z.string().min(1),
-  proposedConstraints: z.array(ConstraintSchema).optional(),
-}).merge(RevisionOptsSchema);
+export const AdviseInputSchema = z
+  .object({
+    sessionId: SessionIdSchema,
+    nodeId: NodeIdSchema,
+    text: z.string().min(1),
+    proposedConstraints: z.array(ConstraintSchema).optional(),
+  })
+  .merge(RevisionOptsSchema);
 export type AdviseInput = z.infer<typeof AdviseInputSchema>;
 
 export const TreeInputSchema = z.object({
@@ -147,17 +175,24 @@ export const TreeInputSchema = z.object({
 });
 export type TreeInput = z.infer<typeof TreeInputSchema>;
 
-export const GetNodeInputSchema = z.object({ sessionId: SessionIdSchema, nodeId: NodeIdSchema });
-export type GetNodeInput = z.infer<typeof GetNodeInputSchema>;
-
-export const LockInputSchema = z.object({ sessionId: SessionIdSchema, nodeId: NodeIdSchema }).merge(RevisionOptsSchema);
-export type LockInput = z.infer<typeof LockInputSchema>;
-
-export const ReopenInputSchema = z.object({
+export const GetNodeInputSchema = z.object({
   sessionId: SessionIdSchema,
   nodeId: NodeIdSchema,
-  reason: z.string().min(1),
-}).merge(RevisionOptsSchema);
+});
+export type GetNodeInput = z.infer<typeof GetNodeInputSchema>;
+
+export const LockInputSchema = z
+  .object({ sessionId: SessionIdSchema, nodeId: NodeIdSchema })
+  .merge(RevisionOptsSchema);
+export type LockInput = z.infer<typeof LockInputSchema>;
+
+export const ReopenInputSchema = z
+  .object({
+    sessionId: SessionIdSchema,
+    nodeId: NodeIdSchema,
+    reason: z.string().min(1),
+  })
+  .merge(RevisionOptsSchema);
 export type ReopenInput = z.infer<typeof ReopenInputSchema>;
 
 export const RefreshCatalogInputSchema = z.object({});
@@ -165,7 +200,10 @@ export type RefreshCatalogInput = z.infer<typeof RefreshCatalogInputSchema>;
 
 export const TestInputSchema = z.object({
   sessionId: SessionIdSchema.optional(),
-  procedure: z.string().regex(PROCEDURE_NAME_RE, "procedure 이름 규칙 위반").optional(),
+  procedure: z
+    .string()
+    .regex(PROCEDURE_NAME_RE, "procedure 이름 규칙 위반")
+    .optional(),
   nodeId: NodeIdSchema.optional(),
   params: z.record(z.string()).optional(),
   mode: z.enum(["record", "replay", "passthrough", "live"]).optional(),
@@ -202,31 +240,35 @@ export const RunSupplyInputSchema = z.object({
   value: z.unknown(),
 });
 export type RunSupplyInput = z.infer<typeof RunSupplyInputSchema>;
-export const EditArgsInputSchema = z.object({
-  sessionId: SessionIdSchema,
-  nodeId: NodeIdSchema,
-  patch: z.object({
-    set: z.record(ArgSpecSchema).optional(),
-    remove: z.array(z.string()).optional(),
-  }),
-}).merge(RevisionOptsSchema);
+export const EditArgsInputSchema = z
+  .object({
+    sessionId: SessionIdSchema,
+    nodeId: NodeIdSchema,
+    patch: z.object({
+      set: z.record(ArgSpecSchema).optional(),
+      remove: z.array(z.string()).optional(),
+    }),
+  })
+  .merge(RevisionOptsSchema);
 export type EditArgsInput = z.infer<typeof EditArgsInputSchema>;
 
-export const EditNodeInputSchema = z.object({
-  sessionId: SessionIdSchema,
-  nodeId: NodeIdSchema,
-  goal: z.string().min(1).optional(),
-  addConstraints: z.array(ConstraintSchema).optional(),
-  removeConstraintIds: z.array(z.string()).optional(),
-  /** map 실행 명세 (M5.5-1, kind:"map"과 함께 설정) */
-  map: z.unknown().optional(),
-  /** until 실행 명세 (M5.5-2, kind:"until"과 함께 설정) */
-  until: z.unknown().optional(),
-  /** 실행 간 상태 기록 선언 (M5.5-3) */
-  stateWrites: z.unknown().optional(),
-  /** script 재시도 선언 (M5.7-3, 멱등 opt-in) */
-  retry: z.object({ attempts: z.number().int().min(1).max(10) }).optional(),
-  /** 선행 의존 사후 편집 (M5.8.1-4, 기존 노드만·순환 거부) */
-  dependsOn: z.array(z.string()).optional(),
-}).merge(RevisionOptsSchema);
+export const EditNodeInputSchema = z
+  .object({
+    sessionId: SessionIdSchema,
+    nodeId: NodeIdSchema,
+    goal: z.string().min(1).optional(),
+    addConstraints: z.array(ConstraintSchema).optional(),
+    removeConstraintIds: z.array(z.string()).optional(),
+    /** map 실행 명세 (M5.5-1, kind:"map"과 함께 설정) */
+    map: z.unknown().optional(),
+    /** until 실행 명세 (M5.5-2, kind:"until"과 함께 설정) */
+    until: z.unknown().optional(),
+    /** 실행 간 상태 기록 선언 (M5.5-3) */
+    stateWrites: z.unknown().optional(),
+    /** script 재시도 선언 (M5.7-3, 멱등 opt-in) */
+    retry: z.object({ attempts: z.number().int().min(1).max(10) }).optional(),
+    /** 선행 의존 사후 편집 (M5.8.1-4, 기존 노드만·순환 거부) */
+    dependsOn: z.array(z.string()).optional(),
+  })
+  .merge(RevisionOptsSchema);
 export type EditNodeInput = z.infer<typeof EditNodeInputSchema>;

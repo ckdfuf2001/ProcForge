@@ -32,6 +32,7 @@ import {
 import { errorCodeOf } from "@procforge/shared/errors.js";
 import { logger } from "./logger.js";
 import { detectDuplicateStores } from "./store-dir.js";
+import { randomUUID } from "node:crypto";
 import { OUTPUT_SCHEMAS } from "./app/surface.js";
 import { logEvent } from "./app/surface.js";
 import {
@@ -50,6 +51,8 @@ export type ServerDeps = {
   readOnly?: boolean;
   /** 중복 저장소 감지용 (M7-1-6, 생략 시 cwd) */
   projectRoot?: string;
+  /** MCP 연결 id (M7-1-7. 생략 시 연결마다 randomUUID) */
+  connectionId?: string;
 };
 
 /** 도구 등록 순서 (결정적, 스냅샷 테스트 대상) */
@@ -146,6 +149,8 @@ const WRITE_ANN = {
 export function buildServer(deps: ServerDeps): McpServer {
   const server = new McpServer({ name: "procforge-local", version: "0.2.0" });
   const { app } = deps;
+  // M7-1-7: 연결마다 id 부여 (호출 귀속). 생략 시 서버당 1개 발급.
+  const connectionId = deps.connectionId ?? randomUUID();
   const enabled = (name: string) =>
     !deps.readOnly || (READ_ONLY_TOOLS as readonly string[]).includes(name);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -213,6 +218,7 @@ export function buildServer(deps: ServerDeps): McpServer {
               ? (a as { actor: string }).actor
               : "host",
           ...clientFields(),
+          connectionId,
         });
       }
     } catch {

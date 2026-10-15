@@ -1,4 +1,10 @@
-import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname, join } from "node:path";
 import type { Session } from "@procforge/shared/schema.js";
 import { EventEntrySchema, type EventEntry } from "@procforge/shared/dto.js";
@@ -17,6 +23,8 @@ export type TraceEvent = {
   /** MCP initialize clientInfo (M5.8.1-6) */
   clientName?: string;
   clientVersion?: string;
+  /** MCP 연결 id (M7-1-7. 연결마다 randomUUID. UI 직접 호출은 "ui-<rand>") */
+  connectionId?: string;
 };
 
 export function eventsFile(procforgeDir: string, sessionId: string): string {
@@ -67,7 +75,21 @@ export function logEvent(procforgeDir: string, e: TraceEvent): void {
   }
 }
 
-export function readEvents(procforgeDir: string, sessionId: string): TraceEvent[] {
+/**
+ * 직접 호출 기록 (M7-1-7. MCP를 거치지 않는 UI 경로용).
+ * actor:"ui", connectionId:"ui-<rand>" 형태로 호출자가 지정한다.
+ */
+export function recordCall(
+  procforgeDir: string,
+  e: Omit<TraceEvent, "at"> & { at?: string },
+): void {
+  logEvent(procforgeDir, { ...e, at: e.at ?? new Date().toISOString() });
+}
+
+export function readEvents(
+  procforgeDir: string,
+  sessionId: string,
+): TraceEvent[] {
   migrateCallLog(procforgeDir, sessionId);
   const p = callsFile(procforgeDir, sessionId);
   if (!existsSync(p)) return [];
@@ -97,7 +119,11 @@ export function appendStateEvent(
   sessionId: string,
   entry: Omit<EventEntry, "seq" | "at"> & { at?: string },
 ): EventEntry {
-  const full = EventEntrySchema.parse({ ...entry, seq: entry.revision, at: entry.at ?? new Date().toISOString() });
+  const full = EventEntrySchema.parse({
+    ...entry,
+    seq: entry.revision,
+    at: entry.at ?? new Date().toISOString(),
+  });
   migrateCallLog(procforgeDir, sessionId);
   const p = eventsFile(procforgeDir, sessionId);
   mkdirSync(dirname(p), { recursive: true });
@@ -106,7 +132,10 @@ export function appendStateEvent(
 }
 
 /** R7 상태 이벤트만 읽기 */
-export function readStateEvents(procforgeDir: string, sessionId: string): EventEntry[] {
+export function readStateEvents(
+  procforgeDir: string,
+  sessionId: string,
+): EventEntry[] {
   migrateCallLog(procforgeDir, sessionId);
   const p = eventsFile(procforgeDir, sessionId);
   if (!existsSync(p)) return [];
@@ -132,6 +161,8 @@ export type TraceReport = {
   done: boolean;
   callsTotal: number;
   callsByTool: Record<string, number>;
+  /** 연결별 호출 수 (M7-1-7. 2개 이상이면 끼어들기 의심) */
+  connections: { id: string; calls: number }[];
   nodesTotal: number;
   maxDepth: number;
   statusCounts: Record<string, number>;
@@ -140,7 +171,12 @@ export type TraceReport = {
     id: string;
     goal: string;
     status: string;
-    attempts: { at: string; tool: string; verdict?: string; failedConstraints: string[] }[];
+    attempts: {
+      at: string;
+      tool: string;
+      verdict?: string;
+      failedConstraints: string[];
+    }[];
     advice: { at: string; text: string }[];
     constraints: { id: string; kind: string; source: string }[];
     golden: boolean;
@@ -151,22 +187,46 @@ export type TraceReport = {
   lastAt?: string;
 };
 
-export function buildTrace(procforgeDir: string, sessionId: string): TraceReport {
+export function buildTrace(
+  procforgeDir: string,
+  sessionId: string,
+): TraceReport {
   const store = new FileStore(procforgeDir);
   const session = store.getSession(sessionId);
-  if (!session) throw Object.assign(new Error(`세션 없음: ${sessionId}`), { code: "session_not_found" });
-  const nodes = [...store.getNodes(sessionId).values()].sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
+  if (!session)
+    throw Object.assign(new Error(`세션 없음: ${sessionId}`), {
+      code: "session_not_found",
+    });
+  const nodes = [...store.getNodes(sessionId).values()].sort((a, b) =>
+    a.id.localeCompare(b.id, undefined, { numeric: true }),
+  );
   const events = readEvents(procforgeDir, sessionId);
   const callsByTool: Record<string, number> = {};
   for (const e of events) callsByTool[e.tool] = (callsByTool[e.tool] ?? 0) + 1;
+  // M7-1-7: 연결별 집계 (connectionId 없으면 "local"로 묶음).
+  const byConn = new Map<string, number>();
+  for (const e of events)
+    byConn.set(
+      e.connectionId ?? "local",
+      (byConn.get(e.connectionId ?? "local") ?? 0) + 1,
+    );
+  const connections = [...byConn.entries()]
+    .map(([id, calls]) => ({ id, calls }))
+    .sort((a, b) => b.calls - a.calls);
   // events 누락 시 노드 기록에서 복원
-  const fallbackCalls = nodes.reduce((n, x) => n + x.attempts.length + x.advice.length, 0);
+  const fallbackCalls = nodes.reduce(
+    (n, x) => n + x.attempts.length + x.advice.length,
+    0,
+  );
   const statusCounts: Record<string, number> = {};
   let maxDepth = 0;
   const details = nodes.map((n) => {
     statusCounts[n.status] = (statusCounts[n.status] ?? 0) + 1;
     if (n.depth > maxDepth) maxDepth = n.depth;
-    const times = [...n.attempts.map((a) => a.at), ...n.advice.map((a) => a.at)].sort();
+    const times = [
+      ...n.attempts.map((a) => a.at),
+      ...n.advice.map((a) => a.at),
+    ].sort();
     return {
       id: n.id,
       goal: n.goal,
@@ -178,15 +238,28 @@ export function buildTrace(procforgeDir: string, sessionId: string): TraceReport
         failedConstraints: a.failedConstraints,
       })),
       advice: n.advice,
-      constraints: n.constraints.map((c) => ({ id: c.id, kind: c.kind, source: c.source })),
+      constraints: n.constraints.map((c) => ({
+        id: c.id,
+        kind: c.kind,
+        source: c.source,
+      })),
       golden: !!n.golden,
       firstAt: times[0],
       lastAt: times[times.length - 1],
     };
   });
-  const allTimes = details.flatMap((d) => [d.firstAt, d.lastAt].filter(Boolean) as string[]).sort();
-  const needsHumanNodes = nodes.filter((n) => n.advice.length > 0).map((n) => n.id);
-  const openNodes = nodes.filter((n) => n.status === "open" || n.status === "probing" || n.status === "needs_human");
+  const allTimes = details
+    .flatMap((d) => [d.firstAt, d.lastAt].filter(Boolean) as string[])
+    .sort();
+  const needsHumanNodes = nodes
+    .filter((n) => n.advice.length > 0)
+    .map((n) => n.id);
+  const openNodes = nodes.filter(
+    (n) =>
+      n.status === "open" ||
+      n.status === "probing" ||
+      n.status === "needs_human",
+  );
   return {
     sessionId,
     request: (session as Session).request,
@@ -195,6 +268,7 @@ export function buildTrace(procforgeDir: string, sessionId: string): TraceReport
     done: openNodes.length === 0,
     callsTotal: events.length > 0 ? events.length : fallbackCalls,
     callsByTool,
+    connections,
     nodesTotal: nodes.length,
     maxDepth,
     statusCounts,
@@ -213,24 +287,41 @@ export function formatTraceMarkdown(r: TraceReport): string {
   L.push(`- createdAt: ${r.createdAt}`);
   L.push(`- done: ${r.done}`);
   L.push(`- pf_* 호출 수: ${r.callsTotal} ${JSON.stringify(r.callsByTool)}`);
-  L.push(`- 노드 수: ${r.nodesTotal}, 최대 깊이: ${r.maxDepth}, 상태: ${JSON.stringify(r.statusCounts)}`);
+  // M7-1-7: 연결 2개 이상이면 끼어들기 의심이라 표시.
+  if (r.connections.length > 1) {
+    L.push(
+      `- 연결 ${r.connections.length}개: ${r.connections.map((c) => `${c.id.slice(0, 8)}×${c.calls}`).join(", ")}`,
+    );
+  }
+  L.push(
+    `- 노드 수: ${r.nodesTotal}, 최대 깊이: ${r.maxDepth}, 상태: ${JSON.stringify(r.statusCounts)}`,
+  );
   L.push(`- 사람 개입 노드: ${r.needsHumanNodes.join(", ") || "없음"}`);
   L.push(`- 기간: ${r.firstAt ?? "-"} → ${r.lastAt ?? "-"}`);
   L.push(``, `## 노드`);
   for (const n of r.nodes) {
     L.push(`- ${n.id} [${n.status}] ${n.goal}`);
     for (const a of n.attempts) {
-      L.push(`  - 시도 ${a.at} ${a.tool} verdict=${a.verdict ?? "-"} failed=[${a.failedConstraints.join(",")}]`);
+      L.push(
+        `  - 시도 ${a.at} ${a.tool} verdict=${a.verdict ?? "-"} failed=[${a.failedConstraints.join(",")}]`,
+      );
     }
     for (const ad of n.advice) L.push(`  - 조언 ${ad.at}: ${ad.text}`);
-    if (n.constraints.length > 0) L.push(`  - 조건: ${n.constraints.map((c) => `${c.id}/${c.kind}/${c.source}`).join(", ")}`);
+    if (n.constraints.length > 0)
+      L.push(
+        `  - 조건: ${n.constraints.map((c) => `${c.id}/${c.kind}/${c.source}`).join(", ")}`,
+      );
     if (n.golden) L.push(`  - golden 있음`);
   }
   L.push(``, `## M3.5 측정행`);
   L.push(`| 완주 | 호출 수 | 노드/깊이 | needs_human | 소요 |`);
   L.push(`|---|---|---|---|---|`);
-  L.push(`| ${r.done ? "Y" : "N"} | ${r.callsTotal} | ${r.nodesTotal}/${r.maxDepth} | ${r.needsHumanNodes.join(", ") || "-"} | ${r.firstAt ?? "-"}→${r.lastAt ?? "-"} |`);
-  L.push(`| 지시불이행(수동) | argSpecs정확도(수동) | 토큰(수동) | 압축후행동(수동) |`);
+  L.push(
+    `| ${r.done ? "Y" : "N"} | ${r.callsTotal} | ${r.nodesTotal}/${r.maxDepth} | ${r.needsHumanNodes.join(", ") || "-"} | ${r.firstAt ?? "-"}→${r.lastAt ?? "-"} |`,
+  );
+  L.push(
+    `| 지시불이행(수동) | argSpecs정확도(수동) | 토큰(수동) | 압축후행동(수동) |`,
+  );
   L.push(`| TODO | TODO | TODO | TODO |`);
   return L.join("\n") + "\n";
 }
