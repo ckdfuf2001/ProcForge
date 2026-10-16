@@ -263,7 +263,7 @@ async function cmdUi(): Promise<number> {
   }
   try {
     const { app } = createApp({ procforgeDir, projectRoot });
-    const srv = await createUiServer({ app, procforgeDir, projectRoot, port });
+    const srv = await createUiServer({ app, port });
     const withToken = `${srv.url}#t=${srv.token}`;
     // M7-1: URL+토큰 1회 출력 (토큰은 fragment라 서버 로그·히스토리에 남지 않음).
     console.log(`ui: ${withToken}`);
