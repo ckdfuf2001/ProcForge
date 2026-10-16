@@ -589,6 +589,81 @@ c·d·j는 하네스 과제로 DECISIONS에 기록만.
 
 ---
 
+## M7 UI — 상세 명세 (8절 M7 행의 본문)
+
+### 0. 전제·공통
+- 선행: M7-0.2 [x] (신호 보정). M7 1번은 M7-0.2 green 후 시작.
+- UI는 **어댑터**다 (R3). App 메서드만 호출. core·store·파일 직접 접근 금지.
+  판단 if문 금지 — "이 노드 편집 가능?" 같은 것도 App/core가 답한다.
+- 패키지: `packages/ui` (Vite + React + TypeScript, 빌드 산출물만 local이 정적 서빙).
+  check-deps에 `ui → core`, `ui → local 내부` import 금지 추가. ui는 `shared` DTO만 import.
+- HTTP API = App 메서드 1:1: `POST /api/<method>` (body = shared DTO, zod 양방향 검증).
+  읽기는 GET 허용(`/api/session/:id`, `/api/node/:sid/:nid`). 새 판단이 필요하면 App/CoreClient 메서드를 먼저 만든다.
+- 보안(필수): 127.0.0.1만 바인딩, 실행마다 무작위 토큰(URL fragment로 전달→헤더),
+  Host/Origin 검사(DNS rebinding 차단), 토큰 없음 401·Host 불일치 403 테스트.
+- 동시성: 모든 쓰기는 expectedRevision 포함. conflict면 화면을 다시 읽고 "다른 곳에서 바뀜" 배너
+  (자동 재시도 금지). actor:"ui" 기록.
+- 크기: 트리는 pf_tree 페이지네이션 그대로, attempt 원문은 요청 시 로컬에서만 로드(R8 — 원격 core 모드에서도 원문 송신 0).
+- 문서: 항목마다 8절 체크·9절 이력, 가정은 DECISIONS `[M7-n]`. 끝에 `docs/REVIEW-M7.md`.
+
+### 1. `procforge ui` 서버 + SPA 골격 + 세션 목록
+- `procforge ui [--port 0] [--open]`: 포트 0 기본(OS 할당), 시작 시 URL+토큰 1회 출력.
+- 세션 목록: 저장소(PROCFORGE_DIR) 경로 표시, 세션별 요청문·상태 요약·revision·최근 변경 시각,
+  **pairings 배선**(짝지어진 OpenCode 세션 id, 연결 모드 B/A/C 표시, 이력 보기).
+  한 세션에 connectionId 2개 이상이면 경고 배지.
+- 저장소 2개 감지 경고(M7-0.1의 6번 결과)를 상단에 표시.
+- 테스트: 보안 3종, 목록 API 계약, 빈 저장소, 원격 core 모드에서 동일 동작.
+
+### 2. 트리 + 실시간 갱신(SSE)
+- 트리: id(숫자 정렬)·목표 1줄·상태 색(open/probing/leaf/split/needs_human/failed/stale)·
+  **반복 횟수(attempts 수, retriesLeft)**·locked·sideEffect=external 아이콘.
+  dependsOn은 펼친 leaf 기준 연결선(또는 "의존: 1.2" 텍스트, 그래프 라이브러리는 선택).
+- `GET /api/events/:sid` SSE: events.jsonl tail → `{revision, nodeIds, method, actor}` 전송,
+  클라는 바뀐 노드만 다시 읽음. 연결 끊김 시 마지막 revision부터 재개(Last-Event-ID=revision).
+- needs_human·blocked 노드는 상단 "사람 확인 필요" 목록으로 모음(pfNext blocked 결과 재사용).
+- 테스트: 이벤트 순서·재개, 다른 프로세스(MCP)가 쓴 변경이 2초 안에 반영.
+
+### 3. 노드 상세
+- 목표·tool(server/name)·argSpecs(fixed/var/generated 구분 표시)·constraints(auto/human, kind, 마지막 판정)·
+  advice 이력(actor 표시)·attempts 타임라인(verdict, selfReason, rubricReasons, 소요시간)·golden·hash.
+- 산출물: 텍스트 4KB 미리보기, 전체 보기는 로컬 파일에서만. 바이너리는 {sha256,size,mime}.
+- "왜 이 노드가 이렇게 됐나": 해당 노드 events 필터 보기.
+- 테스트: 각 상태 노드 스냅샷(DTO 기준, 픽셀 아님), 원문 R8 egress 0.
+
+### 4. 텍스트 편집 / 의견 + stale 미리보기 (제품의 핵심)
+- 편집기: CodeMirror 6, args를 JSON으로 편집(스키마 기반 검증 오류 인라인).
+  저장 = `App.editArgs`(pf_edit_args와 동일 경로). procedure.json 직접 편집 금지.
+- 의견: 노드 선택 → 텍스트 입력 → `App.adviseAndSignal`(advise 먼저, 성공 시 B>A>C 신호).
+  결과 표시: 생성된 constraint(검사 가능/llm_rubric 구분), 신호 모드, degraded면 C 문구+복사 버튼.
+- **stale 미리보기**: 적용 전에 "이 변경으로 다시 실행될 노드" 표시.
+  CoreClient에 읽기 전용 `previewChange({sessionId, nodeId, change})` → `{staleNodeIds, hashBefore, hashAfter}` 추가
+  (propagateStale을 dry-run으로 재사용, 상태 변경 0 — 테스트로 단언). wire 계약에도 추가.
+- 잠금: locked 노드는 편집 버튼 대신 "잠금 해제(pf_reopen)" — 가능 여부는 App이 판정.
+- 수락 테스트(필수): 1.2 의견 → 미리보기에 1.2·1.3만 → 적용 → 1.1 hash 불변, 1.2·1.3만 stale→재확정.
+
+### 5. 실행 화면
+- 절차서 목록 → run/test(params 입력: 기간 params required, `@today:utc` 지원) → 노드별 pass/fail/unverified/blocked, exit 의미.
+- 실행은 local 프로세스(runner)로, UI는 진행 이벤트만 수신. 원본 워크스페이스 쓰기 0 단언 유지.
+- 승인: external 노드 대기 목록, dry-run 계획 보기, 승인/거부(`App.approve`), approvals.json 갱신 필요 표시(stale).
+  wildcard는 `--allow-wildcard`와 동일하게 키를 명시 선택해야만.
+- 실패 시 "이 노드 열기" → 3번 상세로 이동.
+
+### 6. Playwright E2E
+- 구성: MemoryStore core + 임시 저장소 + M7-0.1 가짜 OpenCode 서버, 실제 브라우저(chromium).
+- 시나리오 4개:
+  (a) 월간보고서: 트리 보기 → 1.2 의견 → stale 미리보기 확인 → 적용 → 신호 B 전송 → 가짜 모델이 재보고 → leaf.
+  (b) 크롤링: args 텍스트 편집(선택자 수정) → 해당 노드만 재실행.
+  (c) conflict: MCP 쪽이 먼저 쓰면 UI에 배너, 데이터 유실 0.
+  (d) plan 모드/버전 미확인 → degraded + C 복사 문구.
+- CI: ubuntu만 Playwright(windows는 API 계약까지). 스크린샷은 실패 시만 artifact.
+
+### M7 완료 기준 (= MVP)
+- 1~6 [x], L3 green + head_sha 일치 CI success, REVIEW-M7.md.
+- 사람 실사용 1회: 실제 OpenCode(build 모드)에서 분해 → **UI로** 중간 노드 의견 1건 → 그 부분만 재실행 → finalize → 무인 run exit 0.
+  기록 `docs/M7-dogfood.md` (connectionId·actor로 사람/모델/UI 구분 증명).
+
+---
+
 ## 9. 변경 이력
 
 | 날짜 | 절 | 변경 내용 | 사유 |
@@ -651,3 +726,4 @@ c·d·j는 하네스 과제로 DECISIONS에 기록만.
 | 2026-10-16 | 8 | M7-1 묶음 완료 (6 저장소 PROCFORGE_DIR 통일·7 connectionId·연결 B/A/C+plan 가짜서버 E2E·adviseAndSignal·pairings latest-wins) | e170d59 run 38768687844 + d5d7003 run 38807322716 success. pairings UI 배선은 M7-2, M5.8(a)는 M7-1 뒤 build 세션 |
 | 2026-10-16 | 8 | M7-1 [ ] 환원 + M7-1.1 신설 ("계속" 신호 실서버 보정 6건: plan 기준점·버전 조회·짝 검증·실서버 4조합·R5·SSE 우선) | d5d7003 선행 구현이 실서버에서 틀어짐 (빈 세션 가짜 테스트가 가림). M5.8(a)는 신호 코드와 무관해 병행 가능 |
 | 2026-10-16 | 8 | 8절 번호 충돌 정리: "M7-1 OpenCode 연결"→"M7-0.1", "M7-1.1"→"M7-0.2" (M7 1번과 번호 겹침 해소. 9절·DECISIONS 태그는 이력 유지). pairings 화면 배선은 M7 1번에 포함 | M7-0.2는 [x] 유지 (6건 완료·run 38814839031 success). 코드 변경 없음 |
+| 2026-10-16 | 8 | 8절 M7 본문 추가 (M7 UI 상세 명세 0~6 + 완료 기준=MVP). M7-0.2 [x] green이므로 M7 1번 시작 가능 | M8(배포·패키징·core-server 비공개 분리·고객 PC 테스트)은 M7 닫을 때 정의 |
