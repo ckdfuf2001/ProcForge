@@ -20,6 +20,11 @@ export class TxStore implements Store {
     return this.sessions.get(id) ?? this.base.getSession(id);
   }
 
+  /** 목록은 base 위임 (미확정 세션은 목록에 없음) */
+  listSessions(): { id: string; request: string; revision: number; createdAt: string; rootId: string }[] {
+    return this.base.listSessions();
+  }
+
   saveSession(s: Session): void {
     this.sessions.set(s.id, s);
     this.touchedSessions.add(s.id);

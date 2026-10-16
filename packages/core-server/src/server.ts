@@ -157,6 +157,8 @@ async function dispatch(
       const g = b as { sessionId: string; nodeId: string };
       return svc.getNode(g.sessionId, g.nodeId);
     }
+    case "getSessions":
+      return svc.getSessions();
     case "pfBuildProcedure": {
       const g = b as { sessionId: string; name: string };
       return svc.pfBuildProcedure(g.sessionId, g.name);

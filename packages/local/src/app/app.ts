@@ -39,8 +39,9 @@ import {
   type LinkMode,
   type LinkResult,
 } from "../services/opencode-link.js";
-import { savePairing, getPairing, loadPairings } from "../services/pairings.js";
-import { readEvents } from "../trace.js";
+import { savePairing, getPairing, loadPairings, type Pairings } from "../services/pairings.js";
+import { enrichSessions, type SessionRow } from "../services/session-meta.js";
+import { detectDuplicateStores } from "./store-dir.js";
 import { logger } from "../logger.js";
 import {
   diffSnapshot,
@@ -133,18 +134,8 @@ export const PROMPT_TEXT = [
   '   예: 표 셀은 "$1.1.rows", 합계는 "$1.1.total".',
 ].join("\n");
 
-/** M7-1: 세션 목록 1행 (판단 없음. UI가 배지를 붙인다) */
-export type SessionSummary = {
-  sessionId: string;
-  request: string;
-  revision: number;
-  createdAt: string;
-  lastUsedAt: number | null;
-  nodeCount: number;
-  rootStatus: string;
-  connectionIds: string[];
-  pairings: { openCodeSessionId: string; at: string }[];
-};
+/** M7-1: 세션 목록 1행 (core 요약 + 로컬 부가. 판단 없음. UI가 배지를 붙인다) */
+export type SessionSummary = SessionRow;
 
 export type AppDeps = {  core: CoreClient;
   procforgeDir: string;
@@ -966,39 +957,31 @@ export class ProcForgeApp {
   }
 
   /**
-   * M7-1: 세션 목록 (UI 세션 목록용. 판단 없음 — 원시 데이터+짝·연결 수만).
+   * M7-1: 세션 목록 (원천은 core.getSessions — 원격 모드에서 서버 저장소.
+   * App은 core 요약 + 로컬 부가(pairings·connectionIds) 합성만).
    * connectionIds 2개 이상이면 UI가 경고 배지를 붙인다.
    */
   async listSessions(): Promise<{ sessions: SessionSummary[] }> {
-    const store = new FileStore(this.procforgeDir);
-    const pairs = loadPairings(this.procforgeDir);
-    const sessions: SessionSummary[] = store.listSessions().map((s) => {
-      const nodes = store.getNodes(s.id);
-      const seen = new Set<string>();
-      try {
-        for (const e of readEvents(this.procforgeDir, s.id)) {
-          if (typeof e.connectionId === "string" && e.connectionId !== "") {
-            seen.add(e.connectionId);
-          }
-        }
-      } catch {
-        // 추적 읽기 실패는 목록에 영향 없음
-      }
-      return {
-        sessionId: s.id,
-        request: s.request,
-        revision: s.revision,
-        createdAt: s.createdAt,
-        lastUsedAt: store.getLastUsed(s.id) ?? null,
-        nodeCount: nodes.size,
-        rootStatus: nodes.get(s.rootId)?.status ?? "unknown",
-        connectionIds: [...seen].sort(),
-        pairings: Object.values(pairs.pairs)
-          .filter((p) => p.pfSessionId === s.id)
-          .map((p) => ({ openCodeSessionId: p.openCodeSessionId, at: p.at })),
-      };
-    });
-    return { sessions };
+    const { sessions } = await this.core.getSessions();
+    return { sessions: enrichSessions(this.procforgeDir, sessions) };
+  }
+
+  /** M7-ui1: 짝짓기 원본 (어댑터는 App 메서드로만) */
+  async listPairings(): Promise<Pairings> {
+    return loadPairings(this.procforgeDir);
+  }
+
+  /** M7-ui1: 저장소 정보 + 중복 경고 (어댑터는 App 메서드로만) */
+  async storeInfo(): Promise<{
+    storeDir: string;
+    projectRoot: string;
+    duplicateWarning: string | null;
+  }> {
+    return {
+      storeDir: this.procforgeDir,
+      projectRoot: this.projectRoot,
+      duplicateWarning: detectDuplicateStores(this.projectRoot, this.procforgeDir),
+    };
   }
 
   /**

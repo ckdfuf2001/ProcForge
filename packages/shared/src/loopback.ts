@@ -7,6 +7,7 @@ import {
   NodeSchema,
   SessionIdSchema,
   SessionSchema,
+  SessionSummarySchema,
   SideEffectSchema,
   ToolCatalogEntrySchema,
   ToolRefSchema,
@@ -176,6 +177,10 @@ const Methods = {
     in: z.tuple([SessionIdSchema, NodeIdSchema]),
     out: NodeSchema,
   },
+  getSessions: {
+    in: z.tuple([]),
+    out: z.object({ sessions: z.array(SessionSummarySchema) }),
+  },
   pfBuildProcedure: {
     in: z.tuple([SessionIdSchema, z.string()]),
     out: z.object({ doc: ProcedureDocSchema, warnings: z.array(z.string()) }).passthrough(),
@@ -269,6 +274,7 @@ export function createLoopbackClient(inner: CoreClient): CoreClient {
     getEvents: (sid, since) => wrapArgs("getEvents", since === undefined ? [sid] : [sid, since], ([a, b]: [string, number?]) => inner.getEvents(a, b)),
     getSession: (sid) => wrapArgs("getSession", [sid], ([x]) => inner.getSession(x)),
     getNode: (sid, nid) => wrapArgs("getNode", [sid, nid], ([a, b]) => inner.getNode(a, b)),
+    getSessions: () => wrapArgs("getSessions", [], () => inner.getSessions()),
     pfBuildProcedure: (sid, name) => wrapArgs("pfBuildProcedure", [sid, name], ([a, b]) => inner.pfBuildProcedure(a, b)),
     pfApprove: (i) => wrapObj("pfApprove", i, (x) => inner.pfApprove(x)),
     pfImportProcedure: (i) => wrapObj("pfImportProcedure", i, (x) => inner.pfImportProcedure(x)),

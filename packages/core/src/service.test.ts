@@ -713,6 +713,7 @@ function recordingStore(inner = createMemoryStore(), opts: { failCommit?: boolea
     readEvents: (sid) => inner.readEvents(sid),
     getLastUsed: (sid) => inner.getLastUsed(sid),
     touchSession: (sid) => inner.touchSession(sid),
+    listSessions: () => inner.listSessions(),
     withLock: async (sid, fn) => {
       calls.push("withLock");
       return inner.withLock(sid, fn);

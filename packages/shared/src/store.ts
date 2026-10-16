@@ -19,6 +19,8 @@ export type CommitChange = z.infer<typeof CommitChangeSchema>;
 export type Store = {
   getSession(id: string): Session | undefined;
   saveSession(s: Session): void;
+  /** M7-ui1: 세션 목록 (판단 없음. createdAt 내림차순) */
+  listSessions(): { id: string; request: string; revision: number; createdAt: string; rootId: string }[];
   getNodes(sessionId: string): Map<string, Node>;
   getNode(sessionId: string, nodeId: string): Node | undefined;
   saveNode(sessionId: string, n: Node): void;

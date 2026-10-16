@@ -347,6 +347,18 @@ export const SessionSchema = z.object({
 });
 export type Session = z.infer<typeof SessionSchema>;
 
+/** M7-ui1: core 세션 요약 (판단 없음. UI 목록용) */
+export const SessionSummarySchema = z.object({
+  sessionId: z.string(),
+  request: z.string(),
+  revision: z.number().int().min(0),
+  createdAt: z.string(),
+  rootId: z.string(),
+  nodeCount: z.number().int().min(0),
+  rootStatus: z.string(),
+});
+export type SessionSummary = z.infer<typeof SessionSummarySchema>;
+
 // ---------- helpers ----------
 
 function sortKeysDeep(v: unknown): unknown {

@@ -147,6 +147,32 @@ if (fsViolations.length > 0) {
   console.log("check-deps: OK (no adapter fs)");
 }
 
+// M7-ui1: ui-server.ts는 App 메서드만 (services/·filestore 직접 import 금지).
+const UI_SERVER_RES = [/[/\\]ui-server\.ts$/];
+const UI_SERVER_BANNED_RES = [/services\//, /filestore\.js/];
+const uiServerViolations = [];
+for (const f of files) {
+  if (!UI_SERVER_RES.some((re) => re.test(f))) continue;
+  const lines = readFileSync(f, "utf8").split("\n");
+  lines.forEach((line, i) => {
+    const stripped = line.trim();
+    if (stripped.startsWith("//")) return;
+    const isImportLine = /from\s+["']/.test(stripped) || /^import\s+["']/.test(stripped);
+    if (!isImportLine) return;
+    if (UI_SERVER_BANNED_RES.some((re) => re.test(stripped))) {
+      uiServerViolations.push(`${f}:${i + 1}: ${stripped}`);
+    }
+  });
+}
+
+if (uiServerViolations.length > 0) {
+  console.error("DEP VIOLATION (M7-ui1): ui-server.ts may use only App methods (no services/filestore imports).");
+  for (const v of uiServerViolations) console.error("  " + v);
+  process.exit(1);
+} else {
+  console.log("check-deps: OK (ui-server App-only)");
+}
+
 // M4.2-4-2: FileStore 저장 계열은 core in-process 구현 파일에서만 허용.
 // 허용: packages/core/src/**, core-inprocess.ts, filestore.ts(내부),
 // app/**, services/**, runner/**, procedure.ts(App 경로 import).

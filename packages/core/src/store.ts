@@ -28,6 +28,10 @@ export function createMemoryStore(): Store {
       if (!nodes.has(s.id)) nodes.set(s.id, new Map());
     },
     getNodes: (sid) => nodes.get(sid) ?? new Map(),
+    listSessions: () =>
+      [...sessions.values()]
+        .map((s) => ({ id: s.id, request: s.request, revision: s.revision ?? 0, createdAt: s.createdAt, rootId: s.rootId }))
+        .sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0)),
     getNode: (sid, nid) => nodes.get(sid)?.get(nid),
     saveNode: (sid, n) => {
       if (!nodes.has(sid)) nodes.set(sid, new Map());

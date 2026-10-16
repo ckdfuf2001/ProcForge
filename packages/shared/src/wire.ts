@@ -6,6 +6,7 @@ import {
   NodeSchema,
   SessionIdSchema,
   SessionSchema,
+  SessionSummarySchema,
   SideEffectSchema,
   ToolCatalogEntrySchema,
   ToolRefSchema,
@@ -80,6 +81,7 @@ export type WireMethodName =
   | "getEvents"
   | "getSession"
   | "getNode"
+  | "getSessions"
   | "pfBuildProcedure"
   | "pfApprove"
   | "pfImportProcedure"
@@ -313,6 +315,11 @@ export const WireMethods: Record<WireMethodName, WireDef> = {
     path: "/v1/getNode",
     input: z.object({ sessionId: SessionIdSchema, nodeId: NodeIdSchema }),
     output: NodeSchema,
+  },
+  getSessions: {
+    path: "/v1/getSessions",
+    input: z.object({}),
+    output: z.object({ sessions: z.array(SessionSummarySchema) }),
   },
   pfBuildProcedure: {
     path: "/v1/pfBuildProcedure",

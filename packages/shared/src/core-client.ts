@@ -2,6 +2,7 @@ import type {
   Constraint,
   Node,
   Session,
+  SessionSummary,
   ArgSpec,
   SideEffect,
 } from "./schema.js";
@@ -292,6 +293,8 @@ export interface CoreClient {
   getSession(sessionId: string): Promise<Session>;
   /** 노드 조회 (M4.2-2.5) */
   getNode(sessionId: string, nodeId: string): Promise<Node>;
+  /** 세션 목록 (M7-ui1. 테넌트 저장소 기준. 판단 없음) */
+  getSessions(): Promise<{ sessions: SessionSummary[] }>;
   /** 절차서 문서 조립 (M4.2-1, 검증·params 경고 포함. 파일 쓰기는 local) */
   pfBuildProcedure(
     sessionId: string,

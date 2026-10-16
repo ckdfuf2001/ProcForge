@@ -9,6 +9,7 @@ import {
   type Constraint,
   type Node,
   type Session,
+  type SessionSummary,
 } from "@procforge/shared/schema.js";
 import type {
   BlockedEntry,
@@ -1926,6 +1927,23 @@ export class CoreService implements CoreClient {
     const n = this.store.getNode(sessionId, nodeId);
     if (!n) throw err("not_found", `node ${nodeId} not found`);
     return n;
+  }
+
+  /** 세션 목록 (M7-ui1, 읽기 전용. 테넌트 저장소 기준) */
+  async getSessions(): Promise<{ sessions: SessionSummary[] }> {
+    const sessions = this.store.listSessions().map((s) => {
+      const nodes = this.store.getNodes(s.id);
+      return {
+        sessionId: s.id,
+        request: s.request,
+        revision: s.revision,
+        createdAt: s.createdAt,
+        rootId: s.rootId,
+        nodeCount: nodes.size,
+        rootStatus: nodes.get(s.rootId)?.status ?? "unknown",
+      };
+    });
+    return { sessions };
   }
 
   async pfTree(
