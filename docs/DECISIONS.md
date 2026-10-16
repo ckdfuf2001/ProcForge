@@ -496,6 +496,14 @@ argv: [...]}` 고정. runner는 run fs에서 직접 실행해 stdout을 golden�
 - [M7-1.1-5] R5: adviseAndSignal 입력은 JSON만. fetch 주입은 App 생성자.
 - [M7-1.1-6] 감지는 SSE message.part.updated 우선, messages 폴링은 폴백
   (대용량 세션 빈 페이지 오탐 회피. M7-0 §3).
+- [M7-1] UI 서버는 어댑터: App.listSessions만 호출, 판단 없음.
+  127.0.0.1 전용 바인딩·실행마다 무작위 토큰(헤더, fragment로 전달)·
+  Host/Origin 검사. 토큰 없음 401·Host/Origin 불일치 403.
+  `/`는 데이터 없는 정적 골격만 토큰 없이 서빙.
+- [M7-1] 짝 표시는 pairings 역조회(openCode→pf가 아니라 pf→openCode 목록).
+  connectionIds는 calls.jsonl distinct (2개 이상이면 UI가 경고 배지).
+- [M7-1] `--open` 브라우저 실행은 App 모듈(openUrl)에 둔다
+  (check-deps: cli.ts는 node 내장 import 금지).
   짝짓기 읽기는 최신 pf_start 기준 (latest-wins) — messages 뒤쪽이 이긴다.
   advise 실패 시 신호 미전송 (App.adviseAndSignal이 순서 보장).
   pairings UI 배선은 M7-2로 미룸 (App·pairings.json까지만).

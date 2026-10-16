@@ -23,6 +23,8 @@ export type CliValues = {
   discard?: string;
   force?: boolean;
   unattended?: boolean;
+  port?: string;
+  open?: boolean;
   "allow-wildcard"?: string[];
   "retry-attempts"?: string;
   "retry-base-ms"?: string;
@@ -56,6 +58,8 @@ export function parseCliArgs(argv: string[]): {
       discard: { type: "string" },
       force: { type: "boolean", default: false },
       unattended: { type: "boolean", default: false },
+      port: { type: "string" },
+      open: { type: "boolean", default: false },
       "allow-wildcard": { type: "string", multiple: true },
       "retry-attempts": { type: "string" },
       "retry-base-ms": { type: "string" },

@@ -87,6 +87,32 @@ export class FileStore implements Store {
     this.writeAtomic(join(this.sessionDir(s.id), "session.json"), JSON.stringify(s, null, 2));
   }
 
+  /**
+   * M7-1: 세션 목록 (UI 세션 목록용. 판단 없음, 원시 데이터만).
+   * 깨진 항목은 건너뛴다. createdAt 내림차순.
+   */
+  listSessions(): { id: string; request: string; revision: number; createdAt: string; rootId: string }[] {
+    const dir = join(this.root, "sessions");
+    let entries: { name: string; isDirectory(): boolean }[];
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return [];
+    }
+    const out: { id: string; request: string; revision: number; createdAt: string; rootId: string }[] = [];
+    for (const e of entries) {
+      if (!e.isDirectory()) continue;
+      try {
+        const s = this.getSession(e.name);
+        if (s) out.push({ id: s.id, request: s.request, revision: s.revision ?? 0, createdAt: s.createdAt, rootId: s.rootId });
+      } catch {
+        // 깨진 세션은 목록에서 제외
+      }
+    }
+    out.sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0));
+    return out;
+  }
+
   getNodes(sessionId: string): Map<string, Node> {
     assertSessionId(sessionId);
     const dir = join(this.sessionDir(sessionId), "nodes");

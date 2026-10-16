@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { parseCliArgs, resolveDirs, normalizeCliPath } from "./app/cli-args.js";
 import { createApp } from "./app/bootstrap.js";
+import { createUiServer, openUrl } from "./app/ui-server.js";
 import { cliErrorExit, parseRetryOptions, resolveAllowUnverified, runErrorExit, runExitCode } from "./app/run-exit.js";
 
 // CLI 어댑터 (M4.2-4-1). 파일·저장소 작업은 App 메서드로만 수행한다
@@ -231,8 +232,7 @@ async function cmdApprove(): Promise<number> {
   }
 }
 
-async function cmdRepair(): Promise<number> {  const [sid] = positionals.slice(1);
-  const discard = values.discard;
+async function cmdRepair(): Promise<number> {  const [sid] = positionals.slice(1);  const discard = values.discard;
   if (!sid || discard === undefined) {
     console.error("usage: procforge repair <sessionId> --discard <rev>");
     return 2;
@@ -253,6 +253,29 @@ async function cmdRepair(): Promise<number> {  const [sid] = positionals.slice(1
   }
 }
 
+async function cmdUi(): Promise<number> {
+  const { projectRoot, procforgeDir } = resolveDirs(values, process.env);
+  const portRaw = values.port;
+  const port = portRaw === undefined ? 0 : Number(portRaw);
+  if (!Number.isInteger(port) || port < 0 || port > 65535) {
+    console.error(`bad --port (0~65535 필요): ${portRaw}`);
+    return 2;
+  }
+  try {
+    const { app } = createApp({ procforgeDir, projectRoot });
+    const srv = await createUiServer({ app, procforgeDir, projectRoot, port });
+    const withToken = `${srv.url}#t=${srv.token}`;
+    // M7-1: URL+토큰 1회 출력 (토큰은 fragment라 서버 로그·히스토리에 남지 않음).
+    console.log(`ui: ${withToken}`);
+    if (values.open) openUrl(withToken);
+    await new Promise(() => {});
+    return 0;
+  } catch (e) {
+    console.error(`error: ${e instanceof Error ? e.message : String(e)}`);
+    return cliErrorExit(e);
+  }
+}
+
 async function main(): Promise<number> {
   const [cmd] = positionals;
   if (cmd === "test") return cmdTest();
@@ -261,9 +284,11 @@ async function main(): Promise<number> {
   if (cmd === "repair") return cmdRepair();
   if (cmd === "run") return cmdRun();
   if (cmd === "approve") return cmdApprove();
-  console.error("usage: procforge <test|trace|export|repair|run|approve> ...");
+  if (cmd === "ui") return cmdUi();
+  console.error("usage: procforge <test|trace|export|repair|run|approve|ui> ...");
   console.error("  approve <runId> <nodeId> | approve <procedure> --node <id> [--allow-wildcard <key> ...]");
   console.error("  <procedure>: 이름 | procedures/<name> | <dir> | <procedure.json>");
+  console.error("  ui [--port 0] [--open]");
   return 2;
 }
 

@@ -39,7 +39,8 @@ import {
   type LinkMode,
   type LinkResult,
 } from "../services/opencode-link.js";
-import { savePairing, getPairing } from "../services/pairings.js";
+import { savePairing, getPairing, loadPairings } from "../services/pairings.js";
+import { readEvents } from "../trace.js";
 import { logger } from "../logger.js";
 import {
   diffSnapshot,
@@ -132,8 +133,20 @@ export const PROMPT_TEXT = [
   '   예: 표 셀은 "$1.1.rows", 합계는 "$1.1.total".',
 ].join("\n");
 
-export type AppDeps = {
-  core: CoreClient;
+/** M7-1: 세션 목록 1행 (판단 없음. UI가 배지를 붙인다) */
+export type SessionSummary = {
+  sessionId: string;
+  request: string;
+  revision: number;
+  createdAt: string;
+  lastUsedAt: number | null;
+  nodeCount: number;
+  rootStatus: string;
+  connectionIds: string[];
+  pairings: { openCodeSessionId: string; at: string }[];
+};
+
+export type AppDeps = {  core: CoreClient;
   procforgeDir: string;
   projectRoot: string;
   /** 표시용 세션 TTL (판정은 core 소유) */
@@ -950,6 +963,42 @@ export class ProcForgeApp {
       revision: out.revision,
       changedNodeIds: out.changedNodeIds,
     };
+  }
+
+  /**
+   * M7-1: 세션 목록 (UI 세션 목록용. 판단 없음 — 원시 데이터+짝·연결 수만).
+   * connectionIds 2개 이상이면 UI가 경고 배지를 붙인다.
+   */
+  async listSessions(): Promise<{ sessions: SessionSummary[] }> {
+    const store = new FileStore(this.procforgeDir);
+    const pairs = loadPairings(this.procforgeDir);
+    const sessions: SessionSummary[] = store.listSessions().map((s) => {
+      const nodes = store.getNodes(s.id);
+      const seen = new Set<string>();
+      try {
+        for (const e of readEvents(this.procforgeDir, s.id)) {
+          if (typeof e.connectionId === "string" && e.connectionId !== "") {
+            seen.add(e.connectionId);
+          }
+        }
+      } catch {
+        // 추적 읽기 실패는 목록에 영향 없음
+      }
+      return {
+        sessionId: s.id,
+        request: s.request,
+        revision: s.revision,
+        createdAt: s.createdAt,
+        lastUsedAt: store.getLastUsed(s.id) ?? null,
+        nodeCount: nodes.size,
+        rootStatus: nodes.get(s.rootId)?.status ?? "unknown",
+        connectionIds: [...seen].sort(),
+        pairings: Object.values(pairs.pairs)
+          .filter((p) => p.pfSessionId === s.id)
+          .map((p) => ({ openCodeSessionId: p.openCodeSessionId, at: p.at })),
+      };
+    });
+    return { sessions };
   }
 
   /**
