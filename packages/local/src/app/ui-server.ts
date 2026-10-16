@@ -7,14 +7,12 @@ import {
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { spawn } from "node:child_process";
 import type { ProcForgeApp } from "./app.js";
-import { loadPairings } from "../services/pairings.js";
-import { detectDuplicateStores } from "./store-dir.js";
 
 // M7-1: `procforge ui` 로컬 서버 (어댑터. App 메서드만 호출).
 // UI 배선은 M7-1에서 세션 목록+pairings까지, 화면 상호작용은 M7 2~5.
 
-/** 전송계층 무관 (원격 core 모드 동일 동작. inprocess/remote 모두 App 뒤). */
-export type UiApp = Pick<ProcForgeApp, "listSessions">;
+/** M7-ui1: 어댑터는 App 메서드만 (services/filestore 직접 import 금지) */
+export type UiApp = Pick<ProcForgeApp, "listSessions" | "listPairings" | "storeInfo">;
 
 export type UiServer = {
   url: string;
@@ -24,12 +22,18 @@ export type UiServer = {
 };
 
 function err(res: ServerResponse, code: number, msg: string): void {
-  res.writeHead(code, { "content-type": "application/json" });
+  res.writeHead(code, {
+    "content-type": "application/json",
+    "content-security-policy": CSP,
+  });
   res.end(JSON.stringify({ error: { code, message: msg } }));
 }
 
 function send(res: ServerResponse, v: unknown): void {
-  res.writeHead(200, { "content-type": "application/json" });
+  res.writeHead(200, {
+    "content-type": "application/json",
+    "content-security-policy": CSP,
+  });
   res.end(JSON.stringify(v));
 }
 
@@ -45,6 +49,10 @@ function tokenOk(got: unknown, want: string): boolean {
   return timingSafeEqual(a, b);
 }
 
+/** 전 응답 CSP (M7-ui1. 인라인 스크립트 0 — /app.js만 'self') */
+const CSP =
+  "default-src 'self'; script-src 'self'; object-src 'none'; frame-ancestors 'none'";
+
 const INDEX_HTML = `<!doctype html>
 <html lang="ko"><head><meta charset="utf-8"><title>ProcForge</title></head>
 <body>
@@ -53,32 +61,54 @@ const INDEX_HTML = `<!doctype html>
 <h2>세션</h2>
 <table border="1"><thead><tr><th>id</th><th>요청</th><th>rev</th><th>노드</th><th>root</th><th>연결</th><th>짝</th></tr></thead>
 <tbody id="rows"></tbody></table>
-<script>
+<script src="/app.js"></script>
+</body></html>`;
+
+/** 요청문은 textContent로만 (innerHTML 금지 — 요청문 XSS 경로) */
+const APP_JS = `(() => {
 const token = (location.hash.match(/t=([^&]+)/) || [])[1] || "";
+// 토큰은 읽자마자 주소창에서 삭제 (XSS 시 유출 방지).
+history.replaceState(null, "", location.pathname);
 const headers = { "x-procforge-token": token };
 async function j(p) {
   const r = await fetch(p, { headers });
   if (!r.ok) throw new Error(p + " " + r.status);
   return r.json();
 }
+function td(text) {
+  const el = document.createElement("td");
+  el.textContent = text;
+  return el;
+}
 (async () => {
   try {
     const s = await j("/api/store");
-    document.getElementById("store").textContent =
-      "저장소: " + s.storeDir + (s.duplicateWarning ? " / 경고: " + s.duplicateWarning : "");
+    const store = document.getElementById("store");
+    store.textContent =
+      "store: " + s.storeDir + (s.duplicateWarning ? " / warn: " + s.duplicateWarning : "");
     const { sessions } = await j("/api/sessions");
-    document.getElementById("rows").innerHTML = sessions.map((x) =>
-      "<tr><td>" + x.sessionId.slice(0, 8) + "</td><td>" + x.request.slice(0, 60) +
-      "</td><td>" + x.revision + "</td><td>" + x.nodeCount + "</td><td>" + x.rootStatus +
-      "</td><td>" + (x.connectionIds.length > 1 ? "경고:" + x.connectionIds.length + "개" : x.connectionIds.length) +
-      "</td><td>" + x.pairings.map((p) => p.openCodeSessionId.slice(0, 8)).join(",") + "</td></tr>",
-    ).join("");
+    const rows = document.getElementById("rows");
+    rows.replaceChildren();
+    for (const x of sessions) {
+      const tr = document.createElement("tr");
+      tr.append(
+        td(x.sessionId.slice(0, 8)),
+        td(x.request.slice(0, 60)),
+        td(String(x.revision)),
+        td(String(x.nodeCount)),
+        td(x.rootStatus),
+        td(x.connectionIds.length > 1 ? "warn:" + x.connectionIds.length : String(x.connectionIds.length)),
+        td(x.pairings.map((p) => p.openCodeSessionId.slice(0, 8)).join(",")),
+      );
+      rows.append(tr);
+    }
   } catch (e) {
-    document.body.insertAdjacentHTML("beforeend", "<p>오류: " + e.message + " (URL #t=토큰 확인)</p>");
+    const p = document.createElement("p");
+    p.textContent = "error: " + e.message + " (URL #t=token)";
+    document.body.append(p);
   }
 })();
-</script>
-</body></html>`;
+})();`;
 
 /** 브라우저 열기 (best-effort. 실패해도 서버는 유지) */
 export function openUrl(url: string): void {
@@ -97,8 +127,6 @@ export function openUrl(url: string): void {
 
 export async function createUiServer(opts: {
   app: UiApp;
-  procforgeDir: string;
-  projectRoot: string;
   port?: number;
 }): Promise<UiServer> {
   const token = randomBytes(32).toString("hex");
@@ -122,10 +150,21 @@ export async function createUiServer(opts: {
           return;
         }
         const url = new URL(req.url ?? "/", "http://x");
-        // / 는 정적 골격만 (데이터 없음. 토큰 없이 서빙).
+        // / 와 /app.js는 정적 골격만 (데이터 없음. 토큰 없이 서빙).
         if (req.method === "GET" && url.pathname === "/") {
-          res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+          res.writeHead(200, {
+            "content-type": "text/html; charset=utf-8",
+            "content-security-policy": CSP,
+          });
           res.end(INDEX_HTML);
+          return;
+        }
+        if (req.method === "GET" && url.pathname === "/app.js") {
+          res.writeHead(200, {
+            "content-type": "text/javascript; charset=utf-8",
+            "content-security-policy": CSP,
+          });
+          res.end(APP_JS);
           return;
         }
         // 이후는 토큰 필수 (없음·불일치 401).
@@ -134,14 +173,7 @@ export async function createUiServer(opts: {
           return;
         }
         if (req.method === "GET" && url.pathname === "/api/store") {
-          send(res, {
-            storeDir: opts.procforgeDir,
-            projectRoot: opts.projectRoot,
-            duplicateWarning: detectDuplicateStores(
-              opts.projectRoot,
-              opts.procforgeDir,
-            ),
-          });
+          send(res, await opts.app.storeInfo());
           return;
         }
         if (req.method === "GET" && url.pathname === "/api/sessions") {
@@ -149,7 +181,7 @@ export async function createUiServer(opts: {
           return;
         }
         if (req.method === "GET" && url.pathname === "/api/pairings") {
-          send(res, loadPairings(opts.procforgeDir));
+          send(res, await opts.app.listPairings());
           return;
         }
         err(res, 404, "not found");

@@ -4,7 +4,8 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { connect } from "node:net";
 import { createUiServer } from "../src/app/ui-server.js";
-import { savePairing } from "../src/services/pairings.js";
+import { savePairing, loadPairings } from "../src/services/pairings.js";
+import { detectDuplicateStores } from "../src/app/store-dir.js";
 import { createApp } from "../src/app/bootstrap.js";
 
 // M7-1: `procforge ui` 서버 — 보안 3종·세션 목록 계약·pairings·저장소 경고.
@@ -28,7 +29,15 @@ const row = {
   pairings: [{ openCodeSessionId: "oc-1", at: "2026-10-16T00:01:00.000Z" }],
 };
 
-const stubApp = { listSessions: async () => ({ sessions: [row] }) };
+const stubApp = {
+  listSessions: async () => ({ sessions: [row] }),
+  listPairings: async () => loadPairings(pfdir),
+  storeInfo: async () => ({
+    storeDir: pfdir,
+    projectRoot: root,
+    duplicateWarning: detectDuplicateStores(root, pfdir),
+  }),
+};
 
 /** Host/Origin을 직접 제어하는 raw HTTP (fetch는 Host伪造 불가) */
 function raw(
@@ -62,7 +71,7 @@ function raw(
 
 describe("M7-1 ui-server 보안", () => {
   it("토큰 없음·불일치 → 401, 정상 토큰 → 200", async () => {
-    const srv = await createUiServer({ app: stubApp, procforgeDir: pfdir, projectRoot: root });
+    const srv = await createUiServer({ app: stubApp });
     try {
       expect((await raw(srv.port)).status).toBe(401);
       expect((await raw(srv.port, { token: "wrong" })).status).toBe(401);
@@ -78,7 +87,7 @@ describe("M7-1 ui-server 보안", () => {
   });
 
   it("Host 불일치 → 403 (DNS rebinding 차단)", async () => {
-    const srv = await createUiServer({ app: stubApp, procforgeDir: pfdir, projectRoot: root });
+    const srv = await createUiServer({ app: stubApp });
     try {
       const r = await raw(srv.port, { host: "evil.com", token: srv.token });
       expect(r.status).toBe(403);
@@ -88,7 +97,7 @@ describe("M7-1 ui-server 보안", () => {
   });
 
   it("Origin 불일치 → 403, 정상 Origin → 200", async () => {
-    const srv = await createUiServer({ app: stubApp, procforgeDir: pfdir, projectRoot: root });
+    const srv = await createUiServer({ app: stubApp });
     try {
       const bad = await raw(srv.port, {
         token: srv.token,
@@ -106,12 +115,43 @@ describe("M7-1 ui-server 보안", () => {
   });
 
   it("/ 는 토큰 없이 정적 골격만 (데이터 없음)", async () => {
-    const srv = await createUiServer({ app: stubApp, procforgeDir: pfdir, projectRoot: root });
+    const srv = await createUiServer({ app: stubApp });
     try {
       const r = await raw(srv.port, { path: "/" });
       expect(r.status).toBe(200);
       expect(r.body).toContain("ProcForge");
       expect(r.body).not.toContain("월간보고서");
+    } finally {
+      await srv.close();
+    }
+  });
+
+  it("XSS: 요청문 페이로드가 실행 요소로 들어가지 않음 + CSP", async () => {
+    const evil = '<img src=x onerror=alert(1)>';
+    const evilApp = {
+      listSessions: async () => ({ sessions: [{ ...row, request: evil }] }),
+    };
+    const srv = await createUiServer({ app: evilApp });
+    try {
+      // / : 인라인 스크립트 0 (/app.js만), 페이로드 없음, CSP 있음.
+      const idx = await fetch(`${srv.url}/`);
+      expect(idx.headers.get("content-security-policy")).toContain("script-src 'self'");
+      const html = await idx.text();
+      expect(html).not.toContain("<script>");
+      expect(html).toContain('<script src="/app.js"></script>');
+      expect(html).not.toContain("onerror");
+      // /app.js: innerHTML 0, 토큰 fragment 즉시 삭제.
+      const js = await (await fetch(`${srv.url}/app.js`)).text();
+      expect(js).not.toContain("innerHTML");
+      expect(js).toContain("textContent");
+      expect(js).toContain("history.replaceState");
+      // /api/sessions: JSON 데이터로만 전달 (문서 문맥 아님).
+      const r = await fetch(`${srv.url}/api/sessions`, {
+        headers: { "x-procforge-token": srv.token },
+      });
+      expect(r.headers.get("content-security-policy")).toContain("frame-ancestors 'none'");
+      const body = (await r.json()) as { sessions: { request: string }[] };
+      expect(body.sessions[0].request).toBe(evil);
     } finally {
       await srv.close();
     }
@@ -128,7 +168,7 @@ describe("M7-1 ui-server API", () => {
   }
 
   it("세션 목록 계약 + 저장소 경로 + 경고 없음", async () => {
-    const srv = await createUiServer({ app: stubApp, procforgeDir: pfdir, projectRoot: root });
+    const srv = await createUiServer({ app: stubApp });
     try {
       const body = await authed(srv, "/api/sessions");
       expect(body.sessions).toEqual([row]);
@@ -142,7 +182,7 @@ describe("M7-1 ui-server API", () => {
 
   it("저장소 2개 감지 시 경고", async () => {
     mkdirSync(join(root, ".procforge", "sessions", "s1"), { recursive: true });
-    const srv = await createUiServer({ app: stubApp, procforgeDir: pfdir, projectRoot: root });
+    const srv = await createUiServer({ app: stubApp });
     try {
       const store = await authed(srv, "/api/store");
       expect(typeof store.duplicateWarning).toBe("string");
@@ -153,7 +193,7 @@ describe("M7-1 ui-server API", () => {
 
   it("pairings 원본 반환", async () => {
     savePairing(pfdir, "oc-9", "pf-9");
-    const srv = await createUiServer({ app: stubApp, procforgeDir: pfdir, projectRoot: root });
+    const srv = await createUiServer({ app: stubApp });
     try {
       const body = await authed(srv, "/api/pairings");
       const pairs = body.pairs as Record<string, { pfSessionId: string }>;
