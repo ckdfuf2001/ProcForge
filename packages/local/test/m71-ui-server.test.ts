@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { mkdtempSync, mkdirSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { connect } from "node:net";
@@ -12,10 +12,17 @@ import { createApp } from "../src/app/bootstrap.js";
 
 let root: string;
 let pfdir: string;
+let emptyDir: string;
 beforeEach(() => {
   root = mkdtempSync(join(tmpdir(), "pf-m71ui-"));
   pfdir = join(mkdtempSync(join(tmpdir(), "pf-m71uip-")), ".procforge");
+  emptyDir = mkdtempSync(join(tmpdir(), "pf-m71uie-"));
 });
+
+/** 인라인 골격 강제 (실제 packages/ui/dist 무시) */
+function noDist() {
+  return { staticDir: emptyDir };
+}
 
 const row = {
   sessionId: "11111111-2222-4333-8444-555555555555",
@@ -38,6 +45,10 @@ const stubApp = {
     duplicateWarning: detectDuplicateStores(root, pfdir),
   }),
 };
+
+function stubServer() {
+  return createUiServer({ app: stubApp, ...noDist() });
+}
 
 /** Host/Origin을 직접 제어하는 raw HTTP (fetch는 Host伪造 불가) */
 function raw(
@@ -71,7 +82,7 @@ function raw(
 
 describe("M7-1 ui-server 보안", () => {
   it("토큰 없음·불일치 → 401, 정상 토큰 → 200", async () => {
-    const srv = await createUiServer({ app: stubApp });
+    const srv = await stubServer();
     try {
       expect((await raw(srv.port)).status).toBe(401);
       expect((await raw(srv.port, { token: "wrong" })).status).toBe(401);
@@ -87,7 +98,7 @@ describe("M7-1 ui-server 보안", () => {
   });
 
   it("Host 불일치 → 403 (DNS rebinding 차단)", async () => {
-    const srv = await createUiServer({ app: stubApp });
+    const srv = await stubServer();
     try {
       const r = await raw(srv.port, { host: "evil.com", token: srv.token });
       expect(r.status).toBe(403);
@@ -97,7 +108,7 @@ describe("M7-1 ui-server 보안", () => {
   });
 
   it("Origin 불일치 → 403, 정상 Origin → 200", async () => {
-    const srv = await createUiServer({ app: stubApp });
+    const srv = await stubServer();
     try {
       const bad = await raw(srv.port, {
         token: srv.token,
@@ -115,7 +126,7 @@ describe("M7-1 ui-server 보안", () => {
   });
 
   it("/ 는 토큰 없이 정적 골격만 (데이터 없음)", async () => {
-    const srv = await createUiServer({ app: stubApp });
+    const srv = await stubServer();
     try {
       const r = await raw(srv.port, { path: "/" });
       expect(r.status).toBe(200);
@@ -131,7 +142,7 @@ describe("M7-1 ui-server 보안", () => {
     const evilApp = {
       listSessions: async () => ({ sessions: [{ ...row, request: evil }] }),
     };
-    const srv = await createUiServer({ app: evilApp });
+    const srv = await createUiServer({ app: evilApp, ...noDist() });
     try {
       // / : 인라인 스크립트 0 (/app.js만), 페이로드 없음, CSP 있음.
       const idx = await fetch(`${srv.url}/`);
@@ -168,7 +179,7 @@ describe("M7-1 ui-server API", () => {
   }
 
   it("세션 목록 계약 + 저장소 경로 + 경고 없음", async () => {
-    const srv = await createUiServer({ app: stubApp });
+    const srv = await stubServer();
     try {
       const body = await authed(srv, "/api/sessions");
       expect(body.sessions).toEqual([row]);
@@ -182,7 +193,7 @@ describe("M7-1 ui-server API", () => {
 
   it("저장소 2개 감지 시 경고", async () => {
     mkdirSync(join(root, ".procforge", "sessions", "s1"), { recursive: true });
-    const srv = await createUiServer({ app: stubApp });
+    const srv = await stubServer();
     try {
       const store = await authed(srv, "/api/store");
       expect(typeof store.duplicateWarning).toBe("string");
@@ -193,11 +204,35 @@ describe("M7-1 ui-server API", () => {
 
   it("pairings 원본 반환", async () => {
     savePairing(pfdir, "oc-9", "pf-9");
-    const srv = await createUiServer({ app: stubApp });
+    const srv = await stubServer();
     try {
       const body = await authed(srv, "/api/pairings");
       const pairs = body.pairs as Record<string, { pfSessionId: string }>;
       expect(pairs["oc-9"].pfSessionId).toBe("pf-9");
+    } finally {
+      await srv.close();
+    }
+  });
+
+  it("빌드 산출물 서빙 + 상위 탈출 차단", async () => {
+    const dist = mkdtempSync(join(tmpdir(), "pf-m71uid-"));
+    mkdirSync(join(dist, "assets"), { recursive: true });
+    writeFileSync(join(dist, "index.html"), "<html>built</html>");
+    writeFileSync(join(dist, "assets", "x.js"), "console.log(1)");
+    const srv = await createUiServer({ app: stubApp, staticDir: dist });
+    try {
+      const idx = await fetch(`${srv.url}/`);
+      expect(idx.status).toBe(200);
+      expect(await idx.text()).toBe("<html>built</html>");
+      const js = await fetch(`${srv.url}/assets/x.js`);
+      expect(js.status).toBe(200);
+      expect(js.headers.get("content-type")).toContain("javascript");
+      // 상위 탈출 시도는 SPA 폴백(index)이지 파일이 아님.
+      const trav = await fetch(`${srv.url}/..%2f..%2fsecret`);
+      expect(trav.status).toBe(200);
+      expect(await trav.text()).toBe("<html>built</html>");
+      // API는 그대로 토큰 필요.
+      expect((await fetch(`${srv.url}/api/sessions`)).status).toBe(401);
     } finally {
       await srv.close();
     }

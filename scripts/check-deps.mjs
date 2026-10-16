@@ -100,6 +100,9 @@ const ADAPTER_ALLOW_RES = [
   /from\s+["']zod["']/,
 ];
 const adapterViolations = [];
+// M7-ui1: packages/ui는 React 허용 (shared DTO 외 local·core import는 계속 금지).
+const UI_RE = /packages[/\\]ui[/\\]/;
+const UI_ALLOW_RES = [/from\s+["']react["']/, /from\s+["']react-dom\/client["']/];
 for (const f of files) {
   if (!ADAPTER_RES.some((re) => re.test(f))) continue;
   const lines = readFileSync(f, "utf8").split("\n");
@@ -111,6 +114,7 @@ for (const f of files) {
     const isImportLine = /from\s+["']/.test(stripped) || stripped.includes("require(") || /^import\s+["']/.test(stripped);
     if (!isImportLine) return;
     if (!ADAPTER_ALLOW_RES.some((re) => re.test(stripped))) {
+      if (UI_RE.test(f) && UI_ALLOW_RES.some((re) => re.test(stripped))) return;
       adapterViolations.push(`${f}:${i + 1}: ${stripped}`);
     }
   });
@@ -207,4 +211,27 @@ if (saveViolations.length > 0) {
   process.exit(1);
 } else {
   console.log("check-deps: OK (saves in core in-process files)");
+}
+
+// M7-ui1: React는 기본 이스케이프만 (dangerouslySetInnerHTML 금지).
+const escapeViolations = [];
+for (const f of files) {
+  if (!/packages[/\\]ui[/\\]/.test(f)) continue;
+  if (!f.endsWith(".tsx") && !f.endsWith(".ts")) continue;
+  const lines = readFileSync(f, "utf8").split("\n");
+  lines.forEach((line, i) => {
+    const stripped = line.trim();
+    if (stripped.startsWith("//")) return;
+    if (stripped.includes("dangerouslySetInnerHTML")) {
+      escapeViolations.push(`${f}:${i + 1}: ${stripped}`);
+    }
+  });
+}
+
+if (escapeViolations.length > 0) {
+  console.error("DEP VIOLATION (M7-ui1): no dangerouslySetInnerHTML in packages/ui.");
+  for (const v of escapeViolations) console.error("  " + v);
+  process.exit(1);
+} else {
+  console.log("check-deps: OK (ui escaping)");
 }
