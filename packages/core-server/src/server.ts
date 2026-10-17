@@ -163,6 +163,8 @@ async function dispatch(
       return svc.getEventsPage(b as never);
     case "getBlocked":
       return svc.getBlocked(b as never);
+    case "previewEdit":
+      return svc.previewEdit(b as never);
     case "pfBuildProcedure": {
       const g = b as { sessionId: string; name: string };
       return svc.pfBuildProcedure(g.sessionId, g.name);

@@ -81,6 +81,7 @@ export type WireMethodName =
   | "getEvents"
   | "getEventsPage"
   | "getBlocked"
+  | "previewEdit"
   | "getSession"
   | "getNode"
   | "getSessions"
@@ -343,6 +344,30 @@ export const WireMethods: Record<WireMethodName, WireDef> = {
     output: z.object({
       blocked: z.array(BlockedEntrySchema),
       needsHuman: z.array(NodeIdSchema),
+      revision: z.number().int().min(0),
+    }),
+  },
+  previewEdit: {
+    path: "/v1/previewEdit",
+    input: z.object({
+      sessionId: SessionIdSchema,
+      nodeId: NodeIdSchema,
+      change: z.object({
+        patch: z
+          .object({
+            set: z.record(ArgSpecSchema).optional(),
+            remove: z.array(z.string()).optional(),
+          })
+          .optional(),
+        goal: z.string().max(4096).optional(),
+        dependsOn: z.array(NodeIdSchema).optional(),
+        addConstraints: z.array(ConstraintSchema).optional(),
+        removeConstraintIds: z.array(z.string()).optional(),
+      }),
+    }),
+    output: z.object({
+      wouldStale: z.array(NodeIdSchema),
+      newHash: z.string(),
       revision: z.number().int().min(0),
     }),
   },

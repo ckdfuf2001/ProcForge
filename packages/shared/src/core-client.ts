@@ -232,6 +232,23 @@ export type PfEditNodeInput = {
   actor?: Actor;
 };
 
+/**
+ * M7-ui4: 편집 미리보기 입력 (읽기 전용).
+ * change는 pfEditArgs의 patch 또는 pfEditNode의 필드 중 하나.
+ * 최대 길이는 core 검증과 동일(goal·텍스트 4KB).
+ */
+export type PreviewEditInput = {
+  sessionId: string;
+  nodeId: string;
+  change: {
+    patch?: PfEditArgsPatch;
+    goal?: string;
+    dependsOn?: string[];
+    addConstraints?: Constraint[];
+    removeConstraintIds?: string[];
+  };
+};
+
 export type PfAdviseInput = {
   sessionId: string;
   nodeId: string;
@@ -303,10 +320,20 @@ export interface CoreClient {
     /** M7-ui3: 노드 이력 (서버측 필터) */
     nodeId?: string;
   }): Promise<{ events: EventEntry[]; lastRevision: number }>;
-  /** blocked·needs_human 목록 (M7-ui2. pfNext와 같은 계산, 읽기 전용) */
+/** blocked·needs_human 목록 (M7-ui2. pfNext와 같은 계산, 읽기 전용) */
   getBlocked(input: { sessionId: string }): Promise<{
     blocked: BlockedEntry[];
     needsHuman: string[];
+    revision: number;
+  }>;
+  /**
+   * M7-ui4: 편집 미리보기 (읽기 전용·커밋 없음).
+   * propagateStale을 dry-run으로 재사용해 "이 변경으로 stale이 될 노드"를
+   * 알려준다. 저장소를 건드리지 않는다.
+   */
+  previewEdit(input: PreviewEditInput): Promise<{
+    wouldStale: string[];
+    newHash: string;
     revision: number;
   }>;
   /** 절차서 문서 조립 (M4.2-1, 검증·params 경고 포함. 파일 쓰기는 local) */

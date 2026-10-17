@@ -10,8 +10,8 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, normalize, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ProcForgeApp } from "./app.js";
+import { NODE_HISTORY_MAX } from "./app.js";
 import { SessionEventHub, MAX_SUBS_PER_SESSION } from "./events-hub.js";
-import { NODE_HISTORY_MAX } from "../services/artifact-view.js";
 
 // M7-1: `procforge ui` 로컬 서버 (어댑터. App 메서드만 호출).
 // M7-ui1: 보안·세션 목록·pairings·정적 서빙. M7-ui2: 세션 트리 + SSE.
@@ -27,6 +27,10 @@ export type UiApp = Pick<
   | "sessionTree"
   | "nodeDetail"
   | "artifactContent"
+  | "previewEdit"
+  | "uiEditArgs"
+  | "uiEditNode"
+  | "uiAdviseAndSignal"
 >;
 
 export type UiServer = {
@@ -121,6 +125,45 @@ function listenWithRetry(
       resolve();
     });
   });
+}
+
+/** M7-ui4: 쓰기 본문 (JSON만) */
+async function readJsonBody(
+  req: IncomingMessage,
+  res: ServerResponse,
+): Promise<Record<string, unknown> | null> {
+  // content-type 검사 (M7-ui4: JSON만 받는다)
+  const ct = String(req.headers["content-type"] ?? "");
+  if (!ct.toLowerCase().includes("application/json")) {
+    err(res, 415, "content-type must be application/json");
+    return null;
+  }
+  let raw = "";
+  const tooBig = new Promise<null>((resolvePromise) => {
+    req.on("data", () => {
+      raw += "";
+      if (raw.length > 1024 * 1024) {
+        resolvePromise(null);
+      }
+    });
+  });
+  const collect = (async () => {
+    const chunks: Buffer[] = [];
+    for await (const c of req) {
+      chunks.push(c as Buffer);
+      if (chunks.reduce((n, b) => n + b.length, 0) > 1024 * 1024) return null;
+    }
+    return JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<
+      string,
+      unknown
+    >;
+  })();
+  const out = await Promise.race([collect, tooBig]);
+  if (out === null) {
+    err(res, 400, "요청 본문 파싱 실패 또는 상한 초과");
+    return null;
+  }
+  return out;
 }
 
 export async function createUiServer(opts: {
@@ -264,6 +307,80 @@ export async function createUiServer(opts: {
             "content-security-policy": CSP,
           });
           res.end(content.bytes);
+          return;
+        }
+        // M7-ui4: 쓰기 — POST + JSON만. expectedRevision 필수.
+        if (req.method === "POST") {
+          const sidFromPath = /^\/api\/sessions\/([^/]+)\/(preview-edit|advise-and-signal|edit-args|edit-node)$/.exec(
+            url.pathname,
+          );
+          if (sidFromPath) {
+            const sid = decodeURIComponent(sidFromPath[1]);
+            const body = await readJsonBody(req, res);
+            if (body === null) return;
+            const expected = body.expectedRevision;
+            if (!Number.isInteger(expected)) {
+              err(res, 400, "expectedRevision 필수");
+              return;
+            }
+            if (sidFromPath[2] === "preview-edit") {
+              send(
+                res,
+                await opts.app.previewEdit({
+                  sessionId: sid,
+                  nodeId: String(body.nodeId ?? ""),
+                  change: (body.change ?? {}) as never,
+                }),
+              );
+              return;
+            }
+            if (sidFromPath[2] === "edit-args") {
+              send(
+                res,
+                await opts.app.uiEditArgs({
+                  sessionId: sid,
+                  nodeId: String(body.nodeId ?? ""),
+                  patch: (body.patch ?? {}) as never,
+                  expectedRevision: expected as number,
+                }),
+              );
+              return;
+            }
+            if (sidFromPath[2] === "edit-node") {
+              send(
+                res,
+                await opts.app.uiEditNode({
+                  sessionId: sid,
+                  nodeId: String(body.nodeId ?? ""),
+                  ...(body.goal !== undefined ? { goal: String(body.goal) } : {}),
+                  ...(body.addConstraints !== undefined
+                    ? { addConstraints: body.addConstraints as never }
+                    : {}),
+                  ...(body.removeConstraintIds !== undefined
+                    ? { removeConstraintIds: (body.removeConstraintIds as string[]) }
+                    : {}),
+                  ...(body.dependsOn !== undefined
+                    ? { dependsOn: body.dependsOn as string[] }
+                    : {}),
+                  expectedRevision: expected as number,
+                }),
+              );
+              return;
+            }
+            // advise-and-signal
+            send(
+              res,
+              await opts.app.uiAdviseAndSignal({
+                sessionId: sid,
+                nodeId: String(body.nodeId ?? ""),
+                text: String(body.text ?? ""),
+                expectedRevision: expected as number,
+                ...(body.link !== undefined ? { link: body.link as never } : {}),
+              }),
+            );
+            return;
+          }
+          err(res, 404, "not found");
           return;
         }
         // M7-ui2: 세션 트리 (읽기 전용)

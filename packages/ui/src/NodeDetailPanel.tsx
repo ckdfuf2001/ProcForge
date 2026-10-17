@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, type NodeDetail, type NodeEvent } from "./api.js";
+import { EditPanel } from "./EditPanel.js";
 
 // M7-ui3: 노드 상세 패널. 판단 if문 금지 — 표시 매핑만.
 
@@ -125,6 +126,11 @@ export function NodeDetailPanel({
           </li>
         ))}
       </ul>
+      <EditPanel
+        sessionId={sessionId}
+        nodeId={nodeId}
+        revision={detail.revision}
+      />
     </section>
   );
 }

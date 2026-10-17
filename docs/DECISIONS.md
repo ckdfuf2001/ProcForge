@@ -545,6 +545,28 @@ argv: [...]}` 고정. runner는 run fs에서 직접 실행해 stdout을 golden�
   짝짓기 읽기는 최신 pf_start 기준 (latest-wins) — messages 뒤쪽이 이긴다.
   advise 실패 시 신호 미전송 (App.adviseAndSignal이 순서 보장).
   pairings UI 배선은 M7-2로 미룸 (App·pairings.json까지만).
+ - [M7-ui3-3] 산출물 URL은 `.../artifacts/<attemptId>/<index>`다. 경로를
+   클라이언트가 만들지 않는다 — core가 `attempt.artifacts[index]`로 상대경로만
+   골라내고, realpath로 fixtures 루트를 벗어나면 거부한다. 원격 모드에서 파일이
+   없으면 404(`not_found`)로 500을 흘리지 않는다.
+ - [M7-ui3-4] 노드 이력은 최신 200건. 상수는 UI 서버가 아니라 `App`이 정한다
+   (`NODE_HISTORY_MAX`) — UI 서버는 App 메서드만 호출한다.
+ - [M7-ui4-1] 편집 미리보기는 `previewEdit({sessionId,nodeId,change})` **읽기
+   전용**이다. 같은 검증·hash 규칙으로 `wouldStale`(노드 id 배열)과 `newHash`만
+   돌려주고 core·저장소는 건드리지 않는다. 잠긴 노드는 거절한다.
+ - [M7-ui4-2] UI 쓰기는 POST + `application/json`만 허용하고(그 외 415),
+   `expectedRevision`를 **모두 필수**로 받는다(누락 400, 불일치 409).
+   자동 재시도는 없고, 409는 UI가 초안 그대로를 붙들고 최신 다시 읽기를
+   제안한다.
+ - [M7-ui4-3] UI 경로 쓰기는 App이 `actor:"ui"` + connectionId를 강제로 찍는다.
+   클라이언트가 actor를 보내도 무시된다.
+ - [M7-ui4-4] 의견 저장은 **1회만** 한다. 저장이 먼저 끝나고 그다음 신호를
+   시도하므로, 신호 실패·degraded여도 저장분·revision·의견은 그대로다.
+   (advise를 두 번 부르면 두 번째가 같은 `expectedRevision`으로 conflict 난다.)
+ - [M7-ui3-5] 읽기는 TTL을 연장하지 않는다. 이건 예전에는 반대로 동작했는데
+   만료 판정 기준이 `lastUsed` 메모리 맵에 있어, HTTP로 요청마다 store가 새로
+   만들어지는 원격 모드에서는 **만료가 아예 일어나지 않았다**. 기준이 없으면
+   `createdAt`로 간주하고, 연장은 **쓰기만** 하도록 바꿨다.
 - [M6.1-신뢰경계] 판정은 local이 하고 core는 그 판정을 믿는다.
   원본을 보내지 않으니 당연한 결과. 다만 클라이언트가 판정을 조작할 수
   있다는 뜻이기도 하니, 판정 신뢰 경계 = 테넌트 자신 으로 명시한다.

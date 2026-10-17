@@ -198,6 +198,20 @@ const Methods = {
     in: z.tuple([SessionIdSchema, z.string()]),
     out: z.object({ doc: ProcedureDocSchema, warnings: z.array(z.string()) }).passthrough(),
   },
+  previewEdit: {
+    in: z.object({
+      sessionId: SessionIdSchema,
+      nodeId: NodeIdSchema,
+      change: z.object({
+        patch: z.object({ set: z.record(ArgSpecSchema).optional(), remove: z.array(z.string()).optional() }).optional(),
+        goal: z.string().max(4096).optional(),
+        dependsOn: z.array(NodeIdSchema).optional(),
+        addConstraints: z.array(ConstraintSchema).optional(),
+        removeConstraintIds: z.array(z.string()).optional(),
+      }).passthrough(),
+    }).passthrough(),
+    out: z.object({ wouldStale: z.array(NodeIdSchema), newHash: z.string(), revision: z.number().int().min(0) }).passthrough(),
+  },
   pfApprove: {
     in: z.object({
       sessionId: SessionIdSchema, nodeId: NodeIdSchema, approved: z.boolean(), note: z.string().optional(),
@@ -291,6 +305,7 @@ export function createLoopbackClient(inner: CoreClient): CoreClient {
     getEventsPage: (i) => wrapObj("getEventsPage", i, (x) => inner.getEventsPage(x)),
     getBlocked: (i) => wrapObj("getBlocked", i, (x) => inner.getBlocked(x)),
     pfBuildProcedure: (sid, name) => wrapArgs("pfBuildProcedure", [sid, name], ([a, b]) => inner.pfBuildProcedure(a, b)),
+    previewEdit: (i) => wrapObj("previewEdit", i, (x) => inner.previewEdit(x)),
     pfApprove: (i) => wrapObj("pfApprove", i, (x) => inner.pfApprove(x)),
     pfImportProcedure: (i) => wrapObj("pfImportProcedure", i, (x) => inner.pfImportProcedure(x)),
     pfWriteGolden: (i) => wrapObj("pfWriteGolden", i, (x) => inner.pfWriteGolden(x)),

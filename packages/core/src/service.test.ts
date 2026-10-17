@@ -1212,11 +1212,11 @@ describe("M4.2-2.5-1 getSession/getNode + TTL", () => {
     expect((await svc.getNode(s.session.id, "1")).goal).toBe("r");
     await expect(svc.getNode(s.session.id, "9")).rejects.toThrow(/node .* not found/);
     await expect(svc.getSession("123e4567-e89b-42d3-a456-426614174000")).rejects.toThrow(/세션 없음/);
-    // TTL 만료: 최초 접근은 touch 후 통과, 이후는 만료
+    // M7-ui3-b: 읽기는 TTL을 연장하지 않는다 — 마지막 쓰기(시작) 직후면 곧바로 만료다.
     const svc2 = new CoreService(createMemoryStore(), passEval, { sessionTtlMs: -1 });
     const s2 = await svc2.pfStart({ request: "r", toolCatalog: catalog });
-    await svc2.getSession(s2.session.id);
     await expect(svc2.getSession(s2.session.id)).rejects.toThrow(/세션 만료/);
+    await expect(svc2.getNode(s2.session.id, "1")).rejects.toThrow(/세션 만료/);
   });
 });
 

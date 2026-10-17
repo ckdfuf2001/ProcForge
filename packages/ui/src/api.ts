@@ -111,6 +111,20 @@ export type TreeResponse = {
   };
 };
 
+/** 쓰기: POST + JSON만 (M7-ui4) */
+async function post<T>(path: string, body: unknown): Promise<T> {
+  const r = await fetch(path, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-procforge-token": takeToken(),
+    },
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) throw new ApiError(path, r.status);
+  return (await r.json()) as T;
+}
+
 async function get<T>(path: string): Promise<T> {
   const r = await fetch(path, { headers: { "x-procforge-token": takeToken() } });
   if (!r.ok) throw new ApiError(path, r.status);
@@ -127,6 +141,7 @@ export class ApiError extends Error {
 }
 
 export const api = {
+  post,
   sessions: () => get<{ sessions: SessionRow[] }>("/api/sessions"),
   store: () => get<StoreInfo>("/api/store"),
   pairings: () => get<Pairings>("/api/pairings"),

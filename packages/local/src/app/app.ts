@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
-import { join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
+import { join, resolve } from "node:path";
 import type { CoreClient } from "@procforge/shared/core-client.js";
 import type { Actor } from "@procforge/shared/dto.js";
 import { pfError } from "@procforge/shared/errors.js";
@@ -113,7 +113,7 @@ import {
   auditContentTexts,
   collectAuditContent,
 } from "../services/audit-content.js";
-import { buildTrace, formatTraceMarkdown } from "../trace.js";
+import { buildTrace, formatTraceMarkdown, recordCall } from "../trace.js";
 import { exportSession } from "../export.js";
 import { assertProjectPath } from "../artifacts.js";
 import { writeProcedure } from "../services/procedureWriter.js";
@@ -141,6 +141,9 @@ export const PROMPT_TEXT = [
 
 /** M7-1: 세션 목록 1행 (core 요약 + 로컬 부가. 판단 없음. UI가 배지를 붙인다) */
 export type SessionSummary = SessionRow;
+
+/** M7-ui3-d: 노드 이력 최신 N건 (UI 서버가 상한 상수를 알지 않도록 App이 정한다) */
+export const NODE_HISTORY_MAX = 200;
 
 /** M7-ui2: 세션 트리 1행 (노드 요약 + stale 표시. 판단 없음) */
 export type SessionNodeRow = {
@@ -215,6 +218,8 @@ export class ProcForgeApp {
   private maxArtifactBytes: number;
   private catalogTimeoutMs: number | undefined;
   private linkFetchImpl: typeof fetch | undefined;
+  /** M7-ui4: UI 연결 id (호출 귀속 기록용. 연결마다 1개) */
+  private readonly uiConnectionId = `ui-${randomUUID()}`;
 
   constructor(deps: AppDeps) {
     this.core = deps.core;
@@ -1336,6 +1341,183 @@ export class ProcForgeApp {
       reason: a.reason as string,
       expectedRevision: a.expectedRevision as number | undefined,
       actor: (a.actor as Actor | undefined) ?? "host",
+    });
+    return {
+      node: nodeSummary(out.node, s.limits),
+      revision: out.revision,
+      changedNodeIds: out.changedNodeIds,
+    };
+  }
+
+  /** M7-ui4: 편집 미리보기 (읽기 전용 — core에 위임. UI는 표시만) */
+  async previewEdit(input: {
+    sessionId: string;
+    nodeId: string;
+    change: {
+      patch?: { set?: Record<string, unknown>; remove?: string[] };
+      goal?: string;
+      dependsOn?: string[];
+      addConstraints?: unknown[];
+      removeConstraintIds?: string[];
+    };
+  }): Promise<{ wouldStale: string[]; newHash: string; revision: number }> {
+    return this.core.previewEdit(input as never);
+  }
+
+  /**
+   * M7-ui4: UI 편집 저장. actor는 항상 "ui"(M7-0.1 귀속 규칙).
+   * expectedRevision이 없으면 거부한다 — 자동 재시도로 충돌을 덮지 않는다.
+   */
+  async uiEditArgs(input: {
+    sessionId: string;
+    nodeId: string;
+    patch: { set?: Record<string, unknown>; remove?: string[] };
+    expectedRevision: number;
+  }): Promise<{ node: ReturnType<typeof nodeSummary>; revision: number; changedNodeIds: string[] }> {
+    if (!Number.isInteger(input.expectedRevision)) {
+      throw pfError("bad_request", "expectedRevision 필수");
+    }
+    const sid = input.sessionId;
+    const s = await this.core.getSession(sid);
+    recordCall(this.procforgeDir, {
+      sessionId: sid,
+      tool: "pf_edit_args",
+      ok: true,
+      nodeId: input.nodeId,
+      clientName: "procforge-ui",
+      actor: "ui",
+      connectionId: this.uiConnectionId,
+    });
+    const out = await this.core.pfEditArgs({
+      sessionId: sid,
+      nodeId: input.nodeId,
+      patch: input.patch as never,
+      expectedRevision: input.expectedRevision,
+      actor: "ui",
+    });
+    return {
+      node: nodeSummary(out.node, s.limits),
+      revision: out.revision,
+      changedNodeIds: out.changedNodeIds,
+    };
+  }
+
+  /**
+   * M7-ui4: UI 의견 + "계속" 신호 (M7-0.2 B>A>C).
+   * advise가 먼저 저장되고, 신호 실패·degraded여도 **저장분은 그대로**다
+   * (신호는 상태 변경이 아니다).
+   */
+  async uiAdviseAndSignal(input: {
+    sessionId: string;
+    nodeId: string;
+    text: string;
+    expectedRevision: number;
+    link?: {
+      baseUrl: string;
+      openCodeSessionId?: string;
+      mode: LinkMode;
+      text?: string;
+      timeoutMs?: number;
+      serverVersion?: string;
+    };
+  }): Promise<{
+    advise: OutputOf<"pf_advise">;
+    signal: LinkResult | null;
+  }> {
+    if (!Number.isInteger(input.expectedRevision)) {
+      throw pfError("bad_request", "expectedRevision 필수");
+    }
+    const sid = input.sessionId;
+    recordCall(this.procforgeDir, {
+      sessionId: sid,
+      tool: "pf_advise",
+      nodeId: input.nodeId,
+      clientName: "procforge-ui",
+      actor: "ui",
+      connectionId: this.uiConnectionId,
+      ok: true,
+    });
+    const advised = await this.advise({
+      sessionId: sid,
+      nodeId: input.nodeId,
+      text: input.text,
+      expectedRevision: input.expectedRevision,
+      actor: "ui",
+    } as never);
+    if (!input.link) return { advise: advised, signal: null };
+    // advise는 **이미 저장됐다.** 여기서 신호만 보낸다 (두 번 advise하지 않는다 —
+    // 두 번 쓰면 같은 expectedRevision으로 두 번째가 conflict 난다).
+    const noSend = (degraded: string): LinkResult => ({
+      delivered: false,
+      degraded,
+      copyText: `${input.link?.text ?? "계속"}\nOpenCode에서 '계속'이라고 입력하세요.`,
+    });
+    const link = input.link;
+    if (link.openCodeSessionId) {
+      const pair = getPairing(this.procforgeDir, link.openCodeSessionId);
+      if (pair && pair.pfSessionId !== sid) {
+        return {
+          advise: advised,
+          signal: noSend(`다른 세션과 짝(${pair.pfSessionId}). 전송하지 않음`),
+        };
+      }
+    }
+    const http = httpLinkDeps(link.baseUrl, this.linkFetchImpl);
+    const signal = await sendContinue({
+      baseUrl: link.baseUrl,
+      openCodeSessionId: link.openCodeSessionId,
+      text: link.text ?? "계속",
+      mode: link.mode,
+      timeoutMs: link.timeoutMs,
+      serverVersion: link.serverVersion,
+      deps: {
+        fetchImpl: this.linkFetchImpl,
+        ...http,
+        onPairing: (openSid, pfSid) => {
+          savePairing(this.procforgeDir, openSid, pfSid);
+        },
+      },
+    });
+    return { advise: advised, signal };
+  }
+
+  /** M7-ui4: UI 노드 편집(목표·조건) — actor "ui" */
+  async uiEditNode(input: {
+    sessionId: string;
+    nodeId: string;
+    goal?: string;
+    addConstraints?: unknown[];
+    removeConstraintIds?: string[];
+    dependsOn?: string[];
+    expectedRevision: number;
+  }): Promise<{ node: ReturnType<typeof nodeSummary>; revision: number; changedNodeIds: string[] }> {
+    if (!Number.isInteger(input.expectedRevision)) {
+      throw pfError("bad_request", "expectedRevision 필수");
+    }
+    const sid = input.sessionId;
+    const s = await this.core.getSession(sid);
+    recordCall(this.procforgeDir, {
+      sessionId: sid,
+      tool: "pf_edit_node",
+      ok: true,
+      nodeId: input.nodeId,
+      clientName: "procforge-ui",
+      actor: "ui",
+      connectionId: this.uiConnectionId,
+    });
+    const out = await this.core.pfEditNode({
+      sessionId: sid,
+      nodeId: input.nodeId,
+      ...(input.goal !== undefined ? { goal: input.goal } : {}),
+      ...(input.addConstraints !== undefined
+        ? { addConstraints: input.addConstraints as never }
+        : {}),
+      ...(input.removeConstraintIds !== undefined
+        ? { removeConstraintIds: input.removeConstraintIds }
+        : {}),
+      ...(input.dependsOn !== undefined ? { dependsOn: input.dependsOn } : {}),
+      expectedRevision: input.expectedRevision,
+      actor: "ui",
     });
     return {
       node: nodeSummary(out.node, s.limits),

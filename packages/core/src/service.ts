@@ -30,6 +30,7 @@ import type {
   PfApproveInput,
   PfEditArgsInput,
   PfEditNodeInput,
+  PreviewEditInput,
   AmendAttemptArtifactsInput,
   PfStartInput,
   PfStartOutput,
@@ -44,6 +45,9 @@ import { TxStore } from "./txn.js";
 import { defaultEvaluate } from "./evaluate.js";
 import { adviceToConstraints, suggestsNumericRef } from "./advice.js";
 import { compareNodeIds } from "@procforge/shared/ids.js";
+
+/** M7-ui4: 목표 상한 (UI 입력도 core와 같은 상한으로 검증한다). */
+export const GOAL_MAX_LEN = 4096;
 import {
   autoConstraints,
   decideReportVerdict,
@@ -209,13 +213,18 @@ export class CoreService implements CoreClient {
   private checkFreshWith(sessionId: string, touch: boolean): Session {
     const s = this.store.getSession(sessionId);
     if (!s) throw err("session_not_found", `세션 없음: ${sessionId}`);
-    const last = this.store.getLastUsed(sessionId);
-    if (last === undefined) {
+    const recorded = this.store.getLastUsed(sessionId);
+    // M7-ui3-b: 원격(HTTP)에서는 요청마다 store가 새로 만들어져 lastUsed 기록이 없다.
+    // 판단 근거가 없으면 세션 생성 시각으로 간주한다.
+    const base = recorded ?? Date.parse(s.createdAt);
+    if (!Number.isFinite(base)) {
       if (touch) this.store.touchSession(sessionId);
       return s;
     }
-    if (Date.now() - last > this.sessionTtlMs)
+    if (Date.now() - base > this.sessionTtlMs)
       throw err("session_not_found", `세션 만료: ${sessionId}`);
+    // 연장은 **쓰기만** 한다 — 화면을 보기만 해서는 살아있는 세션이 바뀌지 않는다.
+    if (touch) this.store.touchSession(sessionId);
     return s;
   }
 
@@ -1455,6 +1464,132 @@ if (oldHash !== next.hash) this.propagateStale(s.id, input.nodeId, s.revision + 
       revision: c.revision,
       changedNodeIds: c.changedNodeIds,
     };
+  }
+
+  /**
+ * M7-ui4: 편집 미리보기 (읽기 전용·커밋 없음).
+ * pfEditArgs/pfEditNode와 **같은 검증·해시 규칙**을 쓰되, 노드 사본에
+ * 대해서만 계산하고 저장소에는 아무것도 쓰지 않는다 (propagateStale의
+ * dry-run). "이 변경으로 다시 실행될 노드"를 UI에 알려주기 위한 API.
+ */
+  async previewEdit(input: PreviewEditInput): Promise<{
+    wouldStale: string[];
+    newHash: string;
+    revision: number;
+  }> {
+    // 읽기 전용 확인 (touch 없음) — 여기서 상태가 바뀌면 안 된다.
+    const s = this.checkFreshRead(input.sessionId);
+    const n = this.node(input.sessionId, input.nodeId);
+    if (n.locked) throw err("conflict", `node ${n.id} is locked`);
+    const ch = input.change;
+    const hasPatch = ch.patch !== undefined;
+    const hasNodeEdit =
+      ch.goal !== undefined ||
+      ch.dependsOn !== undefined ||
+      ch.addConstraints !== undefined ||
+      ch.removeConstraintIds !== undefined;
+    if (!hasPatch && !hasNodeEdit) {
+      throw err("bad_request", "변경 내용 없음.");
+    }
+    // 1) 대상 노드의 사본을 만든다 (검증 규칙은 실제 편집과 동일).
+    let next: Node = { ...n };
+    if (hasPatch) {
+      if (!n.args) {
+        throw err(
+          "bad_request",
+          `node ${n.id}에 확정된 인자가 없어 수정 불가. pf_confirm_leaf 먼저.`,
+        );
+      }
+      const set = ch.patch?.set ?? {};
+      for (const [k, spec] of Object.entries(set)) {
+        if (
+          !spec ||
+          (spec.kind !== "fixed" &&
+            spec.kind !== "var" &&
+            spec.kind !== "generated" &&
+            spec.kind !== "script")
+        ) {
+          throw err("bad_request", `bad patch spec: ${k}`);
+        }
+      }
+      const remove = new Set(ch.patch?.remove ?? []);
+      if (Object.keys(set).length === 0 && remove.size === 0) {
+        throw err("bad_request", "변경 없음 (patch.set/remove 중 하나 필요).");
+      }
+      const merged: Record<string, ArgSpec> = {};
+      for (const [k, spec] of Object.entries(n.args)) {
+        if (!remove.has(k)) merged[k] = spec;
+      }
+      Object.assign(merged, set);
+      const cat = s.toolCatalog.find(
+        (t) => t.server === n.tool?.server && t.name === n.tool?.name,
+      );
+      if (!n.tool || !cat) {
+        throw err(
+          "bad_request",
+          `node ${n.id}의 도구를 카탈로그에서 찾을 수 없어 검증 불가.`,
+        );
+      }
+      const problem = checkFixedAgainstInputSchema(merged, cat.inputSchema);
+      if (problem) throw err("bad_request", problem);
+      next = { ...next, args: merged, suggestedArgs: merged };
+    }
+    if (hasNodeEdit) {
+      if (ch.goal !== undefined) {
+        const g = ch.goal;
+        // pfEditNode와 동일한 검증 (빈 문자열 거부).
+        if (g.length === 0 || g.trim() === "") {
+          throw err("bad_request", "goal이 비어 있음.");
+        }
+        if (g.length > GOAL_MAX_LEN) {
+          throw err("bad_request", `goal 상한 초과 (${g.length} > ${GOAL_MAX_LEN}).`);
+        }
+        next = { ...next, goal: g };
+      }
+      if (ch.addConstraints !== undefined) {
+        for (const c of ConstraintSchema.array().parse(ch.addConstraints)) {
+          const dup = next.constraints.some((x) => x.id === c.id);
+          if (!dup) next.constraints = [...next.constraints, c];
+        }
+      }
+      if (ch.removeConstraintIds !== undefined) {
+        const rm = new Set(ch.removeConstraintIds);
+        next.constraints = next.constraints.filter((x) => !rm.has(x.id));
+      }
+      if (ch.dependsOn !== undefined) {
+        if (ch.dependsOn.length === 0) {
+          throw err("bad_request", "dependsOn 비우기 금지 (pf_reopen 사용).");
+        }
+        next = { ...next, dependsOn: [...ch.dependsOn] };
+      }
+    }
+    // 2) 대상 해시 + stale 전파를 **사본 그래프에서** 계산한다.
+    const byId = new Map<string, Node>();
+    for (const m of this.store.getNodes(input.sessionId).values()) {
+      byId.set(m.id, m);
+    }
+    const nextHash = this.hashFor(input.sessionId, next, byId);
+    byId.set(next.id, { ...next, hash: nextHash });
+    const wouldStale: string[] = [];
+    if (nextHash !== n.hash) {
+      const queue = [n.id];
+      const seen = new Set<string>([n.id]);
+      while (queue.length > 0) {
+        const cur = queue.shift() as string;
+        for (const m of [...byId.values()]) {
+          if (m.id === cur || seen.has(m.id)) continue;
+          if (!effectiveDeps(m, byId).includes(cur)) continue;
+          seen.add(m.id);
+          const mh = this.hashFor(input.sessionId, m, byId);
+          if (mh === m.hash) continue;
+          wouldStale.push(m.id);
+          byId.set(m.id, { ...m, hash: mh });
+          queue.push(m.id);
+        }
+      }
+    }
+    wouldStale.sort(compareNodeIds);
+    return { wouldStale, newHash: nextHash, revision: s.revision };
   }
 
   /** 목표·검사 조건 직접 수정 (M4.2-2) */
