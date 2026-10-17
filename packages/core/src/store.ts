@@ -30,7 +30,7 @@ export function createMemoryStore(): Store {
     getNodes: (sid) => nodes.get(sid) ?? new Map(),
     listSessions: () =>
       [...sessions.values()]
-        .map((s) => ({ id: s.id, request: s.request, revision: s.revision ?? 0, createdAt: s.createdAt, rootId: s.rootId }))
+        .map((s) => ({ id: s.id, request: s.request, revision: s.revision ?? 0, createdAt: s.createdAt, lastWriteAt: s.lastWriteAt, rootId: s.rootId }))
         .sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0)),
     getNode: (sid, nid) => nodes.get(sid)?.get(nid),
     saveNode: (sid, n) => {
@@ -41,10 +41,8 @@ export function createMemoryStore(): Store {
       events.set(sid, [...(events.get(sid) ?? []), ...evts]);
     },
     readEvents: (sid) => [...(events.get(sid) ?? [])],
-    getLastUsed: (sid) => lastUsed.get(sid),
-    touchSession: (sid) => {
-      lastUsed.set(sid, Date.now());
-    },
+    // M7-ui4-a: TTL 기준은 commitChange가 session.json에 남긴다 (메모리 상태 금지).
+    touchSession: () => {},
     withLock: async (_sid, fn) => await fn(),
     commitChange: (sid, c) => apply(sid, c),
   };

@@ -210,21 +210,19 @@ export class CoreService implements CoreClient {
     return this.checkFreshWith(sessionId, false);
   }
 
-  private checkFreshWith(sessionId: string, touch: boolean): Session {
+  private checkFreshWith(sessionId: string, _touch: boolean): Session {
     const s = this.store.getSession(sessionId);
     if (!s) throw err("session_not_found", `세션 없음: ${sessionId}`);
-    const recorded = this.store.getLastUsed(sessionId);
-    // M7-ui3-b: 원격(HTTP)에서는 요청마다 store가 새로 만들어져 lastUsed 기록이 없다.
-    // 판단 근거가 없으면 세션 생성 시각으로 간주한다.
-    const base = recorded ?? Date.parse(s.createdAt);
-    if (!Number.isFinite(base)) {
-      if (touch) this.store.touchSession(sessionId);
-      return s;
-    }
-    if (Date.now() - base > this.sessionTtlMs)
+    // M7-ui4-a: 판정 기준은 **디스크**에 남은 값이다 (`lastWriteAt ?? createdAt`).
+    // 메모리 상태에 의존하면 프로세스 재시작 후, 그리고 원격 core(요청마다
+    // store를 새로 만드는 구조)에서 판정이 사라진다.
+    // 읽기는 기준을 바꾸지 않는다 — 화면만 봐도 세션이 살아 있으면 안 된다.
+    const raw = s.lastWriteAt ?? s.createdAt;
+    const base = Date.parse(raw);
+    if (!Number.isFinite(base)) return s;
+    if (Date.now() - base > this.sessionTtlMs) {
       throw err("session_not_found", `세션 만료: ${sessionId}`);
-    // 연장은 **쓰기만** 한다 — 화면을 보기만 해서는 살아있는 세션이 바뀌지 않는다.
-    if (touch) this.store.touchSession(sessionId);
+    }
     return s;
   }
 
@@ -2117,6 +2115,8 @@ if (oldHash !== next.hash) this.propagateStale(s.id, input.nodeId, s.revision + 
         request: s.request,
         revision: s.revision,
         createdAt: s.createdAt,
+        // M7-ui4-a: TTL 기준을 UI에도 보여준다 (로컬 부가정보가 되짚지 않도록).
+        lastWriteAt: s.lastWriteAt,
         rootId: s.rootId,
         nodeCount: nodes.size,
         rootStatus: nodes.get(s.rootId)?.status ?? "unknown",

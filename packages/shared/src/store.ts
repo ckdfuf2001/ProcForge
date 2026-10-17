@@ -20,7 +20,7 @@ export type Store = {
   getSession(id: string): Session | undefined;
   saveSession(s: Session): void;
   /** M7-ui1: 세션 목록 (판단 없음. createdAt 내림차순) */
-  listSessions(): { id: string; request: string; revision: number; createdAt: string; rootId: string }[];
+  listSessions(): { id: string; request: string; revision: number; createdAt: string; lastWriteAt?: string; rootId: string }[];
   getNodes(sessionId: string): Map<string, Node>;
   getNode(sessionId: string, nodeId: string): Node | undefined;
   saveNode(sessionId: string, n: Node): void;
@@ -28,9 +28,10 @@ export type Store = {
   appendEvents(sessionId: string, events: EventEntry[]): void;
   /** 상태 이벤트 조회 (R7 히스토리 원천) */
   readEvents(sessionId: string): EventEntry[];
-  /** 세션 TTL용 최종 사용 시각 (없으면 undefined) */
-  getLastUsed(sessionId: string): number | undefined;
-  /** 최종 사용 시각 갱신 */
+  /**
+   * M7-ui4-a: 세션 부가정보(클라이언트 정보) 기록. TTL 판정은 여기서 하지 않는다 —
+   * 기준은 commitChange가 session.json에 남기는 `lastWriteAt`다.
+   */
   touchSession(sessionId: string): void;
   /** 세션 잠금 안에서 실행 (M4.2-2.5, core change 트랜잭션용. 대기 후 conflict) */
   withLock<T>(sessionId: string, fn: () => T | Promise<T>): Promise<T>;

@@ -31,7 +31,8 @@ export function enrichSessions(
     }
     return {
       ...s,
-      lastUsedAt: store.getLastUsed(s.sessionId) ?? null,
+      // M7-ui4-a: TTL과 같은 기준을 쓴다 (lastWriteAt ?? createdAt).
+      lastUsedAt: Date.parse(s.lastWriteAt ?? s.createdAt),
       connectionIds: [...seen].sort(),
       pairings: Object.values(pairs.pairs)
         .filter((p) => p.pfSessionId === s.sessionId)

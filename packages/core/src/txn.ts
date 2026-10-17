@@ -21,7 +21,7 @@ export class TxStore implements Store {
   }
 
   /** 목록은 base 위임 (미확정 세션은 목록에 없음) */
-  listSessions(): { id: string; request: string; revision: number; createdAt: string; rootId: string }[] {
+  listSessions(): { id: string; request: string; revision: number; createdAt: string; lastWriteAt?: string; rootId: string }[] {
     return this.base.listSessions();
   }
 
@@ -63,10 +63,6 @@ export class TxStore implements Store {
   /** 읽기는 base 위임 (미확정분 제외) */
   readEvents(sessionId: string): EventEntry[] {
     return this.base.readEvents(sessionId);
-  }
-
-  getLastUsed(sessionId: string): number | undefined {
-    return this.base.getLastUsed(sessionId);
   }
 
   touchSession(sessionId: string): void {

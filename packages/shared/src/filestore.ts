@@ -91,7 +91,7 @@ export class FileStore implements Store {
    * M7-1: 세션 목록 (UI 세션 목록용. 판단 없음, 원시 데이터만).
    * 깨진 항목은 건너뛴다. createdAt 내림차순.
    */
-  listSessions(): { id: string; request: string; revision: number; createdAt: string; rootId: string }[] {
+  listSessions(): { id: string; request: string; revision: number; createdAt: string; lastWriteAt?: string; rootId: string }[] {
     const dir = join(this.root, "sessions");
     let entries: { name: string; isDirectory(): boolean }[];
     try {
@@ -99,12 +99,12 @@ export class FileStore implements Store {
     } catch {
       return [];
     }
-    const out: { id: string; request: string; revision: number; createdAt: string; rootId: string }[] = [];
+    const out: { id: string; request: string; revision: number; createdAt: string; lastWriteAt?: string; rootId: string }[] = [];
     for (const e of entries) {
       if (!e.isDirectory()) continue;
       try {
         const s = this.getSession(e.name);
-        if (s) out.push({ id: s.id, request: s.request, revision: s.revision ?? 0, createdAt: s.createdAt, rootId: s.rootId });
+        if (s) out.push({ id: s.id, request: s.request, revision: s.revision ?? 0, createdAt: s.createdAt, lastWriteAt: s.lastWriteAt, rootId: s.rootId });
       } catch {
         // 깨진 세션은 목록에서 제외
       }
@@ -421,6 +421,10 @@ export class FileStore implements Store {
   commitChange(sid: string, c: CommitChange): void {
     assertSessionId(sid);
     if (!c.session) throw pfError("internal", "commitChange requires session", "호출자 확인 필요");
+    // M7-ui4-a: 쓰기 커밋 시각을 session.json에 남긴다. TTL 판정이 이 값에만
+    // 의존하므로 프로세스 재시작·원격 core(요청마다 store 재생성)에서도 결과가 같다.
+    const session: Session = { ...c.session, lastWriteAt: new Date().toISOString() };
+    const commit: CommitChange = { ...c, session };
     // M4.2-4-0-1: 손상 잔류 시 새 커밋 거부 (CLI repair로만 해제)
     const corrupt = this.corruptFiles(sid);
     if (corrupt.length > 0) {
@@ -431,13 +435,13 @@ export class FileStore implements Store {
     if (rec.failed.length > 0) {
       throw pfError("internal", `복구 실패(${rec.failed.length}건), 수동 확인 필요`, "복구 필요");
     }
-    const rev = c.session.revision;
+    const rev = session.revision;
     mkdirSync(this.sessionDir(sid), { recursive: true });
     this.writeAtomic(
       join(this.sessionDir(sid), `pending-${rev}.json`),
-      JSON.stringify({ revision: rev, session: c.session ?? null, nodes: c.nodes ?? [], events: c.events ?? [] }),
+      JSON.stringify({ revision: rev, session: session ?? null, nodes: c.nodes ?? [], events: c.events ?? [] }),
     );
-    this.applyPending(sid, c);
+    this.applyPending(sid, commit);
     try {
       fsutil.unlinkRetrySync(join(this.sessionDir(sid), `pending-${rev}.json`));
     } catch {
@@ -669,17 +673,5 @@ export class FileStore implements Store {
       }
     }
     throw pfError("conflict", `session locked: ${sid}`);
-  }
-
-  getLastUsed(sid: string): number | undefined {
-    assertSessionId(sid);
-    const p = this.metaPath(sid);
-    if (!existsSync(p)) return undefined;
-    try {
-      const t = Date.parse((JSON.parse(readFileSync(p, "utf8")) as { lastUsedAt: string }).lastUsedAt);
-      return Number.isNaN(t) ? undefined : t;
-    } catch {
-      return undefined;
-    }
   }
 }

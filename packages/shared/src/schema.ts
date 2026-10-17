@@ -347,6 +347,12 @@ export const SessionSchema = z.object({
     maxNodes: z.number().int().min(1),
   }),
   createdAt: z.string().min(1),
+  /**
+   * M7-ui4-a: 마지막 **쓰기 커밋** 시각 (ISO). TTL 판정 기준이다
+   * (`lastWriteAt ?? createdAt`). 판정이 메모리 상태에 의존하지 않으므로
+   * 프로세스 재시작·원격 core(요청마다 store 재생성)에서도 같다.
+   */
+  lastWriteAt: z.string().min(1).optional(),
   /** 세션 revision (M4.2-0, R6). 구 세션은 로드 시 0으로 마이그레이션 */
   revision: z.number().int().min(0).default(0),
   /** 수집 시점 opencode 버전 (M3.6-7, 미상은 "unknown") */
@@ -360,6 +366,8 @@ export const SessionSummarySchema = z.object({
   request: z.string(),
   revision: z.number().int().min(0),
   createdAt: z.string(),
+  /** M7-ui4-a: 마지막 쓰기 커밋 시각 (TTL 기준. 없으면 createdAt으로 간주) */
+  lastWriteAt: z.string().optional(),
   rootId: z.string(),
   nodeCount: z.number().int().min(0),
   rootStatus: z.string(),
