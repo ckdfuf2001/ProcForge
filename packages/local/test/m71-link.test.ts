@@ -13,7 +13,7 @@ import {
   getPairing,
   loadPairings,
 } from "../src/services/pairings.js";
-import { ProcForgeApp } from "../src/app/app.js";
+import { ProcForgeApp, type SignalTarget } from "../src/app/app.js";
 
 // M7-1: UI→OpenCode 연결 B/A/C + plan 모드 E2E (가짜 opencode 서버).
 // M7-1.1 실서버 확인 재현: POST /session/:id/message + {parts} → 200
@@ -453,12 +453,16 @@ function stubCore(opts: { failAdvise?: boolean } = {}) {
   };
 }
 
-function stubApp(opts: { failAdvise?: boolean } = {}) {
+function stubApp(
+  opts: { failAdvise?: boolean; signal?: Partial<SignalTarget> } = {},
+) {
   return new ProcForgeApp({
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     core: stubCore(opts) as any,
     procforgeDir: pfdir,
     projectRoot: pfdir,
+    // M7-ui4-b: 신호 대상은 서버 설정에서만 온다
+    ...(opts.signal ? { signal: opts.signal } : {}),
   });
 }
 
@@ -472,19 +476,35 @@ describe("M7-1 adviseAndSignal", () => {
   it("advise 실패 → 신호 미전송", async () => {
     const fake = await startFake("b-ok");
     try {
-      const app = stubApp({ failAdvise: true });
+      const app = stubApp({
+        failAdvise: true,
+        signal: { baseUrl: fake.baseUrl, mode: "b", serverVersion: "1.18.18" },
+      });
       await expect(
         app.adviseAndSignal({
           ...adviseInput,
-          link: {
-            baseUrl: fake.baseUrl,
-            openCodeSessionId: "ses-f",
-            mode: "b",
-            timeoutMs: 500,
-            serverVersion: "1.18.18",
-          },
+          link: { openCodeSessionId: "ses-f", timeoutMs: 500 },
         }),
       ).rejects.toThrow("advise boom");
+      expect(fake.requests).toEqual([]);
+    } finally {
+      await fake.close();
+    }
+  });
+
+  it("M7-ui4-b: 본문 link.baseUrl·mode 지정 → 400 (서버 설정만)", async () => {
+    const fake = await startFake("b-ok");
+    try {
+      const app = stubApp({ signal: { baseUrl: fake.baseUrl, mode: "b" } });
+      await expect(
+        app.adviseAndSignal({
+          ...adviseInput,
+          link: { baseUrl: "http://169.254.169.254:80", mode: "b" },
+        }),
+      ).rejects.toThrow(/서버 설정에서만/);
+      await expect(
+        app.adviseAndSignal({ ...adviseInput, link: { mode: "c" } }),
+      ).rejects.toThrow(/서버 설정에서만/);
       expect(fake.requests).toEqual([]);
     } finally {
       await fake.close();
@@ -494,11 +514,11 @@ describe("M7-1 adviseAndSignal", () => {
   it("advise 성공 → 신호 + 짝짓기 기록, 재연결 latest-wins·이력 보존", async () => {
     const fake = await startFake("b-ok", { pfIds: ["pf-1", "pf-2"] });
     try {
-      const app = stubApp();
+      const app = stubApp({
+        signal: { baseUrl: fake.baseUrl, mode: "b", serverVersion: "1.18.18" },
+      });
       const link = {
-        baseUrl: fake.baseUrl,
         openCodeSessionId: "ses-g",
-        mode: "b" as const,
         timeoutMs: 2000,
         serverVersion: "1.18.18",
       };
@@ -534,16 +554,12 @@ describe("M7-1 adviseAndSignal", () => {
     const fake = await startFake("b-ok");
     try {
       savePairing(pfdir, "ses-g", "pf-other");
-      const app = stubApp();
+      const app = stubApp({
+        signal: { baseUrl: fake.baseUrl, mode: "b", serverVersion: "1.18.18" },
+      });
       const r = await app.adviseAndSignal({
         ...adviseInput, // sessionId "pf-sid" ≠ 짝 "pf-other"
-        link: {
-          baseUrl: fake.baseUrl,
-          openCodeSessionId: "ses-g",
-          mode: "b",
-          timeoutMs: 500,
-          serverVersion: "1.18.18",
-        },
+        link: { openCodeSessionId: "ses-g", timeoutMs: 500 },
       });
       expect(r.signal.delivered).toBe(false);
       if (!r.signal.delivered) {

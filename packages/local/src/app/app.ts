@@ -207,6 +207,21 @@ export type AppDeps = {  core: CoreClient;
   catalogTimeoutMs?: number;
   /** M7-1.1-5: 신호 전송용 fetch (R5. 테스트 주입은 생성자로만. 입력은 JSON) */
   linkFetchImpl?: typeof fetch;
+  /**
+   * M7-ui4-b: **서버 설정** 신호 대상. 클라이언트(MCP 도구·UI 본문)는
+   * baseUrl·mode를 정하지 않는다 — 지정하려 하면 400이다.
+   * 미지정 시 환경변수(PROCFORGE_OPENCODE_URL / _MODE)로 본다.
+   */
+  signal?: Partial<SignalTarget>;
+};
+
+/** M7-ui4-b/c: 신호 대상 (서버 설정에서만 온다) */
+export type SignalTarget = {
+  baseUrl: string;
+  mode: LinkMode;
+  text?: string;
+  timeoutMs?: number;
+  serverVersion?: string;
 };
 
 export class ProcForgeApp {
@@ -220,6 +235,7 @@ export class ProcForgeApp {
   private linkFetchImpl: typeof fetch | undefined;
   /** M7-ui4: UI 연결 id (호출 귀속 기록용. 연결마다 1개) */
   private readonly uiConnectionId = `ui-${randomUUID()}`;
+  private readonly signal: SignalTarget;
 
   constructor(deps: AppDeps) {
     this.core = deps.core;
@@ -230,6 +246,16 @@ export class ProcForgeApp {
     this.maxArtifactBytes = deps.maxArtifactBytes ?? 5 * 1024 * 1024;
     this.catalogTimeoutMs = deps.catalogTimeoutMs;
     this.linkFetchImpl = deps.linkFetchImpl;
+    // M7-ui4-b: 신호 대상은 여기서 한 번만 정한다.
+    this.signal = {
+      baseUrl: deps.signal?.baseUrl ?? process.env.PROCFORGE_OPENCODE_URL ?? "",
+      mode: (deps.signal?.mode ??
+        (process.env.PROCFORGE_OPENCODE_MODE as LinkMode | undefined) ??
+        "b") as LinkMode,
+      text: deps.signal?.text,
+      timeoutMs: deps.signal?.timeoutMs,
+      serverVersion: deps.signal?.serverVersion,
+    };
   }
 
   async start(a: StartInput): Promise<OutputOf<"pf_start">> {
@@ -1203,60 +1229,90 @@ export class ProcForgeApp {
   }
 
   /**
-   * M7-1: 사람 조언 등록 + OpenCode에 "계속" 신호.
-   * 상태 변경은 advise로만 하고, advise가 실패(throw)하면 신호를 보내지
-   * 않는다. 신호 성공 시 pairings.json에 latest-wins로 기록 (UI 배선 없음).
-   * M7-1.1: 입력 link는 JSON만 (R5). fetch 주입은 생성자로.
-   * 신호 전 짝을 조회해 다른 ProcForge 세션과 짝이면 보내지 않는다.
+   * M7-ui4-c: **신호만** 보낸다 (advise를 하지 않는다).
+   * 짝 없음 처리는 M7-0.2 규칙 그대로 — 짝이 없으면 허용(첫 신호가 짝을 만든다),
+   * 다른 세션과 짝이면 degraded로 막는다. 실패해도 데이터는 건드리지 않는다.
+   * baseUrl·mode는 서버 설정(this.signal)에서만 온다.
    */
-  async adviseAndSignal(
-    a: AdviseInput & {
-      link: {
-        baseUrl: string;
-        openCodeSessionId?: string;
-        mode: LinkMode;
-        text?: string;
-        timeoutMs?: number;
-        /** 연결의 clientInfo 버전 (없으면 미확인→C. 호출자가 넣어라) */
-        serverVersion?: string;
-      };
-    },
-  ): Promise<{ advise: OutputOf<"pf_advise">; signal: LinkResult }> {
-    const advised = await this.advise(a);
-    const sid = a.sessionId as string;
-    const link = a.link;
+  async signalOnly(input: {
+    sessionId: string;
+    /** 미지정 시 이 세션의 최신 짝짓기를 쓴다 (UI는 클라이언트가 못 고른다) */
+    openCodeSessionId?: string;
+    text?: string;
+    timeoutMs?: number;
+    serverVersion?: string;
+  }): Promise<LinkResult> {
+    const sid = input.sessionId;
+    const cfg = this.signal;
+    const openSid =
+      input.openCodeSessionId ?? this.latestPairingSessionId(sid);
     const noSend = (degraded: string): LinkResult => ({
       delivered: false,
       degraded,
-      copyText: `${link.text ?? "계속"}\nOpenCode에서 '계속'이라고 입력하세요.`,
+      copyText: `${cfg.text ?? input.text ?? "계속"}\nOpenCode에서 '계속'이라고 입력하세요.`,
     });
-    // M7-1.1-3: 엉뚱한 세션에 "계속" 금지. 짝이 없으면 허용(첫 신호가 짝을 만든다).
-    if (link.openCodeSessionId) {
-      const pair = getPairing(this.procforgeDir, link.openCodeSessionId);
+    if (!cfg.baseUrl) return noSend("OpenCode 주소 미설정 (PROCFORGE_OPENCODE_URL)");
+    // M7-0.2-3: 엉뚱한 세션에 "계속" 금지. 짝이 없으면 허용.
+    if (openSid) {
+      const pair = getPairing(this.procforgeDir, openSid);
       if (pair && pair.pfSessionId !== sid) {
-        return {
-          advise: advised,
-          signal: noSend(
-            `다른 세션과 짝(${pair.pfSessionId}). 전송하지 않음`,
-          ),
-        };
+        return noSend(`다른 세션과 짝(${pair.pfSessionId}). 전송하지 않음`);
       }
     }
-    const http = httpLinkDeps(link.baseUrl, this.linkFetchImpl);
-    const signal = await sendContinue({
-      baseUrl: link.baseUrl,
-      openCodeSessionId: link.openCodeSessionId,
-      text: link.text ?? "계속",
-      mode: link.mode,
-      timeoutMs: link.timeoutMs,
-      serverVersion: link.serverVersion,
+    const http = httpLinkDeps(cfg.baseUrl, this.linkFetchImpl);
+    return sendContinue({
+      baseUrl: cfg.baseUrl,
+      openCodeSessionId: openSid,
+      text: input.text ?? cfg.text ?? "계속",
+      mode: cfg.mode,
+      timeoutMs: input.timeoutMs ?? cfg.timeoutMs,
+      serverVersion: input.serverVersion ?? cfg.serverVersion,
       deps: {
         fetchImpl: this.linkFetchImpl,
         ...http,
-        onPairing: (openSid, pfSid) => {
-          savePairing(this.procforgeDir, openSid, pfSid);
+        onPairing: (osid, pfSid) => {
+          savePairing(this.procforgeDir, osid, pfSid);
         },
       },
+    });
+  }
+
+  /** 이 세션에 짝지어진 OpenCode 세션 중 가장 최근 것 */
+  private latestPairingSessionId(sessionId: string): string | undefined {
+    const pairs = Object.values(loadPairings(this.procforgeDir).pairs)
+      .filter((p) => p.pfSessionId === sessionId)
+      .sort((a, b) => (a.at < b.at ? 1 : -1));
+    return pairs[0]?.openCodeSessionId;
+  }
+
+  /**
+   * M7-1: 사람 조언 등록 + OpenCode에 "계속" 신호.
+   * advise는 **한 번만** 한다 (M7-ui4-c). advise가 실패하면 신호를 보내지 않는다.
+   * M7-ui4-b: link.baseUrl·mode는 서버 설정과 다르면 400 (클라이언트가 정하지 않는다).
+   */
+  async adviseAndSignal(
+    a: AdviseInput & { link?: Partial<SignalTarget> & { openCodeSessionId?: string } },
+  ): Promise<{ advise: OutputOf<"pf_advise">; signal: LinkResult }> {
+    const link = a.link ?? {};
+    if (link.baseUrl && link.baseUrl !== this.signal.baseUrl) {
+      throw pfError(
+        "bad_request",
+        "link.baseUrl은 서버 설정에서만 결정됩니다 (M7-ui4-b).",
+      );
+    }
+    if (link.mode && link.mode !== this.signal.mode) {
+      throw pfError(
+        "bad_request",
+        "link.mode는 서버 설정에서만 결정됩니다 (M7-ui4-b).",
+      );
+    }
+    const advised = await this.advise(a);
+    const signal = await this.signalOnly({
+      sessionId: a.sessionId as string,
+      openCodeSessionId: link.openCodeSessionId,
+      text: link.text,
+      timeoutMs: link.timeoutMs,
+      serverVersion: link.serverVersion,
     });
     return { advise: advised, signal };
   }
@@ -1379,22 +1435,20 @@ export class ProcForgeApp {
     }
     const sid = input.sessionId;
     const s = await this.core.getSession(sid);
-    recordCall(this.procforgeDir, {
-      sessionId: sid,
-      tool: "pf_edit_args",
-      ok: true,
-      nodeId: input.nodeId,
-      clientName: "procforge-ui",
-      actor: "ui",
-      connectionId: this.uiConnectionId,
-    });
-    const out = await this.core.pfEditArgs({
-      sessionId: sid,
-      nodeId: input.nodeId,
-      patch: input.patch as never,
-      expectedRevision: input.expectedRevision,
-      actor: "ui",
-    });
+    // M7-ui4-d: core 호출 뒤, 실제 결과로 기록한다.
+    const out = await this.core
+      .pfEditArgs({
+        sessionId: sid,
+        nodeId: input.nodeId,
+        patch: input.patch as never,
+        expectedRevision: input.expectedRevision,
+        actor: "ui",
+      })
+      .catch((e: unknown) => {
+        this.recordUiCall(sid, "pf_edit_args", input.nodeId, e);
+        throw e;
+      });
+    this.recordUiCall(sid, "pf_edit_args", input.nodeId);
     return {
       node: nodeSummary(out.node, s.limits),
       revision: out.revision,
@@ -1406,20 +1460,16 @@ export class ProcForgeApp {
    * M7-ui4: UI 의견 + "계속" 신호 (M7-0.2 B>A>C).
    * advise가 먼저 저장되고, 신호 실패·degraded여도 **저장분은 그대로**다
    * (신호는 상태 변경이 아니다).
+   * M7-ui4-b: baseUrl·mode·openCodeSessionId는 **입력으로 받지 않는다** —
+   * 서버 설정과 저장된 짝짓기로 정한다.
    */
   async uiAdviseAndSignal(input: {
     sessionId: string;
     nodeId: string;
     text: string;
     expectedRevision: number;
-    link?: {
-      baseUrl: string;
-      openCodeSessionId?: string;
-      mode: LinkMode;
-      text?: string;
-      timeoutMs?: number;
-      serverVersion?: string;
-    };
+    /** false면 저장만 (신호 시도 안 함) */
+    signal?: boolean;
   }): Promise<{
     advise: OutputOf<"pf_advise">;
     signal: LinkResult | null;
@@ -1428,57 +1478,46 @@ export class ProcForgeApp {
       throw pfError("bad_request", "expectedRevision 필수");
     }
     const sid = input.sessionId;
-    recordCall(this.procforgeDir, {
-      sessionId: sid,
-      tool: "pf_advise",
-      nodeId: input.nodeId,
-      clientName: "procforge-ui",
-      actor: "ui",
-      connectionId: this.uiConnectionId,
-      ok: true,
-    });
+    // M7-ui4-d: 기록은 core 호출 **뒤**, 실제 결과로 남긴다.
     const advised = await this.advise({
       sessionId: sid,
       nodeId: input.nodeId,
       text: input.text,
       expectedRevision: input.expectedRevision,
       actor: "ui",
-    } as never);
-    if (!input.link) return { advise: advised, signal: null };
-    // advise는 **이미 저장됐다.** 여기서 신호만 보낸다 (두 번 advise하지 않는다 —
-    // 두 번 쓰면 같은 expectedRevision으로 두 번째가 conflict 난다).
-    const noSend = (degraded: string): LinkResult => ({
-      delivered: false,
-      degraded,
-      copyText: `${input.link?.text ?? "계속"}\nOpenCode에서 '계속'이라고 입력하세요.`,
+    } as never).catch((e: unknown) => {
+      this.recordUiCall(sid, "pf_advise", input.nodeId, e);
+      throw e;
     });
-    const link = input.link;
-    if (link.openCodeSessionId) {
-      const pair = getPairing(this.procforgeDir, link.openCodeSessionId);
-      if (pair && pair.pfSessionId !== sid) {
-        return {
-          advise: advised,
-          signal: noSend(`다른 세션과 짝(${pair.pfSessionId}). 전송하지 않음`),
-        };
-      }
-    }
-    const http = httpLinkDeps(link.baseUrl, this.linkFetchImpl);
-    const signal = await sendContinue({
-      baseUrl: link.baseUrl,
-      openCodeSessionId: link.openCodeSessionId,
-      text: link.text ?? "계속",
-      mode: link.mode,
-      timeoutMs: link.timeoutMs,
-      serverVersion: link.serverVersion,
-      deps: {
-        fetchImpl: this.linkFetchImpl,
-        ...http,
-        onPairing: (openSid, pfSid) => {
-          savePairing(this.procforgeDir, openSid, pfSid);
-        },
-      },
-    });
+    this.recordUiCall(sid, "pf_advise", input.nodeId);
+    if (input.signal === false) return { advise: advised, signal: null };
+    // advise는 **이미 저장됐다.** 여기서 신호만 보낸다 (advise 2회 금지 —
+    // 같은 expectedRevision으로 두 번째가 conflict 난다).
+    const signal = await this.signalOnly({ sessionId: sid });
     return { advise: advised, signal };
+  }
+
+  /**
+   * M7-ui4-d: UI 호출 기록. core 호출 **이후**에만 남기고, 결과(ok/오류코드)를
+   * 그대로 적는다 — 실패한 쓰기가 성공처럼 기록되면 안 된다.
+   */
+  private recordUiCall(
+    sessionId: string,
+    tool: string,
+    nodeId: string,
+    err?: unknown,
+  ): void {
+    const code = (err as { code?: unknown } | undefined)?.code;
+    recordCall(this.procforgeDir, {
+      sessionId,
+      tool,
+      nodeId,
+      clientName: "procforge-ui",
+      actor: "ui",
+      connectionId: this.uiConnectionId,
+      ok: err === undefined,
+      ...(typeof code === "string" ? { errorCode: code } : {}),
+    });
   }
 
   /** M7-ui4: UI 노드 편집(목표·조건) — actor "ui" */
@@ -1496,29 +1535,27 @@ export class ProcForgeApp {
     }
     const sid = input.sessionId;
     const s = await this.core.getSession(sid);
-    recordCall(this.procforgeDir, {
-      sessionId: sid,
-      tool: "pf_edit_node",
-      ok: true,
-      nodeId: input.nodeId,
-      clientName: "procforge-ui",
-      actor: "ui",
-      connectionId: this.uiConnectionId,
-    });
-    const out = await this.core.pfEditNode({
-      sessionId: sid,
-      nodeId: input.nodeId,
-      ...(input.goal !== undefined ? { goal: input.goal } : {}),
-      ...(input.addConstraints !== undefined
-        ? { addConstraints: input.addConstraints as never }
-        : {}),
-      ...(input.removeConstraintIds !== undefined
-        ? { removeConstraintIds: input.removeConstraintIds }
-        : {}),
-      ...(input.dependsOn !== undefined ? { dependsOn: input.dependsOn } : {}),
-      expectedRevision: input.expectedRevision,
-      actor: "ui",
-    });
+    // M7-ui4-d: core 호출 뒤, 실제 결과로 기록한다.
+    const out = await this.core
+      .pfEditNode({
+        sessionId: sid,
+        nodeId: input.nodeId,
+        ...(input.goal !== undefined ? { goal: input.goal } : {}),
+        ...(input.addConstraints !== undefined
+          ? { addConstraints: input.addConstraints as never }
+          : {}),
+        ...(input.removeConstraintIds !== undefined
+          ? { removeConstraintIds: input.removeConstraintIds }
+          : {}),
+        ...(input.dependsOn !== undefined ? { dependsOn: input.dependsOn } : {}),
+        expectedRevision: input.expectedRevision,
+        actor: "ui",
+      })
+      .catch((e: unknown) => {
+        this.recordUiCall(sid, "pf_edit_node", input.nodeId, e);
+        throw e;
+      });
+    this.recordUiCall(sid, "pf_edit_node", input.nodeId);
     return {
       node: nodeSummary(out.node, s.limits),
       revision: out.revision,

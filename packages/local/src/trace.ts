@@ -25,6 +25,8 @@ export type TraceEvent = {
   clientVersion?: string;
   /** MCP 연결 id (M7-1-7. 연결마다 randomUUID. UI 직접 호출은 "ui-<rand>") */
   connectionId?: string;
+  /** M7-ui4-d: 실패한 호출의 pfError 코드 (ok=false일 때만 적는다) */
+  errorCode?: string;
 };
 
 export function eventsFile(procforgeDir: string, sessionId: string): string {

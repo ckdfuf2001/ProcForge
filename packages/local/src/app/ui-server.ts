@@ -147,42 +147,48 @@ function pathId(raw: string, what: string): string {
 }
 
 /** M7-ui4: 쓰기 본문 (JSON만) */
+/** M7-ui4-e: 쓰기 본문 상한 (1MB) */
+const MAX_BODY_BYTES = 1024 * 1024;
+
 async function readJsonBody(
   req: IncomingMessage,
   res: ServerResponse,
 ): Promise<Record<string, unknown> | null> {
-  // content-type 검사 (M7-ui4: JSON만 받는다)
-  const ct = String(req.headers["content-type"] ?? "");
-  if (!ct.toLowerCase().includes("application/json")) {
+  // M7-ui4-e: media type을 **정확히** 비교한다 (subtype 불일치·문자열 포함 금지).
+  const ct = String(req.headers["content-type"] ?? "")
+    .split(";")[0]
+    .trim()
+    .toLowerCase();
+  if (ct !== "application/json") {
     err(res, 415, "content-type must be application/json");
     return null;
   }
-  let raw = "";
-  const tooBig = new Promise<null>((resolvePromise) => {
-    req.on("data", () => {
-      raw += "";
-      if (raw.length > 1024 * 1024) {
-        resolvePromise(null);
-      }
-    });
-  });
-  const collect = (async () => {
-    const chunks: Buffer[] = [];
-    for await (const c of req) {
-      chunks.push(c as Buffer);
-      if (chunks.reduce((n, b) => n + b.length, 0) > 1024 * 1024) return null;
+  // M7-ui4-e: 단일 루프 + 바이트 상한. 예전엔 청크마다 배열 전체를 다시 더했다.
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const c of req) {
+    const b = c as Buffer;
+    size += b.length;
+    if (size > MAX_BODY_BYTES) {
+      err(res, 413, `요청 본문 상한 초과 (${MAX_BODY_BYTES}B)`);
+      return null;
     }
-    return JSON.parse(Buffer.concat(chunks).toString("utf8")) as Record<
-      string,
-      unknown
-    >;
-  })();
-  const out = await Promise.race([collect, tooBig]);
-  if (out === null) {
-    err(res, 400, "요청 본문 파싱 실패 또는 상한 초과");
+    chunks.push(b);
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+  } catch {
+    // M7-ui4-e: JSON 파싱 실패는 400 (조용히 넘어가지 않는다)
+    err(res, 400, "요청 본문이 JSON이 아닙니다");
     return null;
   }
-  return out;
+  // 배열·null·문자열 같은 비객체는 400 (객체 본문만 받는다)
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    err(res, 400, "요청 본문은 JSON 객체여야 합니다");
+    return null;
+  }
+  return parsed as Record<string, unknown>;
 }
 
 export async function createUiServer(opts: {
@@ -387,6 +393,12 @@ export async function createUiServer(opts: {
               return;
             }
             // advise-and-signal
+            // M7-ui4-b: 본문으로 신호 대상(baseUrl·mode·openCodeSessionId)을
+            // 지정하려 하면 400 — 무시하면 조용히 다른 주소로 갈 수 있다.
+            if (body.link !== undefined || body.baseUrl !== undefined || body.mode !== undefined) {
+              err(res, 400, "link.baseUrl·mode는 서버 설정에서만 결정됩니다");
+              return;
+            }
             send(
               res,
               await opts.app.uiAdviseAndSignal({
@@ -394,7 +406,7 @@ export async function createUiServer(opts: {
                 nodeId: String(body.nodeId ?? ""),
                 text: String(body.text ?? ""),
                 expectedRevision: expected as number,
-                ...(body.link !== undefined ? { link: body.link as never } : {}),
+                ...(body.signal === false ? { signal: false } : {}),
               }),
             );
             return;

@@ -155,20 +155,29 @@ describe("M7-ui4 UI 쓰기 API", () => {
   }, 30000);
 
   it("의견 저장 후 신호 실패 → 저장분은 유지", async () => {
-    const { app, sid } = await started();
+    const { client } = testStack(pfdir);
+    // M7-ui4-b: 신호 대상은 서버 설정 (연결 불가한 주소)
+    const app = new ProcForgeApp({
+      core: client,
+      procforgeDir: pfdir,
+      projectRoot: pfdir,
+      signal: { baseUrl: "http://127.0.0.1:1", mode: "b" },
+    });
+    const s = await app.start({ request: "r", toolCatalog: catalog as never });
+    const sid = s.sessionId;
+    await app.split({
+      sessionId: sid,
+      nodeId: "1",
+      children: [{ goal: "a" }, { goal: "b" }],
+      expectedRevision: 0,
+    });
     const srv = await createUiServer({ app });
     try {
       const rev = (await app.readSession(sid)).revision;
-      // 연결 불가한 OpenCode (버전 미지정 → C)
       const r = await json(srv, `/api/sessions/${sid}/advise-and-signal`, {
         nodeId: "1.1",
         text: "Show HN 제외",
         expectedRevision: rev,
-        link: {
-          baseUrl: "http://127.0.0.1:1",
-          openCodeSessionId: "oc-x",
-          mode: "b",
-        },
       });
       expect(r.status).toBe(200);
       const body = (await r.json()) as {
@@ -177,7 +186,7 @@ describe("M7-ui4 UI 쓰기 API", () => {
       };
       // 신호는 실패하지만 저장은 됐다
       expect(body.signal?.delivered).toBe(false);
-      expect(body.signal?.degraded).toMatch(/버전 미확인|전송 실패|미확인/);
+      expect(body.signal?.degraded).toMatch(/버전 미확인|전송 실패|미확인|연결 없음/);
       const node = await app.readNode(sid, "1.1");
       expect(node.advice.length).toBeGreaterThan(0);
       expect(node.constraints.length).toBeGreaterThan(0);
@@ -185,6 +194,70 @@ describe("M7-ui4 UI 쓰기 API", () => {
         (e) => e.actor === "ui" && e.tool === "pf_advise",
       );
       expect(calls.length).toBeGreaterThan(0);
+      expect(calls.every((c) => c.ok)).toBe(true);
+    } finally {
+      srv.close();
+    }
+  }, 30000);
+
+  it("M7-ui4-b: 본문으로 link/baseUrl 지정 → 400 (서버 설정만)", async () => {
+    const { app, sid } = await started();
+    const srv = await createUiServer({ app });
+    try {
+      const rev = (await app.readSession(sid)).revision;
+      for (const body of [
+        { link: { baseUrl: "http://169.254.169.254" } },
+        { baseUrl: "http://169.254.169.254" },
+        { mode: "c" },
+      ]) {
+        const r = await json(srv, `/api/sessions/${sid}/advise-and-signal`, {
+          nodeId: "1.1",
+          text: "x",
+          expectedRevision: rev,
+          ...body,
+        });
+        expect(r.status).toBe(400);
+      }
+    } finally {
+      srv.close();
+    }
+  }, 30000);
+
+  it("M7-ui4-e: media type 정확 비교·비객체·깨진 JSON 400", async () => {
+    const { app, sid } = await started();
+    const srv = await createUiServer({ app });
+    try {
+      const url = `${srv.url}/api/sessions/${sid}/edit-node`;
+      const tok = { "x-procforge-token": srv.token };
+      const body = JSON.stringify({ nodeId: "1.1", goal: "g", expectedRevision: 0 });
+      // application/json 뒤에 매개변수가 붙어도 허용 (charset 등)
+      const withParam = await fetch(url, {
+        method: "POST",
+        headers: { ...tok, "content-type": "application/json; charset=utf-8" },
+        body,
+      });
+      expect(withParam.status).not.toBe(415);
+      // 대문자도 받아야 한다 (media type은 대소문자 무관)
+      const upper = await fetch(url, {
+        method: "POST",
+        headers: { ...tok, "content-type": "APPLICATION/JSON" },
+        body,
+      });
+      expect(upper.status).not.toBe(415);
+      // application/json을 "포함"만 하는 타입은 415
+      for (const ct of ["text/json", "application/jsonx", "application/json-patch+json"]) {
+        const r = await fetch(url, { method: "POST", headers: { ...tok, "content-type": ct }, body });
+        expect(r.status).toBe(415);
+      }
+      // 배열·문자열·깨진 JSON은 400
+      for (const raw of ["[]", '"x"', "not json", "{"]) {
+        const r = await fetch(url, {
+          method: "POST",
+          headers: { ...tok, "content-type": "application/json" },
+          body: raw,
+        });
+        expect(r.status).toBe(400);
+      }
     } finally {
       srv.close();
     }
