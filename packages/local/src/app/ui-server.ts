@@ -9,6 +9,7 @@ import { spawn } from "node:child_process";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, normalize, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { pfError } from "@procforge/shared/errors.js";
 import type { ProcForgeApp } from "./app.js";
 import { NODE_HISTORY_MAX } from "./app.js";
 import { SessionEventHub, MAX_SUBS_PER_SESSION } from "./events-hub.js";
@@ -125,6 +126,24 @@ function listenWithRetry(
       resolve();
     });
   });
+}
+
+/**
+ * M7-ui3-a: 경로 파라미터 정규화.
+ * 세션·노드·attempt id는 파일명 조각이다. `..`·구분자·빈 값은 **경로로 나오기 전에**
+ * 400으로 막는다 — core 검증에 맡기면 client 모드별로 404/500이 갈린다.
+ */
+function pathId(raw: string, what: string): string {
+  let v: string;
+  try {
+    v = decodeURIComponent(raw);
+  } catch {
+    throw pfError("bad_request", `${what} 형식이 잘못되었습니다.`);
+  }
+  if (!/^[A-Za-z0-9._-]{1,128}$/.test(v) || v.includes("..")) {
+    throw pfError("bad_request", `${what} 형식이 잘못되었습니다.`);
+  }
+  return v;
 }
 
 /** M7-ui4: 쓰기 본문 (JSON만) */
@@ -272,8 +291,8 @@ export async function createUiServer(opts: {
         // M7-ui3: 노드 상세
         const mNode = /^\/api\/sessions\/([^/]+)\/nodes\/([^/]+)$/.exec(url.pathname);
         if (req.method === "GET" && mNode) {
-          const sid = decodeURIComponent(mNode[1]);
-          const nid = decodeURIComponent(mNode[2]);
+          const sid = pathId(mNode[1], "sessionId");
+          const nid = pathId(mNode[2], "nodeId");
           const detail = await opts.app.nodeDetail({ sessionId: sid, nodeId: nid });
           // "왜 이 노드가 이렇게 됐나" — 이 노드 이벤트만 (core 필터).
           const evs = await opts.app.getEventsPage({
@@ -290,9 +309,9 @@ export async function createUiServer(opts: {
           url.pathname,
         );
         if (req.method === "GET" && mArt) {
-          const sid = decodeURIComponent(mArt[1]);
-          const nid = decodeURIComponent(mArt[2]);
-          const aid = decodeURIComponent(mArt[3]);
+          const sid = pathId(mArt[1], "sessionId");
+          const nid = pathId(mArt[2], "nodeId");
+          const aid = pathId(mArt[3], "attemptId");
           const content = await opts.app.artifactContent({
             sessionId: sid,
             nodeId: nid,
@@ -315,7 +334,7 @@ export async function createUiServer(opts: {
             url.pathname,
           );
           if (sidFromPath) {
-            const sid = decodeURIComponent(sidFromPath[1]);
+            const sid = pathId(sidFromPath[1], "sessionId");
             const body = await readJsonBody(req, res);
             if (body === null) return;
             const expected = body.expectedRevision;
@@ -386,7 +405,7 @@ export async function createUiServer(opts: {
         // M7-ui2: 세션 트리 (읽기 전용)
         const mTree = /^\/api\/sessions\/([^/]+)\/tree$/.exec(url.pathname);
         if (req.method === "GET" && mTree) {
-          const sid = decodeURIComponent(mTree[1]);
+          const sid = pathId(mTree[1], "sessionId");
           const nodes = await opts.app.sessionTree({ sessionId: sid });
           const blocked = await opts.app.getBlocked({ sessionId: sid });
           send(res, { nodes, blocked });
@@ -395,7 +414,7 @@ export async function createUiServer(opts: {
         // M7-ui2: 세션 이벤트 SSE (토큰 헤더 필수. 쿼리 토큰 금지)
         const mEvents = /^\/api\/sessions\/([^/]+)\/events$/.exec(url.pathname);
         if (req.method === "GET" && mEvents) {
-          const sid = decodeURIComponent(mEvents[1]);
+          const sid = pathId(mEvents[1], "sessionId");
           // M7-ui2-e: Last-Event-ID가 없으면 **현재 revision부터** (전체 이력 재전송 금지).
           let startRevision: number;
           const raw = req.headers["last-event-id"];

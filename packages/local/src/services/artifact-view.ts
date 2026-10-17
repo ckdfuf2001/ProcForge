@@ -48,10 +48,20 @@ export function isTextKind(path: string): boolean {
 /**
  * realpath 기준 root 하위 검사. 심링크가 root 밖을 가리키면 거부한다
  * (문자열 prefix 검사로는 심링크 탈출을 막을 수 없다).
+ * 파일이 없으면 404로 알린다 — 원격 core 모드에서는 로컬에 없을 수 있고,
+ * 존재하지 않는 경로를 500으로 흘리면 버그를 숨긴다.
  */
 export function assertInsideRoot(root: string, abs: string): string {
   const realRoot = existsSync(root) ? realpathSync(root) : resolve(root);
-  const real = realpathSync(abs);
+  let real: string;
+  try {
+    real = realpathSync(abs);
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") {
+      throw pfError("not_found", "산출물이 없습니다.");
+    }
+    throw pfError("bad_request", "산출물 경로를 확인할 수 없습니다.");
+  }
   if (real !== realRoot && !real.startsWith(realRoot + sep)) {
     throw pfError("bad_request", "산출물이 허용 디렉터리 밖입니다.");
   }
@@ -78,7 +88,16 @@ export function resetArtifactCache(): void {
 
 /** sha256 + size 스트림 계산 ((path,size,mtime) 캐시로 재계산 생략) */
 export function digestOf(abs: string): Promise<{ sha256: string; size: number }> {
-  const st = statSync(abs);
+  let st: ReturnType<typeof statSync>;
+  try {
+    st = statSync(abs);
+  } catch (e) {
+    return Promise.reject(
+      (e as NodeJS.ErrnoException).code === "ENOENT"
+        ? pfError("not_found", "산출물이 없습니다.")
+        : pfError("bad_request", "산출물 경로를 확인할 수 없습니다."),
+    );
+  }
   const hit = digestCache.get(abs);
   if (hit && hit.size === st.size && hit.mtimeMs === st.mtimeMs) {
     return Promise.resolve({ sha256: hit.sha256, size: hit.size });
@@ -91,7 +110,13 @@ export function digestOf(abs: string): Promise<{ sha256: string; size: number }>
       h.update(c);
       size += c.length;
     });
-    rs.on("error", reject);
+    rs.on("error", (e: NodeJS.ErrnoException) => {
+      reject(
+        e.code === "ENOENT"
+          ? pfError("not_found", "산출물이 없습니다.")
+          : pfError("bad_request", "산출물을 읽을 수 없습니다."),
+      );
+    });
     rs.on("end", () => {
       const sha256 = h.digest("hex");
       digestCache.set(abs, { sha256, size, mtimeMs: st.mtimeMs });
@@ -121,7 +146,12 @@ export async function previewArtifact(
   // 미리보기는 앞 4KB만 읽는다 (큰 산출물 전체를 읽지 않는다).
   const rs = createReadStream(real, { start: 0, end: Math.max(0, PREVIEW_MAX_BYTES - 1) });
   const chunks: Buffer[] = [];
-  for await (const c of rs) chunks.push(c as Buffer);
+  try {
+    for await (const c of rs) chunks.push(c as Buffer);
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw e;
+  }
   return {
     rel,
     sha256,
