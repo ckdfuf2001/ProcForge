@@ -295,6 +295,18 @@ export interface CoreClient {
   getNode(sessionId: string, nodeId: string): Promise<Node>;
   /** 세션 목록 (M7-ui1. 테넌트 저장소 기준. 판단 없음) */
   getSessions(): Promise<{ sessions: SessionSummary[] }>;
+  /** 이벤트 페이지 (M7-ui2. afterRevision 뒤 limit개 + 마지막 revision) */
+  getEventsPage(input: {
+    sessionId: string;
+    afterRevision?: number;
+    limit?: number;
+  }): Promise<{ events: EventEntry[]; lastRevision: number }>;
+  /** blocked·needs_human 목록 (M7-ui2. pfNext와 같은 계산, 읽기 전용) */
+  getBlocked(input: { sessionId: string }): Promise<{
+    blocked: BlockedEntry[];
+    needsHuman: string[];
+    revision: number;
+  }>;
   /** 절차서 문서 조립 (M4.2-1, 검증·params 경고 포함. 파일 쓰기는 local) */
   pfBuildProcedure(
     sessionId: string,

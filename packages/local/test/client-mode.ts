@@ -118,6 +118,8 @@ function deferredRemoteClient(basePromise: Promise<string>): CoreClient {
     getSession: (sid) => invoke("getSession", [sid]) as never,
     getNode: (sid, nid) => invoke("getNode", [sid, nid]) as never,
     getSessions: () => invoke("getSessions", []) as never,
+    getEventsPage: (i) => invoke("getEventsPage", [i]) as never,
+    getBlocked: (i) => invoke("getBlocked", [i]) as never,
     pfBuildProcedure: (sid, name) =>
       invoke("pfBuildProcedure", [sid, name]) as never,
     pfApprove: (i) => invoke("pfApprove", [i]) as never,

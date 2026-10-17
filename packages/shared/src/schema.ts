@@ -307,6 +307,13 @@ export const NodeSchema = z.object({
   retries: z.number().int().min(0).default(0),
   hash: z.string().min(1),
   locked: z.boolean().default(false),
+  /**
+   * M7-ui2: stale 표시 (status에 stale이 없어 UI가 추측하지 않도록 core가 기록).
+   * propagateStale이 기록하고, 재확정/재실행으로 해제된다.
+   */
+  staleSince: z
+    .object({ revision: z.number().int().min(0), causeNodeId: NodeIdSchema })
+    .optional(),
 });
 export type Node = z.infer<typeof NodeSchema>;
 

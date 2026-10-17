@@ -584,7 +584,7 @@ c·d·j는 하네스 과제로 DECISIONS에 기록만.
 | M6 | 원격 core | [x] | `9458704` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38604361482 | 0~6 + M6.1 후속(1~5) 완료 (docs/REVIEW-M6.md) |
 | M6.1 | 원격 core 후속 | [x] | `9458704` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38604361482 | 1 egress R8·2 전체 remote+egress 단언·3 재시도 제거·4 인증·5 공개유지 (docs/REVIEW-M6.md) |
 | M7 | UI | [ ] | | | 0 SDK 확인(opencode serve 세션 메시지·pf_next 재개) · 1 `procforge ui` 로컬 서버+SPA+pairings 세션 목록 배선 · 2 트리+SSE · 3 노드 상세 · 4 텍스트 편집/의견+stale 미리보기 · 5 실행 화면 · 6 Playwright E2E |
-| M7-0.1 | OpenCode 연결 (UI 없이 App·CLI까지) | [ ] | | | B/A/C 신호+plan degraded+짝짓기 latest-wins·이력+저장소 PROCFORGE_DIR 통일+connectionId 기록 — d5d7003 선행 구현에서 실서버 오동작 6건 발견되어 M7-0.2로 보정 완료 (9절) |
+| M7-0.1 | OpenCode 연결 (UI 없이 App·CLI까지) | [x] | `d73988f` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38814839031 | B/A/C 신호+plan degraded+짝짓기 latest-wins·이력+저장소 PROCFORGE_DIR 통일+connectionId 기록 — 실서버 오동작 6건은 M7-0.2로 보정 |
 | M7-0.2 | "계속" 신호 실서버 보정 | [x] | `d73988f` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38814839031 | 1 plan 감지 기준점 · 2 버전 default-deny · 3 짝 검증 · 4 실서버 4조합 확정(msg+parts) · 5 R5 생성자 주입 · 6 SSE 우선·폴링 폴백 (+tsc narrowing 빌드 수정) |
 
 ---
@@ -727,4 +727,5 @@ c·d·j는 하네스 과제로 DECISIONS에 기록만.
 | 2026-10-16 | 8 | M7-1 [ ] 환원 + M7-1.1 신설 ("계속" 신호 실서버 보정 6건: plan 기준점·버전 조회·짝 검증·실서버 4조합·R5·SSE 우선) | d5d7003 선행 구현이 실서버에서 틀어짐 (빈 세션 가짜 테스트가 가림). M5.8(a)는 신호 코드와 무관해 병행 가능 |
 | 2026-10-16 | 8 | 8절 번호 충돌 정리: "M7-1 OpenCode 연결"→"M7-0.1", "M7-1.1"→"M7-0.2" (M7 1번과 번호 겹침 해소. 9절·DECISIONS 태그는 이력 유지). pairings 화면 배선은 M7 1번에 포함 | M7-0.2는 [x] 유지 (6건 완료·run 38814839031 success). 코드 변경 없음 |
 | 2026-10-16 | 8 | 8절 M7 본문 추가 (M7 UI 상세 명세 0~6 + 완료 기준=MVP). M7-0.2 [x] green이므로 M7 1번 시작 가능 | M8(배포·패키징·core-server 비공개 분리·고객 PC 테스트)은 M7 닫을 때 정의 |
-| 2026-10-17 | 8 | M7 1번 전반 (ui 서버+세션 목록+pairings+React 화면): XSS 보정·core.getSessions 분리·ui-server App-only·packages/ui+Vite 빌드·local 정적 서빙 | 1428da7 run 38924489785 success. React 화면은 인라인 골격 대체 (CSP 유지) |
+| 2026-10-17 | 8 | M7-0.1 [x] 확정(보정은 M7-0.2) · M7 2번(트리+SSE) core 읽기 API(getEventsPage·getBlocked·staleSince) + SSE(폴러 1개 공유·Last-Event-ID·heartbeat·상한 429) + fetch 스트리밍 클라 + React 트리 화면 · 골격 경로 제거(빌드 없으면 안내) | 화면은 packages/ui 빌드만. EventSource 금지(토큰 헤더 불가). M5.8(a)와 병행 가능 |
+| 2026-10-16 | 8 | M7 1번 전반 (ui 서버+세션 목록+pairings+React 화면): XSS 보정·core.getSessions 분리·ui-server App-only·packages/ui+Vite 빌드·local 정적 서빙 | 1428da7 run 38924489785 success. React 화면은 인라인 골격 대체 (CSP 유지) |

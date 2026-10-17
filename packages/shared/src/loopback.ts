@@ -181,6 +181,18 @@ const Methods = {
     in: z.tuple([]),
     out: z.object({ sessions: z.array(SessionSummarySchema) }),
   },
+  getEventsPage: {
+    in: z.object({
+      sessionId: SessionIdSchema,
+      afterRevision: z.number().int().min(0).optional(),
+      limit: z.number().int().min(1).max(500).optional(),
+    }).passthrough(),
+    out: z.object({ events: z.array(EventEntrySchema), lastRevision: z.number().int().min(0) }).passthrough(),
+  },
+  getBlocked: {
+    in: z.object({ sessionId: SessionIdSchema }).passthrough(),
+    out: z.object({ blocked: z.array(BlockedEntrySchema), needsHuman: z.array(NodeIdSchema), revision: z.number().int().min(0) }).passthrough(),
+  },
   pfBuildProcedure: {
     in: z.tuple([SessionIdSchema, z.string()]),
     out: z.object({ doc: ProcedureDocSchema, warnings: z.array(z.string()) }).passthrough(),
@@ -275,6 +287,8 @@ export function createLoopbackClient(inner: CoreClient): CoreClient {
     getSession: (sid) => wrapArgs("getSession", [sid], ([x]) => inner.getSession(x)),
     getNode: (sid, nid) => wrapArgs("getNode", [sid, nid], ([a, b]) => inner.getNode(a, b)),
     getSessions: () => wrapArgs("getSessions", [], () => inner.getSessions()),
+    getEventsPage: (i) => wrapObj("getEventsPage", i, (x) => inner.getEventsPage(x)),
+    getBlocked: (i) => wrapObj("getBlocked", i, (x) => inner.getBlocked(x)),
     pfBuildProcedure: (sid, name) => wrapArgs("pfBuildProcedure", [sid, name], ([a, b]) => inner.pfBuildProcedure(a, b)),
     pfApprove: (i) => wrapObj("pfApprove", i, (x) => inner.pfApprove(x)),
     pfImportProcedure: (i) => wrapObj("pfImportProcedure", i, (x) => inner.pfImportProcedure(x)),

@@ -6,7 +6,7 @@ import type { Actor } from "@procforge/shared/dto.js";
 import { pfError } from "@procforge/shared/errors.js";
 import { collectCatalog } from "../catalog.js";
 import { FileStore } from "../filestore.js";
-import { constraintSummary, nodeSummary } from "../views.js";
+import { constraintSummary, nodeSummary, retriesLeft } from "../views.js";
 import type { OUTPUT_SCHEMAS } from "../views.js";
 import type {
   AdviseInput,
@@ -136,6 +136,20 @@ export const PROMPT_TEXT = [
 
 /** M7-1: 세션 목록 1행 (core 요약 + 로컬 부가. 판단 없음. UI가 배지를 붙인다) */
 export type SessionSummary = SessionRow;
+
+/** M7-ui2: 세션 트리 1행 (노드 요약 + stale 표시. 판단 없음) */
+export type SessionNodeRow = {
+  id: string;
+  goal: string;
+  status: string;
+  depth: number;
+  dependsOn: string[];
+  attempts: number;
+  retriesLeft: number;
+  locked: boolean;
+  sideEffect: string;
+  staleSince?: { revision: number; causeNodeId: string };
+};
 
 export type AppDeps = {  core: CoreClient;
   procforgeDir: string;
@@ -971,6 +985,64 @@ export class ProcForgeApp {
     return loadPairings(this.procforgeDir);
   }
 
+  /** M7-ui2: 이벤트 페이지 (core에서만 읽는다) */
+  async getEventsPage(input: {
+    sessionId: string;
+    afterRevision?: number;
+    limit?: number;
+  }): Promise<{ events: import("@procforge/shared/dto.js").EventEntry[]; lastRevision: number }> {
+    return this.core.getEventsPage(input);
+  }
+
+  /** M7-ui2: 세션 트리 (노드 요약 + stale 표시. 상태 변경 0) */
+  async sessionTree(input: {
+    sessionId: string;
+    limit?: number;
+  }): Promise<{ nodes: SessionNodeRow[]; revision: number }> {
+    const s = await this.core.getSession(input.sessionId);
+    const out = await this.tree({
+      sessionId: input.sessionId,
+      detail: "full",
+      limit: input.limit ?? 200,
+    });
+    return {
+      nodes: out.entries.map((e: (typeof out.entries)[number]) => ({
+        id: e.id,
+        goal: e.goal,
+        status: e.status,
+        depth: e.node?.depth ?? 0,
+        dependsOn: e.node?.dependsOn ?? [],
+        attempts: e.node?.attempts.length ?? 0,
+        retriesLeft: e.node ? retriesLeft(e.node, s.limits) : 0,
+        locked: e.node?.locked ?? false,
+        sideEffect: e.node?.sideEffect ?? "none",
+        ...(e.node?.staleSince ? { staleSince: e.node.staleSince } : {}),
+      })),
+      revision: s.revision,
+    };
+  }
+
+  private limitsCache = new Map<string, { maxRetries: number; maxDepth: number; maxNodes: number }>();
+
+  private limitsOf(sessionId: string): {
+    maxRetries: number;
+    maxDepth: number;
+    maxNodes: number;
+  } {
+    const cached = this.limitsCache.get(sessionId);
+    if (cached) return cached;
+    return { maxRetries: 2, maxDepth: 5, maxNodes: 50 };
+  }
+
+  /** M7-ui2: blocked·needs_human (읽기 전용) */
+  async getBlocked(input: { sessionId: string }): Promise<{
+    blocked: import("@procforge/shared/core-client.js").BlockedEntry[];
+    needsHuman: string[];
+    revision: number;
+  }> {
+    return this.core.getBlocked(input);
+  }
+
   /** M7-ui1: 저장소 정보 + 중복 경고 (어댑터는 App 메서드로만) */
   async storeInfo(): Promise<{
     storeDir: string;
@@ -1046,6 +1118,7 @@ export class ProcForgeApp {
   async tree(a: TreeInput): Promise<OutputOf<"pf_tree">> {
     const sid = a.sessionId as string;
     const s = await this.core.getSession(sid);
+    this.limitsCache.set(sid, s.limits);
     const { nodes } = await this.core.pfTree(sid);
     const detail = (a.detail as string | undefined) ?? "summary";
     const limit = (a.limit as number | undefined) ?? 50;

@@ -8,8 +8,8 @@ import { pfError } from "../src/errors.js";
 // M6-1 wire 계약.
 
 describe("wire", () => {
-  it("20 메서드 1:1 매핑", () => {
-    expect(Object.keys(WireMethods)).toHaveLength(20);
+  it("22 메서드 1:1 매핑", () => {
+    expect(Object.keys(WireMethods)).toHaveLength(22);
     for (const [name, m] of Object.entries(WireMethods)) {
       expect(m.path).toBe(`/v1/${name}`);
     }

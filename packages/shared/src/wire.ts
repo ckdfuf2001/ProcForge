@@ -79,6 +79,8 @@ export type WireMethodName =
   | "pfEditArgs"
   | "pfEditNode"
   | "getEvents"
+  | "getEventsPage"
+  | "getBlocked"
   | "getSession"
   | "getNode"
   | "getSessions"
@@ -320,6 +322,27 @@ export const WireMethods: Record<WireMethodName, WireDef> = {
     path: "/v1/getSessions",
     input: z.object({}),
     output: z.object({ sessions: z.array(SessionSummarySchema) }),
+  },
+  getEventsPage: {
+    path: "/v1/getEventsPage",
+    input: z.object({
+      sessionId: SessionIdSchema,
+      afterRevision: z.number().int().min(0).optional(),
+      limit: z.number().int().min(1).max(500).optional(),
+    }),
+    output: z.object({
+      events: z.array(EventEntrySchema),
+      lastRevision: z.number().int().min(0),
+    }),
+  },
+  getBlocked: {
+    path: "/v1/getBlocked",
+    input: z.object({ sessionId: SessionIdSchema }),
+    output: z.object({
+      blocked: z.array(BlockedEntrySchema),
+      needsHuman: z.array(NodeIdSchema),
+      revision: z.number().int().min(0),
+    }),
   },
   pfBuildProcedure: {
     path: "/v1/pfBuildProcedure",

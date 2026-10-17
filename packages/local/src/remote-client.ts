@@ -30,6 +30,8 @@ const READ_METHODS: ReadonlySet<WireMethodName> = new Set([
   "getSession",
   "getNode",
   "getSessions",
+  "getEventsPage",
+  "getBlocked",
   "pfTree",
   "getEvents",
   "pfBuildProcedure",
@@ -170,6 +172,8 @@ export function createRemoteCoreClient(opts: RemoteCoreClientOpts): CoreClient {
     getNode: (sid, nid) =>
       call("getNode", { sessionId: sid, nodeId: nid }) as never,
     getSessions: () => call("getSessions", {}) as never,
+    getEventsPage: (i) => call("getEventsPage", i as Record<string, unknown>) as never,
+    getBlocked: (i) => call("getBlocked", i as Record<string, unknown>) as never,
     pfBuildProcedure: (sid, name) =>
       call("pfBuildProcedure", { sessionId: sid, name }) as never,
     pfApprove: (i) => call("pfApprove", i as Record<string, unknown>) as never,

@@ -326,6 +326,7 @@ export class CoreService implements CoreClient {
   private propagateStale(sid: string, originId: string): void {
     const queue = [originId];
     const seen = new Set<string>([originId]);
+    const rev = this.store.getSession(sid)?.revision ?? 0;
     while (queue.length > 0) {
       const cur = queue.shift()!;
       const all = this.store.getNodes(sid);
@@ -335,14 +336,19 @@ export class CoreService implements CoreClient {
         seen.add(n.id);
         const nh = this.hashFor(sid, n);
         if (nh === n.hash) continue;
+        // M7-ui2: stale 표시 기록 (UI가 추측하지 않도록 core가 남긴다).
+        const mark = {
+          ...n,
+          staleSince: n.staleSince ?? { revision: rev, causeNodeId: originId },
+        };
         // M3.4.3-3: split은 상태 유지(해시만 갱신). 펼친 의존 검사가 자손 leaf에
         // 직접 도달하므로 별도 하강 불필요. 재-split 불필요.
         if (n.status === "split") {
-          this.store.saveNode(sid, { ...n, hash: nh });
+          this.store.saveNode(sid, { ...mark, hash: nh });
           continue;
         }
         const reopened = n.status === "leaf" ? ("open" as const) : n.status;
-        this.store.saveNode(sid, { ...n, hash: nh, status: reopened });
+        this.store.saveNode(sid, { ...mark, hash: nh, status: reopened });
         queue.push(n.id);
       }
     }
@@ -685,11 +691,13 @@ export class CoreService implements CoreClient {
         if (verdict === "pass") {
           // M1.5-1: pass여도 leaf 자동 확정 없음. probing 유지 + resolve 요구.
           // M3.5.1-1: auto 제약 재생성 저장 (human 유지).
+          // M7-ui2: 재실행 성공 → stale 표시 해제.
           const constraints = [...human, ...freshAuto];
           const next: Node = {
             ...n,
             status: "probing",
             constraints,
+            staleSince: undefined,
             suggestedArgs: undefined,
             attempts: [
               ...n.attempts,
@@ -725,6 +733,8 @@ export class CoreService implements CoreClient {
           ...n,
           status,
           retries,
+          // M7-ui2: 재실행됨 → stale 표시 해제.
+          staleSince: undefined,
           suggestedArgs: undefined,
           attempts: [
             ...n.attempts,
@@ -1944,6 +1954,57 @@ export class CoreService implements CoreClient {
       };
     });
     return { sessions };
+  }
+
+  /**
+   * 이벤트 페이지 (M7-ui2, 읽기 전용).
+   * pfNext·pfAdvise 등의 **쓰기 메서드가 아니므로** UI가 상태를 바꾸지 않는다.
+   */
+  async getEventsPage(input: {
+    sessionId: string;
+    afterRevision?: number;
+    limit?: number;
+  }): Promise<{ events: EventEntry[]; lastRevision: number }> {
+    const s = this.checkFresh(input.sessionId);
+    const all = this.store.readEvents(input.sessionId);
+    const after = input.afterRevision ?? 0;
+    const limit = Math.min(input.limit ?? 200, 500);
+    const picked = all.filter((e) => e.revision > after).slice(0, limit);
+    const last = all.length === 0 ? 0 : Math.max(...all.map((e) => e.revision));
+    return { events: picked, lastRevision: Math.max(last, picked.at(-1)?.revision ?? s.revision) };
+  }
+
+  /**
+   * blocked·needs_human (M7-ui2, 읽기 전용).
+   * pfNext와 같은 계산(ready/deadlock)을 쓰되 승격·상태 변경은 하지 않는다.
+   * "읽기 전용" 계약: revision·노드 상태가 바뀌지 않는다 (테스트로 단언).
+   */
+  async getBlocked(input: { sessionId: string }): Promise<{
+    blocked: BlockedEntry[];
+    needsHuman: string[];
+    revision: number;
+  }> {
+    const s = this.checkFresh(input.sessionId);
+    const nodes = [...this.store.getNodes(input.sessionId).values()];
+    const byId = new Map(nodes.map((n) => [n.id, n]));
+    const needsHuman = nodes
+      .filter((n) => n.status === "needs_human")
+      .sort((a, b) => compareNodeIds(a.id, b.id))
+      .map((n) => n.id);
+    const stuck = nodes
+      .filter((n) => n.status === "open" || n.status === "probing")
+      .sort((a, b) => compareNodeIds(a.id, b.id));
+    const ready = nodes.some(
+      (n) =>
+        (n.status === "open" || n.status === "probing") &&
+        effectiveDeps(n, byId).every((d) => {
+          const dep = byId.get(d);
+          return dep !== undefined && isResolved(dep, byId);
+        }),
+    );
+    // 진행 가능한 노드가 있으면 교착 아님 (blocked 비움).
+    const { blocked } = ready || stuck.length === 0 ? { blocked: [] } : computeDeadlock(stuck, byId);
+    return { blocked, needsHuman, revision: s.revision };
   }
 
   async pfTree(

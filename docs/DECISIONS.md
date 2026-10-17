@@ -504,6 +504,23 @@ argv: [...]}` 고정. runner는 run fs에서 직접 실행해 stdout을 golden�
   connectionIds는 calls.jsonl distinct (2개 이상이면 UI가 경고 배지).
 - [M7-ui1-3] `--open` 브라우저 실행은 App 모듈(openUrl)에 둔다
   (check-deps: cli.ts는 node 내장 import 금지).
+- [M7-ui1-4] 화면 경로는 하나: packages/ui 빌드 산출물만. 인라인 골격은
+  제거했고 빌드가 없으면 "pnpm -r build 필요" 안내만 낸다(중복 경로 방지).
+- [M7-ui1-5] 토큰은 메모리에만 두고 읽자마자 fragment를 지운다. 따라서
+  새로고침하면 401이 난다 — **의도된 동작**이다. 401 화면은
+  "터미널에 출력된 URL로 다시 열기"를 안내한다.
+- [M7-ui2-1] SSE 클라는 EventSource를 쓰지 않는다 (토큰 헤더를 붙일 수
+  없다). fetch ReadableStream으로 SSE를 직접 파싱한다. 쿼리스트링
+  토큰은 금지(로그·기록 잔류). 서버는 헤더를 먼저 flush하고,
+  `req`가 아니라 `res`의 close로 구독을 정리한다.
+- [M7-ui2-2] 이벤트는 core에서만 읽는다 (`getEventsPage`). UI 서버가
+  events.jsonl을 tail하면 원격 core 모드에서 아무 이벤트도 오지 않는다.
+  세션당 폴러 1개를 구독자들에 공유하고, 구독자 0이면 정지.
+- [M7-ui2-3] blocked·needs_human은 읽기 전용 `getBlocked`로 따로 받는다
+  (`pfNext`는 쓰기 메서드 — 화면을 보기만 해도 상태가 바뀌면 안 된다).
+- [M7-ui2-4] stale은 상태가 아니라 `staleSince:{revision,causeNodeId}`
+  로 core가 기록하고 UI는 표시만 한다 (R3: UI가 추측 금지).
+  `pfReport`(pass/fail)로 재실행되면 해제된다.
   짝짓기 읽기는 최신 pf_start 기준 (latest-wins) — messages 뒤쪽이 이긴다.
   advise 실패 시 신호 미전송 (App.adviseAndSignal이 순서 보장).
   pairings UI 배선은 M7-2로 미룸 (App·pairings.json까지만).
