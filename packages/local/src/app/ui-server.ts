@@ -104,7 +104,9 @@ export function openUrl(url: string): void {
 function listenWithRetry(
   server: Server,
   port: number,
-  left = 8,
+  // M7-ui4: 여러 테스트 파일이 각자 서버를 띄우면 Windows loopback의
+  // ephemeral 포트가 고갈돼 EACCES가 반복된다. 재시도 예산을 넉넉히 준다.
+  left = 14,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     // M7-ui4: 결정이 끝난 뒤 도착하는 late error(재시도 중 발생한 EACCES 등)가
@@ -120,7 +122,7 @@ function listenWithRetry(
       server.removeListener("error", onError);
       if ((e?.code === "EACCES" || e?.code === "EADDRINUSE") && left > 0) {
         // 지수 백오프 (parallel fork에서 listen 경쟁이 잦다).
-        const delay = Math.min(1000, 50 * 2 ** (8 - left));
+        const delay = Math.min(2000, 50 * 2 ** (14 - left));
         setTimeout(
           () => listenWithRetry(server, port, left - 1).then(resolve, reject),
           delay,
