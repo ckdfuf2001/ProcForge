@@ -329,6 +329,8 @@ export const WireMethods: Record<WireMethodName, WireDef> = {
       sessionId: SessionIdSchema,
       afterRevision: z.number().int().min(0).optional(),
       limit: z.number().int().min(1).max(500).optional(),
+      /** M7-ui3: 노드 이력 보기 (서버측 필터) */
+      nodeId: NodeIdSchema.optional(),
     }),
     output: z.object({
       events: z.array(EventEntrySchema),

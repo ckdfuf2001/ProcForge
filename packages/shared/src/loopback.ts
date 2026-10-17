@@ -186,6 +186,7 @@ const Methods = {
       sessionId: SessionIdSchema,
       afterRevision: z.number().int().min(0).optional(),
       limit: z.number().int().min(1).max(500).optional(),
+      nodeId: NodeIdSchema.optional(),
     }).passthrough(),
     out: z.object({ events: z.array(EventEntrySchema), lastRevision: z.number().int().min(0) }).passthrough(),
   },

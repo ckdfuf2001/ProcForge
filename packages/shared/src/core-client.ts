@@ -300,6 +300,8 @@ export interface CoreClient {
     sessionId: string;
     afterRevision?: number;
     limit?: number;
+    /** M7-ui3: 노드 이력 (서버측 필터) */
+    nodeId?: string;
   }): Promise<{ events: EventEntry[]; lastRevision: number }>;
   /** blocked·needs_human 목록 (M7-ui2. pfNext와 같은 계산, 읽기 전용) */
   getBlocked(input: { sessionId: string }): Promise<{

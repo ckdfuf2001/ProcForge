@@ -98,15 +98,17 @@ export function openUrl(url: string): void {
 function listenWithRetry(
   server: Server,
   port: number,
-  left = 3,
+  left = 8,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     const onError = (e: NodeJS.ErrnoException) => {
       server.removeListener("error", onError);
       if ((e?.code === "EACCES" || e?.code === "EADDRINUSE") && left > 0) {
+        // 지수 백오프 (parallel fork에서 listen 경쟁이 잦다).
+        const delay = Math.min(1000, 50 * 2 ** (8 - left));
         setTimeout(
           () => listenWithRetry(server, port, left - 1).then(resolve, reject),
-          200,
+          delay,
         );
       } else {
         reject(e);
