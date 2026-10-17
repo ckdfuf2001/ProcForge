@@ -109,7 +109,7 @@ export class SessionEventHub {
    * 폴러 1회. 가장 뒤처진 구독자 커서 뒤부터 읽고, 각 구독자는 자기
    * 커서보다 큰 이벤트만 받는다 (늦게 붙은 구독자도 복회받음).
    */
-  private async poll(sid: string): Promise<void> {
+  async poll(sid: string): Promise<void> {
     const set = this.subs.get(sid);
     if (!set || set.size === 0) return;
     const after = Math.min(...[...set].map((s) => s.lastSent));
@@ -134,8 +134,27 @@ export class SessionEventHub {
         }
       }
       this.cursors.set(sid, Math.max(page.lastRevision, after));
-    } catch {
-      // core 오류는 다음 주기에 재시도 (클라 연결 유지).
+    } catch (e) {
+      // M7-ui2-c: session_not_found 등 영구 오류는 종료 (재시도 무의미).
+      // 일시 오류(네트워크·5xx)는 다음 주기에 재시도한다.
+      const code = (e as { code?: unknown }).code;
+      if (code === "session_not_found" || code === "not_found") {
+        const msg =
+          typeof e === "object" && e && "message" in e
+            ? String((e as { message?: unknown }).message)
+            : "세션 없음";
+        for (const s of set) {
+          s.write(
+            `event: error\ndata: ${JSON.stringify({ code, message: msg })}\n\n`,
+          );
+          s.close();
+        }
+        const t = this.timers.get(sid);
+        if (t) clearInterval(t);
+        this.timers.delete(sid);
+        this.subs.delete(sid);
+        this.cursors.delete(sid);
+      }
     }
   }
 

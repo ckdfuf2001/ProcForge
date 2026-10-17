@@ -192,13 +192,26 @@ export class CoreService implements CoreClient {
     return this.tx ?? this.base;
   }
 
-  /** 세션 신선도 확인 + touch (M4.2-2.5, App fresh 이동). 없으면 session_not_found */
+  /**
+   * 세션 신선도 확인 + touch (M4.2-2.5, App fresh 이동). 없으면 session_not_found.
+   * M7-ui2-b: 읽기 전용 경로(UI 폴링)는 저장소를 건드리지 않는다.
+   * touch는 쓰기 경로만 doing — 화면을 보기만 해도 세션 파일이 바뀌면 안 된다.
+   */
   private checkFresh(sessionId: string): Session {
+    return this.checkFreshWith(sessionId, true);
+  }
+
+  /** 읽기 전용 확인 (touch 없음. 만료 판정은 같은 규칙) */
+  private checkFreshRead(sessionId: string): Session {
+    return this.checkFreshWith(sessionId, false);
+  }
+
+  private checkFreshWith(sessionId: string, touch: boolean): Session {
     const s = this.store.getSession(sessionId);
     if (!s) throw err("session_not_found", `세션 없음: ${sessionId}`);
     const last = this.store.getLastUsed(sessionId);
     if (last === undefined) {
-      this.store.touchSession(sessionId);
+      if (touch) this.store.touchSession(sessionId);
       return s;
     }
     if (Date.now() - last > this.sessionTtlMs)
@@ -323,10 +336,11 @@ export class CoreService implements CoreClient {
    * origin을 포함하는 하류 노드의 hash를 재계산·저장. leaf는 open으로 되돌리고,
    * split은 상태를 유지한 채 자손으로 계속 (재-split 불필요).
    */
-  private propagateStale(sid: string, originId: string): void {
+  private propagateStale(sid: string, originId: string, atRevision?: number): void {
     const queue = [originId];
     const seen = new Set<string>([originId]);
-    const rev = this.store.getSession(sid)?.revision ?? 0;
+    const rev = atRevision ?? this.store.getSession(sid)?.revision ?? 0;
+    const marked = new Set<string>();
     while (queue.length > 0) {
       const cur = queue.shift()!;
       const all = this.store.getNodes(sid);
@@ -336,20 +350,40 @@ export class CoreService implements CoreClient {
         seen.add(n.id);
         const nh = this.hashFor(sid, n);
         if (nh === n.hash) continue;
-        // M7-ui2: stale 표시 기록 (UI가 추측하지 않도록 core가 남긴다).
-        const mark = {
-          ...n,
-          staleSince: n.staleSince ?? { revision: rev, causeNodeId: originId },
-        };
-        // M3.4.3-3: split은 상태 유지(해시만 갱신). 펼친 의존 검사가 자손 leaf에
-        // 직접 도달하므로 별도 하강 불필요. 재-split 불필요.
+        // M7-ui2-a: split은 상태를 유지하고 stale 표시도 미기록한다.
+        // (자손 leaf의 표시가 실제 작업 단위 — split 표시까지 켜면噪声)
         if (n.status === "split") {
-          this.store.saveNode(sid, { ...mark, hash: nh });
+          this.store.saveNode(sid, { ...n, hash: nh, staleSince: undefined });
           continue;
         }
         const reopened = n.status === "leaf" ? ("open" as const) : n.status;
-        this.store.saveNode(sid, { ...mark, hash: nh, status: reopened });
+        this.store.saveNode(sid, {
+          ...n,
+          hash: nh,
+          status: reopened,
+          staleSince: n.staleSince ?? { revision: rev, causeNodeId: originId },
+        });
+        marked.add(n.id);
         queue.push(n.id);
+      }
+    }
+    // M7-ui2-a: 이 번 전파에서 표시한 자손이 모두 해제되면 split 표시도 해제.
+    this.clearStaleSplits(sid, marked);
+  }
+
+  /** M7-ui2-a: 자손 leaf가 모두 stale 표시를 잃은 split은 표시를 해제한다. */
+  private clearStaleSplits(sid: string, changed: Set<string>): void {
+    if (changed.size === 0) return;
+    const all = this.store.getNodes(sid);
+    for (const n of all.values()) {
+      if (n.status !== "split" || !n.staleSince) continue;
+      const touched = [...all.values()]
+        .filter((m) => m.id !== n.id && effectiveDeps(m, all).includes(n.id))
+        .filter((m) => changed.has(m.id) || m.staleSince !== undefined);
+      if (touched.length === 0) continue;
+      const stillStale = touched.some((m) => m.staleSince !== undefined);
+      if (!stillStale) {
+        this.store.saveNode(sid, { ...n, staleSince: undefined });
       }
     }
   }
@@ -710,7 +744,7 @@ export class CoreService implements CoreClient {
           };
           next.hash = this.hashFor(s.id, next);
           this.store.saveNode(s.id, next);
-          if (next.hash !== n.hash) this.propagateStale(s.id, n.id);
+          if (next.hash !== n.hash) this.propagateStale(s.id, n.id, s.revision + 1);
           const autoNote =
             freshAuto.length > 0
               ? ` 결과 형태 기반 auto constraint ${freshAuto.length}개 부착.`
@@ -950,7 +984,7 @@ export class CoreService implements CoreClient {
             };
             next.hash = this.hashFor(s.id, next);
             this.store.saveNode(s.id, next);
-            this.propagateStale(s.id, n.id);
+            this.propagateStale(s.id, n.id, s.revision + 1);
             // M5.8.1-4(a): 형제 2개 이상인데 ref/dependsOn 전부 비어 있으면 경고.
             const depWarn =
               withHashes.length >= 2 &&
@@ -1204,7 +1238,7 @@ export class CoreService implements CoreClient {
             if (input.sideEffect) next.sideEffect = input.sideEffect;
             next.hash = this.hashFor(s.id, next);
             this.store.saveNode(s.id, next);
-            this.propagateStale(s.id, n.id);
+            this.propagateStale(s.id, n.id, s.revision + 1);
             return {
               result: {
                 node: next,
@@ -1323,7 +1357,7 @@ export class CoreService implements CoreClient {
         const oldHash = n.hash;
         next.hash = this.hashFor(s.id, next);
         this.store.saveNode(s.id, next);
-        if (oldHash !== next.hash) this.propagateStale(s.id, input.nodeId);
+if (oldHash !== next.hash) this.propagateStale(s.id, input.nodeId, s.revision + 1);
         const node = this.node(input.sessionId, input.nodeId);
         return {
           result: {
@@ -1406,7 +1440,7 @@ export class CoreService implements CoreClient {
         };
         next.hash = this.hashFor(s.id, next);
         this.store.saveNode(s.id, next);
-        this.propagateStale(s.id, n.id);
+        this.propagateStale(s.id, n.id, s.revision + 1);
         return {
           result: {
             node: next,
@@ -1653,7 +1687,7 @@ export class CoreService implements CoreClient {
           (next as { retry?: unknown }).retry = retrySpec;
         next.hash = this.hashFor(s.id, next);
         this.store.saveNode(s.id, next);
-        this.propagateStale(s.id, n.id);
+        this.propagateStale(s.id, n.id, s.revision + 1);
         return {
           result: {
             node: next,
@@ -1931,9 +1965,9 @@ export class CoreService implements CoreClient {
     return this.checkFresh(sessionId);
   }
 
-  /** 노드 조회 (M4.2-2.5, 읽기 전용) */
+  /** 노드 조회 (M4.2-2.5, 읽기 전용. touch 없음 — M7-ui2-b) */
   async getNode(sessionId: string, nodeId: string): Promise<Node> {
-    this.checkFresh(sessionId);
+    this.checkFreshRead(sessionId);
     const n = this.store.getNode(sessionId, nodeId);
     if (!n) throw err("not_found", `node ${nodeId} not found`);
     return n;
@@ -1957,21 +1991,30 @@ export class CoreService implements CoreClient {
   }
 
   /**
-   * 이벤트 페이지 (M7-ui2, 읽기 전용).
+   * 이벤트 페이지 (M7-ui2, 읽기 전용. touch 없음 — M7-ui2-b).
    * pfNext·pfAdvise 등의 **쓰기 메서드가 아니므로** UI가 상태를 바꾸지 않는다.
+   * nodeId 지정 시 그 노드가 건드린 이벤트만 (노드 이력 보기, M7-ui3).
    */
   async getEventsPage(input: {
     sessionId: string;
     afterRevision?: number;
     limit?: number;
+    nodeId?: string;
   }): Promise<{ events: EventEntry[]; lastRevision: number }> {
-    const s = this.checkFresh(input.sessionId);
+    const s = this.checkFreshRead(input.sessionId);
     const all = this.store.readEvents(input.sessionId);
     const after = input.afterRevision ?? 0;
     const limit = Math.min(input.limit ?? 200, 500);
-    const picked = all.filter((e) => e.revision > after).slice(0, limit);
+    const scoped =
+      input.nodeId === undefined
+        ? all
+        : all.filter((e) => e.nodeIds.includes(input.nodeId as string));
+    const picked = scoped.filter((e) => e.revision > after).slice(0, limit);
     const last = all.length === 0 ? 0 : Math.max(...all.map((e) => e.revision));
-    return { events: picked, lastRevision: Math.max(last, picked.at(-1)?.revision ?? s.revision) };
+    return {
+      events: picked,
+      lastRevision: Math.max(last, picked.at(-1)?.revision ?? s.revision),
+    };
   }
 
   /**
@@ -1984,7 +2027,7 @@ export class CoreService implements CoreClient {
     needsHuman: string[];
     revision: number;
   }> {
-    const s = this.checkFresh(input.sessionId);
+    const s = this.checkFreshRead(input.sessionId);
     const nodes = [...this.store.getNodes(input.sessionId).values()];
     const byId = new Map(nodes.map((n) => [n.id, n]));
     const needsHuman = nodes

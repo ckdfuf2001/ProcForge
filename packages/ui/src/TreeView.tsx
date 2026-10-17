@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, subscribeEvents, ApiError, type NodeRow } from "./api.js";
+import { NodeDetailPanel } from "./NodeDetailPanel.js";
 
 // M7-ui2: 세션 트리 + 실시간 갱신.
 // 판단 if문 금지 — 상태·staleSince 등 표시는 core가 준 값만 그대로 찍는다.
@@ -27,6 +28,8 @@ export function compareNodeIds(a: string, b: string): number {
 
 export function TreeView({ sessionId }: { sessionId: string }) {
   const [nodes, setNodes] = useState<NodeRow[] | null>(null);
+  const [revision, setRevision] = useState(0);
+  const [picked, setPicked] = useState<string | null>(null);
   const [needsHuman, setNeedsHuman] = useState<string[]>([]);
   const [blocked, setBlocked] = useState<string[]>([]);
   const [live, setLive] = useState<"open" | "closed" | "error" | "connecting">(
@@ -39,6 +42,7 @@ export function TreeView({ sessionId }: { sessionId: string }) {
       try {
         const t = await api.tree(sessionId);
         setNodes(t.nodes.nodes);
+        setRevision(t.nodes.revision);
         setNeedsHuman(t.blocked.needsHuman);
         setBlocked(
           t.blocked.blocked.map((b) => `${b.nodeId}(${b.reason})`),
@@ -65,14 +69,24 @@ export function TreeView({ sessionId }: { sessionId: string }) {
   return (
     <div>
       <p>
-        실시간: {live} (revision {nodes.length}노드)
+        실시간: {live} (revision {revision} · {nodes.length}노드)
       </p>
       {needsHuman.length > 0 && (
-        <p role="status">
-          사람 확인 필요: {needsHuman.join(", ")}
-        </p>
+        <p role="status">사람 확인 필요: {needsHuman.join(", ")}</p>
       )}
       {blocked.length > 0 && <p>막힘: {blocked.join(", ")}</p>}
+      {picked && (
+        <div>
+          <button type="button" onClick={() => setPicked(null)}>
+            ← 트리로
+          </button>
+          <NodeDetailPanel
+            sessionId={sessionId}
+            nodeId={picked}
+            revision={revision}
+          />
+        </div>
+      )}
       <table>
         <thead>
           <tr>
@@ -90,7 +104,11 @@ export function TreeView({ sessionId }: { sessionId: string }) {
         <tbody>
           {sorted.map((n) => (
             <tr key={n.id} className={STATUS_CLASS[n.status] ?? "st-other"}>
-              <td>{n.id}</td>
+              <td>
+                <button type="button" onClick={() => setPicked(n.id)}>
+                  {n.id}
+                </button>
+              </td>
               <td>{n.goal}</td>
               <td>{n.status}</td>
               <td>{n.attempts}</td>

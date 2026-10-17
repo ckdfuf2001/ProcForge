@@ -24,6 +24,8 @@ export type UiApp = Pick<
   | "getEventsPage"
   | "getBlocked"
   | "sessionTree"
+  | "nodeDetail"
+  | "artifactContent"
 >;
 
 export type UiServer = {
@@ -221,6 +223,42 @@ export async function createUiServer(opts: {
           send(res, await opts.app.listPairings());
           return;
         }
+        // M7-ui3: 노드 상세
+        const mNode = /^\/api\/sessions\/([^/]+)\/nodes\/([^/]+)$/.exec(url.pathname);
+        if (req.method === "GET" && mNode) {
+          const sid = decodeURIComponent(mNode[1]);
+          const nid = decodeURIComponent(mNode[2]);
+          const detail = await opts.app.nodeDetail({ sessionId: sid, nodeId: nid });
+          // "왜 이 노드가 이렇게 됐나" — 이 노드 이벤트만 (core 필터).
+          const evs = await opts.app.getEventsPage({
+            sessionId: sid,
+            nodeId: nid,
+            afterRevision: 0,
+            limit: 200,
+          });
+          send(res, { detail, events: evs.events });
+          return;
+        }
+        // M7-ui3: 산출물 전문 (로컬 전용. text/plain + nosniff + attachment)
+        const mArt = /^\/api\/sessions\/([^/]+)\/nodes\/([^/]+)\/artifacts\/(.+)$/.exec(
+          url.pathname,
+        );
+        if (req.method === "GET" && mArt) {
+          const sid = decodeURIComponent(mArt[1]);
+          const rel = decodeURIComponent(mArt[3]);
+          const content = await opts.app.artifactContent({
+            sessionId: sid,
+            rel,
+          });
+          res.writeHead(200, {
+            "content-type": "text/plain; charset=utf-8",
+            "x-content-type-options": "nosniff",
+            "content-disposition": `attachment; filename="${rel.replace(/["\\]/g, "_")}"`,
+            "content-security-policy": CSP,
+          });
+          res.end(content.bytes);
+          return;
+        }
         // M7-ui2: 세션 트리 (읽기 전용)
         const mTree = /^\/api\/sessions\/([^/]+)\/tree$/.exec(url.pathname);
         if (req.method === "GET" && mTree) {
@@ -234,8 +272,19 @@ export async function createUiServer(opts: {
         const mEvents = /^\/api\/sessions\/([^/]+)\/events$/.exec(url.pathname);
         if (req.method === "GET" && mEvents) {
           const sid = decodeURIComponent(mEvents[1]);
-          const lastEventId = Number(req.headers["last-event-id"] ?? "0");
-          const startRevision = Number.isFinite(lastEventId) ? lastEventId : 0;
+          // M7-ui2-e: Last-Event-ID가 없으면 **현재 revision부터** (전체 이력 재전송 금지).
+          let startRevision: number;
+          const raw = req.headers["last-event-id"];
+          if (raw === undefined) {
+            try {
+              startRevision = (await opts.app.getBlocked({ sessionId: sid })).revision;
+            } catch {
+              startRevision = 0;
+            }
+          } else {
+            const n = Number(raw);
+            startRevision = Number.isFinite(n) && n > 0 ? n : 0;
+          }
           // 상한은 헤더를 쓰기 전에 판정한다 (429가 200 뒤에 붙으면 안 됨).
           if (hub.atCapacity(sid)) {
             err(res, 429, `구독자 초과 (세션당 ${MAX_SUBS_PER_SESSION}명)`);
@@ -274,7 +323,11 @@ export async function createUiServer(opts: {
         }
         err(res, 404, "not found");
       } catch (e) {
-        err(res, 500, e instanceof Error ? e.message : String(e));
+        // pfError 코드는 HTTP로 매핑 (bad_request 400 · not_found 404).
+        const code = (e as { code?: unknown }).code;
+        const status =
+          code === "bad_request" ? 400 : code === "not_found" ? 404 : 500;
+        err(res, status, e instanceof Error ? e.message : String(e));
       }
     },
   );

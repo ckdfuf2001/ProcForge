@@ -41,6 +41,11 @@ import {
 } from "../services/opencode-link.js";
 import { savePairing, getPairing, loadPairings, type Pairings } from "../services/pairings.js";
 import { enrichSessions, type SessionRow } from "../services/session-meta.js";
+import {
+  previewArtifact,
+  readArtifact,
+  type ArtifactPreview,
+} from "../services/artifact-view.js";
 import { detectDuplicateStores } from "./store-dir.js";
 import { logger } from "../logger.js";
 import {
@@ -149,6 +154,43 @@ export type SessionNodeRow = {
   locked: boolean;
   sideEffect: string;
   staleSince?: { revision: number; causeNodeId: string };
+};
+
+/** M7-ui3: 노드 상세 (표시 매핑은 UI. 여기선 판단 없음) */
+export type NodeDetail = {
+  sessionId: string;
+  nodeId: string;
+  revision: number;
+  goal: string;
+  status: string;
+  locked: boolean;
+  sideEffect: string;
+  staleSince: { revision: number; causeNodeId: string } | null;
+  hash: string;
+  tool: { server: string; name: string } | null;
+  args: Record<string, unknown>;
+  map: unknown;
+  until: unknown;
+  dependsOn: string[];
+  constraints: import("@procforge/shared/schema.js").Constraint[];
+  advice: { at: string; text: string }[];
+  golden: { fixtures: string[]; output: string; attemptId?: string; ignore: string[] } | null;
+  approval: { at: string; note?: string } | null;
+  retriesLeft: number;
+  attempts: {
+    id: string;
+    at: string;
+    tool: { server: string; name: string };
+    verdict: string | null;
+    failedConstraints: string[];
+    rubricReasons: Record<string, string>;
+    resultSummary: string;
+    resultJsonMeta: { sha256: string; size: number; preview: string } | null;
+    artifactPreviews: import("../services/artifact-view.js").ArtifactPreview[];
+  }[];
+  resultJsonMeta: { sha256: string; size: number; preview: string } | null;
+  lastVerdict: string | null;
+  lastFailedConstraints: string[];
 };
 
 export type AppDeps = {  core: CoreClient;
@@ -990,8 +1032,89 @@ export class ProcForgeApp {
     sessionId: string;
     afterRevision?: number;
     limit?: number;
+    nodeId?: string;
   }): Promise<{ events: import("@procforge/shared/dto.js").EventEntry[]; lastRevision: number }> {
     return this.core.getEventsPage(input);
+  }
+
+  /** 읽기 전용 세션 조회 (M7-ui3 내부·테스트용. touch 없음) */
+  async readSession(sessionId: string): Promise<{ revision: number }> {
+    return this.core.getSession(sessionId);
+  }
+
+  /** 읽기 전용 노드 조회 (M7-ui3 내부·테스트용. touch 없음) */
+  async readNode(sessionId: string, nodeId: string) {
+    return this.core.getNode(sessionId, nodeId);
+  }
+
+  /**
+   * M7-ui3: 노드 상세. 메타·판정·hash는 core(getNode), 산출물 미리보기는
+   * 로컬에서만 읽는다 (R8: 원문은 로컬 밖으로 나가지 않는다).
+   * 판단 없음 — 표시 매핑은 UI가 한다.
+   */
+  async nodeDetail(input: {
+    sessionId: string;
+    nodeId: string;
+  }): Promise<NodeDetail> {
+    const sessionId = input.sessionId;
+    const node = await this.core.getNode(sessionId, input.nodeId);
+    const s = await this.core.getSession(sessionId);
+    // 산출물은 세션 디렉터리(fixtures/...)에 저장된다. 그 밖은 거부.
+    const sandboxRoot = join(this.procforgeDir, "sessions", sessionId);
+    const last = node.attempts[node.attempts.length - 1];
+    const attempts = node.attempts.map((a) => {
+      const preview =
+        a.artifacts.length === 0
+          ? []
+          : a.artifacts
+              .map((rel) => previewArtifact(sandboxRoot, rel))
+              .filter((x): x is ArtifactPreview => x !== null);
+      return {
+        id: a.id,
+        at: a.at,
+        tool: a.tool,
+        verdict: a.verdict ?? null,
+        failedConstraints: a.failedConstraints,
+        rubricReasons: a.rubricReasons ?? {},
+        resultSummary: a.resultSummary,
+        resultJsonMeta: a.resultJsonMeta ?? null,
+        artifactPreviews: preview,
+      };
+    });
+    return {
+      sessionId,
+      nodeId: node.id,
+      revision: s.revision,
+      goal: node.goal,
+      status: node.status,
+      locked: node.locked,
+      sideEffect: node.sideEffect,
+      staleSince: node.staleSince ?? null,
+      hash: node.hash,
+      tool: node.tool ?? null,
+      args: node.args ?? {},
+      map: node.map ?? null,
+      until: node.until ?? null,
+      dependsOn: node.dependsOn,
+      constraints: node.constraints,
+      advice: node.advice,
+      golden: node.golden ?? null,
+      approval: node.approval ?? null,
+      retriesLeft: retriesLeft(node, s.limits),
+      attempts,
+      resultJsonMeta: last?.resultJsonMeta ?? null,
+      lastVerdict: last?.verdict ?? null,
+      lastFailedConstraints: last?.failedConstraints ?? [],
+    };
+  }
+
+  /** M7-ui3: attempt 산출물 1건 전문 (로컬 전용, 상한·sandbox 밖 거부) */
+  async artifactContent(input: {
+    sessionId: string;
+    rel: string;
+  }): Promise<{ bytes: Buffer; mime: string }> {
+    const sandboxRoot = join(this.procforgeDir, "sessions", input.sessionId);
+    return readArtifact(sandboxRoot, input.rel);
   }
 
   /** M7-ui2: 세션 트리 (노드 요약 + stale 표시. 상태 변경 0) */

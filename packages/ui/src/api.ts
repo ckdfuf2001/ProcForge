@@ -49,6 +49,58 @@ export type NodeRow = {
   staleSince?: { revision: number; causeNodeId: string };
 };
 
+export type NodeDetail = {
+  sessionId: string;
+  nodeId: string;
+  revision: number;
+  goal: string;
+  status: string;
+  locked: boolean;
+  sideEffect: string;
+  staleSince: { revision: number; causeNodeId: string } | null;
+  hash: string;
+  tool: { server: string; name: string } | null;
+  args: Record<string, unknown>;
+  dependsOn: string[];
+  constraints: { id: string; source: string; kind: string }[];
+  advice: { at: string; text: string }[];
+  golden: { fixtures: string[]; output: string; ignore: string[] } | null;
+  retriesLeft: number;
+  attempts: {
+    id: string;
+    at: string;
+    tool: { server: string; name: string };
+    verdict: string | null;
+    failedConstraints: string[];
+    rubricReasons: Record<string, string>;
+    resultSummary: string;
+    artifactPreviews: {
+      rel: string;
+      sha256: string;
+      size: number;
+      mime: string;
+      text: string | null;
+      truncated: boolean;
+    }[];
+  }[];
+  lastVerdict: string | null;
+  lastFailedConstraints: string[];
+};
+
+export type NodeEvent = {
+  revision: number;
+  at: string;
+  actor: string;
+  method: string;
+  nodeIds: string[];
+  summary: string;
+};
+
+export type NodeDetailResponse = {
+  detail: NodeDetail;
+  events: NodeEvent[];
+};
+
 export type TreeResponse = {
   nodes: { nodes: NodeRow[]; revision: number };
   blocked: {
@@ -78,6 +130,15 @@ export const api = {
   store: () => get<StoreInfo>("/api/store"),
   pairings: () => get<Pairings>("/api/pairings"),
   tree: (sid: string) => get<TreeResponse>(`/api/sessions/${encodeURIComponent(sid)}/tree`),
+  nodeDetail: (sid: string, nid: string) =>
+    get<NodeDetailResponse>(
+      `/api/sessions/${encodeURIComponent(sid)}/nodes/${encodeURIComponent(nid)}`,
+    ),
+  artifactUrl: (sid: string, nid: string, rel: string) =>
+    `/api/sessions/${encodeURIComponent(sid)}/nodes/${encodeURIComponent(nid)}/artifacts/${rel
+      .split("/")
+      .map(encodeURIComponent)
+      .join("/")}`,
 };
 
 /**

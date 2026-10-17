@@ -84,7 +84,8 @@ function makeStubApp(events: Ev[] = []) {
     getBlocked: async () => ({
       blocked: [{ nodeId: "1.2", waitingOn: [], reason: "dep_failed" as const }],
       needsHuman: ["1.2"],
-      revision: 4,
+      // M7-ui2-e: Last-Event-ID 없는 구독은 현재 revision(=0)부터 시작한다.
+      revision: 0,
     }),
     sessionTree: async () => ({
       nodes: [
@@ -232,7 +233,7 @@ describe("M7-ui2 SSE", () => {
     try {
       const r = await readSse(`${srv.url}/api/sessions/ses/events`, {
         token: srv.token,
-        ms: 400,
+        ms: 1200,
       });
       expect(r.status).toBe(200);
       expect(r.text).toContain("id: 1");
@@ -252,7 +253,7 @@ describe("M7-ui2 SSE", () => {
       const r = await readSse(`${srv.url}/api/sessions/ses/events`, {
         token: srv.token,
         lastEventId: 2,
-        ms: 400,
+        ms: 1200,
       });
       expect(r.text).toContain("id: 3");
       expect(r.text).not.toContain('"revision":1');
@@ -276,12 +277,12 @@ describe("M7-ui2 SSE", () => {
         await new Promise((r) => setTimeout(r, 25));
       }
       expect(srv.subscriberCount("ses")).toBe(2);
-      await new Promise((r) => setTimeout(r, 300));
+      await new Promise((r) => setTimeout(r, 1200));
       expect(a.text()).toContain("id: 1");
       expect(b.text()).toContain("id: 1");
       a.stop();
       b.stop();
-      await new Promise((r) => setTimeout(r, 100));
+      await new Promise((r) => setTimeout(r, 300));
       expect(srv.subscriberCount("ses")).toBe(0);
     } finally {
       await srv.close();

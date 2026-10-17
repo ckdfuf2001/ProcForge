@@ -521,6 +521,27 @@ argv: [...]}` 고정. runner는 run fs에서 직접 실행해 stdout을 golden�
 - [M7-ui2-4] stale은 상태가 아니라 `staleSince:{revision,causeNodeId}`
   로 core가 기록하고 UI는 표시만 한다 (R3: UI가 추측 금지).
   `pfReport`(pass/fail)로 재실행되면 해제된다.
+- [M7-ui2-5] **split에는 stale 표시를 미기록**한다 (택1). 실제 작업 단위는
+  leaf이고, split까지 표시가 켜지면 신호 노이즈가 된다. 전파 중 split은
+  해시만 갱신하고 기존 표시도 함께 지운다.
+- [M7-ui2-6] `staleSince.revision`은 **커밋되는 revision**(그 변경 이벤트
+  revision과 동일)이다. 표시가 생긴 시점의 세션 revision이 아니라 이벤트
+  revision이라 "어느 변경 때문인가"가 UI에서 대조된다.
+- [M7-ui2-7] 읽기 전용 경로(getNode·getEventsPage·getBlocked·getSessions)는
+  **touch하지 않는다**. 화면을 보기만 해도 세션 파일이 바뀌면 안 된다
+  (폴링이 TTL을 무한 연장하는 것도 방지). 만료 판정은 같은 규칙이고,
+  TTL은 쓰기 경로 기준이다.
+- [M7-ui2-8] SSE 폴러 오류: `session_not_found`/`not_found`는 영구 오류로
+  보고 `event: error`를 쏜 뒤 구독·폴러를 종료한다. 그 외는 다음 주기에
+  재시도한다 (일시 오류 가정).
+- [M7-ui2-9] `Last-Event-ID`가 없으면 시작점은 **현재 revision**이다 —
+  화면을 처음 열었을 때 과거 이력을 전부 재전송하지 않는다.
+- [M7-ui3-1] 산출물은 `sessions/<sid>/fixtures/...`에 저장된다. 미리보기·전문
+  모두 이 디렉터리 밖은 거부하고, 전문은 5MB 상한 + `text/plain` +
+  `nosniff` + `attachment`로만 내려준다(HTML·JSON 모두 텍스트, iframe 렌더
+  없음). 미리보기는 UI가 `<pre>` + textContent.
+- [M7-ui3-2] 노드 이력은 `getEventsPage({nodeId})`의 **서버측 필터**를 쓴다
+  (UI가 전체를 받아 거르지 않는다).
   짝짓기 읽기는 최신 pf_start 기준 (latest-wins) — messages 뒤쪽이 이긴다.
   advise 실패 시 신호 미전송 (App.adviseAndSignal이 순서 보장).
   pairings UI 배선은 M7-2로 미룸 (App·pairings.json까지만).
