@@ -58,6 +58,8 @@ function err(res: ServerResponse, code: number, msg: string): void {
   res.writeHead(code, {
     "content-type": "application/json",
     "content-security-policy": CSP,
+    // M7-ui4-k: 본문 초과처럼 연결을 끊는 경우에도 헤더가 나가야 한다.
+    ...(res.hasHeader("connection") ? { connection: "close" } : {}),
   });
   res.end(JSON.stringify({ error: { code, message: msg } }));
 }
@@ -175,17 +177,40 @@ async function readJsonBody(
     err(res, 415, "content-type must be application/json");
     return null;
   }
-  // M7-ui4-e: 단일 루프 + 바이트 상한. 예전엔 청크마다 배열 전체를 다시 더했다.
+  // M7-ui4-k: content-length로 **사전**에 413. 스트림을 끝까지 읽으면
+  // 이미 버퍼에 넣은 만큼 쓰고 나서야 알 수 있다(상한을 넘긴 뒤 거절).
+  const declared = Number(req.headers["content-length"]);
+  if (Number.isFinite(declared) && declared > MAX_BODY_BYTES) {
+    err(res, 413, `요청 본문 상한 초과 (${MAX_BODY_BYTES}B)`);
+    // 아직 읽지 않은 바디를 버린다 — 버리지 않으면 연결이 붙는다.
+    res.setHeader("connection", "close");
+    req.resume();
+    return null;
+  }
+  // M7-ui4-e/k: 단일 루프 + 바이트 상한.
+  // 주의: `for await (const c of req)` 는 루프를 벗어나면 **스트림을 destroy**
+  // 해서 아직 올리고 있는 클라이언트가 ECONNRESET 을 받는다(413 본문을 못 읽음).
+  // 그래서 이벤트로 끝까지 소비한 뒤에 판정한다.
   const chunks: Buffer[] = [];
   let size = 0;
-  for await (const c of req) {
-    const b = c as Buffer;
-    size += b.length;
-    if (size > MAX_BODY_BYTES) {
-      err(res, 413, `요청 본문 상한 초과 (${MAX_BODY_BYTES}B)`);
-      return null;
-    }
-    chunks.push(b);
+  let overflow = false;
+  await new Promise<void>((resolveDrain, rejectDrain) => {
+    req.on("data", (b: Buffer) => {
+      size += b.length;
+      if (size > MAX_BODY_BYTES) {
+        overflow = true;
+        return; // 더 담지 않는다 (소비는 계속 → 클라이언트가 응답을 읽을 수 있다)
+      }
+      chunks.push(b);
+    });
+    req.on("end", () => resolveDrain());
+    req.on("error", (e) => rejectDrain(e));
+  });
+  if (overflow) {
+    // M7-ui4-k: 초과를 알렸으니 이 연결은 닫는다(요청은 이미 끝까지 소비했다).
+    res.setHeader("connection", "close");
+    err(res, 413, `요청 본문 상한 초과 (${MAX_BODY_BYTES}B)`);
+    return null;
   }
   let parsed: unknown;
   try {
@@ -495,6 +520,12 @@ export async function createUiServer(opts: {
         }
         err(res, 404, "not found");
       } catch (e) {
+        // M7-ui4-k: 이미 응답을 보낸 경우(413 등)에는 다시 쓰지 않는다 —
+        // "Cannot write headers after they are sent" unhandled rejection이 된다.
+        if (res.headersSent || res.writableEnded) {
+          res.end();
+          return;
+        }
         // pfError 코드는 HTTP로 매핑. M7-ui3-d: session_not_found도 404.
         const code = (e as { code?: unknown }).code;
         const status =

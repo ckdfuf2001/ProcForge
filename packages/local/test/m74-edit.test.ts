@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterAll } from "vitest";
 import { mkdtempSync, existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { request as httpRequest } from "node:http";
 import { createUiServer } from "../src/app/ui-server.js";
 import { ProcForgeApp } from "../src/app/app.js";
 import { testStack } from "./client-mode.js";
@@ -82,6 +83,49 @@ afterAll(() => {
   sharedPromise = null;
   currentApp = null;
 });
+/** content-length 없이 chunked로 보내고 상태줄을 그대로 받는 원시 POST */
+function rawPost(opts: {
+  host: string;
+  port: string;
+  path: string;
+  headers: Record<string, string>;
+  chunks: number;
+  chunkBytes: number;
+}): Promise<{ statusCode: number; headers: Record<string, unknown> }> {
+  return new Promise((resolve, reject) => {
+    const req = httpRequest(
+      {
+        host: opts.host,
+        port: Number(opts.port),
+        path: opts.path,
+        method: "POST",
+        headers: opts.headers,
+      },
+      (res) => {
+        const statusCode = res.statusCode ?? 0;
+        const headers = res.headers as Record<string, unknown>;
+        res.resume();
+        res.on("end", () => resolve({ statusCode, headers }));
+      },
+    );
+    req.on("error", (e) => reject(e));
+    req.write("-".repeat(opts.chunkBytes));
+    let sent = 1;
+    const tick = () => {
+      if (sent >= opts.chunks) {
+        req.end();
+        return;
+      }
+      // 서버가 413 으로 응답하면 더 보내지 않는다 (리셋 회피)
+      if (req.writableEnded || req.destroyed) return;
+      req.write("-".repeat(opts.chunkBytes));
+      sent++;
+      setImmediate(tick);
+    };
+    setImmediate(tick);
+  });
+}
+
 describe("M7-ui4 core.previewEdit", () => {
   it("무쓰기: 저장소 바이트 불변 + wouldStale 계산", async () => {
     const { app, sid } = await started();
@@ -249,6 +293,63 @@ describe("M7-ui4 UI 쓰기 API", () => {
         expect(r.status).toBe(400);
       }
     } finally {
+    }
+  }, 30000);
+
+  it("M7-ui4-k: 2MB 본문 → 413 (content-length 사전 판정)", async () => {
+    const { app, sid } = await started();
+    const srv = await createUiServer({ app });
+    try {
+      const url = `${srv.url}/api/sessions/${sid}/edit-node`;
+      const big = JSON.stringify({
+        nodeId: "1.1",
+        goal: "x".repeat(2 * 1024 * 1024),
+        expectedRevision: 0,
+      });
+      expect(big.length).toBeGreaterThan(2 * 1024 * 1024);
+      // content-length가 있는 요청: 서버가 본문을 읽기 전에 거절한다
+      const r = await fetch(url, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-procforge-token": srv.token,
+        },
+        body: big,
+      });
+      expect(r.status).toBe(413);
+      const body = (await r.json()) as { error: { code: number; message: string } };
+      expect(body.error.code).toBe(413);
+      // 상태는 그대로 (본문은 반영되지 않았다)
+      expect((await app.readNode(sid, "1.1")).goal).toBe("a");
+    } finally {
+      srv.close();
+    }
+  }, 30000);
+
+  it("M7-ui4-k: chunked(길이 미고지) 2MB → 413 + connection close", async () => {
+    const { app, sid } = await started();
+    const srv = await createUiServer({ app });
+    try {
+      // fetch(undici)는 스트리밍 업로드 중 조기 응답을 리셋으로 받는다.
+      // "클라이언트가 413을 실제로 받는지"를 보려면 원시 HTTP로 확인한다.
+      const { statusCode, headers } = await rawPost({
+        host: "127.0.0.1",
+        port: new URL(srv.url).port,
+        path: `/api/sessions/${sid}/edit-node`,
+        headers: {
+          "content-type": "application/json",
+          "x-procforge-token": srv.token,
+        },
+        // content-length 없이 2.5MB 를 쪼개서 보낸다 (chunked)
+        chunks: 40,
+        chunkBytes: 64 * 1024,
+      });
+      expect(statusCode).toBe(413);
+      expect(headers.connection).toBe("close");
+      // 상태는 그대로 (본문은 반영되지 않았다)
+      expect((await app.readNode(sid, "1.1")).goal).toBe("a");
+    } finally {
+      srv.close();
     }
   }, 30000);
 
