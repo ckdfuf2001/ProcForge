@@ -237,8 +237,22 @@ export async function sendContinue(opts: {
   const deadline = Date.now() + timeoutMs;
   const isNewPfCall = (parts: unknown[]): boolean =>
     parts.some((p) => isPfToolPart(p) && !before.has(JSON.stringify(p)));
-  // M7-1.1-6: SSE 1순위, messages 폴링은 폴백 (대용량 세션 빈 페이지 오탐 회피).
-  if (await sseNewPfCall({ baseUrl: base, sid: ocSid, before, until: deadline, fetchImpl: doFetch })) {
+  // M7-ui1.1-6: SSE 1순위, messages 폴링은 폴백 (대용량 세션 빈 페이지 오탐 회피).
+  // 신호 직후엔 이미 호출이 반영돼 있을 수 있어 1회 즉시 확인한다 (지연 최소화).
+  try {
+    if (isNewPfCall(await opts.deps.listParts(ocSid))) return paired();
+  } catch {
+    // 무시
+  }
+  if (
+    await sseNewPfCall({
+      baseUrl: base,
+      sid: ocSid,
+      before,
+      until: deadline,
+      fetchImpl: doFetch,
+    })
+  ) {
     return paired();
   }
   for (;;) {

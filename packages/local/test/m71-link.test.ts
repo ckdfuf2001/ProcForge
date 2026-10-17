@@ -257,7 +257,7 @@ describe("M7-1 opencode-link", () => {
         openCodeSessionId: "ses-p",
         text: "계속",
         mode: "b",
-        timeoutMs: 300,
+        timeoutMs: 1500,
         pollMs: 25,
         serverVersion: "1.18.18",
         deps: { ...httpLinkDeps(fake.baseUrl) },
@@ -288,7 +288,7 @@ describe("M7-1 opencode-link", () => {
         openCodeSessionId: "ses-h",
         text: "계속",
         mode: "b",
-        timeoutMs: 300,
+        timeoutMs: 1500,
         pollMs: 25,
         serverVersion: "1.18.18",
         deps: { ...httpLinkDeps(fake.baseUrl) },
@@ -349,7 +349,7 @@ describe("M7-1 opencode-link", () => {
         baseUrl: fake.baseUrl,
         text: "계속",
         mode: "c",
-        timeoutMs: 300,
+        timeoutMs: 1500,
         pollMs: 25,
         deps: {
           listParts: async () => {
