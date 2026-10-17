@@ -65,10 +65,6 @@ export class TxStore implements Store {
     return this.base.readEvents(sessionId);
   }
 
-  touchSession(sessionId: string): void {
-    this.base.touchSession(sessionId);
-  }
-
   async withLock<T>(sessionId: string, fn: () => T | Promise<T>): Promise<T> {
     return this.base.withLock(sessionId, fn);
   }

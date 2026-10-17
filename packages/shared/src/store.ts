@@ -28,11 +28,6 @@ export type Store = {
   appendEvents(sessionId: string, events: EventEntry[]): void;
   /** 상태 이벤트 조회 (R7 히스토리 원천) */
   readEvents(sessionId: string): EventEntry[];
-  /**
-   * M7-ui4-a: 세션 부가정보(클라이언트 정보) 기록. TTL 판정은 여기서 하지 않는다 —
-   * 기준은 commitChange가 session.json에 남기는 `lastWriteAt`다.
-   */
-  touchSession(sessionId: string): void;
   /** 세션 잠금 안에서 실행 (M4.2-2.5, core change 트랜잭션용. 대기 후 conflict) */
   withLock<T>(sessionId: string, fn: () => T | Promise<T>): Promise<T>;
   /** 원자 커밋 (M4.2-2.5-3): pending 기록 후 일괄 반영 */

@@ -186,11 +186,24 @@ export class CoreService implements CoreClient {
   constructor(
     private base: Store = createMemoryStore(),
     private evaluate: EvaluateFn = defaultEvaluate,
-    private opts: { sessionTtlMs?: number } = {},
+    private opts: {
+    sessionTtlMs?: number;
+    /** M7-ui4-h: 시각 주입 (가짜 시계). TTL 판정·lastWriteAt 기록 모두 이 값을 쓴다. */
+    now?: () => number;
+  } = {},
   ) {}
 
   private get sessionTtlMs(): number {
     return this.opts.sessionTtlMs ?? 30 * 24 * 3600 * 1000;
+  }
+
+  /** M7-ui4-h: 주입된 시계 (없으면 벽시계) */
+  private now(): number {
+    return this.opts.now?.() ?? Date.now();
+  }
+
+  private nowIso(): string {
+    return new Date(this.now()).toISOString();
   }
 
   /** 변경 메서드 안에서는 tx 오버레이 경유. NOTE: 본문은 await 없이 동기 실행 */
@@ -219,10 +232,11 @@ export class CoreService implements CoreClient {
     // 메모리 상태에 의존하면 프로세스 재시작 후, 그리고 원격 core(요청마다
     // store를 새로 만드는 구조)에서 판정이 사라진다.
     // 읽기는 기준을 바꾸지 않는다 — 화면만 봐도 세션이 살아 있으면 안 된다.
+    // M7-ui4-h: 판정 시각도 주입된 시계를 쓴다 (기록 시각과 판정 시각이 어긋나면 안 된다).
     const raw = s.lastWriteAt ?? s.createdAt;
     const base = Date.parse(raw);
     if (!Number.isFinite(base)) return s;
-    if (Date.now() - base > this.sessionTtlMs) {
+    if (this.now() - base > this.sessionTtlMs) {
       throw err("session_not_found", `세션 만료: ${sessionId}`);
     }
     return s;
@@ -268,19 +282,27 @@ export class CoreService implements CoreClient {
             changedNodeIds: [] as string[],
           };
         }
-        const cur = tx.getSession(sessionId);
+const cur = tx.getSession(sessionId);
         if (!cur) throw err("not_found", `session ${sessionId} not found`);
-        const bumped: Session = { ...cur, revision: cur.revision + 1 };
+        // M7-ui4-h: **커밋 세션에 core가** lastWriteAt를 찍는다.
+        // 저장소가 찍으면 테스트용 메모리 store와 판정이 달라지고(저장소가 모르는
+        // 규칙이 되는 셈), 시각도 주입 불가다. 여기서 찍으면 파일/메모리·재시작·
+        // 원격이 같은 규칙을 쓴다.
+        const bumped: Session = {
+          ...cur,
+          revision: cur.revision + 1,
+          lastWriteAt: this.nowIso(),
+        };
         tx.saveSession(bumped);
         const after = new Map<string, string>();
-        for (const [id, n] of tx.getNodes(sessionId)) after.set(id, n.hash);
+        for (const [id, n] of tx.getNodes(sessionId)) after.set(n.id, n.hash);
         const pick = (m: Map<string, string>) =>
           combineHashes(changed.map((id) => m.get(id) ?? `missing:${id}`));
         tx.appendEvents(sessionId, [
           {
             seq: bumped.revision,
             revision: bumped.revision,
-            at: new Date().toISOString(),
+            at: this.nowIso(),
             actor: op.actor ?? "host",
             method: op.method,
             nodeIds: [...changed].sort(),
@@ -407,7 +429,9 @@ export class CoreService implements CoreClient {
       toolCatalog: input.toolCatalog,
       rootId: "1",
       limits,
-      createdAt: new Date().toISOString(),
+      createdAt: this.nowIso(),
+      // M7-ui4-h: 시작도 쓰기다 — TTL 기준을 심는다.
+      lastWriteAt: this.nowIso(),
       revision: 0,
       opencodeVersion: input.opencodeVersion ?? "unknown",
     };
@@ -1785,7 +1809,8 @@ if (oldHash !== next.hash) this.propagateStale(s.id, input.nodeId, s.revision + 
             );
           parsed.push(r.data);
         }
-        this.store.saveSession({ ...s, toolCatalog: parsed });
+        // M7-ui4-h: 카탈로그 갱신도 쓰기다 — 기준 시각 갱신
+        this.store.saveSession({ ...s, toolCatalog: parsed, lastWriteAt: this.nowIso() });
         return {
           result: undefined as void,
           summary: `updateCatalog ${parsed.length}`,
@@ -1840,7 +1865,8 @@ if (oldHash !== next.hash) this.propagateStale(s.id, input.nodeId, s.revision + 
       input.doc as ProcedureDoc,
       input.params ?? {},
     );
-    this.store.saveSession(session);
+    // M7-ui4-h: import도 쓰기다 — 기준 시각 심는다
+    this.store.saveSession({ ...session, lastWriteAt: this.nowIso() });
     for (const n of nodes) this.store.saveNode(session.id, n);
     return { sessionId: session.id };
   }

@@ -421,11 +421,8 @@ export class FileStore implements Store {
   commitChange(sid: string, c: CommitChange): void {
     assertSessionId(sid);
     if (!c.session) throw pfError("internal", "commitChange requires session", "호출자 확인 필요");
-    // M7-ui4-a: 쓰기 커밋 시각을 session.json에 남긴다. TTL 판정이 이 값에만
-    // 의존하므로 프로세스 재시작·원격 core(요청마다 store 재생성)에서도 결과가 같다.
-    const session: Session = { ...c.session, lastWriteAt: new Date().toISOString() };
-    const commit: CommitChange = { ...c, session };
-    // M4.2-4-0-1: 손상 잔류 시 새 커밋 거부 (CLI repair로만 해제)
+    // M7-ui4-h: lastWriteAt는 **core가 커밋 세션에** 심는다. 저장소가 찍으면
+    // 메모리 store와 판정이 갈리고(저장소가 모르는 규칙) 시각 주입도 불가하다.
     const corrupt = this.corruptFiles(sid);
     if (corrupt.length > 0) {
       throw pfError("internal", `손상 파일 잔류(${corrupt.length}건), repair 필요`, "복구 필요");
@@ -435,13 +432,13 @@ export class FileStore implements Store {
     if (rec.failed.length > 0) {
       throw pfError("internal", `복구 실패(${rec.failed.length}건), 수동 확인 필요`, "복구 필요");
     }
-    const rev = session.revision;
+    const rev = c.session.revision;
     mkdirSync(this.sessionDir(sid), { recursive: true });
     this.writeAtomic(
       join(this.sessionDir(sid), `pending-${rev}.json`),
-      JSON.stringify({ revision: rev, session: session ?? null, nodes: c.nodes ?? [], events: c.events ?? [] }),
+      JSON.stringify({ revision: rev, session: c.session ?? null, nodes: c.nodes ?? [], events: c.events ?? [] }),
     );
-    this.applyPending(sid, commit);
+    this.applyPending(sid, c);
     try {
       fsutil.unlinkRetrySync(join(this.sessionDir(sid), `pending-${rev}.json`));
     } catch {
