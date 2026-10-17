@@ -32,7 +32,7 @@ const node = (over: Partial<Node> = {}): Node =>
   }) as unknown as Node;
 
 const c = (id: string): Constraint =>
-  ({ id, source: "human", kind: "equals", spec: { path: "/x", expected: id } }) as Constraint;
+  ({ id, source: "human", kind: "llm_rubric", spec: { rubric: `조건 ${id}` } }) as Constraint;
 
 describe("M7-ui4-f applyEdit 순수성·검증", () => {
   it("원본 노드를 바꾸지 않는다 (복사본 반환)", () => {

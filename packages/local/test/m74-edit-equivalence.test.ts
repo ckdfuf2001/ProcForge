@@ -13,7 +13,8 @@ const c = (id: string) => ({
   id,
   source: "human" as const,
   kind: "equals" as const,
-  spec: { path: "/x", expected: id },
+  // R8: path 문자열은 core 경계를 넘을 수 없다 — 값만 있는 조건을 쓴다.
+  spec: { rubric: `조건 ${id}` },
 });
 
 async function built(pfdir: string) {
@@ -95,15 +96,20 @@ describe("M7-ui4-f previewEdit ↔ 실제 편집 동치", () => {
       addConstraints: [c("dup")] as never,
       expectedRevision: (await app.readSession(sid)).revision,
     });
-    const pv = app.previewEdit({ sessionId: sid, nodeId: "1.2.1", change: { addConstraints: [c("dup")] } });
-    const real = app.editNode({
-      sessionId: sid,
-      nodeId: "1.2.1",
-      addConstraints: [c("dup")] as never,
-      expectedRevision: (await app.readSession(sid)).revision,
-    });
-    await expect(pv).rejects.toThrow(/duplicate constraint/);
-    await expect(real).rejects.toThrow(/duplicate constraint/);
+    // 핸들러를 **즉시** 붙인다 (두 번째 프로미스가 그 전에 reject되면 Node가
+    // unhandled rejection으로 친다 — 테스트 오염).
+    const pvExp = expect(
+      app.previewEdit({ sessionId: sid, nodeId: "1.2.1", change: { addConstraints: [c("dup")] } }),
+    ).rejects.toThrow(/duplicate constraint/);
+    const realExp = expect(
+      app.editNode({
+        sessionId: sid,
+        nodeId: "1.2.1",
+        addConstraints: [c("dup")] as never,
+        expectedRevision: (await app.readSession(sid)).revision,
+      }),
+    ).rejects.toThrow(/duplicate constraint/);
+    await Promise.all([pvExp, realExp]);
   });
 
   it("split 노드 편집도 동치 (split 자체는 stale 표시 안 함)", async () => {
@@ -137,16 +143,31 @@ describe("M7-ui4-f previewEdit ↔ 실제 편집 동치", () => {
     expect(newly).toEqual([...pv.wouldStale].sort());
   });
 
-  it("goal 상한·trim 검증이 양쪽에서 같다", async () => {
+  it("goal 검증(빈값·공백·상한)이 양쪽에서 같은 결론·같은 메시지", async () => {
     const pfdir = mk();
     const { app, sid } = await built(pfdir);
     for (const goal of ["", "   ", "x".repeat(5000)]) {
-      await expect(
-        app.previewEdit({ sessionId: sid, nodeId: "1.2.1", change: { goal } }),
-      ).rejects.toThrow(/goal/);
-      await expect(
-        app.editNode({ sessionId: sid, nodeId: "1.2.1", goal, expectedRevision: (await app.readSession(sid)).revision }),
-      ).rejects.toThrow(/goal|bad_request/);
+      // 메시지 문자열을 하드코딩하지 않는다 — 계층(wire zod / core)에 따라
+      // 문구는 달라지지만 **preview와 실제 저장은 같은 결론·같은 문구**여야 한다.
+      const pv = await app
+        .previewEdit({ sessionId: sid, nodeId: "1.2.1", change: { goal } })
+        .then(
+          () => "성공",
+          (e: Error) => e.message,
+        );
+      const real = await app
+        .editNode({
+          sessionId: sid,
+          nodeId: "1.2.1",
+          goal,
+          expectedRevision: (await app.readSession(sid)).revision,
+        })
+        .then(
+          () => "성공",
+          (e: Error) => e.message,
+        );
+      expect(pv).not.toBe("성공");
+      expect(real).toBe(pv);
     }
   });
 

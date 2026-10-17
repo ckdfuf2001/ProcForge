@@ -285,7 +285,9 @@ export const WireMethods: Record<WireMethodName, WireDef> = {
     input: z.object({
       sessionId: SessionIdSchema,
       nodeId: NodeIdSchema,
-      goal: z.string().min(1).optional(),
+      // M7-ui4-f: goal 규칙의 단일 소스는 core의 applyEdit다. wire에서 min/max를 다시
+// 두면 원격 모드에서만 오류 문구가 달라진다(미리보기 vs 실제 저장이 갈라짐).
+      goal: z.string().optional(),
       addConstraints: z.array(ConstraintSchema).optional(),
       removeConstraintIds: z.array(z.string()).optional(),
       map: z.unknown().optional(),
@@ -361,7 +363,9 @@ export const WireMethods: Record<WireMethodName, WireDef> = {
             remove: z.array(z.string()).optional(),
           })
           .optional(),
-        goal: z.string().max(4096).optional(),
+        // M7-ui4-f: wire는 goal 규칙을 다시 정의하지 않는다 (core의 applyEdit가 유일한
+// 규칙). 여기서 max를 두면 "미리보기"와 "실제 저장"의 오류 문구가 갈린다.
+        goal: z.string().optional(),
         dependsOn: z.array(NodeIdSchema).optional(),
         addConstraints: z.array(ConstraintSchema).optional(),
         removeConstraintIds: z.array(z.string()).optional(),

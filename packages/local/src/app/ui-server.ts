@@ -108,16 +108,17 @@ function listenWithRetry(
   // ephemeral 포트가 고갈돼 EACCES가 반복된다. 재시도 예산을 넉넉히 준다.
   left = 14,
 ): Promise<void> {
+  // M7-ui4: 결정이 끝난 뒤 도착하는 late error(재시도 중 발생한 EACCES 등)가
+  // unhandled exception으로 프로세스를 죽이지 않게 한다. 진짜 listen 실패는
+  // 아래 onError가 reject로 알린다. 리스너는 **한 번만** 붙인다 (재시도마다
+  // 쌓이면 MaxListenersExceeded + 새 listen이 붙잡고 있는 상태로 남는다).
+  const marked = server as Server & { __pfLateGuard?: boolean };
+  if (!marked.__pfLateGuard) {
+    marked.__pfLateGuard = true;
+    server.on("error", () => {});
+    server.setMaxListeners(Math.max(server.getMaxListeners(), 64));
+  }
   return new Promise((resolve, reject) => {
-    // M7-ui4: 결정이 끝난 뒤 도착하는 late error(재시도 중 발생한 EACCES 등)가
-    // unhandled exception으로 프로세스를 죽이지 않게 한다. 진짜 listen 실패는
-    // 아래 onError가 reject로 이미 알린다.
-    const late = (): void => {};
-    server.on("error", late);
-    const done = (fn: () => void) => {
-      server.removeListener("error", late);
-      fn();
-    };
     const onError = (e: NodeJS.ErrnoException) => {
       server.removeListener("error", onError);
       if ((e?.code === "EACCES" || e?.code === "EADDRINUSE") && left > 0) {
@@ -128,13 +129,13 @@ function listenWithRetry(
           delay,
         );
       } else {
-        done(() => reject(e));
+        reject(e);
       }
     };
     server.once("error", onError);
     server.listen(port, "127.0.0.1", () => {
       server.removeListener("error", onError);
-      done(() => resolve());
+      resolve();
     });
   });
 }

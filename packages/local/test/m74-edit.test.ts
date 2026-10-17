@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterAll } from "vitest";
 import { mkdtempSync, existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -49,6 +49,39 @@ function json(srv: { url: string; token: string }, path: string, body: unknown) 
   });
 }
 
+/**
+ * M7-ui4: 파일당 서버 1개 (Windows loopback ephemeral 포트 고갈 방지).
+ * 테스트마다 App이 다르므로 **위임 프록시**를 服务器에 심어 두고, 요청 시점에
+ * 현재 테스트의 App으로 넘긴다 (ui-server는 opts.app를 요청마다 읽는다).
+ */
+let currentApp: Record<string, unknown> | null = null;
+const appProxy = new Proxy(
+  {},
+  {
+    get: (_t, k) => {
+      const app = currentApp;
+      if (!app) throw new Error("currentApp 미설정");
+      const v = app[k as string];
+      return typeof v === "function" ? v.bind(app) : v;
+    },
+  },
+) as unknown as { close: () => void };
+let sharedPromise: Promise<{ url: string; token: string }> | null = null;
+let sharedClose: (() => void) | null = null;
+function sharedServer(app: unknown): Promise<{ url: string; token: string }> {
+  currentApp = app as Record<string, unknown>;
+  sharedPromise ??= createUiServer({ app: appProxy }).then((s) => {
+    sharedClose = s.close;
+    return { url: s.url, token: s.token };
+  });
+  return sharedPromise;
+}
+afterAll(() => {
+  sharedClose?.();
+  sharedClose = null;
+  sharedPromise = null;
+  currentApp = null;
+});
 describe("M7-ui4 core.previewEdit", () => {
   it("무쓰기: 저장소 바이트 불변 + wouldStale 계산", async () => {
     const { app, sid } = await started();
@@ -98,7 +131,7 @@ describe("M7-ui4 core.previewEdit", () => {
 describe("M7-ui4 UI 쓰기 API", () => {
   it("POST+JSON만·expectedRevision 필수·actor ui", async () => {
     const { app, sid } = await started();
-    const srv = await createUiServer({ app });
+    const srv = await sharedServer(app);
     try {
       const rev = (await app.readSession(sid)).revision;
       // 1) GET으로는 못 쓴다
@@ -132,13 +165,12 @@ describe("M7-ui4 UI 쓰기 API", () => {
       expect(calls.some((c) => c.tool === "pf_edit_node")).toBe(true);
       expect(calls.some((c) => (c.connectionId ?? "").startsWith("ui-"))).toBe(true);
     } finally {
-      srv.close();
     }
   }, 30000);
 
   it("409: 초안 유지 (자동 재시도 없음)", async () => {
     const { app, sid } = await started();
-    const srv = await createUiServer({ app });
+    const srv = await sharedServer(app);
     try {
       const stale = 0; // 실제 revision보다 오래된 값
       const r = await json(srv, `/api/sessions/${sid}/edit-node`, {
@@ -150,7 +182,6 @@ describe("M7-ui4 UI 쓰기 API", () => {
       // 상태는 그대로 (goal 미변경)
       expect((await app.readNode(sid, "1.1")).goal).toBe("a");
     } finally {
-      srv.close();
     }
   }, 30000);
 
@@ -171,7 +202,7 @@ describe("M7-ui4 UI 쓰기 API", () => {
       children: [{ goal: "a" }, { goal: "b" }],
       expectedRevision: 0,
     });
-    const srv = await createUiServer({ app });
+    const srv = await sharedServer(app);
     try {
       const rev = (await app.readSession(sid)).revision;
       const r = await json(srv, `/api/sessions/${sid}/advise-and-signal`, {
@@ -196,13 +227,12 @@ describe("M7-ui4 UI 쓰기 API", () => {
       expect(calls.length).toBeGreaterThan(0);
       expect(calls.every((c) => c.ok)).toBe(true);
     } finally {
-      srv.close();
     }
   }, 30000);
 
   it("M7-ui4-b: 본문으로 link/baseUrl 지정 → 400 (서버 설정만)", async () => {
     const { app, sid } = await started();
-    const srv = await createUiServer({ app });
+    const srv = await sharedServer(app);
     try {
       const rev = (await app.readSession(sid)).revision;
       for (const body of [
@@ -219,13 +249,12 @@ describe("M7-ui4 UI 쓰기 API", () => {
         expect(r.status).toBe(400);
       }
     } finally {
-      srv.close();
     }
   }, 30000);
 
   it("M7-ui4-e: media type 정확 비교·비객체·깨진 JSON 400", async () => {
     const { app, sid } = await started();
-    const srv = await createUiServer({ app });
+    const srv = await sharedServer(app);
     try {
       const url = `${srv.url}/api/sessions/${sid}/edit-node`;
       const tok = { "x-procforge-token": srv.token };
@@ -259,7 +288,6 @@ describe("M7-ui4 UI 쓰기 API", () => {
         expect(r.status).toBe(400);
       }
     } finally {
-      srv.close();
     }
   }, 30000);
 });

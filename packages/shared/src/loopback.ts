@@ -204,7 +204,8 @@ const Methods = {
       nodeId: NodeIdSchema,
       change: z.object({
         patch: z.object({ set: z.record(ArgSpecSchema).optional(), remove: z.array(z.string()).optional() }).optional(),
-        goal: z.string().max(4096).optional(),
+        // M7-ui4-f: goal 규칙은 core applyEdit가 유일한 소스 (여기서 max를 두면 문구가 갈린다).
+        goal: z.string().optional(),
         dependsOn: z.array(NodeIdSchema).optional(),
         addConstraints: z.array(ConstraintSchema).optional(),
         removeConstraintIds: z.array(z.string()).optional(),
