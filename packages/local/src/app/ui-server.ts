@@ -32,6 +32,9 @@ export type UiApp = Pick<
   | "uiEditArgs"
   | "uiEditNode"
   | "uiAdviseAndSignal"
+  | "uiRun"
+  | "uiRunCancel"
+  | "uiRunLog"
 >;
 
 export type UiServer = {
@@ -375,6 +378,19 @@ export async function createUiServer(opts: {
         }
         // M7-ui4: 쓰기 — POST + JSON만. expectedRevision 필수.
         if (req.method === "POST") {
+          // M7 5-1: 실행 시작/취소는 세션 경로가 아니라 별도 경로다
+          if (url.pathname === "/api/runs" || /^\/api\/runs\/[^/]+\/cancel$/.test(url.pathname)) {
+            const body = (await readJsonBody(req, res)) ?? {};
+            if (url.pathname === "/api/runs") {
+              // 원본 본문을 그대로 넘긴다 — App이 주입 키를 검증한다
+              // (여기서 골라내면 400이 아니라 조용히 무시된다).
+              send(res, await opts.app.uiRun(body as never));
+              return;
+            }
+            const runId = pathId(url.pathname.split("/")[3] ?? "", "runId");
+            send(res, await opts.app.uiRunCancel({ runId }));
+            return;
+          }
           const sidFromPath = /^\/api\/sessions\/([^/]+)\/(preview-edit|advise-and-signal|edit-args|edit-node)$/.exec(
             url.pathname,
           );
@@ -454,6 +470,50 @@ export async function createUiServer(opts: {
             return;
           }
           err(res, 404, "not found");
+          return;
+        }
+        // M7 5-1: 실행 로그 SSE (토큰 헤더 필수)
+        const mRunStream = /^\/api\/runs\/([^/]+)\/stream$/.exec(url.pathname);
+        if (req.method === "GET" && mRunStream) {
+          const runId = pathId(mRunStream[1], "runId");
+          res.writeHead(200, {
+            "content-type": "text/event-stream; charset=utf-8",
+            "cache-control": "no-cache",
+            connection: "keep-alive",
+            "content-security-policy": CSP,
+          });
+          res.flushHeaders();
+          let closed = false;
+          let after = 0;
+          const stop = (): void => {
+            closed = true;
+          };
+          res.on("close", stop);
+          const pollMs = opts.pollMs ?? 800;
+          const tick = async (): Promise<void> => {
+            if (closed) return;
+            try {
+              const page = await opts.app.uiRunLog({ runId, afterSeq: after });
+              for (const e of page.entries) {
+                after = e.seq;
+                // 로그 본문은 SSE 데이터로 — 화면은 textContent로만 렌더한다
+                res.write(`data: ${JSON.stringify(e)}\n\n`);
+              }
+              if (page.status !== "running") {
+                res.write(
+                  `event: end\ndata: ${JSON.stringify({ runId, status: page.status })}\n\n`,
+                );
+                res.end();
+                return;
+              }
+            } catch (e) {
+              res.write(`event: error\ndata: ${JSON.stringify({ message: String(e) })}\n\n`);
+              res.end();
+              return;
+            }
+            setTimeout(() => void tick(), pollMs);
+          };
+          void tick();
           return;
         }
         // M7-ui2: 세션 트리 (읽기 전용)

@@ -81,6 +81,12 @@ import { loadCassette, recordKey } from "../runner/index.js";
 import { runProcedureTest } from "../runner/procedure-run.js";
 import { loadProcedureDoc } from "../runner/procedure-run.js";
 import {
+  appendRunLog,
+  cancelRun,
+  readRunLog,
+  readCancelFlag,
+} from "./run-control.js";
+import {
   buildApprovalEntry,
   saveApproval,
   scopeWarnings,
@@ -238,6 +244,8 @@ export class ProcForgeApp {
   /** M7-ui4: UI 연결 id (호출 귀속 기록용. 연결마다 1개) */
   private readonly uiConnectionId = `ui-${randomUUID()}`;
   private readonly signal: SignalTarget;
+  /** M7 5-1: 실행 중 절차서 → runId (동시 1개 강제). 취소되면 반납. */
+  private activeRuns = new Map<string, string>();
 
   constructor(deps: AppDeps) {
     this.core = deps.core;
@@ -1975,6 +1983,151 @@ export class ProcForgeApp {
       files: written.files,
       commandFile: written.commandFile,
     };
+  }
+
+  /**
+   * M7 5-1: UI 실행. **즉시** `{runId}`를 돌려주고, 로그는 SSE로 흘린다.
+   * - 등록된 절차서만 (`loadProcedureDoc`이 모르는 이름을 거절)
+   * - 선언된 param만 (미선언 param·경로/명령/out 같은 주입 키는 400)
+   * - 절차서당 동시 1개 (두 번째는 409)
+   * 실행 기록은 `.procforge/runs/<runId>` — **세션 TTL과 무관**하다.
+   */
+  async uiRun(input: {
+    procedure: string;
+    params?: Record<string, string>;
+  }): Promise<{
+    runId: string;
+    sessionId: string;
+    procedure: string;
+    params: Record<string, string>;
+  }> {
+    const forbidden = ["path", "command", "cmd", "out", "outDir", "cwd", "script", "shell"];
+    for (const k of forbidden) {
+      if ((input as Record<string, unknown>)[k] !== undefined) {
+        throw pfError("bad_request", `${k}는 UI에서 지정할 수 없습니다 (M7-5-1).`);
+      }
+    }
+    const ref = String(input.procedure ?? "");
+    if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(ref)) {
+      throw pfError("bad_request", "procedure 이름이 올바르지 않습니다.");
+    }
+    // 등록 여부 + 선언 param 확인 (loadProcedureDoc이 없는 이름을 throw)
+    let doc: { name: string; params?: Record<string, unknown> };
+    let dir: string;
+    try {
+      const loaded = loadProcedureDoc(this.procforgeDir, ref);
+      doc = loaded.doc as { name: string; params?: Record<string, unknown> };
+      dir = loaded.dir;
+    } catch (e) {
+      throw pfError("bad_request", `등록되지 않은 절차서입니다: ${ref}`);
+    }
+    const params = input.params ?? {};
+    const declared = new Set(Object.keys(doc.params ?? {}));
+    const unknownParams = Object.keys(params).filter((k) => !declared.has(k));
+    if (unknownParams.length > 0) {
+      throw pfError(
+        "bad_request",
+        `선언되지 않은 param: ${unknownParams.join(",")} (선언됨: ${[...declared].join(",") || "없음"})`,
+      );
+    }
+    const running = this.activeRuns.get(doc.name);
+    if (running) {
+      throw pfError("conflict", `이미 실행 중입니다 (run ${running}).`);
+    }
+    const started = await this.runStart({ procedure: ref, params });
+    this.activeRuns.set(doc.name, started.runId);
+    appendRunLog(this.procforgeDir, started.runId, {
+      level: "info",
+      message: `실행 시작: ${started.procedure}`,
+    });
+    // 백그라운드 진행 — UI는 기다리지 않는다(로그·결과는 SSE).
+    void this.driveRun(started.runId, doc.name).catch(() => {
+      // 오류는 로그로 남는다 (흘러나오면 UI가 조용히 멈춘 것처럼 보인다)
+      appendRunLog(this.procforgeDir, started.runId, {
+        level: "error",
+        message: "실행 진행 중 오류",
+      });
+    });
+    return started;
+  }
+
+  /** M7 5-1: 취소 — 플래그 + 자식 프로세스 트리 종료 */
+  async uiRunCancel(input: { runId: string }): Promise<{
+    runId: string;
+    cancelled: boolean;
+    killed: number[];
+    failed: number[];
+  }> {
+    const runId = String(input.runId ?? "");
+    const st = readRunState(this.procforgeDir, runId);
+    if (!st) throw pfError("not_found", `run ${runId} not found`);
+    const r = cancelRun(this.procforgeDir, runId, "UI 실행 화면에서 취소");
+    appendRunLog(this.procforgeDir, runId, {
+      level: "info",
+      message: `취소 요청 (자식 ${r.children.length}개 종료 시도)`,
+    });
+    return { runId, cancelled: true, killed: r.killed, failed: r.failed };
+  }
+
+  /** M7 5-1: 실행 로그 (SSE 증분용) */
+  async uiRunLog(input: { runId: string; afterSeq?: number }): Promise<{
+    runId: string;
+    status: string;
+    entries: ReturnType<typeof readRunLog>;
+    sessionId: string;
+    procedure: string;
+  }> {
+    const runId = String(input.runId ?? "");
+    const st = readRunState(this.procforgeDir, runId);
+    if (!st) throw pfError("not_found", `run ${runId} not found`);
+    return {
+      runId,
+      status: readCancelFlag(this.procforgeDir, runId) ? "cancelling" : st.status,
+      entries: readRunLog(this.procforgeDir, runId, input.afterSeq ?? 0),
+      sessionId: st.sessionId,
+      procedure: st.procedure,
+    };
+  }
+
+  /** M7 5-1: 백그라운드 진행 루프 (결정점까지 자동) */
+  private async driveRun(runId: string, procedure: string): Promise<void> {
+    for (let i = 0; i < 500; i++) {
+      if (readCancelFlag(this.procforgeDir, runId)) {
+        appendRunLog(this.procforgeDir, runId, { level: "info", message: "취소됨" });
+        this.activeRuns.delete(procedure);
+        return;
+      }
+      const step = await this.runStep(runId);
+      if (step.kind === "done") {
+        appendRunLog(this.procforgeDir, runId, {
+          level: "result",
+          message: `완료: pass ${step.pass} / fail ${step.fail} / blocked ${step.blocked}`,
+        });
+        this.activeRuns.delete(procedure);
+        return;
+      }
+      if (step.kind === "failed") {
+        appendRunLog(this.procforgeDir, runId, {
+          level: "error",
+          nodeId: step.nodeId,
+          message: `실패: ${step.detail}`,
+        });
+        this.activeRuns.delete(procedure);
+        return;
+      }
+      // need_generated / need_approval 은 사람이 결정해야 한다 → 멈춘다
+      appendRunLog(this.procforgeDir, runId, {
+        level: "info",
+        nodeId: step.nodeId,
+        message:
+          step.kind === "need_approval"
+            ? "승인 대기 — 결정을 기다립니다"
+            : "생성값 대기 — 값을 기다립니다",
+      });
+      this.activeRuns.delete(procedure);
+      return;
+    }
+    this.activeRuns.delete(procedure);
   }
 
   /** 절차서 live 실행 시작 (M5). 실행은 pf_run_next/supply로 단계 진행. */
