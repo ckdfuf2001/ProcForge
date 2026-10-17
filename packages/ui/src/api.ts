@@ -36,14 +36,106 @@ export function takeToken(): string {
   return token;
 }
 
+export type NodeRow = {
+  id: string;
+  goal: string;
+  status: string;
+  depth: number;
+  dependsOn: string[];
+  attempts: number;
+  retriesLeft: number;
+  locked: boolean;
+  sideEffect: string;
+  staleSince?: { revision: number; causeNodeId: string };
+};
+
+export type TreeResponse = {
+  nodes: { nodes: NodeRow[]; revision: number };
+  blocked: {
+    blocked: { nodeId: string; waitingOn: string[]; reason: string }[];
+    needsHuman: string[];
+    revision: number;
+  };
+};
+
 async function get<T>(path: string): Promise<T> {
   const r = await fetch(path, { headers: { "x-procforge-token": takeToken() } });
-  if (!r.ok) throw new Error(`${path} ${r.status}`);
+  if (!r.ok) throw new ApiError(path, r.status);
   return (await r.json()) as T;
+}
+
+export class ApiError extends Error {
+  constructor(
+    readonly path: string,
+    readonly status: number,
+  ) {
+    super(`${path} ${status}`);
+  }
 }
 
 export const api = {
   sessions: () => get<{ sessions: SessionRow[] }>("/api/sessions"),
   store: () => get<StoreInfo>("/api/store"),
   pairings: () => get<Pairings>("/api/pairings"),
+  tree: (sid: string) => get<TreeResponse>(`/api/sessions/${encodeURIComponent(sid)}/tree`),
 };
+
+/**
+ * M7-ui2: SSE 구독. EventSource는 토큰 헤더를 못 붙이므로 fetch 스트리밍으로
+ * 직접 파싱한다 (M7-ui2 결정).
+ */
+export function subscribeEvents(
+  sid: string,
+  onChange: (e: {
+    revision: number;
+    nodeIds: string[];
+    method: string;
+    actor: string;
+  }) => void,
+  onStatus?: (s: "open" | "closed" | "error") => void,
+): () => void {
+  const ctrl = new AbortController();
+  const lastEventId = { v: 0 };
+  void (async () => {
+    try {
+      const r = await fetch(
+        `/api/sessions/${encodeURIComponent(sid)}/events`,
+        {
+          headers: {
+            "x-procforge-token": takeToken(),
+            accept: "text/event-stream",
+            ...(lastEventId.v > 0 ? { "last-event-id": String(lastEventId.v) } : {}),
+          },
+          signal: ctrl.signal,
+        },
+      );
+      if (!r.ok || !r.body) {
+        onStatus?.(r.status === 401 ? "closed" : "error");
+        return;
+      }
+      onStatus?.("open");
+      const reader = r.body.getReader();
+      const dec = new TextDecoder();
+      let buf = "";
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        const blocks = buf.split("\n\n");
+        buf = blocks.pop() ?? "";
+        for (const b of blocks) {
+          if (b.startsWith(":")) continue; // heartbeat
+          const idm = /^id: (\d+)$/m.exec(b);
+          const dm = /^data: (.*)$/m.exec(b);
+          if (!dm) continue;
+          if (idm) lastEventId.v = Number(idm[1]);
+          onChange(JSON.parse(dm[1]));
+        }
+      }
+      onStatus?.("closed");
+    } catch {
+      if (!ctrl.signal.aborted) onStatus?.("error");
+    }
+  })();
+  return () => ctrl.abort();
+}
