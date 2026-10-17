@@ -332,6 +332,8 @@ export const WireMethods: Record<WireMethodName, WireDef> = {
       limit: z.number().int().min(1).max(500).optional(),
       /** M7-ui3: 노드 이력 보기 (서버측 필터) */
       nodeId: NodeIdSchema.optional(),
+      /** M7-ui4-g: true면 최신 limit건 (노드 이력). false면 증분(기본) */
+      tail: z.boolean().optional(),
     }),
     output: z.object({
       events: z.array(EventEntrySchema),

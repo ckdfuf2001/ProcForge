@@ -47,7 +47,8 @@ import { adviceToConstraints, suggestsNumericRef } from "./advice.js";
 import { compareNodeIds } from "@procforge/shared/ids.js";
 
 /** M7-ui4: 목표 상한 (UI 입력도 core와 같은 상한으로 검증한다). */
-export const GOAL_MAX_LEN = 4096;
+// M7-ui4-f: goal 상한은 순수 편집 함수가 정의한다 (preview=실제 편집 동일).
+export { GOAL_MAX_LEN } from "./edit.js";
 import {
   autoConstraints,
   decideReportVerdict,
@@ -71,6 +72,7 @@ import {
   varRefNodeId,
 } from "@procforge/shared/args-schema.js";
 import { checkFixedAgainstInputSchema } from "@procforge/shared/validator.js";
+import { applyEdit, type EditChange } from "./edit.js";
 
 import {
   PROCEDURE_NAME_RE,
@@ -1479,88 +1481,18 @@ if (oldHash !== next.hash) this.propagateStale(s.id, input.nodeId, s.revision + 
     const s = this.checkFreshRead(input.sessionId);
     const n = this.node(input.sessionId, input.nodeId);
     if (n.locked) throw err("conflict", `node ${n.id} is locked`);
-    const ch = input.change;
-    const hasPatch = ch.patch !== undefined;
-    const hasNodeEdit =
-      ch.goal !== undefined ||
-      ch.dependsOn !== undefined ||
-      ch.addConstraints !== undefined ||
-      ch.removeConstraintIds !== undefined;
-    if (!hasPatch && !hasNodeEdit) {
-      throw err("bad_request", "변경 내용 없음.");
-    }
-    // 1) 대상 노드의 사본을 만든다 (검증 규칙은 실제 편집과 동일).
-    let next: Node = { ...n };
-    if (hasPatch) {
-      if (!n.args) {
-        throw err(
-          "bad_request",
-          `node ${n.id}에 확정된 인자가 없어 수정 불가. pf_confirm_leaf 먼저.`,
-        );
-      }
-      const set = ch.patch?.set ?? {};
-      for (const [k, spec] of Object.entries(set)) {
-        if (
-          !spec ||
-          (spec.kind !== "fixed" &&
-            spec.kind !== "var" &&
-            spec.kind !== "generated" &&
-            spec.kind !== "script")
-        ) {
-          throw err("bad_request", `bad patch spec: ${k}`);
-        }
-      }
-      const remove = new Set(ch.patch?.remove ?? []);
-      if (Object.keys(set).length === 0 && remove.size === 0) {
-        throw err("bad_request", "변경 없음 (patch.set/remove 중 하나 필요).");
-      }
-      const merged: Record<string, ArgSpec> = {};
-      for (const [k, spec] of Object.entries(n.args)) {
-        if (!remove.has(k)) merged[k] = spec;
-      }
-      Object.assign(merged, set);
-      const cat = s.toolCatalog.find(
-        (t) => t.server === n.tool?.server && t.name === n.tool?.name,
-      );
-      if (!n.tool || !cat) {
-        throw err(
-          "bad_request",
-          `node ${n.id}의 도구를 카탈로그에서 찾을 수 없어 검증 불가.`,
-        );
-      }
-      const problem = checkFixedAgainstInputSchema(merged, cat.inputSchema);
-      if (problem) throw err("bad_request", problem);
-      next = { ...next, args: merged, suggestedArgs: merged };
-    }
-    if (hasNodeEdit) {
-      if (ch.goal !== undefined) {
-        const g = ch.goal;
-        // pfEditNode와 동일한 검증 (빈 문자열 거부).
-        if (g.length === 0 || g.trim() === "") {
-          throw err("bad_request", "goal이 비어 있음.");
-        }
-        if (g.length > GOAL_MAX_LEN) {
-          throw err("bad_request", `goal 상한 초과 (${g.length} > ${GOAL_MAX_LEN}).`);
-        }
-        next = { ...next, goal: g };
-      }
-      if (ch.addConstraints !== undefined) {
-        for (const c of ConstraintSchema.array().parse(ch.addConstraints)) {
-          const dup = next.constraints.some((x) => x.id === c.id);
-          if (!dup) next.constraints = [...next.constraints, c];
-        }
-      }
-      if (ch.removeConstraintIds !== undefined) {
-        const rm = new Set(ch.removeConstraintIds);
-        next.constraints = next.constraints.filter((x) => !rm.has(x.id));
-      }
-      if (ch.dependsOn !== undefined) {
-        if (ch.dependsOn.length === 0) {
-          throw err("bad_request", "dependsOn 비우기 금지 (pf_reopen 사용).");
-        }
-        next = { ...next, dependsOn: [...ch.dependsOn] };
-      }
-    }
+    // M7-ui4-f: pfEditNode와 **같은 순수 함수**로 검증·적용한다.
+    const applied = applyEdit(
+      n,
+      input.change as EditChange,
+      {
+        toolCatalog: s.toolCatalog,
+        fail: (m: string) => {
+          throw err("bad_request", m);
+        },
+      },
+    );
+    const next: Node = applied.next;
     // 2) 대상 해시 + stale 전파를 **사본 그래프에서** 계산한다.
     const byId = new Map<string, Node>();
     for (const m of this.store.getNodes(input.sessionId).values()) {
@@ -1627,45 +1559,33 @@ if (oldHash !== next.hash) this.propagateStale(s.id, input.nodeId, s.revision + 
             "변경 없음 (goal/addConstraints/removeConstraintIds/map/until/stateWrites/retry/dependsOn 중 하나 필요).",
           );
         }
-        if (input.goal !== undefined && input.goal.length === 0)
-          throw err("bad_request", "goal이 비었다.");
-        let constraints = n.constraints;
-        if (removes.length > 0) {
-          const missing = removes.filter(
-            (id) => !constraints.some((c) => c.id === id),
-          );
-          if (missing.length > 0)
-            throw err(
-              "bad_request",
-              `unknown constraint: ${missing.join(",")}`,
-            );
-          constraints = constraints.filter((c) => !removes.includes(c.id));
-        }
-        if (adds.length > 0) {
-          const parsed: Constraint[] = [];
-          for (const p of adds) {
-            const r = ConstraintSchema.safeParse(p);
-            if (!r.success)
-              throw err(
-                "bad_request",
-                `bad constraint: ${r.error.issues[0]?.message ?? "invalid"}`,
-              );
-            parsed.push(r.data);
-          }
-          const dup = parsed.filter((a) =>
-            constraints.some((c) => c.id === a.id),
-          );
-          if (dup.length > 0)
-            throw err(
-              "bad_request",
-              `duplicate constraint: ${dup.map((d) => d.id).join(",")}`,
-            );
-          constraints = [...constraints, ...parsed];
-        }
-        const goalChanged = input.goal !== undefined && input.goal !== n.goal;
-        const reopened =
-          goalChanged && n.status === "leaf" ? ("open" as const) : n.status;
-        const status = n.status === "needs_human" ? "open" : reopened;
+        // M7-ui4-f: previewEdit와 **같은 순수 함수**로 검증·적용한다
+        // (goal 상한·trim·중복 constraint까지 미리보기와 결과가 같아야 한다).
+        // map/until/stateWrites/retry 만 주는 편집은 이 함수가 모르는 필드라
+        // 대상만 그대로 통과시킨다 (없다고 "변경 없음"으로 거절하지 않는다).
+        const edited =
+          input.goal !== undefined ||
+          adds.length > 0 ||
+          removes.length > 0 ||
+          depChanged
+            ? applyEdit(
+                n,
+                {
+                  ...(input.goal !== undefined ? { goal: input.goal } : {}),
+                  ...(adds.length > 0 ? { addConstraints: adds } : {}),
+                  ...(removes.length > 0 ? { removeConstraintIds: removes } : {}),
+                  ...(depChanged ? { dependsOn: input.dependsOn } : {}),
+                },
+                {
+                  fail: (m: string) => {
+                    throw err("bad_request", m);
+                  },
+                },
+              )
+            : { next: n, changed: false };
+        const constraints = edited.next.constraints;
+        const goalChanged = edited.next.goal !== n.goal;
+        const status = edited.next.status;
         // M5.5-1: map 실행 명세 설정 (kind:"map" 동반).
         let kind = (n as { kind?: string }).kind;
         let mapSpec = (n as { map?: unknown }).map;
@@ -2135,6 +2055,12 @@ if (oldHash !== next.hash) this.propagateStale(s.id, input.nodeId, s.revision + 
     afterRevision?: number;
     limit?: number;
     nodeId?: string;
+    /**
+     * M7-ui4-g: true면 **최신** limit건을 준다 (노드 이력용).
+     * 기본(false)은 SSE 증분용 — 오래된 것부터 이어 준다.
+     * 이력을 "처음 200건"으로 자르면 마지막 사건이 화면에서 사라진다.
+     */
+    tail?: boolean;
   }): Promise<{ events: EventEntry[]; lastRevision: number }> {
     const s = this.checkFreshRead(input.sessionId);
     const all = this.store.readEvents(input.sessionId);
@@ -2144,7 +2070,11 @@ if (oldHash !== next.hash) this.propagateStale(s.id, input.nodeId, s.revision + 
       input.nodeId === undefined
         ? all
         : all.filter((e) => e.nodeIds.includes(input.nodeId as string));
-    const picked = scoped.filter((e) => e.revision > after).slice(0, limit);
+    const fresh = scoped.filter((e) => e.revision > after);
+    const picked =
+      input.tail === true
+        ? fresh.slice(Math.max(0, fresh.length - limit))
+        : fresh.slice(0, limit);
     const last = all.length === 0 ? 0 : Math.max(...all.map((e) => e.revision));
     return {
       events: picked,

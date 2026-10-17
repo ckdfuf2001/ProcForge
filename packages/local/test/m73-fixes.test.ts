@@ -180,12 +180,12 @@ describe("M7-ui3-c 미리보기", () => {
 });
 
 describe("M7-ui3-d 노드 이력", () => {
-  it("최신 200건으로 제한", async () => {
+  it("M7-ui4-g: 이벤트 250건 → 최신 200건이고 마지막 이벤트가 들어 있다", async () => {
     const { client } = testStack(pfdir);
     const app = new ProcForgeApp({ core: client, procforgeDir: pfdir, projectRoot: pfdir });
     const s = await app.start({ request: "r", toolCatalog: catalog as never });
     let rev = (await app.readSession(s.sessionId)).revision;
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 250; i++) {
       await app.editNode({
         sessionId: s.sessionId,
         nodeId: "1",
@@ -194,18 +194,23 @@ describe("M7-ui3-d 노드 이력", () => {
       });
       rev = (await app.readSession(s.sessionId)).revision;
     }
+    const lastRevision = rev;
     const srv = await createUiServer({ app });
     try {
       const r = await fetch(`${srv.url}/api/sessions/${s.sessionId}/nodes/1`, {
         headers: { "x-procforge-token": srv.token },
       });
-      const body = (await r.json()) as { events: unknown[] };
-      expect(body.events.length).toBeLessThanOrEqual(200);
-      for (const e of body.events as { nodeIds: string[] }[]) {
-        expect(e.nodeIds).toContain("1");
-      }
+      const body = (await r.json()) as { events: { revision: number; nodeIds: string[] }[] };
+      expect(body.events).toHaveLength(200);
+      // 오래된 것부터 자르면 마지막 사건이 사라진다 — 최신 200이어야 한다
+      expect(body.events.some((e) => e.revision === lastRevision)).toBe(true);
+      expect(body.events[0].revision).toBeGreaterThan(1);
+      // 오름차순 유지 (SSE 증분과 같은 순서)
+      const revs = body.events.map((e) => e.revision);
+      expect([...revs].sort((a, b) => a - b)).toEqual(revs);
+      for (const e of body.events) expect(e.nodeIds).toContain("1");
     } finally {
       srv.close();
     }
-  }, 30000);
+  }, 60000);
 });

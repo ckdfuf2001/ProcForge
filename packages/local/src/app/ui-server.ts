@@ -107,6 +107,15 @@ function listenWithRetry(
   left = 8,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
+    // M7-ui4: 결정이 끝난 뒤 도착하는 late error(재시도 중 발생한 EACCES 등)가
+    // unhandled exception으로 프로세스를 죽이지 않게 한다. 진짜 listen 실패는
+    // 아래 onError가 reject로 이미 알린다.
+    const late = (): void => {};
+    server.on("error", late);
+    const done = (fn: () => void) => {
+      server.removeListener("error", late);
+      fn();
+    };
     const onError = (e: NodeJS.ErrnoException) => {
       server.removeListener("error", onError);
       if ((e?.code === "EACCES" || e?.code === "EADDRINUSE") && left > 0) {
@@ -117,13 +126,13 @@ function listenWithRetry(
           delay,
         );
       } else {
-        reject(e);
+        done(() => reject(e));
       }
     };
     server.once("error", onError);
     server.listen(port, "127.0.0.1", () => {
       server.removeListener("error", onError);
-      resolve();
+      done(() => resolve());
     });
   });
 }
@@ -306,6 +315,8 @@ export async function createUiServer(opts: {
             nodeId: nid,
             afterRevision: 0,
             limit: NODE_HISTORY_MAX,
+            // M7-ui4-g: **최신** 200건. 오래된 것부터 자르면 마지막 사건이 사라진다.
+            tail: true,
           });
           send(res, { detail, events: evs.events });
           return;

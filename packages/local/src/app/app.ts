@@ -1064,6 +1064,8 @@ export class ProcForgeApp {
     afterRevision?: number;
     limit?: number;
     nodeId?: string;
+    /** M7-ui4-g: true면 **최신** limit건 (노드 이력). false면 오래된 것부터 (SSE 증분) */
+    tail?: boolean;
   }): Promise<{ events: import("@procforge/shared/dto.js").EventEntry[]; lastRevision: number }> {
     return this.core.getEventsPage(input);
   }
