@@ -75,6 +75,7 @@ export type NodeDetail = {
     rubricReasons: Record<string, string>;
     resultSummary: string;
     artifactPreviews: {
+      /** core가 정한 상대 경로 (표시 전용. 내려받기는 attemptId+idx) */
       rel: string;
       sha256: string;
       size: number;
@@ -134,11 +135,13 @@ export const api = {
     get<NodeDetailResponse>(
       `/api/sessions/${encodeURIComponent(sid)}/nodes/${encodeURIComponent(nid)}`,
     ),
-  artifactUrl: (sid: string, nid: string, rel: string) =>
-    `/api/sessions/${encodeURIComponent(sid)}/nodes/${encodeURIComponent(nid)}/artifacts/${rel
-      .split("/")
-      .map(encodeURIComponent)
-      .join("/")}`,
+  artifactUrl: (
+    sid: string,
+    nid: string,
+    attemptId: string,
+    index: number,
+  ) =>
+    `/api/sessions/${encodeURIComponent(sid)}/nodes/${encodeURIComponent(nid)}/artifacts/${encodeURIComponent(attemptId)}/${index}`,
 };
 
 /**

@@ -1,14 +1,21 @@
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, statSync } from "node:fs";
-import { extname, resolve, sep } from "node:path";
+import {
+  createReadStream,
+  existsSync,
+  readFileSync,
+  realpathSync,
+  statSync,
+} from "node:fs";
+import { basename, extname, resolve, sep } from "node:path";
 import { pfError } from "@procforge/shared/errors.js";
 
 // M7-ui3: 산출물 원문 미리보기·전문 보기 (로컬 전용).
 // R8: 원문은 요청 시 로컬에서만 읽는다 (원격 core 모드에서도 전송 0).
-// sandbox 밖·상한 밖은 거부.
+// 경로는 core가 정한 attempt.artifacts[idx]만 쓴다 (클라 문자열 금지).
 
 export const PREVIEW_MAX_BYTES = 4096;
 export const ARTIFACT_MAX_BYTES = 5 * 1024 * 1024;
+export const NODE_HISTORY_MAX = 200;
 
 const MIME: Record<string, string> = {
   ".txt": "text/plain",
@@ -33,19 +40,22 @@ export function mimeOf(path: string): string {
   return MIME[extname(path).toLowerCase()] ?? "application/octet-stream";
 }
 
-/** 텍스트로 볼 수 있는 종류 (확장자 기준, 이진 판정 재사용) */
+/** 텍스트로 볼 수 있는 종류 (확장자 기준) */
 export function isTextKind(path: string): boolean {
   return mimeOf(path) === "text/plain";
 }
 
-/** sandbox 밖 경로 거부 */
-export function assertInsideSandbox(sandboxRoot: string, rel: string): string {
-  const root = resolve(sandboxRoot);
-  const abs = resolve(root, rel);
-  if (abs !== root && !abs.startsWith(root + sep)) {
-    throw pfError("bad_request", `sandbox 밖 경로: ${rel}`);
+/**
+ * realpath 기준 root 하위 검사. 심링크가 root 밖을 가리키면 거부한다
+ * (문자열 prefix 검사로는 심링크 탈출을 막을 수 없다).
+ */
+export function assertInsideRoot(root: string, abs: string): string {
+  const realRoot = existsSync(root) ? realpathSync(root) : resolve(root);
+  const real = realpathSync(abs);
+  if (real !== realRoot && !real.startsWith(realRoot + sep)) {
+    throw pfError("bad_request", "산출물이 허용 디렉터리 밖입니다.");
   }
-  return abs;
+  return real;
 }
 
 export type ArtifactPreview = {
@@ -58,43 +68,87 @@ export type ArtifactPreview = {
   truncated: boolean;
 };
 
-/** attempt 산출물 1건 미리보기 (없으면 null) */
-export function previewArtifact(
-  sandboxRoot: string,
+type DigestCacheEntry = { sha256: string; size: number; mtimeMs: number };
+const digestCache = new Map<string, DigestCacheEntry>();
+
+/** 테스트용 캐시 비우기 */
+export function resetArtifactCache(): void {
+  digestCache.clear();
+}
+
+/** sha256 + size 스트림 계산 ((path,size,mtime) 캐시로 재계산 생략) */
+export function digestOf(abs: string): Promise<{ sha256: string; size: number }> {
+  const st = statSync(abs);
+  const hit = digestCache.get(abs);
+  if (hit && hit.size === st.size && hit.mtimeMs === st.mtimeMs) {
+    return Promise.resolve({ sha256: hit.sha256, size: hit.size });
+  }
+  return new Promise((resolvePromise, reject) => {
+    const h = createHash("sha256");
+    let size = 0;
+    const rs = createReadStream(abs);
+    rs.on("data", (c: Buffer) => {
+      h.update(c);
+      size += c.length;
+    });
+    rs.on("error", reject);
+    rs.on("end", () => {
+      const sha256 = h.digest("hex");
+      digestCache.set(abs, { sha256, size, mtimeMs: st.mtimeMs });
+      resolvePromise({ sha256, size });
+    });
+  });
+}
+
+/** attempt 산출물 1건 미리보기 (앞 4KB만 읽는다) */
+export async function previewArtifact(
+  sessionRoot: string,
   rel: string,
-): ArtifactPreview | null {
-  const abs = assertInsideSandbox(sandboxRoot, rel);
-  if (!existsSync(abs) || !statSync(abs).isFile()) return null;
-  const size = statSync(abs).size;
-  const buf = readFileSync(abs);
-  const sha256 = createHash("sha256").update(buf).digest("hex");
-  const mime = mimeOf(abs);
-  if (!isTextKind(abs)) {
+): Promise<ArtifactPreview | null> {
+  const abs = resolve(sessionRoot, rel);
+  let real: string;
+  try {
+    real = assertInsideRoot(sessionRoot, abs);
+  } catch {
+    return null;
+  }
+  if (!existsSync(real) || !statSync(real).isFile()) return null;
+  const mime = mimeOf(real);
+  const { sha256, size } = await digestOf(real);
+  if (!isTextKind(real)) {
     return { rel, sha256, size, mime, text: null, truncated: false };
   }
-  const slice = buf.subarray(0, PREVIEW_MAX_BYTES);
+  // 미리보기는 앞 4KB만 읽는다 (큰 산출물 전체를 읽지 않는다).
+  const rs = createReadStream(real, { start: 0, end: Math.max(0, PREVIEW_MAX_BYTES - 1) });
+  const chunks: Buffer[] = [];
+  for await (const c of rs) chunks.push(c as Buffer);
   return {
     rel,
     sha256,
     size,
     mime,
-    text: slice.toString("utf8"),
+    text: Buffer.concat(chunks).toString("utf8"),
     truncated: size > PREVIEW_MAX_BYTES,
   };
 }
 
 /** attempt 산출물 전문 (5MB 상한, 텍스트로만 내려준다) */
 export function readArtifact(
-  sandboxRoot: string,
+  sessionRoot: string,
   rel: string,
-): { bytes: Buffer; mime: string } {
-  const abs = assertInsideSandbox(sandboxRoot, rel);
-  if (!existsSync(abs) || !statSync(abs).isFile()) {
-    throw pfError("not_found", `산출물 없음: ${rel}`);
+): { bytes: Buffer; mime: string; downloadName: string } {
+  const abs = resolve(sessionRoot, rel);
+  const real = assertInsideRoot(sessionRoot, abs);
+  if (!existsSync(real) || !statSync(real).isFile()) {
+    throw pfError("not_found", "산출물이 없습니다.");
   }
-  const size = statSync(abs).size;
+  const size = statSync(real).size;
   if (size > ARTIFACT_MAX_BYTES) {
-    throw pfError("bad_request", `산출물 상한 초과 (${size}B > ${ARTIFACT_MAX_BYTES}B): ${rel}`);
+    throw pfError("bad_request", `산출물 상한 초과 (${size}B > ${ARTIFACT_MAX_BYTES}B).`);
   }
-  return { bytes: readFileSync(abs), mime: mimeOf(abs) };
+  return {
+    bytes: readFileSync(real),
+    mime: mimeOf(real),
+    downloadName: basename(real),
+  };
 }

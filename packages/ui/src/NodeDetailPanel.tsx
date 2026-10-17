@@ -97,7 +97,7 @@ export function NodeDetailPanel({
                   ({k}: {v})
                 </span>
               ))}
-            {a.artifactPreviews.map((p) => (
+            {a.artifactPreviews.map((p, i) => (
               <div key={p.rel}>
                 <span>
                   산출물 {p.rel} ({p.mime}, {p.size}B)
@@ -107,7 +107,7 @@ export function NodeDetailPanel({
                 ) : (
                   <span> (이진 · 전문 내려받기 버튼)</span>
                 )}
-                <a href={api.artifactUrl(sessionId, detail.nodeId, p.rel)}>
+                <a href={api.artifactUrl(sessionId, detail.nodeId, a.id, i)}>
                   전문 내려받기
                 </a>
               </div>

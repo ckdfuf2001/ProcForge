@@ -97,14 +97,15 @@ describe("M7-ui3 산출물 API", () => {
       artifacts: ["out/page.html"],
     });
     const d = await app.nodeDetail({ sessionId: sid, nodeId: "1.1" });
-    const pv = d.attempts.at(-1)?.artifactPreviews.at(0);
+    const attempt = d.attempts.at(-1)!;
+    const pv = attempt.artifactPreviews.at(0);
     expect(pv?.mime).toBe("text/plain");
     expect(pv?.text).toContain("<script>");
-    const stored = pv!.rel;
 
     const srv = await createUiServer({ app });
     try {
-      const url = `${srv.url}/api/sessions/${sid}/nodes/1.1/artifacts/${stored}`;
+      // M7-ui3-a: 경로는 attemptId+idx로만 (클라가 경로를 보내지 않는다).
+      const url = `${srv.url}/api/sessions/${sid}/nodes/1.1/artifacts/${attempt.id}/0`;
       const r = await fetch(url, { headers: { "x-procforge-token": srv.token } });
       expect(r.status).toBe(200);
       expect(r.headers.get("content-type")).toContain("text/plain");
@@ -113,12 +114,12 @@ describe("M7-ui3 산출물 API", () => {
       // 본문은 그대로지만 text/plain + nosniff라 브라우저가 실행하지 않는다.
       expect(await r.text()).toBe(html);
 
-      // 경로 탈출 거부
+      // 경로 탈출 시도 (attemptId 슬롯에 경로를 넣는다)
       const esc = await fetch(
-        `${srv.url}/api/sessions/${sid}/nodes/1.1/artifacts/..%2f..%2f..%2fsession.json`,
+        `${srv.url}/api/sessions/${sid}/nodes/1.1/artifacts/..%2f..%2f..%2fsession.json/0`,
         { headers: { "x-procforge-token": srv.token } },
       );
-      expect(esc.status).toBe(400);
+      expect([400, 404]).toContain(esc.status);
       // 토큰 없으면 401
       expect((await fetch(url)).status).toBe(401);
     } finally {

@@ -1062,25 +1062,26 @@ export class ProcForgeApp {
     // 산출물은 세션 디렉터리(fixtures/...)에 저장된다. 그 밖은 거부.
     const sandboxRoot = join(this.procforgeDir, "sessions", sessionId);
     const last = node.attempts[node.attempts.length - 1];
-    const attempts = node.attempts.map((a) => {
-      const preview =
-        a.artifacts.length === 0
-          ? []
-          : a.artifacts
-              .map((rel) => previewArtifact(sandboxRoot, rel))
-              .filter((x): x is ArtifactPreview => x !== null);
-      return {
-        id: a.id,
-        at: a.at,
-        tool: a.tool,
-        verdict: a.verdict ?? null,
-        failedConstraints: a.failedConstraints,
-        rubricReasons: a.rubricReasons ?? {},
-        resultSummary: a.resultSummary,
-        resultJsonMeta: a.resultJsonMeta ?? null,
-        artifactPreviews: preview,
-      };
-    });
+    const attempts = await Promise.all(
+      node.attempts.map(async (a) => {
+        const preview = (
+          await Promise.all(
+            a.artifacts.map((rel) => previewArtifact(sandboxRoot, rel)),
+          )
+        ).filter((x): x is ArtifactPreview => x !== null);
+        return {
+          id: a.id,
+          at: a.at,
+          tool: a.tool,
+          verdict: a.verdict ?? null,
+          failedConstraints: a.failedConstraints,
+          rubricReasons: a.rubricReasons ?? {},
+          resultSummary: a.resultSummary,
+          resultJsonMeta: a.resultJsonMeta ?? null,
+          artifactPreviews: preview,
+        };
+      }),
+    );
     return {
       sessionId,
       nodeId: node.id,
@@ -1108,13 +1109,30 @@ export class ProcForgeApp {
     };
   }
 
-  /** M7-ui3: attempt 산출물 1건 전문 (로컬 전용, 상한·sandbox 밖 거부) */
+  /**
+   * M7-ui3-a: attempt 산출물 1건 전문 (로컬 전용).
+   * rel은 **core.getNode의 attempt.artifacts[idx]** 로만 결정한다 —
+   * 클라이언트가 경로 문자열을 보내지 않는다. 세션·노드·attempt·인덱스를
+   * core에서 먼저 검증하고, 그 뒤 realpath 기준으로 세션 디렉터리 안인지 본다.
+   */
   async artifactContent(input: {
     sessionId: string;
-    rel: string;
-  }): Promise<{ bytes: Buffer; mime: string }> {
-    const sandboxRoot = join(this.procforgeDir, "sessions", input.sessionId);
-    return readArtifact(sandboxRoot, input.rel);
+    nodeId: string;
+    attemptId: string;
+    index: number;
+  }): Promise<{ bytes: Buffer; mime: string; downloadName: string }> {
+    // 1) core 검증 (세션 존재·노드·attempt·인덱스). 실패하면 경로에 손도 안 댄다.
+    const node = await this.core.getNode(input.sessionId, input.nodeId);
+    const attempt = node.attempts.find((a) => a.id === input.attemptId);
+    if (!attempt) throw pfError("not_found", "attempt 없음");
+    if (!Number.isInteger(input.index) || input.index < 0) {
+      throw pfError("bad_request", "bad artifact index");
+    }
+    const rel = attempt.artifacts[input.index];
+    if (rel === undefined) throw pfError("not_found", "산출물 없음");
+    // 2) 로컬 realpath 검사 (심링크 탈출 포함).
+    const sessionRoot = join(this.procforgeDir, "sessions", input.sessionId);
+    return readArtifact(sessionRoot, rel);
   }
 
   /** M7-ui2: 세션 트리 (노드 요약 + stale 표시. 상태 변경 0) */

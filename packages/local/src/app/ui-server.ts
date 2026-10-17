@@ -11,6 +11,7 @@ import { dirname, join, normalize, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { ProcForgeApp } from "./app.js";
 import { SessionEventHub, MAX_SUBS_PER_SESSION } from "./events-hub.js";
+import { NODE_HISTORY_MAX } from "../services/artifact-view.js";
 
 // M7-1: `procforge ui` 로컬 서버 (어댑터. App 메서드만 호출).
 // M7-ui1: 보안·세션 목록·pairings·정적 서빙. M7-ui2: 세션 트리 + SSE.
@@ -236,26 +237,30 @@ export async function createUiServer(opts: {
             sessionId: sid,
             nodeId: nid,
             afterRevision: 0,
-            limit: 200,
+            limit: NODE_HISTORY_MAX,
           });
           send(res, { detail, events: evs.events });
           return;
         }
-        // M7-ui3: 산출물 전문 (로컬 전용. text/plain + nosniff + attachment)
-        const mArt = /^\/api\/sessions\/([^/]+)\/nodes\/([^/]+)\/artifacts\/(.+)$/.exec(
+        // M7-ui3-a: attempt 산출물 전문 (경로는 core가 정한다. 텍스트·nosniff·attachment)
+        const mArt = /^\/api\/sessions\/([^/]+)\/nodes\/([^/]+)\/artifacts\/([^/]+)\/(\d+)$/.exec(
           url.pathname,
         );
         if (req.method === "GET" && mArt) {
           const sid = decodeURIComponent(mArt[1]);
-          const rel = decodeURIComponent(mArt[3]);
+          const nid = decodeURIComponent(mArt[2]);
+          const aid = decodeURIComponent(mArt[3]);
           const content = await opts.app.artifactContent({
             sessionId: sid,
-            rel,
+            nodeId: nid,
+            attemptId: aid,
+            index: Number(mArt[4]),
           });
           res.writeHead(200, {
             "content-type": "text/plain; charset=utf-8",
             "x-content-type-options": "nosniff",
-            "content-disposition": `attachment; filename="${rel.replace(/["\\]/g, "_")}"`,
+            // basename + filename* (UTF-8). 경로는 절대 넣지 않는다.
+            "content-disposition": `attachment; filename="${content.downloadName}"; filename*=UTF-8''${encodeURIComponent(content.downloadName)}`,
             "content-security-policy": CSP,
           });
           res.end(content.bytes);
@@ -325,10 +330,16 @@ export async function createUiServer(opts: {
         }
         err(res, 404, "not found");
       } catch (e) {
-        // pfError 코드는 HTTP로 매핑 (bad_request 400 · not_found 404).
+        // pfError 코드는 HTTP로 매핑. M7-ui3-d: session_not_found도 404.
         const code = (e as { code?: unknown }).code;
         const status =
-          code === "bad_request" ? 400 : code === "not_found" ? 404 : 500;
+          code === "bad_request"
+            ? 400
+            : code === "not_found" || code === "session_not_found"
+              ? 404
+              : code === "conflict"
+                ? 409
+                : 500;
         err(res, status, e instanceof Error ? e.message : String(e));
       }
     },

@@ -1960,9 +1960,9 @@ if (oldHash !== next.hash) this.propagateStale(s.id, input.nodeId, s.revision + 
     return sinceSeq === undefined ? all : all.filter((e) => e.seq > sinceSeq);
   }
 
-  /** 세션 조회 (M4.2-2.5, 읽기 전용. TTL 판정 + touch 포함) */
+  /** 세션 조회 (M4.2-2.5, 읽기 전용. TTL 판정, touch 없음 — M7-ui3-b) */
   async getSession(sessionId: string): Promise<Session> {
-    return this.checkFresh(sessionId);
+    return this.checkFreshRead(sessionId);
   }
 
   /** 노드 조회 (M4.2-2.5, 읽기 전용. touch 없음 — M7-ui2-b) */
