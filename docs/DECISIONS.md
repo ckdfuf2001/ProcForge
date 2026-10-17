@@ -567,6 +567,30 @@ argv: [...]}` 고정. runner는 run fs에서 직접 실행해 stdout을 golden�
    만료 판정 기준이 `lastUsed` 메모리 맵에 있어, HTTP로 요청마다 store가 새로
    만들어지는 원격 모드에서는 **만료가 아예 일어나지 않았다**. 기준이 없으면
    `createdAt`로 간주하고, 연장은 **쓰기만** 하도록 바꿨다.
+ - [M7-ui4-a] TTL 기준은 **디스크**다. 쓰기 커밋이 `session.json`에
+   `lastWriteAt`를 남기고 판정은 `lastWriteAt ?? createdAt`. 메모리 lastUsed는
+   제거했다 — 프로세스 재시작 후에도, 원격 core(요청마다 store 재생성)에서도
+   같은 결과여야 한다.
+ - [M7-ui4-b] 신호 대상(baseUrl·mode·openCodeSessionId)은 **서버 설정에서만**
+   온다. UI POST 본문에 `link`/`baseUrl`/`mode`가 오면 400이고, MCP 경로도
+   서버 설정과 다르면 400이다. 조용히 무시하면 클라이언트가 다른 주소로 갈 수
+   있어 버그를 숨긴다. 미지정 시 `PROCFORGE_OPENCODE_URL`/`_MODE`.
+ - [M7-ui4-c] `signalOnly`를 advise와 분리했다. advise는 **한 번만** 하고
+   그다음 신호를 시도한다(두 번 부르면 두 번째가 같은 expectedRevision으로
+   conflict 난다). 짝 없음 처리는 M7-0.2 그대로 — 짝이 없으면 허용, 다른 세션과
+   짝이면 degraded. 신호 실패·degraded여도 저장분은 그대로다.
+ - [M7-ui4-d] UI 호출 기록은 core 호출 **뒤** 실제 결과(ok/오류코드)로 남긴다.
+   실패한 쓰기가 성공처럼 기록되면 추적이 거짓말을 한다.
+ - [M7-ui4-e] 쓰기 본문: media type을 정확히 비교(`application/json`만,
+   매개변수는 허용), 단일 루프 + 바이트 상한, JSON 실패·비객체는 400.
+ - [M7-ui4-f] 편집은 순수 함수 `applyEdit`(packages/core/src/edit.ts) 하나다.
+   `previewEdit`와 `pfEditNode`가 공유하므로 "미리보기 N개 stale"과 "저장 후 N개
+   stale"이 어긋날 수 없다. 중복 constraint는 조용히 버리지 않고 거절한다
+   (미리보기가 "적용됨"이라 말한 뒤 저장이 무시하면 안 된다). goal 규칙의 단일
+   소스도 core이며 wire/loopback 스키마는 다시 정의하지 않는다.
+ - [M7-ui4-g] 노드 이력은 **최신** 200건(`tail: true`)이다. 오래된 것부터
+   자르면 이벤트 250건 세션에서 마지막 사건이 화면에서 사라진다. SSE 증분은
+   기본(head) 동작을 유지한다.
 - [M6.1-신뢰경계] 판정은 local이 하고 core는 그 판정을 믿는다.
   원본을 보내지 않으니 당연한 결과. 다만 클라이언트가 판정을 조작할 수
   있다는 뜻이기도 하니, 판정 신뢰 경계 = 테넌트 자신 으로 명시한다.
