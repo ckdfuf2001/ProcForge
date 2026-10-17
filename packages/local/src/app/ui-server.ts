@@ -407,10 +407,13 @@ export async function createUiServer(opts: {
               return;
             }
             // advise-and-signal
-            // M7-ui4-b: 본문으로 신호 대상(baseUrl·mode·openCodeSessionId)을
-            // 지정하려 하면 400 — 무시하면 조용히 다른 주소로 갈 수 있다.
-            if (body.link !== undefined || body.baseUrl !== undefined || body.mode !== undefined) {
-              err(res, 400, "link.baseUrl·mode는 서버 설정에서만 결정됩니다");
+            // M7-ui4-b/i: 본문으로 신호 대상(baseUrl·mode·openCodeSessionId)이나
+            // 버전·타임아웃을 지정하려 하면 400 — 무시하면 조용히 다른 주소로
+            // 갈 수 있다.
+            const forbidden = ["link", "baseUrl", "mode", "serverVersion", "timeoutMs"];
+            const used = forbidden.filter((k) => body[k] !== undefined);
+            if (used.length > 0) {
+              err(res, 400, `${used.join(",")} 는 서버 설정에서만 결정됩니다`);
               return;
             }
             send(

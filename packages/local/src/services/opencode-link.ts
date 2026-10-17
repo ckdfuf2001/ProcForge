@@ -19,6 +19,53 @@ export type LinkDeps = {
 
 const CONTINUE_COPY_FALLBACK = "OpenCode에서 '계속'이라고 입력하세요.";
 
+/** M7-ui4-i: 신호 timeout 상한 (2분). 더 오래 기다려도 사람은 기다리지 않는다. */
+export const SIGNAL_TIMEOUT_CAP_MS = 120_000;
+
+export function clampTimeoutMs(ms: number | undefined): number {
+  const v = ms ?? 60_000;
+  return Math.min(Math.max(v, 1_000), SIGNAL_TIMEOUT_CAP_MS);
+}
+
+/**
+ * M7-ui4-i: OpenCode 서버가 밝히는 버전. **클라이언트가 정하지 않는다**
+ * (MCP 도구·UI 본문 값은 무시/거절). 서버 설정이 없으면 여기서 조회하고,
+ * 조회 실패면 undefined → sendContinue가 default-deny로 C에 머문다.
+ */
+export async function fetchServerVersion(
+  baseUrl: string,
+  deps: { fetchImpl?: typeof fetch; timeoutMs?: number },
+): Promise<string | undefined> {
+  const doFetch = deps.fetchImpl ?? fetch;
+  const base = baseUrl.replace(/\/$/, "");
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), Math.min(deps.timeoutMs ?? 3000, 5000));
+  try {
+    for (const path of ["/version", "/config", "/app"]) {
+      try {
+        const r = await doFetch(`${base}${path}`, {
+          signal: ac.signal,
+          headers: { accept: "application/json" },
+        });
+        if (!r.ok) continue;
+        const body = (await r.json()) as Record<string, unknown> | string;
+        const v =
+          typeof body === "string"
+            ? body
+            : [body.version, (body.info as { version?: unknown } | undefined)?.version]
+                .filter((x): x is string => typeof x === "string")
+                .find((x) => /^\d+\.\d+\.\d+/.test(x));
+        if (v) return v.trim();
+      } catch {
+        // 다음 후보 경로를 시도한다 (조회 실패는 미확인으로 간주)
+      }
+    }
+    return undefined;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function postJson(
   doFetch: typeof fetch,
   url: string,
@@ -232,7 +279,7 @@ export async function sendContinue(opts: {
     const sp = await postJson(doFetch, `${base}/tui/submit-prompt`, {});
     if (!sp.ok || sp.json !== true) return fail("submit 실패");
   }
-  const timeoutMs = opts.timeoutMs ?? 60000;
+  const timeoutMs = clampTimeoutMs(opts.timeoutMs);
   const pollMs = opts.pollMs ?? 1000;
   const deadline = Date.now() + timeoutMs;
   const isNewPfCall = (parts: unknown[]): boolean =>

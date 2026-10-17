@@ -36,6 +36,8 @@ import { seedSandbox } from "../services/workspace.js";
 import {
   sendContinue,
   httpLinkDeps,
+  fetchServerVersion,
+  clampTimeoutMs,
   type LinkMode,
   type LinkResult,
 } from "../services/opencode-link.js";
@@ -1232,43 +1234,44 @@ export class ProcForgeApp {
 
   /**
    * M7-ui4-c: **신호만** 보낸다 (advise를 하지 않는다).
-   * 짝 없음 처리는 M7-0.2 규칙 그대로 — 짝이 없으면 허용(첫 신호가 짝을 만든다),
-   * 다른 세션과 짝이면 degraded로 막는다. 실패해도 데이터는 건드리지 않는다.
-   * baseUrl·mode는 서버 설정(this.signal)에서만 온다.
+   * M7-ui4-i: baseUrl·mode·timeoutMs·serverVersion은 모두 서버 설정/조회값이다.
+   * M7-ui4-j: 짝도 없으면 **전송하지 않는다** — 어디로 보낼지 모르는 신호는
+   *   아무것도 바꾸지 않는 쪽이 낫다(가짜 서버 요청 0건).
    */
   async signalOnly(input: {
     sessionId: string;
     /** 미지정 시 이 세션의 최신 짝짓기를 쓴다 (UI는 클라이언트가 못 고른다) */
     openCodeSessionId?: string;
     text?: string;
-    timeoutMs?: number;
-    serverVersion?: string;
   }): Promise<LinkResult> {
     const sid = input.sessionId;
     const cfg = this.signal;
-    const openSid =
-      input.openCodeSessionId ?? this.latestPairingSessionId(sid);
-    const noSend = (degraded: string): LinkResult => ({
+    const openSid = input.openCodeSessionId ?? this.latestPairingSessionId(sid);
+    const copy = `${input.text ?? cfg.text ?? "계속"}\nOpenCode에서 '계속'이라고 입력하세요.`;
+    // M7-ui4-j: 문구 우선순위를 한 곳에 — 1 미설정 → 2 짝 없음 → 3 다른 세션 → 4 전송
+    const notSent = (reason: string): LinkResult => ({
       delivered: false,
-      degraded,
-      copyText: `${cfg.text ?? input.text ?? "계속"}\nOpenCode에서 '계속'이라고 입력하세요.`,
+      degraded: `${reason}. 전송하지 않음`,
+      copyText: copy,
     });
-    if (!cfg.baseUrl) return noSend("OpenCode 주소 미설정 (PROCFORGE_OPENCODE_URL)");
-    // M7-0.2-3: 엉뚱한 세션에 "계속" 금지. 짝이 없으면 허용.
-    if (openSid) {
-      const pair = getPairing(this.procforgeDir, openSid);
-      if (pair && pair.pfSessionId !== sid) {
-        return noSend(`다른 세션과 짝(${pair.pfSessionId}). 전송하지 않음`);
-      }
+    if (!cfg.baseUrl) return notSent("OpenCode 주소 미설정");
+    if (!openSid) return notSent("OpenCode 세션 짝이 없음");
+    const pair = getPairing(this.procforgeDir, openSid);
+    if (pair && pair.pfSessionId !== sid) {
+      return notSent(`다른 세션과 짝(${pair.pfSessionId})`);
     }
+    // M7-ui4-i: 버전은 서버 설정 또는 OpenCode 서버 조회값만 (default-deny 유지)
+    const serverVersion =
+      cfg.serverVersion ??
+      (await fetchServerVersion(cfg.baseUrl, { fetchImpl: this.linkFetchImpl }));
     const http = httpLinkDeps(cfg.baseUrl, this.linkFetchImpl);
     return sendContinue({
       baseUrl: cfg.baseUrl,
       openCodeSessionId: openSid,
       text: input.text ?? cfg.text ?? "계속",
       mode: cfg.mode,
-      timeoutMs: input.timeoutMs ?? cfg.timeoutMs,
-      serverVersion: input.serverVersion ?? cfg.serverVersion,
+      timeoutMs: clampTimeoutMs(cfg.timeoutMs),
+      serverVersion,
       deps: {
         fetchImpl: this.linkFetchImpl,
         ...http,
@@ -1308,13 +1311,19 @@ export class ProcForgeApp {
         "link.mode는 서버 설정에서만 결정됩니다 (M7-ui4-b).",
       );
     }
+    // M7-ui4-i: 버전·타임아웃도 서버 설정/조회값만 (클라이언트가 정하면 거절).
+    if (link.serverVersion !== undefined || link.timeoutMs !== undefined) {
+      throw pfError(
+        "bad_request",
+        "link.serverVersion·timeoutMs는 서버 설정에서만 결정됩니다 (M7-ui4-i).",
+      );
+    }
     const advised = await this.advise(a);
+    // M7-ui4-i: 버전·타임아웃은 위에서 400 처리했으므로 여기서 넘기지 않는다.
     const signal = await this.signalOnly({
       sessionId: a.sessionId as string,
       openCodeSessionId: link.openCodeSessionId,
       text: link.text,
-      timeoutMs: link.timeoutMs,
-      serverVersion: link.serverVersion,
     });
     return { advise: advised, signal };
   }

@@ -483,7 +483,7 @@ describe("M7-1 adviseAndSignal", () => {
       await expect(
         app.adviseAndSignal({
           ...adviseInput,
-          link: { openCodeSessionId: "ses-f", timeoutMs: 500 },
+          link: { openCodeSessionId: "ses-f" },
         }),
       ).rejects.toThrow("advise boom");
       expect(fake.requests).toEqual([]);
@@ -518,9 +518,8 @@ describe("M7-1 adviseAndSignal", () => {
         signal: { baseUrl: fake.baseUrl, mode: "b", serverVersion: "1.18.18" },
       });
       const link = {
+        // M7-ui4-i: baseUrl·mode·timeoutMs·serverVersion은 서버 설정에만 준다
         openCodeSessionId: "ses-g",
-        timeoutMs: 2000,
-        serverVersion: "1.18.18",
       };
       const r1 = await app.adviseAndSignal({
         ...adviseInput,
@@ -559,7 +558,7 @@ describe("M7-1 adviseAndSignal", () => {
       });
       const r = await app.adviseAndSignal({
         ...adviseInput, // sessionId "pf-sid" ≠ 짝 "pf-other"
-        link: { openCodeSessionId: "ses-g", timeoutMs: 500 },
+        link: { openCodeSessionId: "ses-g" },
       });
       expect(r.signal.delivered).toBe(false);
       if (!r.signal.delivered) {
