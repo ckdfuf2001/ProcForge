@@ -35,6 +35,8 @@ export type UiApp = Pick<
   | "uiRun"
   | "uiRunCancel"
   | "uiRunLog"
+  | "uiApprovalInfo"
+  | "uiApprove"
 >;
 
 export type UiServer = {
@@ -352,6 +354,20 @@ export async function createUiServer(opts: {
           send(res, { detail, events: evs.events });
           return;
         }
+        // M7 5-2: 승인 정보 (스크립트 sha + diff + 현재 approvalHash)
+        const mApproval = /^\/api\/sessions\/([^/]+)\/nodes\/([^/]+)\/approval$/.exec(
+          url.pathname,
+        );
+        if (req.method === "GET" && mApproval) {
+          send(
+            res,
+            await opts.app.uiApprovalInfo({
+              sessionId: pathId(mApproval[1], "sessionId"),
+              nodeId: pathId(mApproval[2], "nodeId"),
+            }),
+          );
+          return;
+        }
         // M7-ui3-a: attempt 산출물 전문 (경로는 core가 정한다. 텍스트·nosniff·attachment)
         const mArt = /^\/api\/sessions\/([^/]+)\/nodes\/([^/]+)\/artifacts\/([^/]+)\/(\d+)$/.exec(
           url.pathname,
@@ -389,6 +405,28 @@ export async function createUiServer(opts: {
             }
             const runId = pathId(url.pathname.split("/")[3] ?? "", "runId");
             send(res, await opts.app.uiRunCancel({ runId }));
+            return;
+          }
+          const mApprove = /^\/api\/sessions\/([^/]+)\/nodes\/([^/]+)\/approve$/.exec(
+            url.pathname,
+          );
+          if (mApprove) {
+            const body = (await readJsonBody(req, res)) ?? {};
+            if (typeof body.approvalHash !== "string" || body.approvalHash === "") {
+              err(res, 400, "approvalHash 필수 (M7-5-2)");
+              return;
+            }
+            send(
+              res,
+              await opts.app.uiApprove({
+                sessionId: pathId(mApprove[1], "sessionId"),
+                nodeId: pathId(mApprove[2], "nodeId"),
+                approvalHash: String(body.approvalHash),
+                approved: body.approved !== false,
+                ...(body.note !== undefined ? { note: String(body.note) } : {}),
+                expectedRevision: Number(body.expectedRevision),
+              }),
+            );
             return;
           }
           const sidFromPath = /^\/api\/sessions\/([^/]+)\/(preview-edit|advise-and-signal|edit-args|edit-node)$/.exec(

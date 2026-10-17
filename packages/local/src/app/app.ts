@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHash } from "node:crypto";
 import { join, resolve } from "node:path";
 import type { CoreClient } from "@procforge/shared/core-client.js";
 import type { Actor } from "@procforge/shared/dto.js";
@@ -86,8 +86,13 @@ import {
   readRunLog,
   readCancelFlag,
 } from "./run-control.js";
+import { unifiedDiff } from "../services/diff.js";
 import {
   buildApprovalEntry,
+  loadApprovals,
+  approvalPins,
+  checkApproval,
+  toHashableMap,
   saveApproval,
   scopeWarnings,
   toHashable,
@@ -104,7 +109,11 @@ import {
 import { varRefNodeIds } from "@procforge/shared/deps.js";
 import { varRefNodeId } from "@procforge/shared/args-schema.js";
 import { resolveRefValue } from "@procforge/shared/validator.js";
-import { readRunState, writeRunState } from "../services/run-state.js";
+import {
+  readRunState,
+  readRunStateBySession,
+  writeRunState,
+} from "../services/run-state.js";
 import {
   writeJUnitFile,
   resolveJUnitPath,
@@ -1985,12 +1994,158 @@ export class ProcForgeApp {
     };
   }
 
+/**
+ * M7 5-2: 승인 화면에 필요한 것만 — 스크립트 경로·sha256·현재 내용·diff·
+ * 지금의 approvalHash. 판단(승인/거부)은 pf_approve가 한다.
+ */
+async uiApprovalInfo(input: { sessionId: string; nodeId: string }): Promise<{
+  sessionId: string;
+  nodeId: string;
+  approvalHash: string;
+  script: { rel: string; sha256: string; content: string } | null;
+  diff: string | null;
+  approved: boolean;
+  needsReapproval: boolean;
+}> {
+  const sid = input.sessionId;
+  const nid = input.nodeId;
+  const n = await this.core.getNode(sid, nid);
+  const tree = await this.core.pfTree(sid);
+  const byId = new Map(tree.nodes.map((x) => [x.id, x]));
+  const readScript = (rel: string): string | undefined => {
+    try {
+      return readFileSync(join(this.procforgeDir, "sessions", sid, rel), "utf8");
+    } catch {
+      return undefined;
+    }
+  };
+  const parent = n.parentId ? byId.get(n.parentId) : undefined;
+  const pins = approvalPins(
+    n,
+    parent ? { id: parent.id, hash: parent.hash, kind: (parent as { kind?: string }).kind } : undefined,
+    toHashableMap(byId),
+    readScript,
+  );
+  const approvalHash = pins[0]?.approvalHash ?? "";
+  // script-kind 인자만 화면에 노출 (읽기 전용)
+  const spec = (n.args as Record<string, { kind?: string; file?: string }> | undefined)?.script;
+  const rel = spec?.file;
+  let script: { rel: string; sha256: string; content: string } | null = null;
+  let diff: string | null = null;
+  if (rel) {
+    const content = readScript(rel) ?? "";
+    script = {
+      rel,
+      sha256: createHash("sha256").update(content, "utf8").digest("hex"),
+      content,
+    };
+    // 승인 이력의 스크립트와 현재본의 차이 (없으면 null)
+    const st = readRunStateBySession(this.procforgeDir, sid);
+    if (st) {
+      const prev = loadApprovals(st.procedureDir ?? "").find(
+        (e) => e.node.id === nid,
+      );
+      const prevFile = prev?.args?.script as { file?: string } | undefined;
+      const prevScript = prevFile?.file ? readScript(prevFile.file) : undefined;
+      if (prevScript !== undefined && prevScript !== content) {
+        diff = unifiedDiff(prevScript, content, prevFile?.file ?? "(approved)", rel);
+      }
+    }
+  }
+  const approved = pins.length > 0 && this.hasCurrentApproval(sid, nid, pins);
+  return {
+    sessionId: sid,
+    nodeId: nid,
+    approvalHash,
+    script,
+    diff,
+    approved,
+    // 승인 이력이 있는데 지금 핀과 다르면 재승인 필요
+    needsReapproval: !approved && this.hasAnyApproval(sid, nid),
+  };
+}
+
+/** M7 5-2: 승인 — approvalHash가 지금 값과 다르면 409 (무음 승인 금지) */
+async uiApprove(input: {
+  sessionId: string;
+  nodeId: string;
+  approvalHash: string;
+  approved: boolean;
+  note?: string;
+  expectedRevision: number;
+}): Promise<{ nodeId: string; approvalHash: string; approved: boolean }> {
+  if (!Number.isInteger(input.expectedRevision)) {
+    throw pfError("bad_request", "expectedRevision 필수");
+  }
+  if (!input.approvalHash) {
+    throw pfError("bad_request", "approvalHash 필수 (M7-5-2)");
+  }
+  const info = await this.uiApprovalInfo({
+    sessionId: input.sessionId,
+    nodeId: input.nodeId,
+  });
+  if (info.approvalHash !== input.approvalHash) {
+    throw pfError(
+      "conflict",
+      `approvalHash 불일치 (화면 ${input.approvalHash.slice(0, 8)} ≠ 현재 ${info.approvalHash.slice(0, 8)}). 다시 읽으세요.`,
+    );
+  }
+  const out = await this.core.pfApprove({
+    sessionId: input.sessionId,
+    nodeId: input.nodeId,
+    approved: input.approved,
+    ...(input.note !== undefined ? { note: input.note } : {}),
+    expectedRevision: input.expectedRevision,
+    actor: "ui",
+  });
+  const st = readRunStateBySession(this.procforgeDir, input.sessionId);
+  if (st?.procedureDir) {
+    const entry = buildApprovalEntry(
+      out.node as never,
+      [],
+      new Map(),
+      (rel: string) => {
+        try {
+          return readFileSync(join(this.procforgeDir, "sessions", input.sessionId, rel), "utf8");
+        } catch {
+          return undefined;
+        }
+      },
+    );
+    saveApproval(st.procedureDir, { ...entry, approvalHash: info.approvalHash });
+  }
+  this.recordUiCall(input.sessionId, "pf_approve", input.nodeId);
+  return { nodeId: input.nodeId, approvalHash: info.approvalHash, approved: input.approved };
+}
+
+private hasAnyApproval(sessionId: string, nodeId: string): boolean {
+  const st = readRunStateBySession(this.procforgeDir, sessionId);
+  if (!st?.procedureDir) return false;
+  return loadApprovals(st.procedureDir).some((e) => e.node.id === nodeId);
+}
+
+private hasCurrentApproval(
+  sessionId: string,
+  nodeId: string,
+  pins: { id: string; hash: string; approvalHash: string }[],
+): boolean {
+  const st = readRunStateBySession(this.procforgeDir, sessionId);
+  if (!st?.procedureDir) return false;
+  const list = loadApprovals(st.procedureDir);
+  // 화면 판단은 **approvalHash 일치**만 본다 (node.hash는 실행 시 runner가 판정한다 —
+  // 승인 직후 노드 hash는 바뀌므로 화면에서 재확인하면 거짓말이 된다).
+  return list.some((e) =>
+    pins.some(
+      (p) =>
+        p.id === e.node.id &&
+        (e.approvalHash === undefined || e.approvalHash === p.approvalHash),
+    ),
+  );
+}
+
   /**
    * M7 5-1: UI 실행. **즉시** `{runId}`를 돌려주고, 로그는 SSE로 흘린다.
-   * - 등록된 절차서만 (`loadProcedureDoc`이 모르는 이름을 거절)
-   * - 선언된 param만 (미선언 param·경로/명령/out 같은 주입 키는 400)
-   * - 절차서당 동시 1개 (두 번째는 409)
-   * 실행 기록은 `.procforge/runs/<runId>` — **세션 TTL과 무관**하다.
+   * - 등록된 절차서만 / - 선언된 param만 / - 절차서당 동시 1개(409)
    */
   async uiRun(input: {
     procedure: string;

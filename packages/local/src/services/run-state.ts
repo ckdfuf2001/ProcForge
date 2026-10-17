@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { writeAtomicFile } from "../fsutil.js";
 
@@ -32,6 +32,32 @@ export type RunState = {
 
 export function runStatePath(procforgeDir: string, runId: string): string {
   return join(procforgeDir, "runs", runId, "state.json");
+}
+
+/**
+ * M7-5-2: 이 세션의 가장 최근 실행 기록 (승인 화면이 절차서 dir을 찾아야 한다).
+ * runs/<runId>/ 아래를 훑는다 — 세션 수백 개가 쌓여도 디렉터리만 본다.
+ */
+export function readRunStateBySession(
+  procforgeDir: string,
+  sessionId: string,
+): (RunState & { procedureDir?: string }) | undefined {
+  const runsDir = join(procforgeDir, "runs");
+  let names: string[];
+  try {
+    names = readdirSync(runsDir);
+  } catch {
+    return undefined;
+  }
+  let best: (RunState & { procedureDir?: string }) | undefined;
+  for (const name of names) {
+    const st = readRunState(procforgeDir, name) as
+      | (RunState & { procedureDir?: string })
+      | undefined;
+    if (st?.sessionId !== sessionId) continue;
+    if (!best || st.updatedAt > best.updatedAt) best = st;
+  }
+  return best;
 }
 
 export function readRunState(procforgeDir: string, runId: string): RunState | undefined {
