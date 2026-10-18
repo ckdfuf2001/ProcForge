@@ -158,17 +158,24 @@ export function runScript(input: {
     detached: process.platform !== "win32",
     windowsHide: true,
   });
-  const pid = child.pid;
-  if (pid !== undefined) input.onChild?.(pid, child);
+const pid = child.pid;
+if (pid !== undefined) input.onChild?.(pid, child);
+  // M7-5-c: 종료는 **한 번만**. 취소 감시(200ms)가랑 타임아웃이 동시에 걸리면
+  // taskkill/SIGTERM 이 겹쳐 계속 쌓인다 (Windows 는 프로세스 생성 자체가 비싸다).
+  let terminating: Promise<unknown> | null = null;
+  const terminate = (): void => {
+    if (pid === undefined) return;
+    terminating ??= killScriptTree(pid).catch(() => undefined);
+  };
   const cancelWatch = input.isCancelled
     ? setInterval(() => {
-        if (input.isCancelled?.() && pid !== undefined) void killScriptTree(pid);
+        if (input.isCancelled?.()) terminate();
       }, 200)
     : undefined;
   let timedOut = false;
   const timer = setTimeout(() => {
     timedOut = true;
-    if (pid !== undefined) void killScriptTree(pid);
+    terminate();
   }, timeout);
 
   return new Promise<ScriptResult>((resolve, reject) => {
@@ -181,7 +188,9 @@ export function runScript(input: {
       settled = true;
       clearTimeout(timer);
       if (cancelWatch) clearInterval(cancelWatch);
-      fn();
+      // close 가 왔는데 종료가 아직 진행 중일 수 있다 (SIGTERM 유예 대기).
+      // 그대로 끝내면 프로세스가 아직 살아 있다.
+      void Promise.resolve(terminating).then(fn);
     };
     child.stdout?.on("data", (b: Buffer) => {
       outLen += b.length;
