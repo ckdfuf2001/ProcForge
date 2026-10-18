@@ -24,6 +24,11 @@ export type RunOptions = {
   approvedNodeIds?: string[];
   /** 무인 실행 (M5.5-4. external은 approvals 일치 시에만 실행, 불일치 시 fail ["approval"]) */
   unattended?: boolean;
+  /** M7-5-a: 실행 중 스크립트 자식 pid 등록/해제 (취소가 트리를 죽이��) */
+  onScriptChild?: (pid: number) => void;
+  onScriptChildEnd?: (pid: number) => void;
+  /** M7-5-a: 취소 여부 (참이면 스크립트 트리를 죽이고 cancelled) */
+  isRunCancelled?: () => boolean;
   /** 도구 호출 재시도 (M5.6-f. readOnly + sideEffect none만, 지수 백오프). */
   toolRetry?: { attempts?: number; baseMs?: number; extraTransient?: string[] };
   /** unverified>0 통과 허용 (M5.7.1. 기본 false = 무인 실행 fail-on). */

@@ -1028,13 +1028,24 @@ async function execNode(
     for (;;) {
       scriptTries += 1;
       try {
-        const o = runScript({
+        const o = await runScript({
           runtime: spec.runtime ?? "python",
           scriptAbs,
           args,
           cwd: fsDir,
           timeoutMs: spec.timeoutMs,
           projectRoot: opts.projectRoot,
+          // M7-5-a: 실행 중 자식 pid 를 run 기록에 남긴다. 취소는 이 목록의
+          // 트리를 죽인다 (없으면 취소해도 프로세스가 산다).
+          ...(opts.onScriptChild
+            ? {
+                onChild: (pid: number, proc: { on: (e: string, f: () => void) => void }) => {
+                  opts.onScriptChild?.(pid);
+                  proc.on("close", () => opts.onScriptChildEnd?.(pid));
+                },
+              }
+            : {}),
+          ...(opts.isRunCancelled ? { isCancelled: opts.isRunCancelled } : {}),
         });
         resp = { resultText: o.summary, resultJson: o.json };
         break;

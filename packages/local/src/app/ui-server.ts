@@ -191,6 +191,9 @@ function pathId(raw: string, what: string): string {
 /** M7-ui4-e: 쓰기 본문 상한 (1MB) */
 const MAX_BODY_BYTES = 1024 * 1024;
 
+/** M7-5-d: 실행 로그 SSE 구독 상한 (run당) */
+const RUN_STREAM_MAX_SUBS = 8;
+
 async function readJsonBody(
   req: IncomingMessage,
   res: ServerResponse,
@@ -266,6 +269,7 @@ export async function createUiServer(opts: {
 }): Promise<UiServer> {
   const token = randomBytes(32).toString("hex");
   // M7-ui2: 세션 이벤트 hub (App.getEventsPage 폴러 1개를 구독자들에 공유).
+  const runSubs = new Map<string, number>();
   const hub = new SessionEventHub({
     fetchEvents: (i) => opts.app.getEventsPage(i),
     ...(opts.pollMs !== undefined ? { pollMs: opts.pollMs } : {}),
@@ -552,6 +556,12 @@ export async function createUiServer(opts: {
         const mRunStream = /^\/api\/runs\/([^/]+)\/stream$/.exec(url.pathname);
         if (req.method === "GET" && mRunStream) {
           const runId = pathId(mRunStream[1], "runId");
+          // M7-5-d: SSE 규칙을 그대로 적용 — 구독 상한·heartbeat·id(재연결).
+          // 상한은 **헤더를 쓰기 전에** 판정한다 (429가 200 뒤에 붙으면 안 된다).
+          if ((runSubs.get(runId) ?? 0) >= RUN_STREAM_MAX_SUBS) {
+            err(res, 429, `구독자 초과 (run당 ${RUN_STREAM_MAX_SUBS}명)`);
+            return;
+          }
           res.writeHead(200, {
             "content-type": "text/event-stream; charset=utf-8",
             "cache-control": "no-cache",
@@ -559,13 +569,17 @@ export async function createUiServer(opts: {
             "content-security-policy": cspOf(res),
           });
           res.flushHeaders();
+          runSubs.set(runId, (runSubs.get(runId) ?? 0) + 1);
           let closed = false;
-          let after = 0;
+          let after = Number(req.headers["last-event-id"] ?? 0) || 0;
           const stop = (): void => {
             closed = true;
+            runSubs.set(runId, Math.max(0, (runSubs.get(runId) ?? 1) - 1));
           };
           res.on("close", stop);
           const pollMs = opts.pollMs ?? 800;
+          const beatMs = opts.heartbeatMs ?? 15000;
+          let lastBeat = Date.now();
           const tick = async (): Promise<void> => {
             if (closed) return;
             try {
@@ -573,7 +587,7 @@ export async function createUiServer(opts: {
               for (const e of page.entries) {
                 after = e.seq;
                 // 로그 본문은 SSE 데이터로 — 화면은 textContent로만 렌더한다
-                res.write(`data: ${JSON.stringify(e)}\n\n`);
+                res.write(`id: ${e.seq}\ndata: ${JSON.stringify(e)}\n\n`);
               }
               if (page.status !== "running") {
                 res.write(
@@ -581,6 +595,10 @@ export async function createUiServer(opts: {
                 );
                 res.end();
                 return;
+              }
+              if (Date.now() - lastBeat > beatMs) {
+                lastBeat = Date.now();
+                res.write(`: heartbeat\n\n`);
               }
             } catch (e) {
               res.write(`event: error\ndata: ${JSON.stringify({ message: String(e) })}\n\n`);

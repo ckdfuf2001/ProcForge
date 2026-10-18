@@ -1,6 +1,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import {
   appendFileSync,
+  unlinkSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -98,15 +99,14 @@ export function readCancelFlag(
   }
 }
 
+/** M7-5-d: 취소 플래그 정리 (ESM — require 는 항상 ReferenceError) */
 export function clearCancelFlag(procforgeDir: string, runId: string): void {
   const p = cancelPath(procforgeDir, runId);
-  if (existsSync(p)) {
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      require("node:fs").unlinkSync(p);
-    } catch {
-      // 지우지 못해도 실행 재개 판정에는 영향 없다
-    }
+  if (!existsSync(p)) return;
+  try {
+    unlinkSync(p);
+  } catch {
+    // 지우지 못해도 실행 재개 판정에는 영향 없다
   }
 }
 
@@ -176,16 +176,34 @@ export function killProcessTree(pid: number): { killed: number[]; failed: number
     else failed.push(pid);
     return { killed, failed };
   }
-  try {
-    // 그룹을 먼저 시도하고, 없으면 개별 pid
+  // M7-5-b: 그룹에 SIGTERM → 유예 후 SIGKILL (SIGTERM 을 무시하는 자식이 남지 않게)
+  const signal = (sig: NodeJS.Signals): void => {
     try {
-      process.kill(-pid, "SIGTERM");
+      process.kill(-pid, sig);
     } catch {
-      process.kill(pid, "SIGTERM");
+      try {
+        process.kill(pid, sig);
+      } catch {
+        // 이미 종료
+      }
     }
+  };
+  try {
+    signal("SIGTERM");
     killed.push(pid);
   } catch {
     failed.push(pid);
+    return { killed, failed };
+  }
+  const deadline = Date.now() + 1500;
+  while (Date.now() < deadline) {
+    if (!isAlive(pid)) return { killed, failed };
+    spawnSync("sleep", ["0.05"], { shell: true });
+  }
+  try {
+    signal("SIGKILL");
+  } catch {
+    // 이미 죽음
   }
   return { killed, failed };
 }

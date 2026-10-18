@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { existsSync, readdirSync, statSync, type Dirent } from "node:fs";
 import { delimiter, join, resolve } from "node:path";
 
@@ -10,8 +10,29 @@ import { delimiter, join, resolve } from "node:path";
 // - M5.3-3 실행 제한: 자식 환경은 화이트리스트만, python은 절대경로로 해석,
 //   실행 전후 projectRoot 스냅샷 비교로 run fs 밖 변경 감지 → throw.
 //   OS 수준 sandbox가 아니다 (네트워크·프로세스 격리 없음, DECISIONS 참조).
+// - M7-5-a: **비동기** 실행. spawnSync 옛에는 실행이 이벤트 루프를 막아
+//   취소가 중간에 도달하지 못했다(길게 걸린 스크립트는 끝까지 돈다).
 
 export const DEFAULT_SCRIPT_TIMEOUT_MS = 60000;
+
+/** M7-5-b: 트리 종료 (POSIX 는 그룹, Windows 는 taskkill /T) */
+export function killScriptTree(pid: number): void {
+  if (process.platform === "win32") {
+    spawnSync("taskkill", ["/PID", String(pid), "/T", "/F"], {
+      windowsHide: true,
+    });
+    return;
+  }
+  try {
+    process.kill(-pid, "SIGTERM");
+  } catch {
+    try {
+      process.kill(pid, "SIGTERM");
+    } catch {
+      // 이미 종료됨
+    }
+  }
+}
 
 /** 자식 프로세스에 넘기는 환경변수 화이트리스트 (M5.3-3) */
 const ENV_ALLOW = new Set([
@@ -36,6 +57,8 @@ export type ScriptResult = {
 };
 
 let cachedPython: string | undefined;
+type Snapshot = { files: Map<string, string> };
+const MAX_BUF = 10 * 1024 * 1024;
 
 function findPython(): string {
   if (cachedPython) return cachedPython;
@@ -58,50 +81,39 @@ function childEnv(): Record<string, string> {
   for (const [k, v] of Object.entries(process.env)) {
     if (ENV_ALLOW.has(k) && v !== undefined) out[k] = v;
   }
-  // Windows 로캘(cp949) stdio가 한글 JSON을 깨뜨려 서로게이트가 생기므로 UTF-8 고정.
+  // Windows 로캘(cp949) stdio가 한글 JSON 을 깨뜨릴 수 있어 무조건 UTF-8 고정.
   out.PYTHONUTF8 = "1";
   out.PYTHONIOENCODING = "utf-8";
   return out;
 }
 
-export type Snapshot = {
-  files: Map<string, string>;
-  skipped: boolean;
-};
-
-/** projectRoot 스냅샷 (rel → "size:mtimeMs"). .procforge/node_modules/.git 제외. */
 export function snapshotProject(projectRoot: string): Snapshot {
   const files = new Map<string, string>();
-  let count = 0;
-  let skipped = false;
   const walk = (dir: string, rel: string): void => {
-    if (skipped) return;
-    let entries: Dirent<string>[];
+    let entries: Dirent[];
     try {
       entries = readdirSync(dir, { withFileTypes: true });
     } catch {
       return;
     }
     for (const e of entries) {
-      if (skipped) return;
-      if (rel === "" && SNAPSHOT_SKIP.has(e.name)) continue;
+      if (SNAPSHOT_SKIP.has(e.name)) continue;
+      const r = rel ? `${rel}/${e.name}` : e.name;
       const p = join(dir, e.name);
-      const r = rel === "" ? e.name : `${rel}/${e.name}`;
       if (e.isDirectory()) {
         walk(p, r);
       } else if (e.isFile()) {
         try {
-          const st = statSync(p);
-          files.set(r, `${st.size}:${Math.floor(st.mtimeMs)}`);
-          if (++count > SNAPSHOT_FILE_CAP) skipped = true;
+          files.set(r, String(statSync(p).size));
         } catch {
-          // 소멸·권한: 무시
+          // 못 읽으면 무시
         }
+        if (files.size >= SNAPSHOT_FILE_CAP) return;
       }
     }
   };
   walk(resolve(projectRoot), "");
-  return { files, skipped };
+  return { files };
 }
 
 /** 스냅샷 비교. 변경 목록 (최대 10건). 비어 있으면 변경 없음. */
@@ -121,6 +133,10 @@ export function diffSnapshot(before: Snapshot, after: Snapshot): string[] {
   return out;
 }
 
+
+
+
+
 export function runScript(input: {
   runtime: string;
   scriptAbs: string;
@@ -129,52 +145,149 @@ export function runScript(input: {
   timeoutMs?: number;
   /** run fs 밖 변경 감지 기준. 없으면 스냅샷 생략. */
   projectRoot?: string;
-}): ScriptResult {
+  /**
+   * M7-5-a: 자식 pid 통보 (registerChild/unregisterChild로 연결).
+   * 실행이 비동기라 취소가 중간에 끼어들 수 있고, 그 신호가 이 콜백으로 나간다.
+   */
+  onChild?: (pid: number, proc: ChildProcess) => void;
+  /** M7-5-a: 취소 확인. 참이면 트리를 죽이고 cancelled로 끝낸다. */
+  isCancelled?: () => boolean;
+}): Promise<ScriptResult> {
   const timeout = input.timeoutMs ?? DEFAULT_SCRIPT_TIMEOUT_MS;
   const cmd = input.runtime === "node" ? process.execPath : findPython();
   const before = input.projectRoot ? snapshotProject(input.projectRoot) : null;
-  const r = spawnSync(cmd, [input.scriptAbs], {
+  // M7-5-b: POSIX 는 detached 로 띄워 프로세스 **그룹 리더**로 만든다.
+  // 그래야 그룹 시그널이 손자까지 닿는다.
+  const child = spawn(cmd, [input.scriptAbs], {
     cwd: input.cwd,
-    input: JSON.stringify(input.args),
-    encoding: "utf8",
-    timeout,
-    maxBuffer: 10 * 1024 * 1024,
     env: childEnv(),
+    detached: process.platform !== "win32",
+    windowsHide: true,
   });
-  // M5.3-3: run fs 밖 변경 감지 (성공·실패 무관)
-  if (before && input.projectRoot) {
-    const diff = diffSnapshot(before, snapshotProject(input.projectRoot));
-    if (diff.length > 0) {
-      throw Object.assign(
-        new Error(`run fs 밖 변경 감지 (${diff.length}건+): ${diff.join(", ")} — 스크립트는 run fs 안에서만 쓰라`),
-        { code: "bad_request" },
-      );
-    }
-  }
-  const errTail = (r.stderr ?? "").toString().slice(-2000);
-  if (r.error) {
-    const timedOut = (r.error as NodeJS.ErrnoException).code === "ETIMEDOUT";
-    throw Object.assign(
-      new Error(timedOut ? `스크립트 타임아웃(${timeout}ms): ${input.scriptAbs}` : `스크립트 실행 실패: ${String(r.error)}${errTail ? ` | ${errTail}` : ""}`),
-      { code: timedOut ? "timeout" : "bad_request" },
-    );
-  }
-  if (r.status !== 0) {
-    throw Object.assign(new Error(`스크립트 비정상 종료(${r.status}): ${input.scriptAbs}${errTail ? ` | ${errTail}` : ""}`), {
-      code: "bad_request",
+  const pid = child.pid;
+  if (pid !== undefined) input.onChild?.(pid, child);
+  const cancelWatch = input.isCancelled
+    ? setInterval(() => {
+        if (input.isCancelled?.() && pid !== undefined) killScriptTree(pid);
+      }, 200)
+    : undefined;
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    if (pid !== undefined) killScriptTree(pid);
+  }, timeout);
+
+  return new Promise<ScriptResult>((resolve, reject) => {
+    const out: Buffer[] = [];
+    const err: Buffer[] = [];
+    let outLen = 0;
+    let settled = false;
+    const done = (fn: () => void): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (cancelWatch) clearInterval(cancelWatch);
+      fn();
+    };
+    child.stdout?.on("data", (b: Buffer) => {
+      outLen += b.length;
+      if (outLen <= MAX_BUF) out.push(b);
     });
-  }
-  const text = (r.stdout ?? "").toString().replace(/^\uFEFF/, "").trim();
+    child.stderr?.on("data", (b: Buffer) => err.push(b));
+    child.on("error", (e) =>
+      done(() =>
+        reject(
+          Object.assign(new Error(`스크립트 실행 실패: ${String(e)}`), {
+            code: "bad_request",
+          }),
+        ),
+      ),
+    );
+    child.on("close", (code, signal) => {
+      done(() => {
+        if (input.isCancelled?.()) {
+          reject(Object.assign(new Error("취소됨"), { code: "cancelled" }));
+          return;
+        }
+        // 타임아웃은 트리를 죽였기 때문에 종료코드가 1 이 된다 — 원인(타임아웃)을
+        // 잃지 않게 먼저 판정한다.
+        if (timedOut) {
+          reject(
+            Object.assign(
+              new Error(`스크립트 타임아웃(${timeout}ms): ${input.scriptAbs}`),
+              { code: "timeout" },
+            ),
+          );
+          return;
+        }
+        try {
+          if (code !== 0 && code !== null) {
+            throw Object.assign(
+              new Error(
+                `스크립트 비정상 종료(${code}): ${input.scriptAbs}${tail(err)}`,
+              ),
+              { code: "bad_request" },
+            );
+          }
+          if (code === null && signal) {
+            throw Object.assign(
+              new Error(
+                `스크립트 종료 신호(${signal}): ${input.scriptAbs}${tail(err)}`,
+              ),
+              { code: "bad_request" },
+            );
+          }
+          const parsed = parseOutput(
+            Buffer.concat(out).toString("utf8"),
+            input.scriptAbs,
+          );
+          // M5.3-3: run fs 밖 변경 감지 (성공·실패 무관)
+          if (before && input.projectRoot) {
+            const diff = diffSnapshot(before, snapshotProject(input.projectRoot));
+            if (diff.length > 0) {
+              throw Object.assign(
+                new Error(
+                  `run fs 밖 변경 감지 (${diff.length}건+): ${diff.join(", ")} — 스크립트는 run fs 안에서만 쓰라`,
+                ),
+                { code: "bad_request" },
+              );
+            }
+          }
+          resolve(parsed);
+        } catch (e) {
+          reject(e);
+        }
+      });
+    });
+    try {
+      child.stdin?.end(JSON.stringify(input.args));
+    } catch {
+      // 이미 종료된 경우 무시
+    }
+  });
+}
+
+function tail(err: Buffer[]): string {
+  const t = Buffer.concat(err).toString("utf8").slice(-2000);
+  return t ? ` | ${t}` : "";
+}
+
+function parseOutput(raw: string, scriptAbs: string): ScriptResult {
+  const text = raw.replace(/^\uFEFF/, "").trim();
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);
   } catch {
-    throw Object.assign(new Error(`스크립트 출력이 JSON 아님: ${input.scriptAbs}: ${text.slice(0, 200)}`), {
-      code: "bad_request",
-    });
+    throw Object.assign(
+      new Error(`스크립트 출력이 JSON 아님: ${scriptAbs}: ${text.slice(0, 200)}`),
+      { code: "bad_request" },
+    );
   }
   if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw Object.assign(new Error(`스크립트 출력은 객체여야 함: ${input.scriptAbs}`), { code: "bad_request" });
+    throw Object.assign(
+      new Error(`스크립트 출력은 객체여야 함: ${scriptAbs}`),
+      { code: "bad_request" },
+    );
   }
   const o = parsed as { summary?: unknown; json?: unknown };
   return {

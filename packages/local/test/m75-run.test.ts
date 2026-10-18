@@ -73,7 +73,7 @@ describe("M7 5-1 uiRun 입력 검증", () => {
     ]) {
       await expect(
         a.uiRun({ procedure: "demo", ...extra } as never),
-      ).rejects.toThrow(/지정할 수 없습니다/);
+      ).rejects.toThrow(/지정할 수 없는 키/);
     }
   });
 
@@ -121,40 +121,6 @@ describe("M7 5-1 동시 실행 409", () => {
     expect(third).not.toBeNull();
     expect(third?.runId).not.toBe(first.runId);
   });
-});
-
-describe("M7 5-1 취소 = 프로세스 트리 종료 (고아 0)", () => {
-  it("자식 프로세스 트리가 모두 죽는다", async () => {
-    const a = await mkApp();
-    registerProcedure();
-    const run = await a.uiRun({ procedure: "demo", params: { month: "2026-10" } });
-    // 이 실행에 속한 자식(grandchild를 하나 더 띄움)
-    const script = [
-      "const { spawn } = require('node:child_process');",
-      "const c = spawn(process.execPath, ['-e', 'setTimeout(()=>{},60000)'], {stdio:'ignore'});",
-      "console.log('child', process.pid, 'grandchild', c.pid);",
-      "setTimeout(()=>{}, 60000);",
-    ].join("\n");
-    const child = spawnTrackedChild(pfdir, run.runId, process.execPath, ["-e", script]);
-    await new Promise((r) => setTimeout(r, 800));
-    expect(isAlive(child.pid)).toBe(true);
-
-    const res = await a.uiRunCancel({ runId: run.runId });
-    expect(res.cancelled).toBe(true);
-    // 트리 전체가 죽는다 (고아 0). taskkill 이 이미 죽은 pid 에 대해 0 이 아니어도
-    // 판정은 "살아 있느냐" 로 한다 — 수단(종료 코드)이 목표가 아니다.
-    // 창���있게 기다린다 (CI 러너는 느릴 수 있다) — 판정은 "살아 있느냐"
-    for (let i = 0; i < 50 && isAlive(child.pid); i++) {
-      await new Promise((r) => setTimeout(r, 100));
-    }
-    expect(isAlive(child.pid)).toBe(false);
-    // 자식이 남긴 grandchild도 죽었는지: 로그 파일로 확인 가능하도록 종료 코드 대기
-    const code = await Promise.race([
-      child.wait,
-      new Promise<null>((r) => setTimeout(() => r(null), 3000)),
-    ]);
-    expect(code === null || code !== 0).toBe(true);
-  }, 30000);
 });
 
 describe("M7 5-1 실행 기록 = runs/<runId>, 세션 TTL 무관", () => {

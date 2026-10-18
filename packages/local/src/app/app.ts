@@ -85,6 +85,9 @@ import {
   cancelRun,
   readRunLog,
   readCancelFlag,
+  clearCancelFlag,
+  registerChild,
+  unregisterChild,
 } from "./run-control.js";
 import { unifiedDiff } from "../services/diff.js";
 import {
@@ -255,6 +258,8 @@ export class ProcForgeApp {
   private readonly signal: SignalTarget;
   /** M7 5-1: 실행 중 절차서 → runId (동시 1개 강제). 취소되면 반납. */
   private activeRuns = new Map<string, string>();
+  /** M7-5-c: 결정 대기(승인·생성값) 중 잠금 유지 중인 run */
+  private waitingRuns = new Set<string>();
 
   constructor(deps: AppDeps) {
     this.core = deps.core;
@@ -2115,6 +2120,10 @@ async uiApprove(input: {
     saveApproval(st.procedureDir, { ...entry, approvalHash: info.approvalHash });
   }
   this.recordUiCall(input.sessionId, "pf_approve", input.nodeId);
+  // M7-5-c: 승인 대기로 멈췄던 실행을 **이어간다** (이게 없으면 대기에 영박으로 남는다)
+  if (input.approved && st?.procedure) {
+    this.resumeRunIfWaiting(input.sessionId === st.sessionId ? (st.runId ?? "") : "", st.procedure);
+  }
   return { nodeId: input.nodeId, approvalHash: info.approvalHash, approved: input.approved };
 }
 
@@ -2156,10 +2165,15 @@ private hasCurrentApproval(
     procedure: string;
     params: Record<string, string>;
   }> {
-    const forbidden = ["path", "command", "cmd", "out", "outDir", "cwd", "script", "shell"];
-    for (const k of forbidden) {
-      if ((input as Record<string, unknown>)[k] !== undefined) {
-        throw pfError("bad_request", `${k}는 UI에서 지정할 수 없습니다 (M7-5-1).`);
+    // M7-5-d: **화이트리스트**. denylist 는 키가 늘 때마다 구멍이 된다.
+    const allowed = new Set(["procedure", "params"]);
+    const extra = Object.keys(input).filter((k) => !allowed.has(k));
+    if (extra.length > 0) {
+      throw pfError("bad_request", `지정할 수 없는 키: ${extra.join(",")} (M7-5-d).`);
+    }
+    for (const [k, v] of Object.entries(input.params ?? {})) {
+      if (typeof v !== "string") {
+        throw pfError("bad_request", `param ${k}는 문자열이어야 합니다 (M7-5-d).`);
       }
     }
     const ref = String(input.procedure ?? "");
@@ -2195,6 +2209,8 @@ private hasCurrentApproval(
       level: "info",
       message: `실행 시작: ${started.procedure}`,
     });
+    // M7-5-d: 실행 요청도 calls.jsonl 에 남긴다 (누가 무엇을 띄웠는지)
+    this.recordUiCall(started.sessionId, "pf_run_start", "");
     // 백그라운드 진행 — UI는 기다리지 않는다(로그·결과는 SSE).
     void this.driveRun(started.runId, doc.name).catch(() => {
       // 오류는 로그로 남는다 (흘러나오면 UI가 조용히 멈춘 것처럼 보인다)
@@ -2216,6 +2232,13 @@ private hasCurrentApproval(
     const runId = String(input.runId ?? "");
     const st = readRunState(this.procforgeDir, runId);
     if (!st) throw pfError("not_found", `run ${runId} not found`);
+    // M7-5-c: 이미 끝난 실행은 취소해도 상태가 바뀌지 않는다 (한 번 "cancelling" 으로 굳으면
+    // 사용자가 언제 끝난 건지 알 수 없게 된다).
+    if (st.status === "done" || st.status === "failed") {
+      this.recordUiCall(st.sessionId, "pf_run_cancel", "", new Error("이미 끝난 실행"));
+      return { runId, cancelled: false, killed: [], failed: [] };
+    }
+    this.recordUiCall(st.sessionId, "pf_run_cancel", "", undefined);
     const r = cancelRun(this.procforgeDir, runId, "UI 실행 화면에서 취소");
     appendRunLog(this.procforgeDir, runId, {
       level: "info",
@@ -2245,47 +2268,102 @@ private hasCurrentApproval(
   }
 
   /** M7 5-1: 백그라운드 진행 루프 (결정점까지 자동) */
+  /**
+   * M7-5-c: 백그라운드 진행 루프.
+   * - `activeRuns` 는 **try/finally** 로 항상 해제한다 (예외로 409 고착 금지).
+   * - 승인·생성값 대기는 **잠금을 유지**한다: 같은 절차서를 다시 띄우면
+   *   서로 다른 두 실행이 한 절차서를 동시에 굴리게 된다. 승인은 uiApprove 가
+   *   이 루프를 재개시킨다.
+   * - 취소 플래그는 단계 사이 + 스크립트 실행 **중**에도 본다.
+   */
   private async driveRun(runId: string, procedure: string): Promise<void> {
-    for (let i = 0; i < 500; i++) {
-      if (readCancelFlag(this.procforgeDir, runId)) {
-        appendRunLog(this.procforgeDir, runId, { level: "info", message: "취소됨" });
-        this.activeRuns.delete(procedure);
-        return;
-      }
-      const step = await this.runStep(runId);
-      if (step.kind === "done") {
+    try {
+      for (let i = 0; i < 500; i++) {
+        if (readCancelFlag(this.procforgeDir, runId)) {
+          this.finishRun(runId, procedure, "info", "취소됨");
+          return;
+        }
+        const step = await this.runStep(runId);
+        if (readCancelFlag(this.procforgeDir, runId)) {
+          this.finishRun(runId, procedure, "info", "취소됨");
+          return;
+        }
+        if (step.kind === "done") {
+          this.finishRun(
+            runId,
+            procedure,
+            "result",
+            `완료: pass ${step.pass} / fail ${step.fail} / blocked ${step.blocked}`,
+          );
+          return;
+        }
+        if (step.kind === "failed") {
+          this.finishRun(runId, procedure, "error", `실패: ${step.detail}`, step.nodeId);
+          return;
+        }
+        // need_generated / need_approval 은 사람이 결정해야 한다 → 멈추되
+        // **잠금은 유지**한다 (같은 절차서 중복 실행 방지).
         appendRunLog(this.procforgeDir, runId, {
-          level: "result",
-          message: `완료: pass ${step.pass} / fail ${step.fail} / blocked ${step.blocked}`,
-        });
-        this.activeRuns.delete(procedure);
-        return;
-      }
-      if (step.kind === "failed") {
-        appendRunLog(this.procforgeDir, runId, {
-          level: "error",
+          level: "info",
           nodeId: step.nodeId,
-          message: `실패: ${step.detail}`,
+          message:
+            step.kind === "need_approval"
+              ? "승인 대기 — 결정을 기다립니다"
+              : "생성값 대기 — 값을 기다립니다",
         });
-        this.activeRuns.delete(procedure);
+        this.waitingRuns.add(runId);
         return;
       }
-      // need_generated / need_approval 은 사람이 결정해야 한다 → 멈춘다
       appendRunLog(this.procforgeDir, runId, {
-        level: "info",
-        nodeId: step.nodeId,
-        message:
-          step.kind === "need_approval"
-            ? "승인 대기 — 결정을 기다립니다"
-            : "생성값 대기 — 값을 기다립니다",
+        level: "error",
+        message: "단계 상한 초과로 중단",
       });
-      this.activeRuns.delete(procedure);
-      return;
+    } catch (e) {
+      // 예외가 나도 잠금은 풀어야 한다 (아니면 그 절차서는 재시작 불가)
+      appendRunLog(this.procforgeDir, runId, {
+        level: "error",
+        message: `실행 오류: ${e instanceof Error ? e.message : String(e)}`,
+      });
+    } finally {
+      if (!this.waitingRuns.has(runId)) this.activeRuns.delete(procedure);
     }
-    this.activeRuns.delete(procedure);
   }
 
-  /** 절차서 live 실행 시작 (M5). 실행은 pf_run_next/supply로 단계 진행. */
+  /** 실행 종료 처리 (로그 + 잠금 해제) */
+  private finishRun(
+    runId: string,
+    procedure: string,
+    level: "info" | "error" | "result",
+    message: string,
+    nodeId?: string,
+  ): void {
+    appendRunLog(this.procforgeDir, runId, {
+      level,
+      message,
+      ...(nodeId !== undefined ? { nodeId } : {}),
+    });
+    this.activeRuns.delete(procedure);
+    this.waitingRuns.delete(runId);
+  }
+
+  /**
+   * M7-5-c: 결정(승인·생성값) 뒤 실행 재개.
+   * uiApprove / 생성값 제공이 이 경로를 탄다 (이게 없으면 대기에 영박으로 남는다).
+   */
+  private resumeRunIfWaiting(runId: string, procedure: string): void {
+    if (!this.waitingRuns.delete(runId)) return;
+    if (readCancelFlag(this.procforgeDir, runId)) {
+      this.finishRun(runId, procedure, "info", "취소됨");
+      return;
+    }
+    appendRunLog(this.procforgeDir, runId, {
+      level: "info",
+      message: "결정 반영 — 실행을 이어갑니다",
+    });
+    void this.driveRun(runId, procedure).catch(() => {
+      /* driveRun 이 스스로 로그/해제를 처리한다 */
+    });
+  }
   async runStart(a: { procedure: unknown; params?: unknown }): Promise<{
     runId: string;
     sessionId: string;
@@ -2401,6 +2479,16 @@ private hasCurrentApproval(
       approvedNodeIds: st.approved,
       // M6.1-2: 원격 core면 하이드레이트 후 실행.
       core: this.core,
+      // M7-5-a: 실제 실행 중인 자식 pid 를 이 run 에 등록한다. 취소는 이 목록의
+      // 트리를 죽인다 — 등록이 없으면 취소해도 프로세스가 산다.
+      onScriptChild: (pid: number) => {
+        registerChild(this.procforgeDir, runId, pid);
+      },
+      onScriptChildEnd: (pid: number) => {
+        unregisterChild(this.procforgeDir, runId, pid);
+      },
+      // M7-5-a: 실행 **중**에도 취소가 닿는다 (spawnSync 옛에는 불가능)
+      isRunCancelled: () => readCancelFlag(this.procforgeDir, runId) !== undefined,
     });
     const doneNow = report.results
       .filter((r) => r.status === "pass")
