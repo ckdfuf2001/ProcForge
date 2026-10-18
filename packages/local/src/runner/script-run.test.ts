@@ -104,6 +104,32 @@ describe("M5.3-3 실행 제한", () => {
     expect(diffSnapshot(after, after)).toEqual([]);
   });
 
+  it("M7-5 보정3-a: 파일 수 상한을 넘으면 skipped=true 이고 walk 가 멈춘다", async () => {
+    // 상한은 10만이라 실제로 꽉 채우지는 않는다 — **상한을 낮춘 사본**으로 규칙을 검증한다.
+    const many = mkdtempSync(join(tmpdir(), "pf-cap-"));
+    const n = 25;
+    for (let i = 0; i < n; i++) writeFileSync(join(many, `f${i}.txt`), "x", "utf8");
+    const capSnapshot = snapshotProject(many, { fileCap: n - 1 });
+    expect(capSnapshot.skipped).toBe(true);
+    // 중단됐으므로 상한+1 개까지 전부 담기지는 않는다
+    expect(capSnapshot.files.size).toBeLessThanOrEqual(n - 1 + 1);
+    expect(diffSnapshot(capSnapshot, capSnapshot)).toEqual([]);
+  });
+
+  it("M7-5 보정3-a: 해시 총량 예산을 넘으면 hashPartial=true", async () => {
+    // 1MB 파일 4개, 총량 예산 3MB 로 제한 → 뒤쪽은 stat 만 기록된다
+    const big = mkdtempSync(join(tmpdir(), "pf-hash-"));
+    const blob = "y".repeat(1024 * 1024);
+    for (let i = 0; i < 4; i++) writeFileSync(join(big, `b${i}.bin`), blob, "utf8");
+    const s = snapshotProject(big, { hashTotalBytes: 3 * 1024 * 1024 });
+    expect(s.hashPartial).toBe(true);
+    // 서명은 size:mtimeMs:ctimeMs:hash — 예산 안(3MB)까지만 해시가 붙는다
+    const withHash = [...s.files.values()].filter((v) => (v.split(":")[3] ?? "") !== "");
+    const withoutHash = [...s.files.values()].filter((v) => (v.split(":")[3] ?? "") === "");
+    expect(withHash.length).toBe(3);
+    expect(withoutHash.length).toBe(1);
+  });
+
   it("M5-5-a: **같은 크기** 덮어쓰기도 감지 (size:mtime)", async () => {
     const f = join(root, "same.txt");
     writeFileSync(f, "AAAA");

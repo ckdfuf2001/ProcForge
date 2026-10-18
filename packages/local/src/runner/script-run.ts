@@ -42,6 +42,10 @@ const SNAPSHOT_SKIP = new Set([".procforge", "node_modules", ".git"]);
 const SNAPSHOT_FILE_CAP = 100000;
 /** M7-5-a: 내용 해시를 붙일 파일 크기 상한 (이하만 해시한다) */
 const SNAPSHOT_HASH_MAX_BYTES = 1024 * 1024;
+/** M7-5 보정3-a: 해시 **총량** 예산 (파일당 한도와 달리 이 한도 안에서만 읽는다) */
+const SNAPSHOT_HASH_TOTAL_BYTES = 64 * 1024 * 1024;
+/** 해시를 붙일 파일 수 상한 */
+const SNAPSHOT_HASH_FILE_CAP = 10000;
 
 export type ScriptResult = {
   summary: string;
@@ -49,7 +53,13 @@ export type ScriptResult = {
 };
 
 let cachedPython: string | undefined;
-type Snapshot = { files: Map<string, string>; skipped?: boolean };
+type Snapshot = {
+  files: Map<string, string>;
+  /** 파일 수 상한에 걸려 **일부만** 비교했다는 표시 (조용히 절반만 보면 안 된다) */
+  skipped?: boolean;
+  /** 해시 총량 예산을 소진해 이후 파일은 stat 만 기록했다는 표시 */
+  hashPartial?: boolean;
+};
 const MAX_BUF = 10 * 1024 * 1024;
 
 function findPython(): string {
@@ -79,10 +89,24 @@ function childEnv(): Record<string, string> {
   return out;
 }
 
-export function snapshotProject(projectRoot: string): Snapshot {
+/**
+ * 실행 디렉터리 스냅샷.
+ * `limits` 는 테스트에서만 한도를 낮춰 **규칙 자체**를 확인하기 위해 넣는다
+ * (실제 상한 10만 파일을 채우는 테스트는 불가능하다).
+ */
+export function snapshotProject(
+  projectRoot: string,
+  limits?: { fileCap?: number; hashTotalBytes?: number; hashFileCap?: number },
+): Snapshot {
+  const fileCap = limits?.fileCap ?? SNAPSHOT_FILE_CAP;
+  const hashTotal = limits?.hashTotalBytes ?? SNAPSHOT_HASH_TOTAL_BYTES;
+  const hashFileCap = limits?.hashFileCap ?? SNAPSHOT_HASH_FILE_CAP;
   const files = new Map<string, string>();
   let count = 0;
   let skipped = false;
+  let hashPartial = false;
+  let hashedBytes = 0;
+  let hashedFiles = 0;
   const walk = (dir: string, rel: string): void => {
     if (skipped) return;
     let entries: Dirent<string>[];
@@ -101,14 +125,26 @@ export function snapshotProject(projectRoot: string): Snapshot {
       } else if (e.isFile()) {
         try {
           const st = statSync(p);
-          // size:mtime 만으로는 **같은 초 안의 같은 크기 덮어쓰기**를 못 잡는다
-          // (파일시스템 mtime 해상도가 1초인 곳에서 실제로 남 — CI 컨테이너 등).
-          // 작은 파일은 내용 해시를 덧붙여 그 구멍을 막는다 (비용은 1MB 로 상한).
-          const hash =
-            st.size <= SNAPSHOT_HASH_MAX_BYTES
-              ? createHash("sha256").update(readFileSync(p)).digest("hex").slice(0, 16)
-              : "";
-          files.set(r, `${st.size}:${st.mtimeMs}:${hash}`);
+          // 서명 = size : mtimeMs : ctimeMs [ : hash ]
+          //  - size:mtime 만으로는 같은 초 안의 같은 크기 덮어쓰기를 못 잡는다
+          //    (mtime 해상도가 1초인 파일시스템 — CI 컨테이너 등).
+          //  - ctime 은 "mtime 을 되돌려 놓은" 덮어쓰기를 잡는다 (파일당 최대 1MB 밖에서도).
+          //  - hash 는 위 둘로도 안 잡히는 경우를 막는다. **총량 예산**이 있다 —
+          //    파일당 1MB × 10만 파일이면 실행 한 번에 수십 GB 를 읽을 뻔했다.
+          let hash = "";
+          if (
+            st.size <= SNAPSHOT_HASH_MAX_BYTES &&
+            hashedFiles < hashFileCap &&
+            hashedBytes + st.size <= hashTotal
+          ) {
+            hash = createHash("sha256").update(readFileSync(p)).digest("hex").slice(0, 16);
+            hashedBytes += st.size;
+            hashedFiles += 1;
+          } else if (st.size <= SNAPSHOT_HASH_MAX_BYTES) {
+            hashPartial = true;
+          }
+          files.set(r, `${st.size}:${st.mtimeMs}:${st.ctimeMs}:${hash}`);
+          if (++count > fileCap) skipped = true;
         } catch {
           // 소멸·권한: 무시
         }
@@ -116,7 +152,9 @@ export function snapshotProject(projectRoot: string): Snapshot {
     }
   };
   walk(resolve(projectRoot), "");
-  return { files, skipped };
+  const snap: Snapshot = { files, skipped };
+  if (hashPartial) snap.hashPartial = true;
+  return snap;
 }
 
 /** 스냅샷 비교. 변경 목록 (최대 10건). 비어 있으면 변경 없음. */
