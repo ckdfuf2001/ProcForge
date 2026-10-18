@@ -101,6 +101,7 @@ import {
   approvalPins,
   checkApproval,
   toHashableMap,
+  commitApproval,
   saveApproval,
   scopeWarnings,
   toHashable,
@@ -1058,11 +1059,48 @@ export class ProcForgeApp {
       expectedRevision: a.expectedRevision as number | undefined,
       actor: (a.actor as Actor | undefined) ?? "host",
     });
+    // M7-5-e: MCP 승인도 UI 와 **같은** 승인 기록(스냅샷 포함)을 남긴다.
+    // (여기를 빠지면 모델이 승인한 스크립트는 diff 가 영원히 null 이다)
+    this.persistSessionApproval(sid, a.nodeId as string, out.node as never);
     return {
       node: nodeSummary(out.node, s.limits),
       revision: out.revision,
       changedNodeIds: out.changedNodeIds,
     };
+  }
+
+  /** 세션(절차서) 컨텍스트가 있으면 승인 + 스냅샷을 공통 경로로 남긴다 */
+  private persistSessionApproval(
+    sessionId: string,
+    nodeId: string,
+    node: Parameters<typeof buildApprovalEntry>[0],
+  ): void {
+    const st = readRunStateBySession(this.procforgeDir, sessionId);
+    if (!st?.procedureDir) return;
+    const sessionRoot = join(this.procforgeDir, "sessions", sessionId);
+    const readScript = (rel: string): string | undefined => {
+      try {
+        return readSandboxed(sessionRoot, rel);
+      } catch {
+        return undefined;
+      }
+    };
+    try {
+      const entry = buildApprovalEntry(node, [], new Map(), readScript);
+      const spec = (node as { args?: Record<string, { kind?: string; file?: string }> }).args
+        ?.script;
+      const content = spec?.file ? readScript(spec.file) : undefined;
+      commitApproval(
+        st.procedureDir,
+        entry,
+        spec?.file && content !== undefined
+          ? { nodeId, rel: spec.file, content }
+          : undefined,
+      );
+    } catch (e) {
+      // 승인은 이미 core 에 반영됐으므로 여기서 터뜨리지 않는다 (경고만 남긴다)
+      logger.warn("승인 기록 저장 실패(무시)", { sessionId, nodeId, err: String(e) });
+    }
   }
 
   async advise(a: AdviseInput): Promise<OutputOf<"pf_advise">> {
@@ -2142,30 +2180,28 @@ async uiApprove(input: {
   });
   const st = readRunStateBySession(this.procforgeDir, input.sessionId);
   if (st?.procedureDir) {
+    // M7-5-e: sandbox 로 읽는다 (raw readFileSync 는 "../" 로 세션 밖을 읽는다)
+    const sessionRoot = join(this.procforgeDir, "sessions", input.sessionId);
     const entry = buildApprovalEntry(
       out.node as never,
       [],
       new Map(),
       (rel: string) => {
         try {
-          return readFileSync(join(this.procforgeDir, "sessions", input.sessionId, rel), "utf8");
+          return readSandboxed(sessionRoot, rel);
         } catch {
           return undefined;
         }
       },
     );
-    // M7-5-e: 승인 시 스크립트 **내용 스냅샷**을 남긴다. 나중에 diff 를 그릴 유일한 기준.
-    let snapshotArg: { file?: string; snapshot?: string } | undefined;
-    const scriptSpec = info.script;
-
-    if (scriptSpec && st.procedureDir) {
-      const snap = saveApprovedSnapshot(st.procedureDir, input.nodeId, scriptSpec.content);
-      snapshotArg = { file: scriptSpec.rel, snapshot: snap.snapshotRel };
-    }
-    const mergedArgs = snapshotArg
-      ? { ...(entry.args ?? {}), script: snapshotArg }
-      : entry.args;
-    saveApproval(st.procedureDir, { ...entry, args: mergedArgs, approvalHash: info.approvalHash });
+    // M7-5-e: 스냅샷 저장도 공통 경로로 (MCP/CLI 승인도 같은 기준을 갖게)
+    commitApproval(
+      st.procedureDir,
+      { ...entry, approvalHash: info.approvalHash },
+      info.script
+        ? { nodeId: input.nodeId, rel: info.script.rel, content: info.script.content }
+        : undefined,
+    );
   }
   this.recordUiCall(input.sessionId, "pf_approve", input.nodeId);
   // M7-5-c: 승인 대기로 멈췄던 실행을 **이어간다** (이게 없으면 대기에 영박으로 남는다)
@@ -2895,28 +2931,36 @@ async runApprove(a: {
     if (!n) throw pfError("not_found", `노드 없음: ${nodeId} (${procRef})`);
     // M5.5-4.4-5: toHashable 단일 변환 (캐스팅 없음).
     const docById = new Map(doc.nodes.map((x) => [x.id, toHashable(x)]));
-    const entry = buildApprovalEntry(
-      {
-        id: n.id,
-        goal: n.goal,
-        tool: n.tool,
-        args: n.args,
-        constraints: n.constraints,
-        sideEffect: n.sideEffect,
-        map: n.map,
-        until: n.until,
-      },
-      allowWildcard,
-      docById,
-      (rel: string) => {
-        try {
-          return readFileSync(join(dir, rel), "utf8");
-        } catch {
-          return undefined;
-        }
-      },
+    const docNode = {
+      id: n.id,
+      goal: n.goal,
+      tool: n.tool,
+      args: n.args,
+      constraints: n.constraints,
+      sideEffect: n.sideEffect,
+      map: n.map,
+      until: n.until,
+    };
+    // M7-5-d: 절차서 안 스크립트도 sandbox 로 읽는다 ("../" 로 절차서 밖을 못 읽게)
+    const readScript = (rel: string): string | undefined => {
+      try {
+        return readSandboxed(dir, rel);
+      } catch {
+        return undefined;
+      }
+    };
+    const entry = buildApprovalEntry(docNode, allowWildcard, docById, readScript);
+    // M7-5-e: CLI 승인도 스냅샷을 남긴다 (UI/MCP 와 같은 기준)
+    const scriptFile = (n.args as Record<string, { kind?: string; file?: string }> | undefined)
+      ?.script?.file;
+    const scriptContent = scriptFile ? readScript(scriptFile) : undefined;
+    const { path, replaced } = commitApproval(
+      dir,
+      entry,
+      scriptFile && scriptContent !== undefined
+        ? { nodeId: n.id, rel: scriptFile, content: scriptContent }
+        : undefined,
     );
-    const { path, replaced } = saveApproval(dir, entry);
     // M5.6.1-4: 범위 경고를 함께 반환 (CLI 출력).
     const scope = scopeWarnings({
       id: n.id,

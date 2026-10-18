@@ -6,6 +6,7 @@ import { computeNodeHash, type ArgSpec, type Constraint } from "@procforge/share
 import { writeAtomicFile } from "../fsutil.js";
 import { logger } from "../logger.js";
 import { collectRefNodeIds } from "../runner/resolve.js";
+import { saveApprovedSnapshot } from "./approval-scripts.js";
 
 // M5.5-4: 무인 실행 사전 승인 (procedures/<name>/approvals.json).
 // M5.5-4.3-1: v2 형식 {version:2, entries}. 패턴 명시화:
@@ -486,9 +487,28 @@ export function saveApproval(procedureDir: string, entry: ApprovalEntry): { path
   const replaced = ix !== -1;
   if (replaced) list[ix] = entry;
   else list.push(entry);
-  // M5.5-4.3-1: v2 형식으로 저장.
+  // M5.5-4.3-1: v2 단일 파일.
   writeAtomicFile(path, JSON.stringify({ version: 2, entries: list }, null, 2));
   return { path, replaced };
+}
+
+/**
+ * M7-5-e: **공통 승인 저장**.
+ * UI(uiApprove)·MCP(pf_approve)·CLI(approveProcedureNode) 가 모두 이 길로만 적는다.
+ * 이전엔 uiApprove 안에서만 스냅샷을 남겨서, 모델/CLI 로 승인한 스크립트는 diff 가 계속 null 이었다.
+ * (스냅샷이 없으면 "무엇이 승인됐는지"를 나중에 알 수 없다)
+ */
+export function commitApproval(
+  procedureDir: string,
+  entry: ApprovalEntry,
+  script?: { nodeId: string; rel: string; content: string },
+): { path: string; replaced: boolean } {
+  if (!script) return saveApproval(procedureDir, entry);
+  const snap = saveApprovedSnapshot(procedureDir, script.nodeId, script.content);
+  return saveApproval(procedureDir, {
+    ...entry,
+    args: { ...(entry.args ?? {}), script: { file: script.rel, snapshot: snap.snapshotRel } },
+  });
 }
 
 // M5.5-4.1-3: node pin 판정. ok(실행) | stale(해시 변경·갱신 필요) | denied(미승인).
