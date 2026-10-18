@@ -48,9 +48,31 @@ export type UiServer = {
   subscriberCount: (sessionId: string) => number;
 };
 
-/** 전 응답 CSP (M7-ui1. 인라인 스크립트 0 — 번들만 'self') */
-const CSP =
+/** M7-ui1: 기본 CSP (M7-ui1. 인라인 금지·산출물 렌더 0 → 골격 'self') */
+const CSP_BASE =
   "default-src 'self'; script-src 'self'; object-src 'none'; frame-ancestors 'none'";
+
+/**
+ * M7-5-3: 요청별 nonce. style-src 만 nonce 로 연다.
+ * - 'unsafe-inline' 은 넣지 않는다 (넣으면 nonce 를 무력화한다).
+ * - CodeMirror 가 만든 <style> 태그에도 같은 nonce 를 심고,
+ *   화면은 그 값을 EditorView.cspNonce 으로 넘긴다.
+ */
+function cspFor(nonce?: string): string {
+  return nonce === undefined
+    ? CSP_BASE
+    : `${CSP_BASE}; style-src 'self' 'nonce-${nonce}'`;
+}
+
+function freshNonce(): string {
+  return randomBytes(16).toString("base64");
+}
+/** M7-5-3: 응답 객체에 nonce 를 붙인다 (send/err 가 어디서 호출되든 같은 값) */
+const NONCES = new WeakMap<ServerResponse, string>();
+
+function cspOf(res: ServerResponse): string {
+  return cspFor(NONCES.get(res));
+}
 
 /** M7-ui2: 빌드 산출물이 없을 때 (안내만. 스크립트 0 유지) */
 const NO_BUILD_HTML = `<!doctype html>
@@ -62,7 +84,7 @@ const NO_BUILD_HTML = `<!doctype html>
 function err(res: ServerResponse, code: number, msg: string): void {
   res.writeHead(code, {
     "content-type": "application/json",
-    "content-security-policy": CSP,
+    "content-security-policy": cspOf(res),
     // M7-ui4-k: 본문 초과처럼 연결을 끊는 경우에도 헤더가 나가야 한다.
     ...(res.hasHeader("connection") ? { connection: "close" } : {}),
   });
@@ -72,7 +94,7 @@ function err(res: ServerResponse, code: number, msg: string): void {
 function send(res: ServerResponse, v: unknown): void {
   res.writeHead(200, {
     "content-type": "application/json",
-    "content-security-policy": CSP,
+    "content-security-policy": cspOf(res),
   });
   res.end(JSON.stringify(v));
 }
@@ -272,9 +294,22 @@ export async function createUiServer(opts: {
     }
     const dot = p.lastIndexOf(".");
     const ext = dot === -1 ? "" : p.slice(dot);
+    if (ext === ".html" && NONCES.get(res) !== undefined) {
+      // M7-5-3: 화면이 <meta> 또는 전역에서 nonce 를 읽을 수 있게 심어준다.
+      const html = readFileSync(p, "utf8").replace(
+        /<head>/i,
+        `<head><meta name="csp-nonce" content="${NONCES.get(res) as string}">`,
+      );
+      res.writeHead(200, {
+        "content-type": MIME[".html"],
+        "content-security-policy": cspOf(res),
+      });
+      res.end(html);
+      return true;
+    }
     res.writeHead(200, {
       "content-type": MIME[ext] ?? "application/octet-stream",
-      "content-security-policy": CSP,
+      "content-security-policy": cspOf(res),
     });
     res.end(readFileSync(p));
     return true;
@@ -300,6 +335,9 @@ export async function createUiServer(opts: {
         }
         const url = new URL(req.url ?? "/", "http://x");
         // 화면 = React 빌드 산출물만 (골격 경로 제거). 데이터 없음.
+        // M7-5-3: 이 응답의 nonce (정적 HTML 요청마다 새로 발급)
+        // M7-5-3: 이 응답의 nonce (JSON·정적 파일 전부 같은 값)
+        NONCES.set(res, freshNonce());
         if (
           req.method === "GET" &&
           (url.pathname === "/" || url.pathname === "/index.html")
@@ -307,7 +345,7 @@ export async function createUiServer(opts: {
           if (hasDist && serveFile(res, "index.html")) return;
           res.writeHead(200, {
             "content-type": "text/html; charset=utf-8",
-            "content-security-policy": CSP,
+            "content-security-policy": cspOf(res),
           });
           res.end(NO_BUILD_HTML);
           return;
@@ -387,7 +425,7 @@ export async function createUiServer(opts: {
             "x-content-type-options": "nosniff",
             // basename + filename* (UTF-8). 경로는 절대 넣지 않는다.
             "content-disposition": `attachment; filename="${content.downloadName}"; filename*=UTF-8''${encodeURIComponent(content.downloadName)}`,
-            "content-security-policy": CSP,
+            "content-security-policy": cspOf(res),
           });
           res.end(content.bytes);
           return;
@@ -518,7 +556,7 @@ export async function createUiServer(opts: {
             "content-type": "text/event-stream; charset=utf-8",
             "cache-control": "no-cache",
             connection: "keep-alive",
-            "content-security-policy": CSP,
+            "content-security-policy": cspOf(res),
           });
           res.flushHeaders();
           let closed = false;
@@ -589,7 +627,7 @@ export async function createUiServer(opts: {
             "content-type": "text/event-stream; charset=utf-8",
             "cache-control": "no-cache",
             connection: "keep-alive",
-            "content-security-policy": CSP,
+            "content-security-policy": cspOf(res),
           });
           // 헤더를 즉시 내보내야 클라 fetch가 resolve 된다 (버퍼에 갇히면 hang).
           res.flushHeaders();

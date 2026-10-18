@@ -197,6 +197,39 @@ describe("M7 5-2 승인 POST", () => {
   }, 30000);
 });
 
+describe("M7 5-3 CSP nonce", () => {
+  it("style-src nonce가 있고 unsafe-inline 은 없다 (요청마다 다른 값)", async () => {
+    const { app } = await withScriptNode();
+    const srv = await sharedServer(app);
+    const html1 = await fetch(`${srv.url}/index.html`);
+    const csp1 = String(html1.headers.get("content-security-policy"));
+    const html2 = await fetch(`${srv.url}/index.html`);
+    const csp2 = String(html2.headers.get("content-security-policy"));
+    expect(csp1).toContain("style-src 'self' 'nonce-");
+    expect(csp1).not.toContain("unsafe-inline");
+    expect(csp1).toContain("script-src 'self'");
+    // 요청마다 다른 nonce
+    const n1 = /nonce-([^']+)/.exec(csp1)?.[1];
+    const n2 = /nonce-([^']+)/.exec(csp2)?.[1];
+    expect(n1).toBeTruthy();
+    expect(n2).not.toBe(n1);
+    // 화면이 읽을 수 있게 HTML 에 심어준다
+    const body = await html1.text();
+    expect(body).toContain(`content="${n1}"`);
+  }, 30000);
+
+  it("JSON 응답에도 같은 규칙이 적용된다", async () => {
+    const { app, sid } = await withScriptNode();
+    const srv = await sharedServer(app);
+    const r = await fetch(`${srv.url}/api/sessions/${sid}/nodes/1.1`, {
+      headers: { "x-procforge-token": srv.token },
+    });
+    const csp = String(r.headers.get("content-security-policy"));
+    expect(csp).toContain("style-src 'self' 'nonce-");
+    expect(csp).not.toContain("unsafe-inline");
+  }, 30000);
+});
+
 describe("M7 5-2 diff 유틸", () => {
   it("추가/삭제 줄이 표시된다", () => {
     const d = unifiedDiff("a\nb\nc", "a\nx\nc", "old", "new");
