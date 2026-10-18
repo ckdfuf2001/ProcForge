@@ -106,11 +106,20 @@ describe("M7 5-1 동시 실행 409", () => {
       (e: Error) => e.message,
     );
     expect(second).toMatch(/이미 실행 중/);
-    // 취소하면 다시 시작할 수 있다
+    // 취소하면 (백그라운드 진행이 실제로 멈춘 뒤에) 다시 시작할 수 있다
     await a.uiRunCancel({ runId: first.runId });
-    await new Promise((r) => setTimeout(r, 50));
-    const third = await a.uiRun({ procedure: "demo", params: { month: "2026-10" } });
-    expect(third.runId).not.toBe(first.runId);
+    let third: { runId: string } | null = null;
+    for (let i = 0; i < 100 && third === null; i++) {
+      third = await a
+        .uiRun({ procedure: "demo", params: { month: "2026-10" } })
+        .then(
+          (r) => r,
+          () => null,
+        );
+      if (third === null) await new Promise((r) => setTimeout(r, 50));
+    }
+    expect(third).not.toBeNull();
+    expect(third?.runId).not.toBe(first.runId);
   });
 });
 
