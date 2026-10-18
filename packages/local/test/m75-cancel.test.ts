@@ -28,6 +28,8 @@ const SCRIPT = [
 
 async function running() {
   const pfdir = join(mkdtempSync(join(tmpdir(), "pf-cancel-e2e-")), ".procforge");
+  // remote 모드에서는 로컬 pfdir 이 아직 없다 (core 는 별도 dataDir)
+  mkdirSync(pfdir, { recursive: true });
   const { client } = testStack(pfdir);
   const app = new ProcForgeApp({ core: client, procforgeDir: pfdir, projectRoot: pfdir });
   const s = await app.start({ request: "run", toolCatalog: catalog as never });
