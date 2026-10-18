@@ -329,5 +329,6 @@ export function startServer(opts: {
       );
     });
   };
-  return attempt(10);
+  // M7-5-3: 재시도 예산 확대 (Windows loopback ephemeral 포트 고갈 대비)
+  return attempt(16);
 }

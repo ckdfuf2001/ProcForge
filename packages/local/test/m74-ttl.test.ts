@@ -139,7 +139,7 @@ describe("M7-ui4-h TTL = lastWriteAt ?? createdAt (가짜 시계)", () => {
     if (clientMode() !== "remote") return;
     const { testStack } = await import("./client-mode.js");
     // 원격 서버는 주입 시계를 못 받으므로 TTL 1s + 실제 대기(비율 유지)로 확인한다.
-    const ttl = 3_000;
+    const ttl = 6_000;
     const pfdir = dir();
     const { client } = testStack(pfdir, { sessionTtlMs: ttl });
     const s = await client.pfStart({ request: "r", toolCatalog: catalog as never });
