@@ -464,7 +464,10 @@ export async function createUiServer(opts: {
                 sessionId: pathId(mApprove[1], "sessionId"),
                 nodeId: pathId(mApprove[2], "nodeId"),
                 approvalHash: String(body.approvalHash),
-                approved: body.approved !== false,
+                // M7-5-i: 생략을 승인으로 보지 않는다 — 필수 boolean, 없으면 400
+                ...(typeof body.approved === "boolean"
+                  ? { approved: body.approved }
+                  : { approved: undefined as unknown as boolean }),
                 ...(body.note !== undefined ? { note: String(body.note) } : {}),
                 expectedRevision: Number(body.expectedRevision),
               }),

@@ -91,6 +91,11 @@ import {
 } from "./run-control.js";
 import { unifiedDiff } from "../services/diff.js";
 import {
+  readSandboxed,
+  saveApprovedSnapshot,
+  readApprovedSnapshot,
+} from "../services/approval-scripts.js";
+import {
   buildApprovalEntry,
   loadApprovals,
   approvalPins,
@@ -2017,9 +2022,10 @@ async uiApprovalInfo(input: { sessionId: string; nodeId: string }): Promise<{
   const n = await this.core.getNode(sid, nid);
   const tree = await this.core.pfTree(sid);
   const byId = new Map(tree.nodes.map((x) => [x.id, x]));
+  // M7-5-g: realpath sandbox + 5MB 상한 (rel 은 모델이 적은 값이라 ../ 가 들어온다)
   const readScript = (rel: string): string | undefined => {
     try {
-      return readFileSync(join(this.procforgeDir, "sessions", sid, rel), "utf8");
+      return readSandboxed(join(this.procforgeDir, "sessions", sid), rel);
     } catch {
       return undefined;
     }
@@ -2044,16 +2050,14 @@ async uiApprovalInfo(input: { sessionId: string; nodeId: string }): Promise<{
       sha256: createHash("sha256").update(content, "utf8").digest("hex"),
       content,
     };
-    // 승인 이력의 스크립트와 현재본의 차이 (없으면 null)
+    // M7-5-e: diff 는 **승인 스냅샷**과 비교한다. (이력의 파일 경로를 다시 읽으면 그 파일이
+    // 이미 현재본이라 항상 같아져 diff 가 늘 null 이 된다)
     const st = readRunStateBySession(this.procforgeDir, sid);
-    if (st) {
-      const prev = loadApprovals(st.procedureDir ?? "").find(
-        (e) => e.node.id === nid,
-      );
-      const prevFile = prev?.args?.script as { file?: string } | undefined;
-      const prevScript = prevFile?.file ? readScript(prevFile.file) : undefined;
+    if (st?.procedureDir) {
+      const prevScript = readApprovedSnapshot(st.procedureDir, nid);
+
       if (prevScript !== undefined && prevScript !== content) {
-        diff = unifiedDiff(prevScript, content, prevFile?.file ?? "(approved)", rel);
+        diff = unifiedDiff(prevScript, content, "approved", rel);
       }
     }
   }
@@ -2084,6 +2088,11 @@ async uiApprove(input: {
   }
   if (!input.approvalHash) {
     throw pfError("bad_request", "approvalHash 필수 (M7-5-2)");
+  }
+  // M7-5-i: 승인은 **명시**해야 한다. 빠지면 승인으로 간주하면 안 된다
+  // (요청을 조용히 승인으로 만들어 버리는 구멍).
+  if (typeof input.approved !== "boolean") {
+    throw pfError("bad_request", "approved 는 boolean 으로 명시해야 합니다 (M7-5-i).");
   }
   const info = await this.uiApprovalInfo({
     sessionId: input.sessionId,
@@ -2117,7 +2126,18 @@ async uiApprove(input: {
         }
       },
     );
-    saveApproval(st.procedureDir, { ...entry, approvalHash: info.approvalHash });
+    // M7-5-e: 승인 시 스크립트 **내용 스냅샷**을 남긴다. 나중에 diff 를 그릴 유일한 기준.
+    let snapshotArg: { file?: string; snapshot?: string } | undefined;
+    const scriptSpec = info.script;
+
+    if (scriptSpec && st.procedureDir) {
+      const snap = saveApprovedSnapshot(st.procedureDir, input.nodeId, scriptSpec.content);
+      snapshotArg = { file: scriptSpec.rel, snapshot: snap.snapshotRel };
+    }
+    const mergedArgs = snapshotArg
+      ? { ...(entry.args ?? {}), script: snapshotArg }
+      : entry.args;
+    saveApproval(st.procedureDir, { ...entry, args: mergedArgs, approvalHash: info.approvalHash });
   }
   this.recordUiCall(input.sessionId, "pf_approve", input.nodeId);
   // M7-5-c: 승인 대기로 멈췄던 실행을 **이어간다** (이게 없으면 대기에 영박으로 남는다)
@@ -2147,7 +2167,11 @@ private hasCurrentApproval(
     pins.some(
       (p) =>
         p.id === e.node.id &&
-        (e.approvalHash === undefined || e.approvalHash === p.approvalHash),
+        // M7-5-f: 해시 없는 이력(v1)은 **미승인**으로 본다. 예외를 두면
+        // "스크립트가 바뀌면 무효" 원칙에 구멍이 된다.
+        typeof e.approvalHash === "string" &&
+        e.approvalHash.length > 0 &&
+        e.approvalHash === p.approvalHash,
     ),
   );
 }
