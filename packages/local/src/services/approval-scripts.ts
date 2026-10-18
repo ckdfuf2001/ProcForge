@@ -89,12 +89,18 @@ export function readSandboxed(
   } catch {
     throw pfError("not_found", "루트가 없다.");
   }
+  // M7-5-d: lexical 1차 검사. 파일이 없어도 "../" 탈출은 **즉시** bad_request
+  // (realpath 는 ENOENT 를 먼저 던져 "바깥 경로"와 "없는 파일"을 섞어 준다)
+  if (abs !== realRoot && !abs.startsWith(realRoot + sep)) {
+    throw pfError("bad_request", "허용 디렉터리 밖이다.");
+  }
   let real: string;
   try {
     real = realpathSync(abs);
   } catch {
     throw pfError("not_found", "파일이 없다.");
   }
+  // 2차 검사: 심링크로 튀어나온 경로까지 막는다
   if (real !== realRoot && !real.startsWith(realRoot + sep)) {
     throw pfError("bad_request", "허용 디렉터리 밖이다.");
   }

@@ -157,31 +157,66 @@ describe("M7-5-f approvalHash 없는 이력 = 미승인", () => {
   }, 60000);
 });
 
-describe("M7-5-g 스크립트 읽기 sandbox", () => {
-  it("../ 경로는 거부된다 (화면으로 새지 않는다)", async () => {
-    const { app, sid, sdir } = await withScriptNode();
-    // 세션 밖 비밀 파일
-    writeFileSync(join(pfdir, "secret.txt"), "TOP-SECRET", "utf8");
-    // leaf 인자를 탈출 경로로 바꾼다 (모델이 적은 값을 흉내낸 상황)
-    await app.confirmLeaf({
-      sessionId: sid,
+describe("M7-5-d 스크립트 읽기 sandbox e2e", () => {
+  /**
+   * "../" 를 가진 leaf 를 **픽스처에서 직접** 만든다.
+   * (이전 테스트는 이미 확정된 노드에 confirmLeaf 를 다시 걸어 인자가 안 바뀌었고,
+   *  비밀 값이 안 보인다는 건 당연한 결과였다)
+   */
+  async function sessionWithEscapeScript(rel: string) {
+    const { client } = testStack(pfdir);
+    const app = new ProcForgeApp({
+      core: client,
+      procforgeDir: pfdir,
+      projectRoot: pfdir,
+    });
+    const s = await app.start({ request: "r", toolCatalog: catalog as never });
+    await app.split({
+      sessionId: s.sessionId,
+      nodeId: "1",
+      children: [{ goal: "a" }],
+      expectedRevision: 0,
+    });
+    await app.report({
+      sessionId: s.sessionId,
       nodeId: "1.1",
       tool: { server: "fs", name: "read" },
-      argSpecs: { script: { kind: "script", file: "../../secret.txt", runtime: "python" } },
-      expectedRevision: (await app.readSession(sid)).revision,
-    }).catch(() => undefined);
+      args: {},
+      resultSummary: "ok",
+      selfVerdict: "pass",
+      selfReason: "ok",
+    });
+    // 만들 때부터 탈출 경로를 넣는다 (그래야 실제 경로가 들어간다)
+    await app.confirmLeaf({
+      sessionId: s.sessionId,
+      nodeId: "1.1",
+      tool: { server: "fs", name: "read" },
+      argSpecs: { script: { kind: "script", file: rel, runtime: "python" } },
+    });
+    return { app, sid: s.sessionId };
+  }
+
+  it("../ 경로 노드는 본문을 새지 않는다", async () => {
+// "../secret.txt" 는 **세션 디렉터리 바깥**(sessions/secret.txt)을 가리킨다.
+    // 거기 실제로 파일을 둔다 — 없으면 "안 보임"이 아니라 "파일이 없어서 안 보임"이다.
+    mkdirSync(join(pfdir, "sessions"), { recursive: true });
+    writeFileSync(join(pfdir, "sessions", "secret.txt"), "TOP-SECRET", "utf8");
+    const { app, sid } = await sessionWithEscapeScript("../secret.txt");
     const info = await app.uiApprovalInfo({ sessionId: sid, nodeId: "1.1" });
-    const text = JSON.stringify(info);
-    expect(text).not.toContain("TOP-SECRET");
-    void sdir;
+    expect(JSON.stringify(info)).not.toContain("TOP-SECRET");
+    // 못 읽었으므로 본문은 비어 있다
+    expect(info.script?.content ?? "").toBe("");
   }, 60000);
 
-  it("상한(5MB) 초과 스크립트는 읽지 않는다", async () => {
-    const { app, sid, sdir } = await withScriptNode("scripts/big.py");
-    writeFileSync(join(sdir, "scripts/big.py"), "x".repeat(6 * 1024 * 1024), "utf8");
+  it("sandbox 안 경로 노드는 본문을 준다 (대조군)", async () => {
+    const sdir = join(pfdir, "sessions");
+    mkdirSync(sdir, { recursive: true });
+    const { app, sid } = await sessionWithEscapeScript("scripts/inside.py");
+    const sess = join(sdir, sid, "scripts");
+    mkdirSync(sess, { recursive: true });
+    writeFileSync(join(sess, "inside.py"), "print('v1')\n", "utf8");
     const info = await app.uiApprovalInfo({ sessionId: sid, nodeId: "1.1" });
-    // 상한을 넘으면 스크립트 본문을 주지 않는다 (빈 content)
-    expect(info.script?.content.length ?? 0).toBeLessThan(6 * 1024 * 1024);
+    expect(info.script?.content).toContain("print('v1')");
   }, 60000);
 });
 
