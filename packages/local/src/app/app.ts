@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { randomUUID, createHash } from "node:crypto";
 import { join, resolve } from "node:path";
 import type { CoreClient } from "@procforge/shared/core-client.js";
@@ -121,6 +121,7 @@ import {
   readRunState,
   readRunStateBySession,
   writeRunState,
+  type RunState,
 } from "../services/run-state.js";
 import {
   writeJUnitFile,
@@ -265,6 +266,33 @@ export class ProcForgeApp {
   private activeRuns = new Map<string, string>();
   /** M7-5-c: 결정 대기(승인·생성값) 중 잠금 유지 중인 run */
   private waitingRuns = new Set<string>();
+
+  /**
+   * M7-5-b: **디스크**에 기록된 대기 실행 (재시작 후에도 잠금이 살아 있어야 한다).
+   * 취소/거부로 잠금이 풀리면 state 에 waiting 이 사라지므로 자동으로 제외된다.
+   */
+  private waitingRunFor(procedure: string): string | undefined {
+    const runsDir = join(this.procforgeDir, "runs");
+    let names: string[];
+    try {
+      names = readdirSync(runsDir);
+    } catch {
+      return undefined;
+    }
+    for (const name of names) {
+      const st = readRunState(this.procforgeDir, name) as
+        | (RunState & { waiting?: { nodeId: string; at: string } })
+        | undefined;
+      if (!st?.waiting) continue;
+      if (st.procedure !== procedure) continue;
+      if (st.status === "done" || st.status === "failed" || st.status === "cancelled") {
+        continue;
+      }
+      if (readCancelFlag(this.procforgeDir, st.runId)) continue;
+      return st.runId;
+    }
+    return undefined;
+  }
 
   constructor(deps: AppDeps) {
     this.core = deps.core;
@@ -2141,10 +2169,47 @@ async uiApprove(input: {
   }
   this.recordUiCall(input.sessionId, "pf_approve", input.nodeId);
   // M7-5-c: 승인 대기로 멈췄던 실행을 **이어간다** (이게 없으면 대기에 영박으로 남는다)
-  if (input.approved && st?.procedure) {
-    this.resumeRunIfWaiting(input.sessionId === st.sessionId ? (st.runId ?? "") : "", st.procedure);
+  // M7-5-c: 승인은 진행을 재개하고, **거부는 끝낸다**.
+  // 거부만 해놓고 대기 상태로 두면 그 절차서가 409 고착이다.
+  const waitingRun = this.waitingRunBySession(input.sessionId);
+  if (waitingRun) {
+    if (input.approved) {
+      this.resumeRunIfWaiting(waitingRun.runId, waitingRun.procedure);
+    } else {
+      this.finishRun(waitingRun.runId, waitingRun.procedure, "info", "거부됨 — 실행 종료", input.nodeId);
+      writeRunState(this.procforgeDir, {
+        ...(readRunState(this.procforgeDir, waitingRun.runId) as RunState),
+        status: "cancelled",
+        waiting: undefined,
+        updatedAt: new Date().toISOString(),
+      });
+    }
   }
   return { nodeId: input.nodeId, approvalHash: info.approvalHash, approved: input.approved };
+}
+
+/** M7-5-b: 이 세션에서 결정을 기다리는 실행 (디스크 기준) */
+private waitingRunBySession(
+  sessionId: string,
+): { runId: string; procedure: string } | undefined {
+  const runsDir = join(this.procforgeDir, "runs");
+  let names: string[];
+  try {
+    names = readdirSync(runsDir);
+  } catch {
+    return undefined;
+  }
+  for (const name of names) {
+    const st = readRunState(this.procforgeDir, name) as
+      | (RunState & { waiting?: { nodeId: string } })
+      | undefined;
+    if (!st?.waiting) continue;
+    if (st.sessionId !== sessionId) continue;
+    if (st.status === "done" || st.status === "failed" || st.status === "cancelled") continue;
+    if (readCancelFlag(this.procforgeDir, st.runId)) continue;
+    return { runId: st.runId, procedure: st.procedure };
+  }
+  return undefined;
 }
 
 private hasAnyApproval(sessionId: string, nodeId: string): boolean {
@@ -2227,6 +2292,12 @@ private hasCurrentApproval(
     if (running) {
       throw pfError("conflict", `이미 실행 중입니다 (run ${running}).`);
     }
+    // M7-5-b: **재시작 후에도** 대기 중인 실행이 잠금을 쥔다.
+    // (메모리 맵만 보면 서버를 다시 켤 때 조용히 사라져 같은 절차서가 두 번 돈다)
+    const persisted = this.waitingRunFor(doc.name);
+    if (persisted) {
+      throw pfError("conflict", `이미 실행 중입니다 (run ${persisted}).`);
+    }
     const started = await this.runStart({ procedure: ref, params });
     this.activeRuns.set(doc.name, started.runId);
     appendRunLog(this.procforgeDir, started.runId, {
@@ -2264,6 +2335,20 @@ private hasCurrentApproval(
     }
     this.recordUiCall(st.sessionId, "pf_run_cancel", "", undefined);
     const r = await cancelRun(this.procforgeDir, runId, "UI 실행 화면에서 취소");
+    // M7-5-b: **대기 중** 취소는 driveRun 이 이미 빠져나갔으므로 그���을 읽을 주체가 없다.
+    // 여기서 바로 잠금을 푼다 (안 하면 그 절차서는 409 고착).
+    if (this.waitingRuns.has(runId)) {
+      const wst = readRunState(this.procforgeDir, runId) as RunState | undefined;
+      if (wst?.procedure) this.finishRun(runId, wst.procedure, "info", "대기 중 취소됨");
+      if (wst) {
+        writeRunState(this.procforgeDir, {
+          ...wst,
+          status: "cancelled",
+          waiting: undefined,
+          updatedAt: new Date().toISOString(),
+        });
+      }
+    }
     appendRunLog(this.procforgeDir, runId, {
       level: "info",
       message: `취소 요청 (자식 ${r.children.length}개 종료 시도)`,
@@ -2307,7 +2392,7 @@ private hasCurrentApproval(
           this.finishRun(runId, procedure, "info", "취소됨");
           return;
         }
-        const step = await this.runStep(runId);
+        const step = await this.runStep(runId, { unattended: true });
         if (readCancelFlag(this.procforgeDir, runId)) {
           this.finishRun(runId, procedure, "info", "취소됨");
           return;
@@ -2375,11 +2460,24 @@ private hasCurrentApproval(
    * uiApprove / 생성값 제공이 이 경로를 탄다 (이게 없으면 대기에 영박으로 남는다).
    */
   private resumeRunIfWaiting(runId: string, procedure: string): void {
-    if (!this.waitingRuns.delete(runId)) return;
+    // M7-5-b: 재개 가능 여부는 **디스크 상태**로 판정한다.
+    // (메모리 세트만 보면 재시작 후 승인을 받아도 조용히 실패한다)
+    const st = readRunState(this.procforgeDir, runId) as RunState | undefined;
+    if (!st) return;
+    if (st.status === "done" || st.status === "failed" || st.status === "cancelled") return;
+    this.waitingRuns.delete(runId);
     if (readCancelFlag(this.procforgeDir, runId)) {
       this.finishRun(runId, procedure, "info", "취소됨");
       return;
     }
+    // 대기 표식을 먼저 지운다 (다시 멈추면 driveRun 이 다시 심는다)
+    writeRunState(this.procforgeDir, {
+      ...st,
+      status: "running",
+      waiting: undefined,
+      updatedAt: new Date().toISOString(),
+    });
+    this.activeRuns.set(procedure, runId);
     appendRunLog(this.procforgeDir, runId, {
       level: "info",
       message: "결정 반영 — 실행을 이어갑니다",
@@ -2426,7 +2524,7 @@ private hasCurrentApproval(
   }
 
   /** run 1스텝 진행 (M5, pf_run_next/supply 공용). 결정적 구간 자동 진행. */
-  async runStep(runId: string): Promise<
+  async runStep(runId: string, opts?: { unattended?: boolean }): Promise<
     | {
         kind: "need_generated";
         runId: string;
@@ -2536,6 +2634,12 @@ private hasCurrentApproval(
         pending,
         done,
         status: "suspended",
+        // M7-5-b: 대기 표식은 **무인 구동**(uiRun)일 때만 남긴다.
+        // (runNext 로 한 걸음씩 조종하는 쪽은 호출자가 다음 걸음을 고르기 때문에
+        //  여기에 남기면 승인 시 driveRun 과 세션이 서로 잠글 것이다)
+        ...(opts?.unattended
+          ? { waiting: { nodeId: susp.nodeId, kind, at: new Date().toISOString() } }
+          : {}),
         suspended: {
           nodeId: susp.nodeId,
           kind,
@@ -2719,25 +2823,49 @@ private hasCurrentApproval(
   }
 
   /** run external 승인 (M5, CLI 전용) */
-  async runApprove(a: {
+async runApprove(a: {
     runId: unknown;
     nodeId: unknown;
+    /** M7-5-b: false 면 **거부** — 대기를 끝내고 잠금을 푼다 */
+    approved?: unknown;
   }): Promise<{ runId: string; nodeId: string; approved: boolean }> {
     const runId = a.runId as string;
     const nodeId = a.nodeId as string;
     if (!runId || !nodeId)
-      throw pfError("bad_request", "runId·nodeId가 필요하다.");
+      throw pfError("bad_request", "runId와nodeId가 필요합니다.");
     const st = readRunState(this.procforgeDir, runId);
     if (!st) throw pfError("not_found", `run ${runId} not found`);
     if (!st.pending.includes(nodeId))
-      throw pfError("bad_request", `대기 중인 노드가 아님: ${nodeId}`);
+      throw pfError("bad_request", `이 실행에서 대기 중이던 노드가 아닙니다: ${nodeId}`);
+    const approvedFlag = a.approved !== false;
+    if (!approvedFlag) {
+      // M7-5-b: 거부를 "대기 유지"로 두면 그 절차서가 409 고착이다 → **끝낸다**.
+      writeRunState(this.procforgeDir, {
+        ...st,
+        suspended: undefined,
+        waiting: undefined,
+        status: "cancelled",
+        updatedAt: new Date().toISOString(),
+      });
+      this.finishRun(runId, st.procedure, "info", "승인 거부 — 실행 종료", nodeId);
+      this.activeRuns.delete(st.procedure);
+      this.waitingRuns.delete(runId);
+      return { runId, nodeId, approved: false };
+    }
     const approved = [...new Set([...st.approved, nodeId])];
     writeRunState(this.procforgeDir, {
       ...st,
       approved,
       suspended: undefined,
+      waiting: undefined,
       status: "ready",
+      updatedAt: new Date().toISOString(),
     });
+    // M7-5-b: 승인만 기록하고 멈춰두면 실행이 그대로 얼어붙는다 → **이어서 돌린다**.
+    // 단, uiRun 으로 떠서 driveRun 이主導이던 실행만 해당한다.
+    // (runStart/runNext 로 한 걸음씩 조종하는 쪽은 호출자가 다음 걸음을irn다 —
+    //  여기서까지 대신 굴리면 세션 잠선이 충돌한다)
+    if (st.waiting) this.resumeRunIfWaiting(runId, st.procedure);
     return { runId, nodeId, approved: true };
   }
 

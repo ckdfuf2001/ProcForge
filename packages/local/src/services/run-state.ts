@@ -23,7 +23,13 @@ export type RunState = {
   /** 승인된 external 노드 */
   approved: string[];
   suspended?: { nodeId: string; kind: RunSuspendKind; missing?: string[] };
-  status: "ready" | "running" | "suspended" | "done" | "failed";
+  /**
+   * M7-5-b: 사람의 결정을 기다리는 중인지 (영속).
+   * 메모리에만 두면 서버 재시작 후 재개할 수 없어서 **여기** 적는다 —
+   * 이 상태가 잠금 보유의 근거다 (기억에만 두면 409 고착).
+   */
+  waiting?: { nodeId: string; kind: RunSuspendKind; at: string };
+  status: "ready" | "running" | "suspended" | "done" | "failed" | "cancelled";
   failedNodeId?: string;
   failedDetail?: string;
   summary?: { pass: number; fail: number; unverified: number; skipped: number; blocked: number; suspended: number };
