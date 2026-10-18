@@ -977,3 +977,17 @@ argv: [...]}` 고정. runner는 run fs에서 직접 실행해 stdout을 golden�
  - [M7-5-g] 승인 화면의 스크립트 읽기는 realpath sandbox + 5MB 상한(M7-ui3-3 공통).
  - [M7-5-h] diff 의 LCS 표는 **크기 검사 뒤에** 만든다. 넘으면 "diff 생략"을 알린다.
  - [M7-5-i] 승인 POST 의 approved 는 boolean 필수 — 빠지면 400(조용한 승인 금지).
+### M7-5 보정3 (2026-10-18)
+
+ - [M7-5 보정3-a] 실행 디렉터리 스냅샷 서명 = `size:mtimeMs:ctimeMs[:hash]`.
+   `size:mtime` 만으로는 mtime 해상도가 1초인 파일시스템에서 같은 크기 덮어쓰기를 놓치고,
+   mtime 을 되돌려 놓은 덮어쓰기는 ctime 으로 잡는다. 내용 해시는 **총량 예산**(64MB·1만 파일) 안에서만
+   읽고, 소진 뒤에는 stat 만 기록하며 `hashPartial` 로 표시한다. 파일 수 상한(10만)을 넘기면
+   `skipped` 로 표시하고 walk 를 중단한다(조용히 일부만 비교하지 않는다).
+ - [M7-5 보정3-b] **Windows 는 부모가 먼저 종료된 손자 프로세스를 보장하지 못한다.**
+   `taskkill /T` 는 부모가 살아 있을 때만 트리를 찾아 종료하므로, 스크립트가 손자를 띄우고
+   먼저 끝나면 손자는 트리에서 빠져 살아남는다. 확실한 해법은 job object(KILL_ON_JOB_CLOSE) 이지만
+   Node 표준 기능으로는 불가능하다 -> **M8 에서 검토**. 지금은 기록만 남긴다.
+ - [M7-5 보정3-c] `runApprove` 의 자동 재개는 **uiRun 무인 구동에서만** 한다.
+   `runStart`/`runNext` 로 한 걸음씩 조종하는 쪽은 호출자가 다음 단계를 결정하므로 재개하지 않는다
+   (그렇게 하면 driveRun 과 호출자가 세션 잠선으로 충돌한다 - m5-live 충돌 사례).
