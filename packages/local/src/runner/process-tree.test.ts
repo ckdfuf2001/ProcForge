@@ -21,26 +21,7 @@ describe("M7-5-c SIGTERM 을 무시하는 프로세스", () => {
   it.runIf(process.platform !== "win32")(
     "SIGTERM trap 손자까지 그룹 SIGKILL 로 끝난다",
     async () => {
-      // 손자가 SIGTERM 을 무시하고 버틴다
-      const script = join(root, "stubborn.mjs");
-      writeFileSync(
-        script,
-        [
-          "import { spawn } from 'node:child_process';",
-          "const kid = spawn(process.execPath, ['-e',",
-          "  \"process.on('SIGTERM', () => {}); setTimeout(()=>{}, 60000);\"",
-          "], { stdio: 'ignore' });",
-          "process.stdout.write(String(kid.pid));",
-          "setTimeout(()=>{}, 60000);",
-        ].join("\n"),
-      );
-      const killed = new Promise<string>((resolveP) => {
-        const timer = setTimeout(() => resolveP(""), 15000);
-        // runScript 는 실패해도 reject 하므로 here 로 출력만 받지 않는다
-        clearTimeout(timer);
-      });
-      void killed;
-      // 직접 트리 구조를 만들어 직접 검증한다 (runScript 경로와 같은 함수 사용)
+      // 부모가 손자를 띄우고 버티는 구조 (runScript 와 같은 killProcessTree 을 쓴다)
       const { spawn } = await import("node:child_process");
       const child = spawn(
         process.execPath,
@@ -94,7 +75,7 @@ describe("M7-5-c SIGTERM 을 무시하는 프로세스", () => {
     const elapsed = Date.now() - t0;
     expect(err).not.toBeNull();
     expect(String(err?.message)).toMatch(/타임아웃/);
-    // 유예(1.5s) 안에 끝나야 Event Loop 도 막히지 않는다
-    expect(elapsed).toBeLessThan(20_000);
+    // 800ms 타임아웃 + 1.5s 유예 = 3초 남짓. 이보다 길면 이벤트 루프가 막힌 것이다.
+    expect(elapsed).toBeLessThan(5000);
   }, 60000);
 });
