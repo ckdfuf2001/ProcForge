@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync, readdirSync, statSync, type Dirent } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync, type Dirent } from "node:fs";
+import { createHash } from "node:crypto";
 import { delimiter, join, resolve } from "node:path";
 
 // 스크립트 leaf 실행 (M5.2-2). runner가 run fs에서 호스트 스크립트를 실행.
@@ -39,6 +40,8 @@ const ENV_ALLOW = new Set([
 const SNAPSHOT_SKIP = new Set([".procforge", "node_modules", ".git"]);
 
 const SNAPSHOT_FILE_CAP = 100000;
+/** M7-5-a: 내용 해시를 붙일 파일 크기 상한 (이하만 해시한다) */
+const SNAPSHOT_HASH_MAX_BYTES = 1024 * 1024;
 
 export type ScriptResult = {
   summary: string;
@@ -98,8 +101,14 @@ export function snapshotProject(projectRoot: string): Snapshot {
       } else if (e.isFile()) {
         try {
           const st = statSync(p);
-          files.set(r, `${st.size}:${Math.floor(st.mtimeMs)}`);
-          if (++count > SNAPSHOT_FILE_CAP) skipped = true;
+          // size:mtime 만으로는 **같은 초 안의 같은 크기 덮어쓰기**를 못 잡는다
+          // (파일시스템 mtime 해상도가 1초인 곳에서 실제로 남 — CI 컨테이너 등).
+          // 작은 파일은 내용 해시를 덧붙여 그 구멍을 막는다 (비용은 1MB 로 상한).
+          const hash =
+            st.size <= SNAPSHOT_HASH_MAX_BYTES
+              ? createHash("sha256").update(readFileSync(p)).digest("hex").slice(0, 16)
+              : "";
+          files.set(r, `${st.size}:${st.mtimeMs}:${hash}`);
         } catch {
           // 소멸·권한: 무시
         }
