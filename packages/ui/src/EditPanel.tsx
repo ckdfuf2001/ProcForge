@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, subscribeEvents, ApiError } from "./api.js";
+import { JsonEditor, type ServerError } from "./JsonEditor.js";
 
 // M7-ui4: 텍스트 편집(인자 JSON) + 의견 + stale 미리보기.
 // 판단 if문 금지 — 표시 매핑만. 입력값은 textContent로만 렌더한다.
@@ -17,6 +18,8 @@ export function EditPanel({
   const [goalText, setGoalText] = useState("");
   const [adviceText, setAdviceText] = useState("");
   const [preview, setPreview] = useState<{ wouldStale: string[]; newHash: string } | null>(null);
+  // M7-5-3: 서버가 돌려준 오류만 CM6 에 매핑한다 (스키마 검증은 서버 몫)
+  const [argErrors, setArgErrors] = useState<ServerError[]>([]);
   const [saved, setSaved] = useState<string | null>(null);
   const [conflict, setConflict] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -66,6 +69,7 @@ export function EditPanel({
   const runPreview = async () => {
     setBusy(true);
     setError(null);
+    setArgErrors([]);
     try {
       let change: Record<string, unknown> = {};
       try {
@@ -79,10 +83,16 @@ export function EditPanel({
         nodeId,
         expectedRevision: revision,
         change,
-      })) as { wouldStale: string[]; newHash: string };
+      })) as { wouldStale: string[]; newHash: string; errors?: ServerError[] };
       setPreview(r);
+      // 서버가 준 오류만 위치에 매핑한다 (문법 오류는 CM6 jsonParseLinter 가 본다)
+      setArgErrors(r.errors ?? []);
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : String(e));
+      if (e instanceof ApiError && e.status === 400) {
+        setArgErrors([{ message: e.message }]);
+      } else {
+        setError(e instanceof ApiError ? e.message : String(e));
+      }
     } finally {
       setBusy(false);
     }
@@ -114,10 +124,11 @@ export function EditPanel({
       </label>
       <label>
         인자 JSON (argSpecs)
-        <textarea
+        <JsonEditor
           value={argsText}
-          onChange={(e) => setArgsText(e.target.value)}
-          rows={8}
+          onChange={setArgsText}
+          serverErrors={argErrors}
+          ariaLabel="인자 JSON"
         />
       </label>
       <button type="button" disabled={busy} onClick={runPreview}>
