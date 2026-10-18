@@ -2263,7 +2263,7 @@ private hasCurrentApproval(
       return { runId, cancelled: false, killed: [], failed: [] };
     }
     this.recordUiCall(st.sessionId, "pf_run_cancel", "", undefined);
-    const r = cancelRun(this.procforgeDir, runId, "UI 실행 화면에서 취소");
+    const r = await cancelRun(this.procforgeDir, runId, "UI 실행 화면에서 취소");
     appendRunLog(this.procforgeDir, runId, {
       level: "info",
       message: `취소 요청 (자식 ${r.children.length}개 종료 시도)`,

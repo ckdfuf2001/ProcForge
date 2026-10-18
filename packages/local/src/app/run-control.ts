@@ -157,69 +157,21 @@ export function listChildren(procforgeDir: string, runId: string): number[] {
   }
 }
 
-/**
- * 프로세스 **트리** 종료.
- * - Windows: taskkill /T 가 자손까지 죽인다 (그래서 "고아 0"이 성립).
- * - POSIX: 프로세스 그룹에 SIGTERM → SIGKILL.
- * 이미 죽은 pid는 조용히 넘어간다.
- */
-export function killProcessTree(pid: number): { killed: number[]; failed: number[] } {
-  const killed: number[] = [];
-  const failed: number[] = [];
-  if (process.platform === "win32") {
-    const r = spawnSync(
-      "taskkill",
-      ["/PID", String(pid), "/T", "/F"],
-      { encoding: "utf8", windowsHide: true },
-    );
-    if (r.status === 0) killed.push(pid);
-    else failed.push(pid);
-    return { killed, failed };
-  }
-  // M7-5-b: 그룹에 SIGTERM → 유예 후 SIGKILL (SIGTERM 을 무시하는 자식이 남지 않게)
-  const signal = (sig: NodeJS.Signals): void => {
-    try {
-      process.kill(-pid, sig);
-    } catch {
-      try {
-        process.kill(pid, sig);
-      } catch {
-        // 이미 종료
-      }
-    }
-  };
-  try {
-    signal("SIGTERM");
-    killed.push(pid);
-  } catch {
-    failed.push(pid);
-    return { killed, failed };
-  }
-  const deadline = Date.now() + 1500;
-  while (Date.now() < deadline) {
-    if (!isAlive(pid)) return { killed, failed };
-    spawnSync("sleep", ["0.05"], { shell: true });
-  }
-  try {
-    signal("SIGKILL");
-  } catch {
-    // 이미 죽음
-  }
-  return { killed, failed };
-}
-
+// M7-5-c: 트리 종료 구현은 services/process-tree.ts **하나**다 (여기서 재구현하지 않는다).
+import { killProcessTree } from "../services/process-tree.js";
+export { killProcessTree, isAlive, isGroupAlive } from "../services/process-tree.js";
 /** 취소: 플래그 + 등록된 자식 트리 종료 */
-export function cancelRun(
+export async function cancelRun(
   procforgeDir: string,
   runId: string,
   reason = "사용자 취소",
-): { flag: true; killed: number[]; failed: number[]; children: number[] } {
+): Promise<{ flag: true; killed: number[]; failed: number[]; children: number[] }> {
   writeCancelFlag(procforgeDir, runId, reason);
   const children = listChildren(procforgeDir, runId);
   const killed: number[] = [];
   const failed: number[] = [];
   for (const pid of children) {
-    const r = killProcessTree(pid);
+    const r = await killProcessTree(pid);
     killed.push(...r.killed);
     failed.push(...r.failed);
   }
@@ -244,12 +196,3 @@ export function spawnTrackedChild(
   return { pid: child.pid as number, wait };
 }
 
-/** 프로세스가 아직 살아 있는지 (Windows/POSIX 공통) */
-export function isAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}

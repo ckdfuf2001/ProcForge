@@ -1,4 +1,4 @@
-import { spawn, spawnSync, type ChildProcess } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, readdirSync, statSync, type Dirent } from "node:fs";
 import { delimiter, join, resolve } from "node:path";
 
@@ -15,26 +15,15 @@ import { delimiter, join, resolve } from "node:path";
 
 export const DEFAULT_SCRIPT_TIMEOUT_MS = 60000;
 
-/** M7-5-b: 트리 종료 (POSIX 는 그룹, Windows 는 taskkill /T) */
-export function killScriptTree(pid: number): void {
-  if (process.platform === "win32") {
-    spawnSync("taskkill", ["/PID", String(pid), "/T", "/F"], {
-      windowsHide: true,
-    });
-    return;
-  }
-  try {
-    process.kill(-pid, "SIGTERM");
-  } catch {
-    try {
-      process.kill(pid, "SIGTERM");
-    } catch {
-      // 이미 종료됨
-    }
-  }
+/**
+ * M7-5-c: 트리 종료는 **run-control 의 killProcessTree 하나**만 쓴다.
+ * (이전에 여기 따로 두었다가 SIGTERM 만 보내, SIGTERM 을 무시하는 스크립트가
+ *  영원히 안 끝났다 — 유예 후 SIGKILL 은 run-control 이 그룹 기준으로 처리)
+ */
+async function killScriptTree(pid: number): Promise<void> {
+  const { killProcessTree } = await import("../services/process-tree.js");
+  await killProcessTree(pid);
 }
-
-/** 자식 프로세스에 넘기는 환경변수 화이트리스트 (M5.3-3) */
 const ENV_ALLOW = new Set([
   "SYSTEMROOT",
   "SYSTEMDRIVE",
@@ -173,13 +162,13 @@ export function runScript(input: {
   if (pid !== undefined) input.onChild?.(pid, child);
   const cancelWatch = input.isCancelled
     ? setInterval(() => {
-        if (input.isCancelled?.() && pid !== undefined) killScriptTree(pid);
+        if (input.isCancelled?.() && pid !== undefined) void killScriptTree(pid);
       }, 200)
     : undefined;
   let timedOut = false;
   const timer = setTimeout(() => {
     timedOut = true;
-    if (pid !== undefined) killScriptTree(pid);
+    if (pid !== undefined) void killScriptTree(pid);
   }, timeout);
 
   return new Promise<ScriptResult>((resolve, reject) => {
