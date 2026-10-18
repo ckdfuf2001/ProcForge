@@ -46,7 +46,7 @@ import {
   loadApprovals,
   toHashableMap,
 } from "../services/approvals.js";
-import { runScript } from "./script-run.js";
+import { runScript, describeRunError } from "./script-run.js";
 import {
   inferPathRole,
   rewritePaths,
@@ -1051,7 +1051,12 @@ async function execNode(
         break;
       } catch (e) {
         const transient = isTransientToolError(e) || isScriptTimeout(e);
-        if (scriptTries >= scriptAttempts || !transient) throw e;
+        if (scriptTries >= scriptAttempts || !transient) {
+          // M5-5-a: 바깥 변경 사실이 있으면 **원래 오류와 같이** 보고한다
+          throw Object.assign(e as Error, {
+            message: describeRunError(e),
+          });
+        }
         await new Promise((r) =>
           setTimeout(r, retryDelayMs(500, scriptTries - 1)),
         );

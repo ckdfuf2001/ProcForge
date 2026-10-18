@@ -57,7 +57,7 @@ export type ScriptResult = {
 };
 
 let cachedPython: string | undefined;
-type Snapshot = { files: Map<string, string> };
+type Snapshot = { files: Map<string, string>; skipped?: boolean };
 const MAX_BUF = 10 * 1024 * 1024;
 
 function findPython(): string {
@@ -89,31 +89,36 @@ function childEnv(): Record<string, string> {
 
 export function snapshotProject(projectRoot: string): Snapshot {
   const files = new Map<string, string>();
+  let count = 0;
+  let skipped = false;
   const walk = (dir: string, rel: string): void => {
-    let entries: Dirent[];
+    if (skipped) return;
+    let entries: Dirent<string>[];
     try {
       entries = readdirSync(dir, { withFileTypes: true });
     } catch {
       return;
     }
     for (const e of entries) {
-      if (SNAPSHOT_SKIP.has(e.name)) continue;
-      const r = rel ? `${rel}/${e.name}` : e.name;
+      if (skipped) return;
+      if (rel === "" && SNAPSHOT_SKIP.has(e.name)) continue;
       const p = join(dir, e.name);
+      const r = rel === "" ? e.name : `${rel}/${e.name}`;
       if (e.isDirectory()) {
         walk(p, r);
       } else if (e.isFile()) {
         try {
-          files.set(r, String(statSync(p).size));
+          const st = statSync(p);
+          files.set(r, `${st.size}:${Math.floor(st.mtimeMs)}`);
+          if (++count > SNAPSHOT_FILE_CAP) skipped = true;
         } catch {
-          // 못 읽으면 무시
+          // 소멸·권한: 무시
         }
-        if (files.size >= SNAPSHOT_FILE_CAP) return;
       }
     }
   };
   walk(resolve(projectRoot), "");
-  return { files };
+  return { files, skipped };
 }
 
 /** 스냅샷 비교. 변경 목록 (최대 10건). 비어 있으면 변경 없음. */
@@ -220,42 +225,45 @@ export function runScript(input: {
           );
           return;
         }
+        // M5.3-3: 바깥 변경 감지를 **종료 코드보다 먼저** 한다 — 실패한 스크립트가
+        // 바깥을 망가뜨려도 (exit 1 + 흔적 없음) 흔적이 남아야 한다.
+        const escaped = outsideChanges(input, before);
+        // 바깥 변경은 **성공 여부와 무관하게** 거부한다 (M5.3-3).
+        if (escaped !== null) {
+          reject(
+            Object.assign(
+              new Error(
+                `run fs 밖 변경 감지 (${escaped.length}건+): ${escaped.join(", ")} — 스크립트는 run fs 안에서만 쓰라`,
+              ),
+              { code: "bad_request", escapedChanges: escaped },
+            ),
+          );
+          return;
+        }
         try {
           if (code !== 0 && code !== null) {
             throw Object.assign(
-              new Error(
-                `스크립트 비정상 종료(${code}): ${input.scriptAbs}${tail(err)}`,
-              ),
+              new Error(`스크립트 비정상 종료(${code}): ${input.scriptAbs}${tail(err)}`),
               { code: "bad_request" },
             );
           }
           if (code === null && signal) {
             throw Object.assign(
-              new Error(
-                `스크립트 종료 신호(${signal}): ${input.scriptAbs}${tail(err)}`,
-              ),
+              new Error(`스크립트 종료 신호(${signal}): ${input.scriptAbs}${tail(err)}`),
               { code: "bad_request" },
             );
           }
-          const parsed = parseOutput(
-            Buffer.concat(out).toString("utf8"),
-            input.scriptAbs,
-          );
-          // M5.3-3: run fs 밖 변경 감지 (성공·실패 무관)
-          if (before && input.projectRoot) {
-            const diff = diffSnapshot(before, snapshotProject(input.projectRoot));
-            if (diff.length > 0) {
-              throw Object.assign(
-                new Error(
-                  `run fs 밖 변경 감지 (${diff.length}건+): ${diff.join(", ")} — 스크립트는 run fs 안에서만 쓰라`,
-                ),
-                { code: "bad_request" },
-              );
-            }
-          }
-          resolve(parsed);
+          resolve(parseOutput(Buffer.concat(out).toString("utf8"), input.scriptAbs));
         } catch (e) {
-          reject(e);
+          // 원래 오류를 유지한 채 바깥 변경 사실을 **같이** 알린다 (어느 쪽이든 잃지 않는다)
+          const err = escaped !== null
+            ? Object.assign(e as Error, {
+                escapedChanges: escaped,
+                message: describeRunError(e),
+              })
+            : (e as Error);
+          reject(err);
+          return;
         }
       });
     });
@@ -265,6 +273,33 @@ export function runScript(input: {
       // 이미 종료된 경우 무시
     }
   });
+}
+
+/**
+ * M5.3-3: run fs 밖에서 일어난 변경 목록 (없으면 null).
+ * 성공·실패 무관하게 **먼저** 호출해야 한다 — 실패한 스크립트가 흔적 없이
+ * 바깥을 망가뜨리면 아무도 모른다.
+ */
+function outsideChanges(
+  input: { projectRoot?: string },
+  before: Snapshot | null,
+): string[] | null {
+  if (!before || !input.projectRoot) return null;
+  const after = snapshotProject(input.projectRoot);
+  const diff = diffSnapshot(before, after);
+  if (after.skipped || before.skipped) {
+    // 스냅샷이 불완전하면 "없음"이 아니라 "판단 불가"를 함께 알린다
+    return [...diff, "(스냅샷 상한 초과: 일부만 비교됨)"];
+  }
+  return diff.length > 0 ? diff : null;
+}
+
+/** 바깥 변경 사실까지 붙인 오류 메시지 (사용자에게 보이는 문자열) */
+export function describeRunError(e: unknown): string {
+  const msg = e instanceof Error ? e.message : String(e);
+  const escaped = (e as { escapedChanges?: string[] }).escapedChanges;
+  if (!escaped || escaped.length === 0) return msg;
+  return `${msg} | run fs 밖 변경 감지 (${escaped.length}건): ${escaped.join(", ")}`;
 }
 
 function tail(err: Buffer[]): string {

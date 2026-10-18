@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
-import { runScript } from "./script-run.js";
+import { runScript, describeRunError } from "./script-run.js";
 import { diffSnapshot, snapshotProject } from "./script-run.js";
 import { ArgSpecSchema } from "@procforge/shared/schema.js";
 import { resolveArgs } from "./resolve.js";
@@ -103,6 +103,37 @@ describe("M5.3-3 실행 제한", () => {
     expect(diffSnapshot(before, after)).toEqual(["+new.txt"]);
     expect(diffSnapshot(after, after)).toEqual([]);
   });
+
+  it("M5-5-a: **같은 크기** 덮어쓰기도 감지 (size:mtime)", async () => {
+    const f = join(root, "same.txt");
+    writeFileSync(f, "AAAA");
+    const before = snapshotProject(root);
+    // 크기가 같고 내용만 다르다 — size 만 보면 못 잡는다
+    writeFileSync(f, "BBBB");
+    expect(diffSnapshot(before, snapshotProject(root))).toContain("~same.txt");
+  }, 30000);
+
+  it("M5-5-a: 바깥 쓰기 후 **exit 1** → 감지 사실이 오류에 포함", async () => {
+    const f = join(root, "dirty.mjs");
+    writeFileSync(
+      f,
+      `import fs from "node:fs";fs.writeFileSync(${JSON.stringify(join(root, "escaped.txt"))},"x");process.exit(1);`,
+    );
+    const err = await runScript({
+      runtime: "node",
+      scriptAbs: f,
+      args: {},
+      cwd: fsDir,
+      projectRoot: root,
+    }).then(
+      () => null,
+      (e: Error) => e as Error & { escapedChanges?: string[] },
+    );
+    expect(err).not.toBeNull();
+    // 실패한 스크립트라도 바깥 변경 흔적은 남는다
+    expect(err?.escapedChanges?.join(",")).toContain("escaped.txt");
+    expect(describeRunError(err)).toContain("run fs 밖 변경 감지");
+  }, 30000);
 });
 
 describe("script kind 계약", () => {
