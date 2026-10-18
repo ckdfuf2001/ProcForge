@@ -959,3 +959,21 @@ argv: [...]}` 고정. runner는 run fs에서 직접 실행해 stdout을 golden�
 - [M1-3] "부가세 제외" 조언 변환 — regex `{ path: "summary", pattern: "부가세.?제외|세전|VAT[^\n]*excl" }`로 결정적 변환. 이유: M4 "자동 검사"를 llm_rubric(비가역)으로는 만족 불가. 요약에 기준 명시를 강제하는 형태로 검증 가능하게 함.
 - [M1-4] stale 처리 — hash 변경 시 하류(dependsOn으로 직접/전이적 연결) 중 leaf/split만 open으로 되돌림. `stale` 상태값은 추가하지 않음(NodeStatus 변경 금지).
 - [M1-5] needs_human만 남으면 pfNext가 해당 노드 반환(조언 유도). done은 open/probing/needs_human이 모두 없을 때만 true.
+ - [M7-5-a] 스크립트 실행은 **비동기**(spawn)다. spawnSync 옛에는 이벤트 루프가 막혀
+   취소가 도달하지 못했다(길게 걸린 스크립트는 끝까지 돈다). onChild 로 pid 를
+   runs/<runId> 에 등록하고, 실행 중에도 취소 플래그를 200ms 간격으로 확인한다.
+ - [M7-5-b] POSIX 는 detached:true 로 띄워 **그룹 리더**로 만든다. 그래야 그룹 시그널이
+   손자까지 닿는다(SIGTERM → 1.5s 유예 → SIGKILL). 개별 pid 만 죽이면 손자가 산다.
+ - [M7-5-c] 동시 실행 잠금은 try/finally 로 항상 푼다(예외로 409 고착 금지).
+   승인·생성값 **대기 중에는 잠금을 유지**하고, 승인이 uiApprove 를 통해 진행을 재개한다.
+   이미 끝난 run 은 취소해도 상태가 바뀌지 않는다.
+ - [M7-5-d] 실행 요청 키는 {procedure, params} **화이트리스트**(denylist 는 구멍이 된다),
+   params 값은 문자열만. 실행 로그 SSE 는 세션 SSE 와 동일 규칙(상한·heartbeat·id).
+ - [M7-5-e] 승인은 스크립트 **내용 스냅샷**(procedures/<name>/approved/)을 남긴다.
+   이력의 파일 경로를 다시 읽으면 그 파일이 이미 현재본이라 diff 가 늘 null 이 된다.
+   경로는 index.json 에 둔다(approvals 의 args 는 zod 정규화로 여분 키가 사라진다).
+ - [M7-5-f] approvalHash 가 없는 이력(v1)은 **미승인**으로 본다. 예외를 두면
+   "스크립트가 바뀌면 무효" 원칙에 구멍이 생긴다.
+ - [M7-5-g] 승인 화면의 스크립트 읽기는 realpath sandbox + 5MB 상한(M7-ui3-3 공통).
+ - [M7-5-h] diff 의 LCS 표는 **크기 검사 뒤에** 만든다. 넘으면 "diff 생략"을 알린다.
+ - [M7-5-i] 승인 POST 의 approved 는 boolean 필수 — 빠지면 400(조용한 승인 금지).
