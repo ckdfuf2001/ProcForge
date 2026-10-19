@@ -171,6 +171,9 @@ test("(c) conflict: MCP 가 먼저 쓰면 배너 + 409, 초안 유지·서버 �
   await expect(page.getByText(/다른 곳에서 변경됨 \(409\)/)).toBeVisible();
   // 초안 유지 (UI 가 서버 값으로 덮어쓰지 않는다)
   await expect(page.locator('[aria-label="인자 JSON"]')).toContainText("DRAFT-42");
+  // M7-close-c: "초안 복사" → 다시 읽기 전에 초안을 보관/복사한다 (유실 0)
+  await page.getByRole("button", { name: "초안 복사" }).click();
+  await expect(page.locator('pre[aria-label="초안"]')).toContainText("DRAFT-42");
   // 서버 데이터는 MCP 값 그대로 (유실 0)
   const node = await h.app.core.getNode(sid, "1.1");
   expect(node.args).toMatchObject({ note: { kind: "fixed", value: "hi" } });

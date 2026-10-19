@@ -55,6 +55,18 @@ export function EditPanel({
   const [externalChange, setExternalChange] = useState(false);
   // M7-5-6-d: 신호 실패 시 OpenCode 에 붙여넣을 문구(C 모드)
   const [signalCopy, setSignalCopy] = useState<string | null>(null);
+  // M7-close-c: "최신 다시 읽기" 전에 초안을 보관/복사한다 (409로 유실 방지).
+  const [preserved, setPreserved] = useState<string | null>(null);
+
+  const preserveDraft = () => {
+    const snapshot = `목표:\n${goalText}\n\n인자 JSON:\n${argsText}`;
+    setPreserved(snapshot);
+    try {
+      void navigator.clipboard?.writeText(snapshot);
+    } catch {
+      // 클립보드 불가 환경: <pre> 로 보여주는 것으로 충분하다
+    }
+  };
 
   useEffect(() => {
     if (dirty) return; // 초안 유지
@@ -152,9 +164,14 @@ export function EditPanel({
       {conflict && (
         <div role="alert">
           <p>다른 곳에서 변경되었습니다. 초안은 유지했습니다.</p>
+          <button type="button" onClick={preserveDraft}>
+            초안 복사
+          </button>
           <button
             type="button"
             onClick={() => {
+              // 다시 읽기 전에 초안을 붙잡아 둔다 (유실 0)
+              preserveDraft();
               setConflict(false);
               setError(null);
               setDirty(false);
@@ -163,6 +180,12 @@ export function EditPanel({
           >
             최신 다시 읽기
           </button>
+        </div>
+      )}
+      {preserved && (
+        <div>
+          <p>초안(클립보드에 복사했습니다. 직접 복사하려면 아래를 쓰세요):</p>
+          <pre aria-label="초안">{preserved}</pre>
         </div>
       )}
       {externalChange && !conflict && (
