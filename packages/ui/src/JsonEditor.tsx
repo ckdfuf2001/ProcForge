@@ -55,12 +55,15 @@ export function JsonEditor({
   readOnly = false,
   serverErrors = [],
   ariaLabel,
+  language = "json",
 }: {
   value: string;
   onChange?: (next: string) => void;
   readOnly?: boolean;
   serverErrors?: ServerError[];
   ariaLabel?: string;
+  /** "text" 는 스크립트 보기용 — JSON 언어·검증을 붙이지 않는다(파이썬 등에 오진단 금지) */
+  language?: "json" | "text";
 }) {
   const host = useRef<HTMLDivElement | null>(null);
   const view = useRef<EditorView | null>(null);
@@ -72,16 +75,22 @@ export function JsonEditor({
 
   useEffect(() => {
     if (!host.current) return;
+    const jsonExtras: Extension[] =
+      language === "json"
+        ? [
+            json(),
+            // 검증 1/2 — 문법만. 스키마 검증은 서버 몫이다(여기서 두 벌 만들지 않는다).
+            linter(jsonParseLinter()),
+            // 검증 2/2 — 서버 previewEdit 응답을 위치에 매핑
+            errCompartment.current.of(serverErrorsExtension(serverErrors)),
+          ]
+        : [];
     const extensions: Extension[] = [
       lineNumbers(),
       highlightActiveLine(),
       history(),
       keymap.of([...defaultKeymap, ...historyKeymap]),
-      json(),
-      // 검증 1/2 — 문법만. 스키마 검증은 서버 몫이다(여기서 두 벌 만들지 않는다).
-      linter(jsonParseLinter()),
-      // 검증 2/2 — 서버 previewEdit 응답을 위치에 매핑
-      errCompartment.current.of(serverErrorsExtension(serverErrors)),
+      ...jsonExtras,
       EditorView.lineWrapping,
       EditorState.readOnly.of(readOnly),
       EditorView.editable.of(!readOnly),
@@ -102,7 +111,7 @@ export function JsonEditor({
       view.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [readOnly]);
+  }, [readOnly, language]);
 
   // 서버 오류만 갱신 — Compartment 를 쓰면 편집 상태(커서·선택)가 유지된다
   useEffect(() => {
@@ -132,5 +141,12 @@ export function ReadOnlyCode({
   text: string;
   ariaLabel?: string;
 }) {
-  return <JsonEditor value={text} readOnly ariaLabel={ariaLabel ?? "스크립트(읽기 전용)"} />;
+  return (
+    <JsonEditor
+      value={text}
+      readOnly
+      language="text"
+      ariaLabel={ariaLabel ?? "스크립트(읽기 전용)"}
+    />
+  );
 }

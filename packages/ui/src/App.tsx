@@ -8,6 +8,7 @@ import {
   type NodeRow,
 } from "./api.js";
 import { TreeView } from "./TreeView.js";
+import { RunPanel } from "./RunPanel.js";
 
 // M7-1: 세션 목록 화면 (저장소 경로·중복 경고·연결 배지·짝 이력).
 // React 기본 이스케이프만 사용 (dangerouslySetInnerHTML 금지).
@@ -17,6 +18,19 @@ export function App() {
   const [sessions, setSessions] = useState<SessionRow[] | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
   const [picked, setPicked] = useState<string | null>(null);
+  const [tab, setTab] = useState<"sessions" | "run">("sessions");
+  // M7-5-4: 실행 화면 "이 노드 열기" → 세션 탭의 상세로 이동 (n 은 재진입 강제용)
+  const [focus, setFocus] = useState<{
+    sessionId: string;
+    nodeId: string;
+    n: number;
+  } | null>(null);
+
+  const openNode = (sessionId: string, nodeId: string) => {
+    setTab("sessions");
+    setPicked(sessionId);
+    setFocus({ sessionId, nodeId, n: Date.now() });
+  };
 
   useEffect(() => {
     (async () => {
@@ -50,15 +64,36 @@ export function App() {
       <h1>ProcForge</h1>
       <p>저장소: {store.storeDir}</p>
       {store.duplicateWarning && <p role="alert">경고: {store.duplicateWarning}</p>}
-      {picked && (
+      <nav>
+        <button
+          type="button"
+          aria-pressed={tab === "sessions"}
+          onClick={() => setTab("sessions")}
+        >
+          세션
+        </button>
+        <button
+          type="button"
+          aria-pressed={tab === "run"}
+          onClick={() => setTab("run")}
+        >
+          실행
+        </button>
+      </nav>
+      {tab === "run" && <RunPanel onOpenNode={openNode} />}
+      {tab === "sessions" && picked && (
         <section>
           <button type="button" onClick={() => setPicked(null)}>
             ← 세션 목록
           </button>
-          <TreeView sessionId={picked} />
+          <TreeView
+            key={`${picked}:${focus?.sessionId === picked ? focus.n : 0}`}
+            sessionId={picked}
+            focusNodeId={focus?.sessionId === picked ? focus.nodeId : null}
+          />
         </section>
       )}
-      {!picked && (
+      {tab === "sessions" && !picked && (
         <>
           <h2>세션</h2>
           {sessions.length === 0 ? (

@@ -26,10 +26,17 @@ export function compareNodeIds(a: string, b: string): number {
   return 0;
 }
 
-export function TreeView({ sessionId }: { sessionId: string }) {
+export function TreeView({
+  sessionId,
+  focusNodeId,
+}: {
+  sessionId: string;
+  /** M7-5-4: 실행 화면에서 "이 노드 열기" 로 들어올 때 상세를 바로 연다 */
+  focusNodeId?: string | null;
+}) {
   const [nodes, setNodes] = useState<NodeRow[] | null>(null);
   const [revision, setRevision] = useState(0);
-  const [picked, setPicked] = useState<string | null>(null);
+  const [picked, setPicked] = useState<string | null>(focusNodeId ?? null);
   const [needsHuman, setNeedsHuman] = useState<string[]>([]);
   const [blocked, setBlocked] = useState<string[]>([]);
   const [live, setLive] = useState<"open" | "closed" | "error" | "connecting">(
@@ -52,6 +59,10 @@ export function TreeView({ sessionId }: { sessionId: string }) {
       }
     })();
   };
+
+  useEffect(() => {
+    if (focusNodeId) setPicked(focusNodeId);
+  }, [focusNodeId]);
 
   useEffect(() => {
     reload();

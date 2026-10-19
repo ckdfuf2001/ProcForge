@@ -111,6 +111,60 @@ export type TreeResponse = {
   };
 };
 
+/** M7-5-4: 실행 화면 — 절차서와 param 스키마(required/default). */
+export type ProcedureParam = {
+  name: string;
+  type: string;
+  required: boolean;
+  default?: string;
+  description: string;
+};
+export type ProcedureRow = { name: string; params: ProcedureParam[] };
+
+/** 노드별 결과 — status 는 runner 가 준 문자열 그대로 (UI 해석 금지) */
+export type RunNodeResult = { nodeId: string; status: string };
+
+export type RunInfo = {
+  runId: string;
+  status: string;
+  procedure: string;
+  sessionId: string;
+  params: Record<string, string>;
+  results: RunNodeResult[];
+  summary?: {
+    pass: number;
+    fail: number;
+    unverified: number;
+    skipped: number;
+    blocked: number;
+    suspended: number;
+  };
+  failedNodeId?: string;
+  failedDetail?: string;
+  waiting: { nodeId: string; kind: string; at: string } | null;
+  suspended: { nodeId: string; kind: string; missing?: string[] } | null;
+};
+
+export type RunLogEntry = {
+  seq: number;
+  at: string;
+  level: string;
+  nodeId?: string;
+  message: string;
+};
+
+export type ApprovalInfo = {
+  sessionId: string;
+  nodeId: string;
+  approvalHash: string;
+  script: { rel: string; sha256: string; content: string } | null;
+  diff: string | null;
+  approved: boolean;
+  needsReapproval: boolean;
+  /** var/generated 인자 — 명시 선택해야 승인된다 (CLI --allow-wildcard 와 동일) */
+  wildcardKeys: string[];
+};
+
 async function fail(path: string, r: Response): Promise<ApiError> {
   let message = `${path} ${r.status}`;
   let code: string | undefined;
@@ -174,42 +228,70 @@ export const api = {
     index: number,
   ) =>
     `/api/sessions/${encodeURIComponent(sid)}/nodes/${encodeURIComponent(nid)}/artifacts/${encodeURIComponent(attemptId)}/${index}`,
+  // M7-5-4: 실행 화면
+  procedures: () => get<{ procedures: ProcedureRow[] }>("/api/procedures"),
+  runStart: (procedure: string, params: Record<string, string>) =>
+    post<{ runId: string; sessionId: string; procedure: string; params: Record<string, string> }>(
+      "/api/runs",
+      { procedure, params },
+    ),
+  runInfo: (runId: string) => get<RunInfo>(`/api/runs/${encodeURIComponent(runId)}`),
+  latestRun: (procedure: string) =>
+    get<{ runId: string | null }>(`/api/latest-run?procedure=${encodeURIComponent(procedure)}`),
+  runCancel: (runId: string) =>
+    post<{ runId: string; cancelled: boolean }>(
+      `/api/runs/${encodeURIComponent(runId)}/cancel`,
+      {},
+    ),
+  approvalInfo: (sid: string, nid: string) =>
+    get<ApprovalInfo>(
+      `/api/sessions/${encodeURIComponent(sid)}/nodes/${encodeURIComponent(nid)}/approval`,
+    ),
+  approve: (
+    sid: string,
+    nid: string,
+    body: {
+      approvalHash: string;
+      approved: boolean;
+      expectedRevision: number;
+      note?: string;
+      allowWildcard?: string[];
+    },
+  ) =>
+    post<{ nodeId: string; approvalHash: string; approved: boolean }>(
+      `/api/sessions/${encodeURIComponent(sid)}/nodes/${encodeURIComponent(nid)}/approve`,
+      body,
+    ),
 };
 
-/**
- * M7-ui2: SSE 구독. EventSource는 토큰 헤더를 못 붙이므로 fetch 스트리밍으로
- * 직접 파싱한다 (M7-ui2 결정).
- */
-export function subscribeEvents(
-  sid: string,
-  onChange: (e: {
-    revision: number;
-    nodeIds: string[];
-    method: string;
-    actor: string;
-  }) => void,
-  onStatus?: (s: "open" | "closed" | "error") => void,
+/** SSE 공통 파서 (EventSource 금지 — 토큰 헤더를 못 붙인다). */
+function subscribeSse(
+  path: string,
+  handlers: {
+    onData: (data: string) => void;
+    onEvent?: (event: string, data: string) => void;
+    onStatus?: (s: "open" | "closed" | "error") => void;
+  },
+  lastEventId?: { v: number },
 ): () => void {
   const ctrl = new AbortController();
-  const lastEventId = { v: 0 };
   void (async () => {
     try {
-      const r = await fetch(
-        `/api/sessions/${encodeURIComponent(sid)}/events`,
-        {
-          headers: {
-            "x-procforge-token": takeToken(),
-            accept: "text/event-stream",
-            ...(lastEventId.v > 0 ? { "last-event-id": String(lastEventId.v) } : {}),
-          },
-          signal: ctrl.signal,
+      const r = await fetch(path, {
+        headers: {
+          "x-procforge-token": takeToken(),
+          accept: "text/event-stream",
+          ...(lastEventId && lastEventId.v > 0
+            ? { "last-event-id": String(lastEventId.v) }
+            : {}),
         },
-      );
+        signal: ctrl.signal,
+      });
       if (!r.ok || !r.body) {
-        onStatus?.(r.status === 401 ? "closed" : "error");
+        handlers.onStatus?.(r.status === 401 ? "closed" : "error");
         return;
       }
-      onStatus?.("open");
+      handlers.onStatus?.("open");
       const reader = r.body.getReader();
       const dec = new TextDecoder();
       let buf = "";
@@ -222,16 +304,69 @@ export function subscribeEvents(
         for (const b of blocks) {
           if (b.startsWith(":")) continue; // heartbeat
           const idm = /^id: (\d+)$/m.exec(b);
+          if (idm) {
+            if (lastEventId) lastEventId.v = Number(idm[1]);
+          }
+          const evm = /^event: (.+)$/m.exec(b);
           const dm = /^data: (.*)$/m.exec(b);
+          if (evm) {
+            handlers.onEvent?.(evm[1], dm ? dm[1] : "");
+            continue;
+          }
           if (!dm) continue;
-          if (idm) lastEventId.v = Number(idm[1]);
-          onChange(JSON.parse(dm[1]));
+          handlers.onData(dm[1]);
         }
       }
-      onStatus?.("closed");
+      handlers.onStatus?.("closed");
     } catch {
-      if (!ctrl.signal.aborted) onStatus?.("error");
+      if (!ctrl.signal.aborted) handlers.onStatus?.("error");
     }
   })();
   return () => ctrl.abort();
+}
+
+/**
+ * M7-ui2: 세션 이벤트 SSE 구독.
+ */
+export function subscribeEvents(
+  sid: string,
+  onChange: (e: {
+    revision: number;
+    nodeIds: string[];
+    method: string;
+    actor: string;
+  }) => void,
+  onStatus?: (s: "open" | "closed" | "error") => void,
+): () => void {
+  return subscribeSse(
+    `/api/sessions/${encodeURIComponent(sid)}/events`,
+    {
+      onData: (d) => onChange(JSON.parse(d)),
+      ...(onStatus ? { onStatus } : {}),
+    },
+    { v: 0 },
+  );
+}
+
+/** M7-5-4: 실행 로그 SSE. `end` 이벤트로 종료를 알린다. */
+export function subscribeRunLog(
+  runId: string,
+  onEntry: (e: RunLogEntry) => void,
+  onEnd?: (status: string) => void,
+  onStatus?: (s: "open" | "closed" | "error") => void,
+): () => void {
+  return subscribeSse(
+    `/api/runs/${encodeURIComponent(runId)}/stream`,
+    {
+      onData: (d) => onEntry(JSON.parse(d) as RunLogEntry),
+      onEvent: (ev, d) => {
+        if (ev === "end") {
+          const parsed = d ? (JSON.parse(d) as { status?: string }) : {};
+          onEnd?.(parsed.status ?? "");
+        }
+      },
+      ...(onStatus ? { onStatus } : {}),
+    },
+    { v: 0 },
+  );
 }

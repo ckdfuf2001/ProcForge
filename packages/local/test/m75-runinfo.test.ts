@@ -181,6 +181,36 @@ describe("M7-5-4 승인 wildcard 명시 선택", () => {
     expect(ok.approved).toBe(true);
   }, 30000);
 
+  it("HTTP: allowWildcard 를 승인 전에 검증한다 (미지정 400)", async () => {
+    const { app, sid } = await mkProcedure({
+      argSpecs: { note: { kind: "generated", instruction: "값 생성" } },
+      external: true,
+      finalize: false,
+    });
+    const info = await app.uiApprovalInfo({ sessionId: sid, nodeId: "1.1" });
+    const rev = (await app.readSession(sid)).revision;
+    const srv = await createUiServer({ app });
+    try {
+      const base = `${srv.url}/api/sessions/${sid}/nodes/1.1/approve`;
+      const h = { "x-procforge-token": srv.token, "content-type": "application/json" };
+      const body = {
+        approvalHash: info.approvalHash,
+        approved: true,
+        expectedRevision: rev,
+      };
+      const bad = await fetch(base, { method: "POST", headers: h, body: JSON.stringify(body) });
+      expect(bad.status).toBe(400);
+      const good = await fetch(base, {
+        method: "POST",
+        headers: h,
+        body: JSON.stringify({ ...body, allowWildcard: ["note"] }),
+      });
+      expect(good.status).toBe(200);
+    } finally {
+      await srv.close();
+    }
+  }, 30000);
+
   it("fixed 만 있으면 wildcardKeys 는 비고 선택 없이 승인된다", async () => {
     const { app, sid } = await mkProcedure({ external: true, finalize: false });
     const info = await app.uiApprovalInfo({ sessionId: sid, nodeId: "1.1" });
