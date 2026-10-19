@@ -302,12 +302,10 @@ export async function seedSlowProcedure(
     children: [{ goal: "run script" }],
     expectedRevision: 0,
   });
-  // 절차서 수집은 projectRoot 아래 .py 를 본다 (M7-5-a). 실행본도 세션에 둔다.
+  // M7-close-c: finalize 의 collectScripts 는 **projectRoot 아래** 스크립트만 읽어
+  // procedures/<name>/scripts/ 로 복사하고, 실행은 그 절차서 사본을 쓴다.
+  // 즉 실제 해석 경로는 여기 한 곳뿐이다 — 다른 경로에도 써 두면 경로 버그를 가린다.
   writeFileSync(join(h.root, "slow.py"), script, "utf8");
-  writeFileSync(join(h.pfdir, "slow.py"), script, "utf8");
-  const sdir = join(h.pfdir, "sessions", sid, "scripts");
-  mkdirSync(sdir, { recursive: true });
-  writeFileSync(join(sdir, "slow.py"), script, "utf8");
   await h.app.report({
     sessionId: sid,
     nodeId: "1.1",
