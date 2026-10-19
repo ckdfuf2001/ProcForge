@@ -988,6 +988,15 @@ argv: [...]}` 고정. runner는 run fs에서 직접 실행해 stdout을 golden�
    `taskkill /T` 는 부모가 살아 있을 때만 트리를 찾아 종료하므로, 스크립트가 손자를 띄우고
    먼저 끝나면 손자는 트리에서 빠져 살아남는다. 확실한 해법은 job object(KILL_ON_JOB_CLOSE) 이지만
    Node 표준 기능으로는 불가능하다 -> **M8 에서 검토**. 지금은 기록만 남긴다.
- - [M7-5 보정3-c] `runApprove` 의 자동 재개는 **uiRun 무인 구동에서만** 한다.
-   `runStart`/`runNext` 로 한 걸음씩 조종하는 쪽은 호출자가 다음 단계를 결정하므로 재개하지 않는다
-   (그렇게 하면 driveRun 과 호출자가 세션 잠선으로 충돌한다 - m5-live 충돌 사례).
+  - [M7-5 보정3-c] `runApprove` 의 자동 재개는 **uiRun 무인 구동에서만** 한다.
+    `runStart`/`runNext` 로 한 걸음씩 조종하는 쪽은 호출자가 다음 단계를 결정하므로 재개하지 않는다
+    (그렇게 하면 driveRun 과 호출자가 세션 잠선으로 충돌한다 - m5-live 충돌 사례).
+  - [M7-5 보정3-d] `hashPartial`(예산 초과)은 **비교 실패가 아니라 감지 민감도 저하**다.
+    변경이 있을 때만 "일부는 크기/시각만 비교됨"을 덧붙이고, 변경 0건이면 거부하지 않는다
+    (예산 초과는 대형 저장소에서 정상이므로 매 run 을 실패시키면 안 된다). `skipped` 는 종전대로
+    변경 0건에도 "판단 불가"로 거부한다.
+  - [M7-5-3-a] CM6 검증은 **두 벌만**: 문법(`jsonParseLinter`) + 서버 `previewEdit` 400 메시지의
+    위치 매핑. UI 에 스키마 검증을 다시 구현하지 않는다. `basicSetup` 은 쓰지 않고
+    state/view/lang-json/lint/commands 만 조립한다.
+  - [M7-5-3-b] nonce 는 `<meta name="csp-nonce">` 에서 읽어 `EditorView.cspNonce` 로만 넘긴다.
+    승인 diff 는 merge 확장 대신 서버 unified diff 를 `<pre>`+textContent 로 보여준다(5-4 화면).

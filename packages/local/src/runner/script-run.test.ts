@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
-import { runScript, describeRunError } from "./script-run.js";
+import { runScript, describeRunError, outsideChanges } from "./script-run.js";
 import { diffSnapshot, snapshotProject } from "./script-run.js";
 import { ArgSpecSchema } from "@procforge/shared/schema.js";
 import { resolveArgs } from "./resolve.js";
@@ -111,8 +111,8 @@ describe("M5.3-3 실행 제한", () => {
     for (let i = 0; i < n; i++) writeFileSync(join(many, `f${i}.txt`), "x", "utf8");
     const capSnapshot = snapshotProject(many, { fileCap: n - 1 });
     expect(capSnapshot.skipped).toBe(true);
-    // 중단됐으므로 상한+1 개까지 전부 담기지는 않는다
-    expect(capSnapshot.files.size).toBeLessThanOrEqual(n - 1 + 1);
+    // 중단되므로 상한+1 개만 담긴다 (중단 로직이 없으면 n=25 전부 담겨 실패)
+    expect(capSnapshot.files.size).toBe(n - 1 + 1);
     expect(diffSnapshot(capSnapshot, capSnapshot)).toEqual([]);
   });
 
@@ -128,6 +128,22 @@ describe("M5.3-3 실행 제한", () => {
     const withoutHash = [...s.files.values()].filter((v) => (v.split(":")[3] ?? "") === "");
     expect(withHash.length).toBe(3);
     expect(withoutHash.length).toBe(1);
+  });
+
+  it("M7-5 보정3-a: 해시 예산 초과는 변경이 있을 때만 경고한다 (거부 아님)", () => {
+    const big = mkdtempSync(join(tmpdir(), "pf-hash2-"));
+    const blob = "y".repeat(1024 * 1024);
+    for (let i = 0; i < 4; i++) writeFileSync(join(big, `b${i}.bin`), blob, "utf8");
+    const limits = { hashTotalBytes: 3 * 1024 * 1024 };
+    const before = snapshotProject(big, limits);
+    expect(before.hashPartial).toBe(true);
+    // 변경 0건 — 예산 초과만으로 run 을 거부하면 대형 저장소가 항상 실패한다
+    expect(outsideChanges({ projectRoot: big }, before, limits)).toBeNull();
+    // 변경 1건 — 기존 diff 에 "일부는 크기/시각만 비교됨" 경고를 덧붙인다
+    writeFileSync(join(big, "b3.bin"), `${blob}z`, "utf8");
+    const changes = outsideChanges({ projectRoot: big }, before, limits);
+    expect(changes).toContain("~b3.bin");
+    expect(changes?.some((l) => l.includes("해시 예산 초과"))).toBe(true);
   });
 
   it("M5-5-a: **같은 크기** 덮어쓰기도 감지 (size:mtime)", async () => {

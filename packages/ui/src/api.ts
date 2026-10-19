@@ -111,6 +111,21 @@ export type TreeResponse = {
   };
 };
 
+async function fail(path: string, r: Response): Promise<ApiError> {
+  let message = `${path} ${r.status}`;
+  let code: string | undefined;
+  try {
+    const body = (await r.json()) as { error?: { code?: unknown; message?: unknown } };
+    if (typeof body?.error?.message === "string" && body.error.message !== "") {
+      message = body.error.message;
+    }
+    if (typeof body?.error?.code === "string") code = body.error.code;
+  } catch {
+    // 본문이 없거나 JSON 이 아니면 상태 코드만 남긴다
+  }
+  return new ApiError(path, r.status, message, code);
+}
+
 /** 쓰기: POST + JSON만 (M7-ui4) */
 async function post<T>(path: string, body: unknown): Promise<T> {
   const r = await fetch(path, {
@@ -121,13 +136,13 @@ async function post<T>(path: string, body: unknown): Promise<T> {
     },
     body: JSON.stringify(body),
   });
-  if (!r.ok) throw new ApiError(path, r.status);
+  if (!r.ok) throw await fail(path, r);
   return (await r.json()) as T;
 }
 
 async function get<T>(path: string): Promise<T> {
   const r = await fetch(path, { headers: { "x-procforge-token": takeToken() } });
-  if (!r.ok) throw new ApiError(path, r.status);
+  if (!r.ok) throw await fail(path, r);
   return (await r.json()) as T;
 }
 
@@ -135,8 +150,10 @@ export class ApiError extends Error {
   constructor(
     readonly path: string,
     readonly status: number,
+    message?: string,
+    readonly code?: string,
   ) {
-    super(`${path} ${status}`);
+    super(message ?? `${path} ${status}`);
   }
 }
 

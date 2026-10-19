@@ -325,16 +325,22 @@ if (pid !== undefined) input.onChild?.(pid, child);
  * 성공·실패 무관하게 **먼저** 호출해야 한다 — 실패한 스크립트가 흔적 없이
  * 바깥을 망가뜨리면 아무도 모른다.
  */
-function outsideChanges(
+export function outsideChanges(
   input: { projectRoot?: string },
   before: Snapshot | null,
+  limits?: { fileCap?: number; hashTotalBytes?: number; hashFileCap?: number },
 ): string[] | null {
   if (!before || !input.projectRoot) return null;
-  const after = snapshotProject(input.projectRoot);
+  const after = snapshotProject(input.projectRoot, limits);
   const diff = diffSnapshot(before, after);
   if (after.skipped || before.skipped) {
     // 스냅샷이 불완전하면 "없음"이 아니라 "판단 불가"를 함께 알린다
     return [...diff, "(스냅샷 상한 초과: 일부만 비교됨)"];
+  }
+  // 해시 예산 소진은 **감지 민감도 저하**일 뿐 비교 실패는 아니다.
+  // 변경이 있을 때만 알린다 — 변경 0건인 대형 저장소를 매번 거부하지 않기 위해서.
+  if (diff.length > 0 && (after.hashPartial || before.hashPartial)) {
+    return [...diff, "(내용 해시 예산 초과: 일부 파일은 크기/시각만 비교됨)"];
   }
   return diff.length > 0 ? diff : null;
 }

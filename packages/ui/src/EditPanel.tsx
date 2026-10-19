@@ -5,6 +5,29 @@ import { JsonEditor, type ServerError } from "./JsonEditor.js";
 // M7-ui4: 텍스트 편집(인자 JSON) + 의견 + stale 미리보기.
 // 판단 if문 금지 — 표시 매핑만. 입력값은 textContent로만 렌더한다.
 
+/**
+ * M7-5-3: 서버 검증 메시지에 인자 이름이 있으면 그 줄에, 없으면 첫 줄에 진단을 단다.
+ * (스키마 재구현이 아니라 **메시지 → 위치** 매핑일 뿐이다.)
+ */
+function serverErrorLines(argsText: string, message: string): ServerError[] {
+  let keys: string[] = [];
+  try {
+    const obj = JSON.parse(argsText) as unknown;
+    if (obj !== null && typeof obj === "object" && !Array.isArray(obj)) {
+      keys = Object.keys(obj);
+    }
+  } catch {
+    // 문법 오류는 CM6 jsonParseLinter 가 따로 표시한다
+  }
+  const lines = argsText.split("\n");
+  for (const k of keys) {
+    if (!message.includes(k)) continue;
+    const line = lines.findIndex((l) => l.includes(`"${k}"`));
+    if (line >= 0) return [{ message, from: line, to: line }];
+  }
+  return [{ message, from: 0, to: 0 }];
+}
+
 export function EditPanel({
   sessionId,
   nodeId,
@@ -89,7 +112,8 @@ export function EditPanel({
       setArgErrors(r.errors ?? []);
     } catch (e) {
       if (e instanceof ApiError && e.status === 400) {
-        setArgErrors([{ message: e.message }]);
+        // 서버가 준 검증 메시지를 CM6 진단으로 옮긴다 (스키마는 다시 구현하지 않는다)
+        setArgErrors(serverErrorLines(argsText, e.message));
       } else {
         setError(e instanceof ApiError ? e.message : String(e));
       }
