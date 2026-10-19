@@ -98,3 +98,44 @@ jobs:
         run: pnpm --filter @procforge/local exec vitest run --run --testTimeout=20000 --hookTimeout=20000
         env:
           PROCFORGE_CLIENT: remote
+  e2e:
+    # M7-5-6: 실제 chromium + 실제 UI dist + 실제 local 서버 (ubuntu 전용).
+    # windows는 DEV-GUIDE §6에 따라 API 계약까지만 (build-test/remote-mode에서 커버).
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: pnpm store path
+        id: pnpm-store
+        run: echo "path=$(pnpm store path)" >> $GITHUB_OUTPUT
+      - name: pnpm store cache (M5.6)
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-store-${{ runner.os }}-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: pnpm-store-${{ runner.os }}-
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install openpyxl python-pptx
+      - run: pnpm install --frozen-lockfile
+      - name: playwright browsers (chromium)
+        run: pnpm --filter @procforge/local exec playwright install --with-deps chromium
+      - name: build (시나리오는 dist만 import)
+        run: pnpm build
+      - name: playwright e2e
+        run: pnpm --filter @procforge/local exec playwright test -c playwright.config.ts
+      - name: e2e artifacts (실패 시에만)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-test-results
+          path: packages/local/test-results
+          if-no-files-found: ignore
+          retention-days: 7

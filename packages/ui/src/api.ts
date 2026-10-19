@@ -309,8 +309,8 @@ function subscribeSse(
           }
           const evm = /^event: (.+)$/m.exec(b);
           const dm = /^data: (.*)$/m.exec(b);
-          if (evm) {
-            handlers.onEvent?.(evm[1], dm ? dm[1] : "");
+          if (evm && handlers.onEvent) {
+            handlers.onEvent(evm[1], dm ? dm[1] : "");
             continue;
           }
           if (!dm) continue;

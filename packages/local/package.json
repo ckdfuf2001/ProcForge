@@ -11,6 +11,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "vitest run",
+    "test:e2e": "playwright test -c playwright.config.ts",
+    "pretest:e2e": "pnpm -w build",
     "lint": "tsc --noEmit -p tsconfig.json",
     "start": "node ./dist/main.js"
   },
@@ -21,6 +23,7 @@
     "zod": "^3.23.8"
   },
   "devDependencies": {
+    "@playwright/test": "^1.64.1",
     "@types/node": "^26.6.4",
     "typescript": "^5.6.2",
     "vitest": "^2.1.3"

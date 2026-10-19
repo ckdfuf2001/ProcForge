@@ -47,33 +47,57 @@ export function EditPanel({
   const [conflict, setConflict] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // M7-5-6-c: 초안 보존. 외부(MCP) 변경이 와도 dirty 인 동안에는 덮어쓰지 않고,
+  // 저장 시 baseRevision 으로 409 를 받아 사용자가 다시 읽도록 한다 (데이터 유실 0).
+  const [dirty, setDirty] = useState(false);
+  const [baseRevision, setBaseRevision] = useState(revision);
+  const [baseGoal, setBaseGoal] = useState<string | null>(null);
+  const [externalChange, setExternalChange] = useState(false);
+  // M7-5-6-d: 신호 실패 시 OpenCode 에 붙여넣을 문구(C 모드)
+  const [signalCopy, setSignalCopy] = useState<string | null>(null);
 
   useEffect(() => {
+    if (dirty) return; // 초안 유지
+    let cancelled = false;
     void (async () => {
       try {
         const d = await api.nodeDetail(sessionId, nodeId);
+        if (cancelled) return;
         setArgsText(JSON.stringify(d.detail.args, null, 2));
         setGoalText(d.detail.goal);
+        setBaseGoal(d.detail.goal);
+        setBaseRevision(d.detail.revision);
         setPreview(null);
-        setSaved(null);
+        setArgErrors([]);
+        setExternalChange(false);
       } catch (e) {
-        setError(e instanceof ApiError ? e.message : String(e));
+        if (!cancelled) setError(e instanceof ApiError ? e.message : String(e));
       }
     })();
-  }, [sessionId, nodeId, revision]);
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionId, nodeId, revision, dirty]);
+
+  useEffect(() => {
+    if (dirty && revision !== baseRevision) setExternalChange(true);
+  }, [dirty, revision, baseRevision]);
 
   const post = async (path: string, body: unknown) => {
     setBusy(true);
     setError(null);
     setConflict(false);
+    setSaved(null);
     try {
       const r = await api.post(path, {
         sessionId,
         nodeId,
-        expectedRevision: revision,
+        expectedRevision: baseRevision,
         ...(body as Record<string, unknown>),
       } as Record<string, unknown>);
       setSaved(`${path} 저장됨`);
+      setDirty(false);
+      setExternalChange(false);
       return r;
     } catch (e) {
       if (e instanceof ApiError && e.status === 409) {
@@ -94,17 +118,17 @@ export function EditPanel({
     setError(null);
     setArgErrors([]);
     try {
-      let change: Record<string, unknown> = {};
+      const change: Record<string, unknown> = {};
       try {
-        change = { patch: { set: JSON.parse(argsText) as Record<string, unknown> } };
+        change.patch = { set: JSON.parse(argsText) as Record<string, unknown> };
       } catch (e) {
         setError(`인자 JSON 오류: ${String(e)}`);
         return;
       }
-      if (goalText.trim() !== "") change = { goal: goalText };
+      if (baseGoal !== null && goalText !== baseGoal) change.goal = goalText;
       const r = (await api.post(`/api/sessions/${sessionId}/preview-edit`, {
         nodeId,
-        expectedRevision: revision,
+        expectedRevision: baseRevision,
         change,
       })) as { wouldStale: string[]; newHash: string; errors?: ServerError[] };
       setPreview(r);
@@ -130,11 +154,21 @@ export function EditPanel({
           <p>다른 곳에서 변경되었습니다. 초안은 유지했습니다.</p>
           <button
             type="button"
-            onClick={() => window.location.reload()}
+            onClick={() => {
+              setConflict(false);
+              setError(null);
+              setDirty(false);
+              setExternalChange(false);
+            }}
           >
             최신 다시 읽기
           </button>
         </div>
+      )}
+      {externalChange && !conflict && (
+        <p role="alert">
+          다른 곳에서 이 노드가 변경되었습니다. 저장하면 409가 납니다 (초안 유지).
+        </p>
       )}
       {error && <p role="alert">{error}</p>}
       {saved && <p>{saved}</p>}
@@ -142,7 +176,10 @@ export function EditPanel({
         목표
         <textarea
           value={goalText}
-          onChange={(e) => setGoalText(e.target.value)}
+          onChange={(e) => {
+            setGoalText(e.target.value);
+            setDirty(true);
+          }}
           rows={2}
         />
       </label>
@@ -150,7 +187,10 @@ export function EditPanel({
         인자 JSON (argSpecs)
         <JsonEditor
           value={argsText}
-          onChange={setArgsText}
+          onChange={(t) => {
+            setArgsText(t);
+            setDirty(true);
+          }}
           serverErrors={argErrors}
           ariaLabel="인자 JSON"
         />
@@ -202,16 +242,24 @@ export function EditPanel({
         type="button"
         disabled={busy}
         onClick={async () => {
+          setSignalCopy(null);
           const r = (await post(`/api/sessions/${sessionId}/advise-and-signal`, {
             text: adviceText,
           })) as { signal?: { delivered: boolean; degraded?: string; copyText?: string } } | null;
           if (r && r.signal && !r.signal.delivered) {
             setError(`저장은 끝났습니다. 신호 실패: ${r.signal.degraded ?? ""}`);
+            setSignalCopy(r.signal.copyText ?? null);
           }
         }}
       >
         의견 등록 + 계속 신호
       </button>
+      {signalCopy && (
+        <div>
+          <p>신호 대신 이 문구를 OpenCode에 붙여넣으세요.</p>
+          <pre>{signalCopy}</pre>
+        </div>
+      )}
       <small>SSE 갱신: {revision}</small>
     </section>
   );

@@ -3,3 +3,5 @@ packages/*/dist/
 .procforge/
 *.log
 .DS_Store
+test-results/
+playwright-report/
