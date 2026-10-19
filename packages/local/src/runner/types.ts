@@ -24,7 +24,7 @@ export type RunOptions = {
   approvedNodeIds?: string[];
   /** 무인 실행 (M5.5-4. external은 approvals 일치 시에만 실행, 불일치 시 fail ["approval"]) */
   unattended?: boolean;
-  /** M7-5-a: 실행 중 스크립트 자식 pid 등록/해제 (취소가 트리를 죽이��) */
+  /** M7-5-a: 실행 중 스크립트 자식 pid 등록/해제 (취소가 트리를 죽이도록) */
   onScriptChild?: (pid: number) => void;
   onScriptChildEnd?: (pid: number) => void;
   /** M7-5-a: 취소 여부 (참이면 스크립트 트리를 죽이고 cancelled) */

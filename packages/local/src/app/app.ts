@@ -2396,7 +2396,7 @@ private hasCurrentApproval(
     }
     this.recordUiCall(st.sessionId, "pf_run_cancel", "", undefined);
     const r = await cancelRun(this.procforgeDir, runId, "UI 실행 화면에서 취소");
-    // M7-5-b: **대기 중** 취소는 driveRun 이 이미 빠져나갔으므로 그���을 읽을 주체가 없다.
+    // M7-5-b: **대기 중** 취소는 driveRun 이 이미 빠져나갔으므로 그 자식의 종료를 볼 주체가 없다.
     // 여기서 바로 잠금을 푼다 (안 하면 그 절차서는 409 고착).
     if (this.waitingRuns.has(runId)) {
       const wst = readRunState(this.procforgeDir, runId) as RunState | undefined;

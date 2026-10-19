@@ -130,7 +130,7 @@ describe("M7-5-b 대기 실행 영속", () => {
     expect(again.runId).not.toBe(run.runId);
   }, 60000);
 
-  it("재시��� 후에도 승인이 재개된다 (대기는 디스크)", async () => {
+  it("재시작 후에도 승인이 재개된다 (대기는 디스크)", async () => {
     const { run, nodeId } = await waitingRun();
     // 메모리를 전부 버린 새 인스턴스 (= 서버 재시작)
     const app2 = await mkApp();

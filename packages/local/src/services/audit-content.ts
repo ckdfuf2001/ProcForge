@@ -93,7 +93,7 @@ function readTextFile(abs: string, cap: number): string | null {
     if (abs.toLowerCase().endsWith(".pptx")) return extractPptxText(buf);
     const text = buf.toString("utf8");
     // 바이너리 추정 시 제외
-    const bad = (text.match(/�/g) ?? []).length;
+    const bad = (text.match(/\uFFFD/g) ?? []).length;
     if (bad > text.length / 10) return null;
     return text;
   } catch {
