@@ -2249,7 +2249,57 @@ async uiApprove(input: {
   return { nodeId: input.nodeId, approvalHash: info.approvalHash, approved: input.approved };
 }
 
-/** M7-5-b: 이 세션에서 결정을 기다리는 실행 (디스크 기준) */
+  /** M7-close-a: 실행 external 승인 — CLI runApprove 와 같은 경로(UI 검증 포함). */
+  async uiRunApprove(input: {
+    runId: string;
+    nodeId: string;
+    approvalHash: string;
+    approved: boolean;
+    expectedRevision: number;
+    note?: string;
+    allowWildcard?: string[];
+  }): Promise<{ runId: string; nodeId: string; approved: boolean }> {
+    if (!Number.isInteger(input.expectedRevision)) {
+      throw pfError("bad_request", "expectedRevision 필수");
+    }
+    if (!input.approvalHash) {
+      throw pfError("bad_request", "approvalHash 필수 (M7-5-2)");
+    }
+    if (typeof input.approved !== "boolean") {
+      throw pfError("bad_request", "approved 는 boolean 으로 명시해야 합니다 (M7-5-i).");
+    }
+    const st = readRunState(this.procforgeDir, input.runId) as RunState | undefined;
+    if (!st) throw pfError("not_found", `run ${input.runId} not found`);
+    const info = await this.uiApprovalInfo({
+      sessionId: st.sessionId,
+      nodeId: input.nodeId,
+    });
+    if (info.approvalHash !== input.approvalHash) {
+      throw pfError(
+        "conflict",
+        `approvalHash 불일치 (화면 ${input.approvalHash.slice(0, 8)} ≠ 현재 ${info.approvalHash.slice(0, 8)}). 다시 읽으세요.`,
+      );
+    }
+    const allowWildcard = Array.isArray(input.allowWildcard)
+      ? input.allowWildcard.filter((k): k is string => typeof k === "string")
+      : [];
+    const missingWildcard = info.wildcardKeys.filter((k) => !allowWildcard.includes(k));
+    if (missingWildcard.length > 0) {
+      throw pfError(
+        "bad_request",
+        `승인 불가: 와일드카드 미지정 키 (${missingWildcard.join(",")}). 키를 명시 선택하세요.`,
+      );
+    }
+    const out = await this.runApprove({
+      runId: input.runId,
+      nodeId: input.nodeId,
+      approved: input.approved,
+    });
+    this.recordUiCall(st.sessionId, "pf_run_approve", input.nodeId);
+    return { runId: out.runId, nodeId: out.nodeId, approved: out.approved };
+  }
+
+  /** M7-5-b: 이 세션에서 결정을 기다리는 실행 (디스크 기준) */
 private waitingRunBySession(
   sessionId: string,
 ): { runId: string; procedure: string } | undefined {
@@ -2400,15 +2450,7 @@ private hasCurrentApproval(
     // 여기서 바로 잠금을 푼다 (안 하면 그 절차서는 409 고착).
     if (this.waitingRuns.has(runId)) {
       const wst = readRunState(this.procforgeDir, runId) as RunState | undefined;
-      if (wst?.procedure) this.finishRun(runId, wst.procedure, "info", "대기 중 취소됨");
-      if (wst) {
-        writeRunState(this.procforgeDir, {
-          ...wst,
-          status: "cancelled",
-          waiting: undefined,
-          updatedAt: new Date().toISOString(),
-        });
-      }
+      if (wst?.procedure) this.markCancelled(runId, wst.procedure);
     }
     appendRunLog(this.procforgeDir, runId, {
       level: "info",
@@ -2430,7 +2472,9 @@ private hasCurrentApproval(
     if (!st) throw pfError("not_found", `run ${runId} not found`);
     return {
       runId,
-      status: readCancelFlag(this.procforgeDir, runId) ? "cancelling" : st.status,
+      // M7-close-a: 종료 상태는 취소 플래그가 남아도 그대로 보여준다.
+      // (안 그러면 취소된 실행이 영원히 "cancelling" 이라 재실행 버튼이 안 뜬다)
+      status: this.runStatus(st),
       entries: readRunLog(this.procforgeDir, runId, input.afterSeq ?? 0),
       sessionId: st.sessionId,
       procedure: st.procedure,
@@ -2459,7 +2503,7 @@ private hasCurrentApproval(
     if (!st) throw pfError("not_found", `run ${runId} not found`);
     return {
       runId,
-      status: readCancelFlag(this.procforgeDir, runId) ? "cancelling" : st.status,
+      status: this.runStatus(st),
       procedure: st.procedure,
       sessionId: st.sessionId,
       params: st.params,
@@ -2570,12 +2614,12 @@ private hasCurrentApproval(
     try {
       for (let i = 0; i < 500; i++) {
         if (readCancelFlag(this.procforgeDir, runId)) {
-          this.finishRun(runId, procedure, "info", "취소됨");
+          this.markCancelled(runId, procedure);
           return;
         }
         const step = await this.runStep(runId, { unattended: true });
         if (readCancelFlag(this.procforgeDir, runId)) {
-          this.finishRun(runId, procedure, "info", "취소됨");
+          this.markCancelled(runId, procedure);
           return;
         }
         if (step.kind === "done") {
@@ -2619,6 +2663,35 @@ private hasCurrentApproval(
     }
   }
 
+  /** M7-close-a: 취소 플래그를 반영한 표시용 상태 (종료 상태는 덮지 않는다). */
+  private runStatus(st: RunState): string {
+    const terminal =
+      st.status === "done" || st.status === "failed" || st.status === "cancelled";
+    return !terminal && readCancelFlag(this.procforgeDir, st.runId)
+      ? "cancelling"
+      : st.status;
+  }
+
+  /**
+   * M7-close-a: 취소 확정 — 상태를 **cancelled** 로 굳히고 로그·잠금을 정리한다.
+   * (finishRun 만 부르면 취소 플래그가 남아 uiRunInfo 가 영원히 "cancelling" 이다.)
+   */
+  private markCancelled(runId: string, procedure: string): void {
+    const st = readRunState(this.procforgeDir, runId) as RunState | undefined;
+    if (st) {
+      writeRunState(this.procforgeDir, {
+        ...st,
+        status: "cancelled",
+        waiting: undefined,
+        suspended: undefined,
+        failedNodeId: undefined,
+        failedDetail: undefined,
+        updatedAt: new Date().toISOString(),
+      });
+    }
+    this.finishRun(runId, procedure, "info", "취소됨");
+  }
+
   /** 실행 종료 처리 (로그 + 잠금 해제) */
   private finishRun(
     runId: string,
@@ -2648,7 +2721,7 @@ private hasCurrentApproval(
     if (st.status === "done" || st.status === "failed" || st.status === "cancelled") return;
     this.waitingRuns.delete(runId);
     if (readCancelFlag(this.procforgeDir, runId)) {
-      this.finishRun(runId, procedure, "info", "취소됨");
+      this.markCancelled(runId, procedure);
       return;
     }
     // 대기 표식을 먼저 지운다 (다시 멈추면 driveRun 이 다시 심는다)

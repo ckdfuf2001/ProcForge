@@ -243,6 +243,22 @@ export const api = {
       `/api/runs/${encodeURIComponent(runId)}/cancel`,
       {},
     ),
+  // M7-close-a: 실행 external 승인 (CLI runApprove 와 같은 경로)
+  runApprove: (
+    runId: string,
+    body: {
+      nodeId: string;
+      approvalHash: string;
+      approved: boolean;
+      expectedRevision: number;
+      note?: string;
+      allowWildcard?: string[];
+    },
+  ) =>
+    post<{ runId: string; nodeId: string; approved: boolean }>(
+      `/api/runs/${encodeURIComponent(runId)}/approve`,
+      body,
+    ),
   approvalInfo: (sid: string, nid: string) =>
     get<ApprovalInfo>(
       `/api/sessions/${encodeURIComponent(sid)}/nodes/${encodeURIComponent(nid)}/approval`,

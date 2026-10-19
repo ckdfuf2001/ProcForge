@@ -264,6 +264,7 @@ export function RunPanel({
             <ApprovalPanel
               sessionId={approval.sessionId}
               nodeId={approval.nodeId}
+              runId={runId ?? undefined}
               onClose={() => setApproval(null)}
               onDone={() => {
                 setApproval(null);

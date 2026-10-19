@@ -1,6 +1,7 @@
-import { mkdirSync, mkdtempSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
 import { createServer, type Server } from "node:http";
 import { createLocalStack } from "../dist/core-inprocess.js";
 import { ProcForgeApp } from "../dist/app/app.js";
@@ -10,15 +11,21 @@ import { savePairing } from "../dist/services/pairings.js";
 // M7-5-6: E2E 하네스 — 임시 저장소 + 가짜 OpenCode + UI 서버(실제 dist).
 // 런타임은 **빌드 산출물(dist)** 을 쓴다 (pretest:e2e 가 먼저 빌드).
 
+// M7-close-a: 실행(E2E) 시나리오는 실제 러너가 MCP 서버를 띄우므로
+// 가짜 ppt MCP(test 픽스처)를 opencode.json 에 등록해 둔다.
+const FAKE_MCP = fileURLToPath(
+  new URL("../test/fixtures/fake-ppt-mcp/server.mjs", import.meta.url),
+);
+
 export const CATALOG = [
   {
-    server: "fake",
+    server: "fake-ppt",
     name: "echo",
     inputSchema: { type: "object" },
     schemaHash: "h",
   },
 ];
-export const TOOL = { server: "fake", name: "echo" };
+export const TOOL = { server: "fake-ppt", name: "echo" };
 
 export type FakeMode = "ok" | "plan" | "unknown-version";
 
@@ -132,6 +139,12 @@ export async function setup(opts: { fakeMode?: FakeMode } = {}): Promise<Harness
   const root = mkdtempSync(join(tmpdir(), "pf-e2e-"));
   const pfdir = join(root, ".procforge");
   mkdirSync(pfdir, { recursive: true });
+  // 러너가 MCP 도구를 실제로 실행할 수 있게 가짜 ppt 서버를 등록한다.
+  writeFileSync(
+    join(root, "opencode.json"),
+    JSON.stringify({ mcp: { "fake-ppt": { type: "local", command: ["node", FAKE_MCP] } } }),
+    "utf8",
+  );
   const fake = await startFakeOpenCode(opts.fakeMode ?? "ok");
   const { client } = createLocalStack(pfdir);
   const app = new ProcForgeApp({
@@ -234,6 +247,86 @@ export async function simulateReport(
 
 export function pair(h: Harness, ocSid: string, sid: string): void {
   savePairing(h.pfdir, ocSid, sid);
+}
+
+/**
+ * M7-close-a: external(승인 필요) leaf 하나짜리 절차서. uiRun 하면 runner 가
+ * 승인 대기(suspended/waiting)에서 멈춘다 — UI 승인 흐름용.
+ */
+export async function seedExternalProcedure(
+  h: Harness,
+  name = "ext-proc",
+): Promise<string> {
+  const s = await h.app.start({ request: "ext", toolCatalog: CATALOG as never });
+  const sid = s.sessionId;
+  await h.app.split({
+    sessionId: sid,
+    nodeId: "1",
+    children: [{ goal: "x" }],
+    expectedRevision: 0,
+  });
+  await h.app.report({
+    sessionId: sid,
+    nodeId: "1.1",
+    tool: TOOL,
+    args: { note: "hi" },
+    resultSummary: "ok",
+    resultJson: { note: "hi" },
+    selfVerdict: "pass",
+    selfReason: "ok",
+  });
+  await h.app.confirmLeaf({
+    sessionId: sid,
+    nodeId: "1.1",
+    tool: TOOL,
+    argSpecs: { note: { kind: "fixed", value: "hi" } } as never,
+    sideEffect: "external",
+  });
+  await h.app.finalize({ sessionId: sid, name });
+  return name;
+}
+
+/**
+ * M7-close-a: 취소를 관찰할 수 있게 오래 도는 python 스크립트 leaf 절차서.
+ */
+export async function seedSlowProcedure(
+  h: Harness,
+  name = "slow-proc",
+): Promise<string> {
+  const script = ["import time", "time.sleep(120)"].join("\n");
+  const s = await h.app.start({ request: "run", toolCatalog: CATALOG as never });
+  const sid = s.sessionId;
+  await h.app.split({
+    sessionId: sid,
+    nodeId: "1",
+    children: [{ goal: "run script" }],
+    expectedRevision: 0,
+  });
+  // 절차서 수집은 projectRoot 아래 .py 를 본다 (M7-5-a). 실행본도 세션에 둔다.
+  writeFileSync(join(h.root, "slow.py"), script, "utf8");
+  writeFileSync(join(h.pfdir, "slow.py"), script, "utf8");
+  const sdir = join(h.pfdir, "sessions", sid, "scripts");
+  mkdirSync(sdir, { recursive: true });
+  writeFileSync(join(sdir, "slow.py"), script, "utf8");
+  await h.app.report({
+    sessionId: sid,
+    nodeId: "1.1",
+    tool: TOOL,
+    args: {},
+    resultSummary: "ok",
+    selfVerdict: "pass",
+    selfReason: "ok",
+  });
+  await h.app.confirmLeaf({
+    sessionId: sid,
+    nodeId: "1.1",
+    tool: TOOL,
+    argSpecs: {
+      script: { kind: "script", file: "slow.py", runtime: "python" },
+    } as never,
+  });
+  await h.app.finalize({ sessionId: sid, name });
+  return name;
 }
 
 export const OC_SID = "ses-h";

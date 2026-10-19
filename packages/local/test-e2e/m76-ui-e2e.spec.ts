@@ -2,6 +2,8 @@ import { test, expect, type Page } from "@playwright/test";
 import {
   setup,
   seedTwoLeaves,
+  seedExternalProcedure,
+  seedSlowProcedure,
   simulateReport,
   pair,
   OC_SID,
@@ -9,7 +11,8 @@ import {
 } from "./harness.js";
 
 // M7-5-6: Playwright E2E (실제 chromium + 실제 UI dist + 실제 local 서버).
-// 시나리오: (a) 월간보고서 (b) 크롤링 args 수정 (c) conflict (d) plan/버전 미확인.
+// 시나리오: (a) 월간보고서 (b) 크롤링 args 수정 (c) conflict (d) plan/버전 미확인
+// (e) 실행 탭: 승인 대기→화면 승인→done / 취소→재실행 (M7-close-a).
 
 let h: Harness;
 
@@ -37,6 +40,27 @@ async function openNode(page: Page, nid: string): Promise<void> {
   await expect(
     page.getByRole("heading", { name: new RegExp(`^${nid.replace(".", "\\.")} · `) }),
   ).toBeVisible();
+}
+
+/** M7-close-a: CSP 수집을 깐 채 실행 탭으로 진입. */
+async function visitRunTab(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    const w = window as unknown as { __cspViolations: string[] };
+    w.__cspViolations = [];
+    document.addEventListener("securitypolicyviolation", (e) => {
+      w.__cspViolations.push(e.violatedDirective);
+    });
+  });
+  await page.goto(`${h.ui.url}/#t=${h.ui.token}`);
+  await expect(page.getByRole("heading", { name: "ProcForge" })).toBeVisible();
+  await page.locator("nav").getByRole("button", { name: "실행", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "실행", exact: true })).toBeVisible();
+}
+
+function runPanel(page: Page) {
+  return page
+    .locator("section")
+    .filter({ has: page.getByRole("heading", { name: "실행", exact: true }) });
 }
 
 async function setArgs(page: Page, obj: Record<string, unknown>): Promise<void> {
@@ -197,6 +221,49 @@ test("(d) plan 모드: 신호 실패 + C 복사 문구", async ({ page }) => {
     page.getByText("신호 대신 이 문구를 OpenCode에 붙여넣으세요."),
   ).toBeVisible();
   await expect(page.locator("pre", { hasText: "계속" })).toBeVisible();
+
+  await expectNoCspViolation(page);
+});
+
+test("(e) 실행: 승인 대기 → 화면 승인 → done / 다른 실행 취소 → 재실행 활성", async ({
+  page,
+}) => {
+  h = await setup({ fakeMode: "ok" });
+  const ext = await seedExternalProcedure(h);
+  const slow = await seedSlowProcedure(h);
+
+  await visitRunTab(page);
+  const panel = runPanel(page);
+
+  // 1) external 절차서: 실행하면 승인 대기에서 멈춘다.
+  await panel.getByLabel("절차서").selectOption(ext);
+  await panel.getByRole("button", { name: "실행", exact: true }).click();
+  await expect(panel.getByText(/승인 대기: 노드 1\.1/)).toBeVisible({
+    timeout: 30000,
+  });
+
+  // 화면에서 승인 → 러너 재개 → done + 노드 1.1 pass
+  await panel.getByRole("button", { name: "승인 화면 열기" }).click();
+  await expect(
+    panel.getByRole("heading", { name: "승인 — 노드 1.1" }),
+  ).toBeVisible();
+  await panel.getByRole("button", { name: "승인", exact: true }).click();
+  await expect(panel.getByText(/상태 done/)).toBeVisible({ timeout: 60000 });
+  await expect(
+    panel.locator("tr").filter({ hasText: "1.1" }),
+  ).toContainText("pass");
+
+  // 2) 다른 실행(slow): 실행 중 취소 → 재실행 버튼이 활성화된다.
+  await panel.getByLabel("절차서").selectOption(slow);
+  await panel.getByRole("button", { name: "실행", exact: true }).click();
+  await expect(panel.getByRole("button", { name: "취소" })).toBeVisible({
+    timeout: 30000,
+  });
+  await panel.getByRole("button", { name: "취소" }).click();
+  await expect(panel.getByRole("button", { name: "재실행" })).toBeVisible({
+    timeout: 30000,
+  });
+  await expect(panel.getByRole("button", { name: "재실행" })).toBeEnabled();
 
   await expectNoCspViolation(page);
 });

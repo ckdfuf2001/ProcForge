@@ -40,6 +40,7 @@ export type UiApp = Pick<
   | "listProcedures"
   | "uiApprovalInfo"
   | "uiApprove"
+  | "uiRunApprove"
 >;
 
 export type UiServer = {
@@ -464,7 +465,10 @@ export async function createUiServer(opts: {
         // M7-ui4: 쓰기 — POST + JSON만. expectedRevision 필수.
         if (req.method === "POST") {
           // M7 5-1: 실행 시작/취소는 세션 경로가 아니라 별도 경로다
-          if (url.pathname === "/api/runs" || /^\/api\/runs\/[^/]+\/cancel$/.test(url.pathname)) {
+          if (
+            url.pathname === "/api/runs" ||
+            /^\/api\/runs\/[^/]+\/(cancel|approve)$/.test(url.pathname)
+          ) {
             const body = (await readJsonBody(req, res)) ?? {};
             if (url.pathname === "/api/runs") {
               // 원본 본문을 그대로 넘긴다 — App이 주입 키를 검증한다
@@ -473,7 +477,43 @@ export async function createUiServer(opts: {
               return;
             }
             const runId = pathId(url.pathname.split("/")[3] ?? "", "runId");
-            send(res, await opts.app.uiRunCancel({ runId }));
+            if (url.pathname.endsWith("/cancel")) {
+              send(res, await opts.app.uiRunCancel({ runId }));
+              return;
+            }
+            // M7-close-a: 실행 external 승인
+            if (typeof body.nodeId !== "string" || body.nodeId === "") {
+              err(res, 400, "nodeId 필수");
+              return;
+            }
+            if (typeof body.approvalHash !== "string" || body.approvalHash === "") {
+              err(res, 400, "approvalHash 필수 (M7-5-2)");
+              return;
+            }
+            if (!Number.isInteger(body.expectedRevision)) {
+              err(res, 400, "expectedRevision 필수");
+              return;
+            }
+            send(
+              res,
+              await opts.app.uiRunApprove({
+                runId,
+                nodeId: body.nodeId,
+                approvalHash: body.approvalHash,
+                ...(typeof body.approved === "boolean"
+                  ? { approved: body.approved }
+                  : { approved: undefined as unknown as boolean }),
+                expectedRevision: body.expectedRevision as number,
+                ...(body.note !== undefined ? { note: String(body.note) } : {}),
+                ...(Array.isArray(body.allowWildcard)
+                  ? {
+                      allowWildcard: body.allowWildcard.filter(
+                        (k): k is string => typeof k === "string",
+                      ),
+                    }
+                  : {}),
+              }),
+            );
             return;
           }
           const mApprove = /^\/api\/sessions\/([^/]+)\/nodes\/([^/]+)\/approve$/.exec(
@@ -622,7 +662,13 @@ export async function createUiServer(opts: {
                 // 로그 본문은 SSE 데이터로 — 화면은 textContent로만 렌더한다
                 res.write(`id: ${e.seq}\ndata: ${JSON.stringify(e)}\n\n`);
               }
-              if (page.status !== "running") {
+              // 종료 상태에서만 스트림을 닫는다. suspended/ready 는 아직
+              // 진행 중(승인·생성값 대기)이므로 계속 구독한다 (M7-close-a).
+              const terminal =
+                page.status === "done" ||
+                page.status === "failed" ||
+                page.status === "cancelled";
+              if (terminal) {
                 res.write(
                   `event: end\ndata: ${JSON.stringify({ runId, status: page.status })}\n\n`,
                 );

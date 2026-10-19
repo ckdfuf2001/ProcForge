@@ -11,11 +11,14 @@ import { ReadOnlyCode } from "./JsonEditor.js";
 export function ApprovalPanel({
   sessionId,
   nodeId,
+  runId,
   onClose,
   onDone,
 }: {
   sessionId: string;
   nodeId: string;
+  /** M7-close-a: 실행(run) 승인이면 runId — CLI runApprove 경로로 보낸다. */
+  runId?: string;
   onClose: () => void;
   onDone?: () => void;
 }) {
@@ -53,7 +56,7 @@ export function ApprovalPanel({
       setBusy(true);
       setError(null);
       try {
-        await api.approve(sessionId, nodeId, {
+        const body = {
           approvalHash: info.approvalHash,
           approved,
           expectedRevision: revision,
@@ -61,7 +64,13 @@ export function ApprovalPanel({
           ...(approved && info.wildcardKeys.length > 0
             ? { allowWildcard: Object.keys(checked).filter((k) => checked[k]) }
             : {}),
-        });
+        };
+        if (runId) {
+          // 실행 external 승인: core pfApprove(needs_human 전용)가 아니라 runApprove.
+          await api.runApprove(runId, { nodeId, ...body });
+        } else {
+          await api.approve(sessionId, nodeId, body);
+        }
         onDone?.();
       } catch (e) {
         if (e instanceof ApiError && e.status === 409) {
