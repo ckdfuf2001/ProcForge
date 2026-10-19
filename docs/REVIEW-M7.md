@@ -50,7 +50,8 @@
 - 결정 기록: docs/DECISIONS.md [M7-1]·[M7-1.1-*]·[M7-ui1-*]~[M7-ui4-k]·
   [M7-5-1]~[M7-5-3]·[M7-5-a~i]·[M7-5 보정3-a~d]·[M7-5-3-a/b].
 - 테스트: L3 로컬 green(3 client 모드). CI run 39271527969(b25c688) success —
-  7잡(build-test 4·remote-mode 2·e2e 1) 전부. 5-4는 run 39264793696 success.
+  7잡(build-test 4·remote-mode 2·e2e 1) 전부. 5-4는 run 39264793696,
+  close-a~e는 run 39295325570(head `0604023`, e2e 포함 7잡) success.
 - 남음(사람 수행): dogfood — 실제 OpenCode(build 모드)에서 분해 → **UI로** 중간 노드
   의견 1건 → 그 부분만 재실행 → finalize → 무인 run exit 0. **M5.8(a)와 한 세션에서
   통합 종료**하고 `docs/M7-dogfood.md`에 기록(connectionId·actor로 사람/모델/UI 구분 증명).
