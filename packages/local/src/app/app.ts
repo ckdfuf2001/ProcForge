@@ -1610,6 +1610,7 @@ export class ProcForgeApp {
     tool: string,
     nodeId: string,
     err?: unknown,
+    note?: string,
   ): void {
     const code = (err as { code?: unknown } | undefined)?.code;
     recordCall(this.procforgeDir, {
@@ -1621,6 +1622,7 @@ export class ProcForgeApp {
       connectionId: this.uiConnectionId,
       ok: err === undefined,
       ...(typeof code === "string" ? { errorCode: code } : {}),
+      ...(note !== undefined && note !== "" ? { note } : {}),
     });
   }
 
@@ -2185,11 +2187,13 @@ async uiApprove(input: {
   }
   // M7-5-4: wildcard 키는 **명시 선택**해야 한다. core 승인 전에 막아
   // "core 는 승인됐는데 approvals.json 기록만 실패" 상태를 만들지 않는다.
+  // M7-close-b: 거부(approved:false)에는 선택이 필요 없다 — 승인일 때만 검사한다
+  // (아니면 와일드카드가 있는 노드를 영영 거부할 수 없다).
   const allowWildcard = Array.isArray(input.allowWildcard)
     ? input.allowWildcard.filter((k): k is string => typeof k === "string")
     : [];
   const missingWildcard = info.wildcardKeys.filter((k) => !allowWildcard.includes(k));
-  if (missingWildcard.length > 0) {
+  if (input.approved && missingWildcard.length > 0) {
     throw pfError(
       "bad_request",
       `승인 불가: 와일드카드 미지정 키 (${missingWildcard.join(",")}). 키를 명시 선택하세요.`,
@@ -2270,6 +2274,15 @@ async uiApprove(input: {
     }
     const st = readRunState(this.procforgeDir, input.runId) as RunState | undefined;
     if (!st) throw pfError("not_found", `run ${input.runId} not found`);
+    // M7-close-b: expectedRevision을 **실제로 비교**한다(ui4-2). 화면이 본 리비전과
+    // 지금 세션 리비전이 다르면 승인 전에 409 (무음 승인 금지, 다른 기기 끼어들기 차단).
+    const s = await this.core.getSession(st.sessionId);
+    if (input.expectedRevision !== s.revision) {
+      throw pfError(
+        "conflict",
+        `revision mismatch: expected ${input.expectedRevision}, actual ${s.revision}`,
+      );
+    }
     const info = await this.uiApprovalInfo({
       sessionId: st.sessionId,
       nodeId: input.nodeId,
@@ -2280,11 +2293,13 @@ async uiApprove(input: {
         `approvalHash 불일치 (화면 ${input.approvalHash.slice(0, 8)} ≠ 현재 ${info.approvalHash.slice(0, 8)}). 다시 읽으세요.`,
       );
     }
+    // M7-close-b: 와일드카드 선택 검사는 **승인일 때만**. 거부(approved:false)는
+    // 선택이 필요 없고, 검사하면 와일드카드 노드를 거부할 수 없게 된다.
     const allowWildcard = Array.isArray(input.allowWildcard)
       ? input.allowWildcard.filter((k): k is string => typeof k === "string")
       : [];
     const missingWildcard = info.wildcardKeys.filter((k) => !allowWildcard.includes(k));
-    if (missingWildcard.length > 0) {
+    if (input.approved && missingWildcard.length > 0) {
       throw pfError(
         "bad_request",
         `승인 불가: 와일드카드 미지정 키 (${missingWildcard.join(",")}). 키를 명시 선택하세요.`,
@@ -2295,7 +2310,9 @@ async uiApprove(input: {
       nodeId: input.nodeId,
       approved: input.approved,
     });
-    this.recordUiCall(st.sessionId, "pf_run_approve", input.nodeId);
+    // M7-close-b: note를 받아서 버리지 않는다 — calls 기록에 남긴다(runApprove는 note를
+    // 저장하지 않으므로 여기서 보존). nodeId 뒤(err 자리) undefined, 5번째가 note.
+    this.recordUiCall(st.sessionId, "pf_run_approve", input.nodeId, undefined, input.note);
     return { runId: out.runId, nodeId: out.nodeId, approved: out.approved };
   }
 

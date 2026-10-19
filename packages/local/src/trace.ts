@@ -27,6 +27,8 @@ export type TraceEvent = {
   connectionId?: string;
   /** M7-ui4-d: 실패한 호출의 pfError 코드 (ok=false일 때만 적는다) */
   errorCode?: string;
+  /** M7-close-b: 호출에 딸린 사람 메모(예: 실행 승인 note). 저장 못 하는 경로에서도 남긴다. */
+  note?: string;
 };
 
 export function eventsFile(procforgeDir: string, sessionId: string): string {

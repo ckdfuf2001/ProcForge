@@ -9,6 +9,7 @@ import { tmpdir } from "node:os";
 import { ProcForgeApp } from "../src/app/app.js";
 import { testStack } from "./client-mode.js";
 import { readRunState } from "../src/services/run-state.js";
+import { readEvents } from "../src/trace.js";
 
 // M7-5-b: 승인/생성값 **대기**는 디스크(run-state.waiting)에 적힌다.
 //   1) 승인 → 계속 → done
@@ -84,6 +85,52 @@ async function waitingRun(name = "ext-proc") {
   return { app, run, sessionId: sid, nodeId: "1.1" };
 }
 
+/**
+ * M7-close-b: external + **와일드카드**(var) 인자 leaf. 승인 화면에서 키를 명시
+ * 선택해야 하는 케이스 — 거부는 선택 없이 가능해야 한다.
+ * var ref 는 `${params.x}` (선언된 param 이라 finalize 검사를 통과, 실행 시 값 확정).
+ */
+async function waitingRunWildcard(name = "ext-wild") {
+  const app = await mkApp();
+  const started = await app.core.pfStart({
+    request: "ext",
+    params: { x: "v" },
+    toolCatalog: ECHO_CAT as never,
+  });
+  const sid = started.session.id;
+  await app.core.pfResolve({
+    sessionId: sid,
+    nodeId: "1",
+    decision: "split",
+    children: [{ goal: "x" }],
+  });
+  await app.core.pfReport({
+    sessionId: sid,
+    nodeId: "1.1",
+    tool: { server: "fake-ppt", name: "echo" },
+    args: { note: "hi" },
+    resultSummary: "ok",
+    resultJson: { note: "hi" },
+    selfVerdict: "pass",
+    selfReason: "ok",
+  });
+  await app.core.pfResolve({
+    sessionId: sid,
+    nodeId: "1.1",
+    decision: "leaf",
+    tool: { server: "fake-ppt", name: "echo" },
+    argSpecs: { note: { kind: "var", ref: "${params.x}" } } as never,
+    sideEffect: "external",
+  });
+  await app.finalize({ sessionId: sid, name });
+  const run = await app.uiRun({ procedure: name, params: { x: "v" } });
+  for (let i = 0; i < 300; i++) {
+    if (readRunState(pfdir, run.runId)?.waiting) break;
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  return { app, run, sessionId: sid, nodeId: "1.1" };
+}
+
 async function waitStatus(runId: string, want: string) {
   for (let i = 0; i < 300; i++) {
     const st = readRunState(pfdir, runId);
@@ -140,5 +187,70 @@ describe("M7-5-b 대기 실행 영속", () => {
     const st = await waitStatus(run.runId, "done");
     if (st?.status !== "done") throw new Error(`failed: ${st?.failedNodeId} ${st?.failedDetail}`);
     expect(st?.status).toBe("done");
+  }, 60000);
+});
+
+// M7-close-b: 실행 승인(uiRunApprove)의 회귀 — (1) 와일드카드 노드 **거부** 가능,
+// (2) expectedRevision 실제 비교(불일치 409), (3) 승인 시 와일드카드 키 미선택 거부,
+// (4) note 가 calls.jsonl 에 남는다.
+describe("M7-close-b uiRunApprove 보정", () => {
+  it("와일드카드 노드는 키 선택 없이 **거부**할 수 있다", async () => {
+    const { app, run, nodeId } = await waitingRunWildcard();
+    // 승인은 **실행 세션**(import 결과) 기준이다 — 화면도 run.sessionId 로 해시·리비전을 본다.
+    const runSid = readRunState(pfdir, run.runId)!.sessionId;
+    const info = await app.uiApprovalInfo({ sessionId: runSid, nodeId });
+    expect(info.wildcardKeys).toContain("note");
+    const rev = (await app.core.getSession(runSid)).revision;
+    await app.uiRunApprove({
+      runId: run.runId,
+      nodeId,
+      approvalHash: info.approvalHash,
+      approved: false,
+      expectedRevision: rev,
+      note: "범위 밖",
+    });
+    const st = readRunState(pfdir, run.runId);
+    expect(st?.status).toBe("cancelled");
+    expect(st?.waiting).toBeUndefined();
+    // note 가 버려지지 않고 호출 기록에 남는다
+    const calls = readEvents(pfdir, runSid).filter(
+      (e) => e.tool === "pf_run_approve",
+    );
+    expect(calls.at(-1)?.actor).toBe("ui");
+    expect(calls.at(-1)?.note).toBe("범위 밖");
+  }, 60000);
+
+  it("expectedRevision 불일치면 409 (승인 전에 막는다)", async () => {
+    const { app, run, nodeId } = await waitingRunWildcard();
+    const runSid = readRunState(pfdir, run.runId)!.sessionId;
+    const info = await app.uiApprovalInfo({ sessionId: runSid, nodeId });
+    const rev = (await app.core.getSession(runSid)).revision;
+    await expect(
+      app.uiRunApprove({
+        runId: run.runId,
+        nodeId,
+        approvalHash: info.approvalHash,
+        approved: true,
+        expectedRevision: rev + 1,
+      }),
+    ).rejects.toThrow(/revision mismatch/);
+    // 대기는 그대로 (거부·승인 반영 안 됨)
+    expect(readRunState(pfdir, run.runId)?.status).toBe("suspended");
+  }, 60000);
+
+  it("승인인데 와일드카드 키 미선택이면 거부(bad_request)", async () => {
+    const { app, run, nodeId } = await waitingRunWildcard();
+    const runSid = readRunState(pfdir, run.runId)!.sessionId;
+    const info = await app.uiApprovalInfo({ sessionId: runSid, nodeId });
+    const rev = (await app.core.getSession(runSid)).revision;
+    await expect(
+      app.uiRunApprove({
+        runId: run.runId,
+        nodeId,
+        approvalHash: info.approvalHash,
+        approved: true,
+        expectedRevision: rev,
+      }),
+    ).rejects.toThrow(/와일드카드 미지정/);
   }, 60000);
 });
