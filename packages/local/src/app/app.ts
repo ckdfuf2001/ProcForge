@@ -2082,6 +2082,11 @@ async uiApprovalInfo(input: { sessionId: string; nodeId: string }): Promise<{
   diff: string | null;
   approved: boolean;
   needsReapproval: boolean;
+  /**
+   * M7-5-4: var/generated 인자는 승인 파일에 `$any` 로 고정되므로 **키를 명시 선택**해야 한다
+   * (CLI `--allow-wildcard` 와 동일). fixed/script 는 값이 확정되므로 여기 없다.
+   */
+  wildcardKeys: string[];
 }> {
   const sid = input.sessionId;
   const nid = input.nodeId;
@@ -2128,6 +2133,11 @@ async uiApprovalInfo(input: { sessionId: string; nodeId: string }): Promise<{
     }
   }
   const approved = pins.length > 0 && this.hasCurrentApproval(sid, nid, pins);
+  const wildcardKeys = Object.entries(
+    (n.args ?? {}) as Record<string, { kind?: string }>,
+  )
+    .filter(([, s]) => s?.kind !== "fixed" && s?.kind !== "script")
+    .map(([k]) => k);
   return {
     sessionId: sid,
     nodeId: nid,
@@ -2135,8 +2145,9 @@ async uiApprovalInfo(input: { sessionId: string; nodeId: string }): Promise<{
     script,
     diff,
     approved,
-    // 승인 이력이 있는데 지금 핀과 다르면 재승인 필요
+    // 예전 승인이 있는데 지금 값과 다르면 갱신 필요
     needsReapproval: !approved && this.hasAnyApproval(sid, nid),
+    wildcardKeys,
   };
 }
 
@@ -2148,6 +2159,8 @@ async uiApprove(input: {
   approved: boolean;
   note?: string;
   expectedRevision: number;
+  /** M7-5-4: var/generated 키를 명시 선택 (CLI --allow-wildcard 와 동일) */
+  allowWildcard?: string[];
 }): Promise<{ nodeId: string; approvalHash: string; approved: boolean }> {
   if (!Number.isInteger(input.expectedRevision)) {
     throw pfError("bad_request", "expectedRevision 필수");
@@ -2170,6 +2183,18 @@ async uiApprove(input: {
       `approvalHash 불일치 (화면 ${input.approvalHash.slice(0, 8)} ≠ 현재 ${info.approvalHash.slice(0, 8)}). 다시 읽으세요.`,
     );
   }
+  // M7-5-4: wildcard 키는 **명시 선택**해야 한다. core 승인 전에 막아
+  // "core 는 승인됐는데 approvals.json 기록만 실패" 상태를 만들지 않는다.
+  const allowWildcard = Array.isArray(input.allowWildcard)
+    ? input.allowWildcard.filter((k): k is string => typeof k === "string")
+    : [];
+  const missingWildcard = info.wildcardKeys.filter((k) => !allowWildcard.includes(k));
+  if (missingWildcard.length > 0) {
+    throw pfError(
+      "bad_request",
+      `승인 불가: 와일드카드 미지정 키 (${missingWildcard.join(",")}). 키를 명시 선택하세요.`,
+    );
+  }
   const out = await this.core.pfApprove({
     sessionId: input.sessionId,
     nodeId: input.nodeId,
@@ -2184,7 +2209,7 @@ async uiApprove(input: {
     const sessionRoot = join(this.procforgeDir, "sessions", input.sessionId);
     const entry = buildApprovalEntry(
       out.node as never,
-      [],
+      allowWildcard,
       new Map(),
       (rel: string) => {
         try {
@@ -2410,6 +2435,126 @@ private hasCurrentApproval(
       sessionId: st.sessionId,
       procedure: st.procedure,
     };
+  }
+
+  /**
+   * M7-5-4: 실행 결과 화면용 상태. 노드별 status 는 runner 가 기록한 **문자열 그대로** 준다
+   * (UI 가 pass/fail 로 해석하지 않는다). 실행 중에는 화면이 이 값을 폴링한다.
+   */
+  async uiRunInfo(input: { runId: string }): Promise<{
+    runId: string;
+    status: string;
+    procedure: string;
+    sessionId: string;
+    params: Record<string, string>;
+    results: { nodeId: string; status: string }[];
+    summary?: RunState["summary"];
+    failedNodeId?: string;
+    failedDetail?: string;
+    waiting: RunState["waiting"] | null;
+    suspended: RunState["suspended"] | null;
+  }> {
+    const runId = String(input.runId ?? "");
+    const st = readRunState(this.procforgeDir, runId);
+    if (!st) throw pfError("not_found", `run ${runId} not found`);
+    return {
+      runId,
+      status: readCancelFlag(this.procforgeDir, runId) ? "cancelling" : st.status,
+      procedure: st.procedure,
+      sessionId: st.sessionId,
+      params: st.params,
+      results: st.results ?? [],
+      ...(st.summary !== undefined ? { summary: st.summary } : {}),
+      ...(st.failedNodeId !== undefined ? { failedNodeId: st.failedNodeId } : {}),
+      ...(st.failedDetail !== undefined ? { failedDetail: st.failedDetail } : {}),
+      waiting: st.waiting ?? null,
+      suspended: st.suspended ?? null,
+    };
+  }
+
+  /** M7-5-4: 새로고침 후에도 결과 화면을 복원할 수 있게 최근 runId 를 준다. */
+  async uiLatestRun(input: {
+    procedure?: string;
+    sessionId?: string;
+  }): Promise<{ runId: string | null }> {
+    if (input.procedure) {
+      const runsDir = join(this.procforgeDir, "runs");
+      let names: string[];
+      try {
+        names = readdirSync(runsDir, { withFileTypes: true })
+          .filter((e) => e.isDirectory())
+          .map((e) => e.name);
+      } catch {
+        return { runId: null };
+      }
+      let best: RunState | undefined;
+      for (const name of names) {
+        const st = readRunState(this.procforgeDir, name);
+        if (st?.procedure !== input.procedure) continue;
+        if (!best || st.updatedAt > best.updatedAt) best = st;
+      }
+      return { runId: best?.runId ?? null };
+    }
+    if (input.sessionId) {
+      const st = readRunStateBySession(this.procforgeDir, input.sessionId);
+      return { runId: st?.runId ?? null };
+    }
+    return { runId: null };
+  }
+
+  /**
+   * M7-5-4: 실행 화면의 절차서 목록. `procedures/<name>/procedure.json` 만 읽는다
+   * (손상된 항목은 목록에서 숨긴다 — 화면이 깨지지 않게).
+   */
+  async listProcedures(): Promise<{
+    procedures: {
+      name: string;
+      params: {
+        name: string;
+        type: string;
+        required: boolean;
+        default?: string;
+        description: string;
+      }[];
+    }[];
+  }> {
+    const root = join(this.procforgeDir, "procedures");
+    let names: string[];
+    try {
+      names = readdirSync(root, { withFileTypes: true })
+        .filter((e) => e.isDirectory())
+        .map((e) => e.name);
+    } catch {
+      return { procedures: [] };
+    }
+    const out: {
+      name: string;
+      params: {
+        name: string;
+        type: string;
+        required: boolean;
+        default?: string;
+        description: string;
+      }[];
+    }[] = [];
+    for (const dirName of names.sort()) {
+      try {
+        const { doc } = loadProcedureDoc(this.procforgeDir, dirName);
+        out.push({
+          name: doc.name,
+          params: Object.entries(doc.params ?? {}).map(([k, v]) => ({
+            name: k,
+            type: v.type,
+            required: v.required === true,
+            ...(v.default !== undefined ? { default: v.default } : {}),
+            description: v.description,
+          })),
+        });
+      } catch {
+        // 손상·읽기 실패 항목은 목록에서 제외
+      }
+    }
+    return { procedures: out };
   }
 
   /** M7 5-1: 백그라운드 진행 루프 (결정점까지 자동) */
@@ -2652,6 +2797,14 @@ private hasCurrentApproval(
       .filter((r) => r.status === "pass")
       .map((r) => r.nodeId);
     const done = [...new Set([...st.done, ...doneNow])];
+    // M7-5-4: 노드별 결과를 **그대로** 누적한다. 같은 실행의 뒤 단계에서
+    // skipNodeIds 때문에 "skipped" 로 다시 나온 노드는 이전 결과를 유지한다.
+    const resultMap = new Map((st.results ?? []).map((r) => [r.nodeId, r.status]));
+    for (const r of report.results) {
+      if (r.status === "skipped" && resultMap.has(r.nodeId)) continue;
+      resultMap.set(r.nodeId, r.status);
+    }
+    const results = [...resultMap].map(([nodeId, status]) => ({ nodeId, status }));
     const susp = report.results.find((r) => r.status === "suspended");
     const failed = report.results.find((r) => r.status === "fail");
     if (susp) {
@@ -2669,6 +2822,7 @@ private hasCurrentApproval(
         ...st,
         pending,
         done,
+        results,
         status: "suspended",
         // M7-5-b: 대기 표식은 **무인 구동**(uiRun)일 때만 남긴다.
         // (runNext 로 한 걸음씩 조종하는 쪽은 호출자가 다음 걸음을 고르기 때문에
@@ -2721,6 +2875,7 @@ private hasCurrentApproval(
         ...st,
         pending,
         done,
+        results,
         status: "failed",
         failedNodeId: failed.nodeId,
         failedDetail: failed.detail ?? "",
@@ -2739,6 +2894,7 @@ private hasCurrentApproval(
       ...st,
       pending: [],
       done,
+      results,
       status: "done",
       summary: report.summary,
     });

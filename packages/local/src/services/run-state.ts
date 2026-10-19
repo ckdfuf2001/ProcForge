@@ -18,6 +18,11 @@ export type RunState = {
   pending: string[];
   /** 완료 노드 */
   done: string[];
+  /**
+   * M7-5-4: 노드별 **마지막 실행 결과** (runner 가 준 status 그대로).
+   * UI 는 이 값을 해석하지 않고 그대로 표시한다(pass/fail/unverified/skipped/blocked/suspended).
+   */
+  results?: { nodeId: string; status: string }[];
   /** generated 공급값 (nodeId → 키→값) */
   supplied: Record<string, Record<string, unknown>>;
   /** 승인된 external 노드 */

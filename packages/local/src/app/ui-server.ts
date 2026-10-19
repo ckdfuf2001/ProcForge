@@ -35,6 +35,9 @@ export type UiApp = Pick<
   | "uiRun"
   | "uiRunCancel"
   | "uiRunLog"
+  | "uiRunInfo"
+  | "uiLatestRun"
+  | "listProcedures"
   | "uiApprovalInfo"
   | "uiApprove"
 >;
@@ -378,6 +381,30 @@ export async function createUiServer(opts: {
           send(res, await opts.app.listPairings());
           return;
         }
+        // M7-5-4: 실행 화면 — 절차서 목록
+        if (req.method === "GET" && url.pathname === "/api/procedures") {
+          send(res, await opts.app.listProcedures());
+          return;
+        }
+        // M7-5-4: 실행 결과 (노드별 status 그대로)
+        const mRunInfo = /^\/api\/runs\/([^/]+)$/.exec(url.pathname);
+        if (req.method === "GET" && mRunInfo) {
+          send(
+            res,
+            await opts.app.uiRunInfo({ runId: pathId(mRunInfo[1], "runId") }),
+          );
+          return;
+        }
+        // M7-5-4: 새로고침 복원용 — 절차서 또는 세션의 최근 run
+        const mLatestRun = /^\/api\/sessions\/([^/]+)\/latest-run$/.exec(url.pathname);
+        if (req.method === "GET" && (mLatestRun || url.pathname === "/api/latest-run")) {
+          const procedure = url.searchParams.get("procedure") ?? undefined;
+          const sessionId = mLatestRun
+            ? pathId(mLatestRun[1], "sessionId")
+            : (url.searchParams.get("sessionId") ?? undefined);
+          send(res, await opts.app.uiLatestRun({ procedure, sessionId }));
+          return;
+        }
         // M7-ui3: 노드 상세
         const mNode = /^\/api\/sessions\/([^/]+)\/nodes\/([^/]+)$/.exec(url.pathname);
         if (req.method === "GET" && mNode) {
@@ -469,6 +496,9 @@ export async function createUiServer(opts: {
                   ? { approved: body.approved }
                   : { approved: undefined as unknown as boolean }),
                 ...(body.note !== undefined ? { note: String(body.note) } : {}),
+                ...(Array.isArray(body.allowWildcard)
+                  ? { allowWildcard: body.allowWildcard.map(String) }
+                  : {}),
                 expectedRevision: Number(body.expectedRevision),
               }),
             );
