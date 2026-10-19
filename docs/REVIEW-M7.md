@@ -35,16 +35,24 @@
   wildcard는 `--allow-wildcard`와 동일하게 키를 명시 선택해야 승인(core 승인 전 400).
   실패 노드 → "이 노드 열기"로 상세 이동.
 - 6 E2E: MemoryStore core + 임시 저장소 + 가짜 OpenCode, 실제 chromium + 실제 UI dist +
-  실제 local 서버. (a) 월간보고서 (b) 크롤링 (c) conflict (d) plan/버전 미확인.
-  ubuntu 전용 CI, 스크린샷은 실패 시에만 artifact.
+  실제 local 서버. (a) 월간보고서 (b) 크롤링 (c) conflict (d) plan/버전 미확인
+  (e) 실행(승인·취소). ubuntu 전용 CI, 스크린샷은 실패 시에만 artifact.
 - E2E가 잡은 버그(수정): 세션 SSE가 `event: change`를 보내는데 클라 `subscribeSse`가
   `event:` 줄이 있으면 `onEvent`만 호출하고(onData 폴백 없음) payload를 버려
   실시간 갱신·외부 변경 배너가 죽어 있었다 → `event:`가 있어도 `onEvent`가 없으면
   onData로 폴백.
+- E2E (e)가 잡은 버그(수정, M7-close-a): (1) 실행 external 승인이 `uiApprove`
+  (core `pfApprove`=needs_human 전용)로 가 409 → `uiRunApprove`(runApprove 경로) +
+  `POST /api/runs/:id/approve` + ApprovalPanel runId 모드. (2) run 로그 SSE가
+  suspended에서 바로 `event: end`로 닫혀 승인 후 done을 못 봄 → 종료 상태에서만 end.
+  (3) 취소 후 상태가 `cancelling`에 굳어 재실행 버튼이 안 뜸 → `markCancelled`
+  (cancelled 확정·failed 필드 정리) + 표시용 `runStatus`.
 - 결정 기록: docs/DECISIONS.md [M7-1]·[M7-1.1-*]·[M7-ui1-*]~[M7-ui4-k]·
   [M7-5-1]~[M7-5-3]·[M7-5-a~i]·[M7-5 보정3-a~d]·[M7-5-3-a/b].
 - 테스트: L3 로컬 green(3 client 모드). CI run 39271527969(b25c688) success —
   7잡(build-test 4·remote-mode 2·e2e 1) 전부. 5-4는 run 39264793696 success.
 - 남음(사람 수행): dogfood — 실제 OpenCode(build 모드)에서 분해 → **UI로** 중간 노드
-  의견 1건 → 그 부분만 재실행 → finalize → 무인 run exit 0. 기록 `docs/M7-dogfood.md`
-  (connectionId·actor로 사람/모델/UI 구분 증명).
+  의견 1건 → 그 부분만 재실행 → finalize → 무인 run exit 0. **M5.8(a)와 한 세션에서
+  통합 종료**하고 `docs/M7-dogfood.md`에 기록(connectionId·actor로 사람/모델/UI 구분 증명).
+- 마감 전 보정 M7-close-a~e: (a) 실행 E2E (e)+위 버그 수정, (b) 인코딩 위생·`.editorconfig`,
+  (c) 초안 보존("초안 복사"), (d) `docs/M7-dogfood.md` 양식, (e) DEV-GUIDE §8 M7 표기·M8 정의 유예.

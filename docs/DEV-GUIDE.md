@@ -583,9 +583,12 @@ c·d·j는 하네스 과제로 DECISIONS에 기록만.
 | M5.8.2 | E2E 2회차 후속 | [x] | `ec592a0` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38429848946 | 0 사실확인·1 ref 의미·2 probing/run 차단·3 script 승인·4 csv_rows·5 주석 정정 + 후속(golden 기준·검증불가·R8 분리·stable). 코드 head 기준, 최종 head b2a74e2(docs만) CI success |
 | M6 | 원격 core | [x] | `9458704` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38604361482 | 0~6 + M6.1 후속(1~5) 완료 (docs/REVIEW-M6.md) |
 | M6.1 | 원격 core 후속 | [x] | `9458704` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38604361482 | 1 egress R8·2 전체 remote+egress 단언·3 재시도 제거·4 인증·5 공개유지 (docs/REVIEW-M6.md) |
-| M7 | UI | [ ] | `b25c688` (1~6) | https://github.com/ckdfuf2001/ProcForge/actions/runs/39271527969 | 0 SDK 확인(opencode serve 세션 메시지·pf_next 재개) · 1 로컬 서버+SPA+pairings [x] · 2 트리+SSE [x] · 3 노드 상세 [x] · 4 텍스트 편집/의견+stale 미리보기 [x] · 5 실행 화면 [x] · 6 Playwright E2E [x] · 남음: 사람 실사용 dogfood(REVIEW-M7.md 작성) |
+| M7 | UI | [~] | `b25c688` (1~6) · `M7-close-a~e` | https://github.com/ckdfuf2001/ProcForge/actions/runs/39271527969 | 0 SDK 확인(opencode serve 세션 메시지·pf_next 재개) · 1 로컬 서버+SPA+pairings [x] · 2 트리+SSE [x] · 3 노드 상세 [x] · 4 텍스트 편집/의견+stale 미리보기 [x] · 5 실행 화면 [x] · 6 Playwright E2E [x] · 마감 전 보정 M7-close-a~e · **남음: 사람 dogfood — M5.8(a)와 한 세션에서 통합 종료, 기록 `docs/M7-dogfood.md`** (connectionId·actor로 사람/모델/UI 구분 증명) |
 | M7-0.1 | OpenCode 연결 (UI 없이 App·CLI까지) | [x] | `d73988f` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38814839031 | B/A/C 신호+plan degraded+짝짓기 latest-wins·이력+저장소 PROCFORGE_DIR 통일+connectionId 기록 — 실서버 오동작 6건은 M7-0.2로 보정 |
 | M7-0.2 | "계속" 신호 실서버 보정 | [x] | `d73988f` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38814839031 | 1 plan 감지 기준점 · 2 버전 default-deny · 3 짝 검증 · 4 실서버 4조합 확정(msg+parts) · 5 R5 생성자 주입 · 6 SSE 우선·폴링 폴백 (+tsc narrowing 빌드 수정) |
+
+> **M8은 dogfood(`docs/M7-dogfood.md`) 결과를 반영한 뒤 정의한다.** 그 전에 범위를 확정하지 않는다.
+> 현 후보(확정 아님): core-server 분리·원격 PC 테스트, 사후 dependsOn 편집, 그 밖에 dogfood에서 나온 것.
 
 ---
 
@@ -644,17 +647,22 @@ c·d·j는 하네스 과제로 DECISIONS에 기록만.
 ### 5. 실행 화면
 - 절차서 목록 → run/test(params 입력: 기간 params required, `@today:utc` 지원) → 노드별 pass/fail/unverified/blocked, exit 의미.
 - 실행은 local 프로세스(runner)로, UI는 진행 이벤트만 수신. 원본 워크스페이스 쓰기 0 단언 유지.
-- 승인: external 노드 대기 목록, dry-run 계획 보기, 승인/거부(`App.approve`), approvals.json 갱신 필요 표시(stale).
-  wildcard는 `--allow-wildcard`와 동일하게 키를 명시 선택해야만.
+- 승인: external 노드 대기 목록, dry-run 계획 보기, 승인/거부(`App.approve`). 실행 중 승인은
+  `App.runApprove`(CLI와 동일 경로) — core `pfApprove`(needs_human 전용)와 구분한다.
+  approvals.json 갱신 필요 표시(stale). wildcard는 `--allow-wildcard`와 동일하게 키를 명시 선택해야만.
+- 취소: 자식 프로세스 트리 종료 후 상태를 `cancelled`로 확정(재실행 버튼 활성).
+  실행 로그 SSE는 종료 상태(`done`/`failed`/`cancelled`)에서만 `event: end`로 닫는다
+  (suspended/ready는 승인·생성값 대기이므로 계속 구독).
 - 실패 시 "이 노드 열기" → 3번 상세로 이동.
 
 ### 6. Playwright E2E
-- 구성: MemoryStore core + 임시 저장소 + M7-0.1 가짜 OpenCode 서버, 실제 브라우저(chromium).
-- 시나리오 4개:
+- 구성: MemoryStore core + 임시 저장소 + M7-0.1 가짜 OpenCode 서버(+가짜 ppt MCP), 실제 브라우저(chromium).
+- 시나리오 5개:
   (a) 월간보고서: 트리 보기 → 1.2 의견 → stale 미리보기 확인 → 적용 → 신호 B 전송 → 가짜 모델이 재보고 → leaf.
   (b) 크롤링: args 텍스트 편집(선택자 수정) → 해당 노드만 재실행.
-  (c) conflict: MCP 쪽이 먼저 쓰면 UI에 배너, 데이터 유실 0.
+  (c) conflict: MCP 쪽이 먼저 쓰면 UI에 배너, 데이터 유실 0 (초안 복사 포함).
   (d) plan 모드/버전 미확인 → degraded + C 복사 문구.
+  (e) 실행: uiRun → 승인 대기 → 화면 승인 → `done` / 다른 실행 취소 → `재실행` 활성.
 - CI: ubuntu만 Playwright(windows는 API 계약까지). 스크린샷은 실패 시만 artifact.
 
 ### M7 완료 기준 (= MVP)
