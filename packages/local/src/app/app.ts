@@ -107,6 +107,7 @@ import {
   toHashable,
 } from "../services/approvals.js";
 import { copyImportFiles } from "../procedure.js";
+import { loadAccumulateFromProcedure } from "../services/accumulate.js";
 import { resolveDateParams } from "../services/date-params.js";
 import { runnableTools } from "../services/runnable-tools.js";
 import {
@@ -1093,7 +1094,14 @@ export class ProcForgeApp {
       }
     };
     try {
-      const entry = buildApprovalEntry(node, [], new Map(), readScript);
+      const accumulate = loadAccumulateFromProcedure(st.procedureDir);
+      const entry = buildApprovalEntry(
+        node,
+        [],
+        new Map(),
+        readScript,
+        accumulate,
+      );
       const spec = (node as { args?: Record<string, { kind?: string; file?: string }> }).args
         ?.script;
       const content = spec?.file ? readScript(spec.file) : undefined;
@@ -2110,12 +2118,17 @@ async uiApprovalInfo(input: { sessionId: string; nodeId: string }): Promise<{
       return undefined;
     }
   };
+  const st = readRunStateBySession(this.procforgeDir, sid);
+  const accumulate = st?.procedureDir
+    ? loadAccumulateFromProcedure(st.procedureDir)
+    : undefined;
   const parent = n.parentId ? byId.get(n.parentId) : undefined;
   const pins = approvalPins(
     n,
     parent ? { id: parent.id, hash: parent.hash, kind: (parent as { kind?: string }).kind } : undefined,
     toHashableMap(byId),
     readScript,
+    accumulate,
   );
   const approvalHash = pins[0]?.approvalHash ?? "";
   // script-kind 인자만 화면에 노출 (읽기 전용)
@@ -2132,7 +2145,6 @@ async uiApprovalInfo(input: { sessionId: string; nodeId: string }): Promise<{
     };
     // M7-5-e: diff 는 **승인 스냅샷**과 비교한다. (이력의 파일 경로를 다시 읽으면 그 파일이
     // 이미 현재본이라 항상 같아져 diff 가 늘 null 이 된다)
-    const st = readRunStateBySession(this.procforgeDir, sid);
     if (st?.procedureDir) {
       const prevScript = readApprovedSnapshot(st.procedureDir, nid);
 
@@ -2229,6 +2241,7 @@ async uiApprove(input: {
           return undefined;
         }
       },
+      loadAccumulateFromProcedure(st.procedureDir),
     );
     // M7-5-e: 스냅샷 저장도 공통 경로로 (MCP/CLI 승인도 같은 기준을 갖게)
     commitApproval(
@@ -2908,6 +2921,7 @@ private hasCurrentApproval(
       runId,
       procedure: st.procedure,
       procedureDir: (st as { procedureDir?: string }).procedureDir,
+      ...(st.stateRoot ? { stateRoot: st.stateRoot } : {}),
       skipNodeIds: st.done,
       supplied: st.supplied,
       approvedNodeIds: st.approved,
@@ -3236,7 +3250,13 @@ async runApprove(a: {
         return undefined;
       }
     };
-    const entry = buildApprovalEntry(docNode, allowWildcard, docById, readScript);
+    const entry = buildApprovalEntry(
+      docNode,
+      allowWildcard,
+      docById,
+      readScript,
+      doc.accumulate,
+    );
     // M7-5-e: CLI 승인도 스냅샷을 남긴다 (UI/MCP 와 같은 기준)
     const scriptFile = (n.args as Record<string, { kind?: string; file?: string }> | undefined)
       ?.script?.file;
@@ -3269,6 +3289,7 @@ async runApprove(a: {
     procedure: unknown;
     params?: unknown;
     out?: unknown;
+    state?: unknown;
     force?: unknown;
     allowBash?: unknown;
     allowProjectRead?: unknown;
@@ -3293,6 +3314,10 @@ async runApprove(a: {
     if (!procRef) throw pfError("bad_request", "procedure가 필요하다.");
     const params = (a.params ?? {}) as Record<string, string>;
     const unattended = a.unattended === true;
+    const stateRoot =
+      typeof a.state === "string" && a.state.trim() !== ""
+        ? resolve(this.projectRoot, a.state)
+        : undefined;
     // M5.7-2: 무인 기본 on. M5.7.1: --allow-unverified 단일화 (runner가 unattended와 조합해 판단).
     const { report, sessionId } = await runProcedureTest(
       this.procforgeDir,
@@ -3311,6 +3336,7 @@ async runApprove(a: {
           ? { toolRetry: a.toolRetry as { attempts?: number; baseMs?: number } }
           : {}),
         allowUnverified: a.allowUnverified === true,
+        ...(stateRoot ? { stateRoot } : {}),
       },
     );
     let outDir: string | undefined;

@@ -39,6 +39,10 @@ export type RunOptions = {
   procedure?: string;
   /** 절차서 디렉터리 (M5.5-3 state.json 위치. 미지정 시 procedures/<name>) */
   procedureDir?: string;
+  /** M7-close-i: 누적 상태 루트 (--state). 기본 .procforge/state */
+  stateRoot?: string;
+  /** M7-close-i: 누적 선언 (runSession이 procedure.json에서 로드) */
+  accumulate?: import("@procforge/shared/procedure.js").AccumulateSpec[];
   /** 실행 간 상태 (M5.5-3. runSession이 로드, resolveArgs에 전달) */
   state?: Record<string, unknown>;
   /** 원격 core (M6-5. 지정 시 세션·노드를 가져와 로컬에 하이드레이트 후 실행) */

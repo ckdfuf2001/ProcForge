@@ -10,6 +10,15 @@ import { pfError } from "./errors.js";
 /** 절차 이름 규칙 (M4.1-6, skill 호환): 소문자·숫자·하이픈, 1~64자 */
 export const PROCEDURE_NAME_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
 
+/** M7-close-i: 실행 간 누적 보존할 산출물 (procedure 단위 상태 폴더). */
+export const AccumulateSpecSchema = z.object({
+  /** run fs 기준 상대 경로 (예: daily.csv) */
+  path: z.string().min(1),
+  /** 이 파일을 만드는 절차 노드 id (write-back 소유자) */
+  node: z.string().min(1),
+});
+export type AccumulateSpec = z.infer<typeof AccumulateSpecSchema>;
+
 export const ProcedureDocSchema = z.object({
   format: z.literal("procforge-procedure"),
   version: z.literal(1),
@@ -70,6 +79,8 @@ export const ProcedureDocSchema = z.object({
       goldenArgs: z.record(z.unknown()).optional(),
     }),
   ),
+  /** M7-close-i: 선언이 있으면 run 사이에 보존/누적한다. */
+  accumulate: z.array(AccumulateSpecSchema).optional(),
 });
 export type ProcedureDoc = z.infer<typeof ProcedureDocSchema>;
 

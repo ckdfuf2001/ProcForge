@@ -122,7 +122,7 @@ async function cmdRun(): Promise<number> {
   const positional = positionals[1];
   const procRef = (!values.session ? positional : undefined) ?? values.procedure;
   if (!procRef) {
-    console.error("procedure 실행: procforge run procedures/<name> [--param k=v] [--out dir] [--force] [--unattended] [--allow-unverified] [--retry-attempts n] [--retry-base-ms ms]");
+    console.error("procedure 실행: procforge run procedures/<name> [--param k=v] [--out dir] [--state dir] [--force] [--unattended] [--allow-unverified] [--retry-attempts n] [--retry-base-ms ms]");
     return 2;
   }
   const params: Record<string, string> = {};
@@ -158,6 +158,7 @@ async function cmdRun(): Promise<number> {
       procedure: procRef,
       params,
       out: values.out,
+      state: values.state,
       force: values.force ?? false,
       allowBash: values["allow-bash"] ?? false,
       allowProjectRead: values["allow-project-read"] ?? false,

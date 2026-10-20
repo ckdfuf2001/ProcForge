@@ -3,10 +3,12 @@ import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { pfError } from "@procforge/shared/errors.js";
 import { computeNodeHash, type ArgSpec, type Constraint } from "@procforge/shared/schema.js";
+import type { AccumulateSpec } from "@procforge/shared/procedure.js";
 import { writeAtomicFile } from "../fsutil.js";
 import { logger } from "../logger.js";
 import { collectRefNodeIds } from "../runner/resolve.js";
 import { saveApprovedSnapshot } from "./approval-scripts.js";
+import { normalizeAccumulate } from "./accumulate.js";
 
 // M5.5-4: 무인 실행 사전 승인 (procedures/<name>/approvals.json).
 // M5.5-4.3-1: v2 형식 {version:2, entries}. 패턴 명시화:
@@ -98,8 +100,10 @@ function collectScriptFiles(specs: Record<string, unknown> | undefined): string[
 }
 
 export type ApprovalHashOpts = {
-  /** script-kind 파일 내용 읽기 (rel → 내용. 없으면 undefined). */
+  /** script-kind 원본 파일 읽기 (rel 기준. 실패면 undefined). */
   readScript?: (rel: string) => string | undefined;
+  /** M7-close-i: 누적 선언도 승인 대상 (변경 시 재승인). */
+  accumulate?: AccumulateSpec[];
 };
 
 export function computeApprovalHash(
@@ -127,8 +131,23 @@ export function computeApprovalHash(
     const content = opts.readScript?.(rel);
     return content === undefined ? `missing:${rel}` : createHash("sha256").update(content, "utf8").digest("hex");
   });
+  const acc = normalizeAccumulate(opts.accumulate);
   const fold = (up: string[]): string =>
-    createHash("sha256").update(stable({ base, tool, se, specs, scripts, up })).digest("hex").slice(0, 32);
+    createHash("sha256")
+      .update(
+        stable({
+          base,
+          tool,
+          se,
+          specs,
+          scripts,
+          up,
+          // 기존(누적 선언 없음) approvalHash를 깨지 않도록 없을 때는 key 자체를 넣지 않는다.
+          ...(acc ? { acc } : {}),
+        }),
+      )
+      .digest("hex")
+      .slice(0, 32);
   if (seen.has(n.id)) return fold([`cycle:${n.id}`]);
   seen.add(n.id);
   const refs: string[] = [...collectArgNodeRefs(n.args as Record<string, unknown> | undefined)];
@@ -428,6 +447,7 @@ export function buildApprovalEntry(
   allowWildcardKeys: string[] = [],
   docById: Map<string, HashableNode> = new Map(),
   readScript?: (rel: string) => string | undefined,
+  accumulate?: AccumulateSpec[],
 ): ApprovalEntry {
   if (!docNode.tool) throw pfError("bad_request", `승인은 tool 노드만 가능: ${docNode.id}`);
   // M5.8.2-3: script 노드도 승인 대상 (sideEffect 무관). 스크립트는 임의 코드
@@ -463,7 +483,11 @@ export function buildApprovalEntry(
   const hashable = toHashable(docNode);
   const nodes = new Map(docById);
   nodes.set(hashable.id, hashable);
-  const hashOpts = readScript ? { readScript } : {};
+  const acc = normalizeAccumulate(accumulate);
+  const hashOpts: ApprovalHashOpts = {
+    ...(readScript ? { readScript } : {}),
+    ...(acc ? { accumulate: acc } : {}),
+  };
   return {
     node: {
       id: docNode.id,
@@ -519,9 +543,14 @@ export function approvalPins(
   parent?: { id: string; hash?: string; kind?: string },
   byId?: Map<string, HashableNode>,
   readScript?: (rel: string) => string | undefined,
+  accumulate?: AccumulateSpec[],
 ): ApprovalPin[] {
   const nodes = byId ?? new Map<string, HashableNode>();
-  const opts = readScript ? { readScript } : {};
+  const acc = normalizeAccumulate(accumulate);
+  const opts: ApprovalHashOpts = {
+    ...(readScript ? { readScript } : {}),
+    ...(acc ? { accumulate: acc } : {}),
+  };
   const pin = (id: string, hash: string): ApprovalPin => {
     const full = nodes.get(id);
     return {

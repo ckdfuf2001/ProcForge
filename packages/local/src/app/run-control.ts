@@ -1,6 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
 import {
-  appendFileSync,
   unlinkSync,
   existsSync,
   mkdirSync,
@@ -8,66 +7,20 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
+import { runDir } from "../services/run-log.js";
 
-// M7 5-1: 실행(run) 제어 — 취소·로그·자식 프로세스 기록.
+// M7 5-1: 실행(run) 제어 — 취소·자식 프로세스 기록.
 // 실행 기록은 `.procforge/runs/<runId>/` 아래에 있고 **세션 TTL과 무관**하다
 // (세션이 만료돼도 실행 기록·로그는 남는다).
+// 로그는 runner도 쓰므로 services/run-log.ts에 있다 (여기서는 재-export).
 
-export type RunLogEntry = {
-  seq: number;
-  at: string;
-  level: "info" | "error" | "result";
-  nodeId?: string;
-  message: string;
-};
-
-export function runDir(procforgeDir: string, runId: string): string {
-  return join(procforgeDir, "runs", runId);
-}
-
-export function runLogPath(procforgeDir: string, runId: string): string {
-  return join(runDir(procforgeDir, runId), "log.ndjson");
-}
-
-/** 로그 1줄 추가 (동시 쓰기 대비 append). 실패를 삼키지 않는다. */
-export function appendRunLog(
-  procforgeDir: string,
-  runId: string,
-  entry: Omit<RunLogEntry, "seq" | "at"> & { seq?: number; at?: string },
-): RunLogEntry {
-  mkdirSync(runDir(procforgeDir, runId), { recursive: true });
-  const prev = readRunLog(procforgeDir, runId);
-  const full: RunLogEntry = {
-    seq: entry.seq ?? prev.length + 1,
-    at: entry.at ?? new Date().toISOString(),
-    level: entry.level,
-    ...(entry.nodeId !== undefined ? { nodeId: entry.nodeId } : {}),
-    message: entry.message,
-  };
-  appendFileSync(runLogPath(procforgeDir, runId), `${JSON.stringify(full)}\n`, "utf8");
-  return full;
-}
-
-/** afterSeq 뒤 로그만 (SSE 증분). */
-export function readRunLog(
-  procforgeDir: string,
-  runId: string,
-  afterSeq = 0,
-): RunLogEntry[] {
-  const p = runLogPath(procforgeDir, runId);
-  if (!existsSync(p)) return [];
-  const out: RunLogEntry[] = [];
-  for (const line of readFileSync(p, "utf8").split("\n")) {
-    if (!line.trim()) continue;
-    try {
-      const e = JSON.parse(line) as RunLogEntry;
-      if (e.seq > afterSeq) out.push(e);
-    } catch {
-      // 깨진 줄은 건너뛴다 (로그가 실행을 막지 않게)
-    }
-  }
-  return out;
-}
+export {
+  appendRunLog,
+  readRunLog,
+  runDir,
+  runLogPath,
+  type RunLogEntry,
+} from "../services/run-log.js";
 
 function cancelPath(procforgeDir: string, runId: string): string {
   return join(runDir(procforgeDir, runId), "cancel.json");

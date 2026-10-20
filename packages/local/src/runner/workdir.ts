@@ -18,13 +18,19 @@ export function setupRunFs(
   procforgeDir: string,
   sessionId: string,
   runId: string,
-  bound?: { projectRoot?: string; params?: Record<string, string> },
+  bound?: {
+    projectRoot?: string;
+    params?: Record<string, string>;
+    /** M7-close-i: 같은 run 재개 시 누적 파일은 fixture로 덮어쓰지 않는다. */
+    preservePaths?: string[];
+  },
 ): RunFs {
   const runDir = join(procforgeDir, "runs", runId);
   const fsDir = join(runDir, "fs");
   mkdirSync(fsDir, { recursive: true });
   const store = new FileStore(procforgeDir);
   const manifest = readManifest(procforgeDir, sessionId);
+  const preserve = new Set(bound?.preservePaths ?? []);
   // 노드 순서대로 복사 (같은 source면 뒤 노드가 덮어씀 — 최신 golden 우선)
   const nodes = [...store.getNodes(sessionId).values()].sort((a, b) => (a.id < b.id ? -1 : 1));
   for (const n of nodes) {
@@ -32,7 +38,10 @@ export function setupRunFs(
       const src = manifest[fx];
       const abs = join(procforgeDir, "sessions", sessionId, fx);
       if (!existsSync(abs)) continue;
-      const dest = src ? join(fsDir, src) : join(fsDir, "fx", fx);
+      const rel = src ?? join("fx", fx);
+      const dest = join(fsDir, rel);
+      // 재개 run에서 누적 파일을 fixture 원본으로 되돌리면 이전 단계 산출물이 사라진다.
+      if (preserve.has(rel.split("\\").join("/")) && existsSync(dest)) continue;
       mkdirSync(dirname(dest), { recursive: true });
       copyFileSync(abs, dest);
     }

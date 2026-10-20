@@ -15,6 +15,8 @@ export type RunState = {
   /** 미실행 노드 (순서대로) */
   /** 절차서 디렉터리 (M5.5-3 state.json 위치. 미지정 시 procedures/<procedure>) */
   procedureDir?: string;
+  /** M7-close-i: --state로 지정한 누적 상태 루트 (재개 시 유지) */
+  stateRoot?: string;
   pending: string[];
   /** 완료 노드 */
   done: string[];

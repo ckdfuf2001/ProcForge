@@ -46,6 +46,17 @@ import {
   loadApprovals,
   toHashableMap,
 } from "../services/approvals.js";
+import {
+  loadAccumulateFromProcedure,
+  markAccumulateApplied,
+  normalizeAccumulate,
+  resolveStateDir,
+  seedAccumulate,
+  validateAccumulate,
+  writeBackAccumulate,
+  type AccumulateState,
+} from "../services/accumulate.js";
+import type { AccumulateSpec } from "@procforge/shared/procedure.js";
 import { runScript, describeRunError } from "./script-run.js";
 import {
   inferPathRole,
@@ -253,8 +264,22 @@ export async function runSession(opts: RunOptions): Promise<RunReport> {
     (opts.procedure
       ? join(opts.procforgeDir, "procedures", opts.procedure)
       : undefined);
+  let accumulate: AccumulateSpec[] | undefined;
   if (procedureDir) {
     const preNodes = [...store.getNodes(opts.sessionId).values()];
+    // M7-close-i: 누적은 live 실행에서만 활성. test/replay는 fixture 고정.
+    if (mode === "live") {
+      accumulate = normalizeAccumulate(
+        opts.accumulate ?? loadAccumulateFromProcedure(procedureDir),
+      );
+      if (accumulate) {
+        validateAccumulate(
+          accumulate,
+          new Set(preNodes.map((n) => n.id)),
+        );
+        opts.accumulate = accumulate;
+      }
+    }
     const needsState = preNodes.some((x) => {
       const sw = (x as { stateWrites?: unknown }).stateWrites;
       if (Array.isArray(sw) && sw.length > 0) return true;
@@ -281,6 +306,9 @@ export async function runSession(opts: RunOptions): Promise<RunReport> {
     {
       projectRoot: opts.projectRoot,
       params: session.params as Record<string, string>,
+      ...(accumulate
+        ? { preservePaths: accumulate.map((s) => s.path) }
+        : {}),
     },
   );
   const release = store.acquireLock(opts.sessionId, 60000);
@@ -310,7 +338,24 @@ export async function runSession(opts: RunOptions): Promise<RunReport> {
     opts.allowBash ?? false,
   );
   const t0 = Date.now();
+  let accState: AccumulateState | undefined;
+  let accStateDir: string | undefined;
   try {
+    // M7-close-i: procedure 잠금을 잡은 뒤 상태 overlay (동시 run 직렬화).
+    if (accumulate && procedureDir) {
+      accStateDir = resolveStateDir(
+        opts.procforgeDir,
+        opts.procedure || basename(procedureDir),
+        opts.stateRoot,
+      );
+      accState = seedAccumulate({
+        procforgeDir: opts.procforgeDir,
+        runId,
+        stateDir: accStateDir,
+        fsDir,
+        specs: accumulate,
+      });
+    }
     let all = [...store.getNodes(opts.sessionId).values()];
     if (opts.nodeId) {
       if (!all.some((n) => n.id === opts.nodeId))
@@ -493,6 +538,78 @@ export async function runSession(opts: RunOptions): Promise<RunReport> {
       }
     }
 
+    // M7-close-i: 전체 절차 노드가 pass일 때만 누적 상태를 확정한다.
+    // 부분 실행(--node/--changed)·fail·suspended·unverified는 상태를 건드리지 않는다.
+    const passedIds = new Set([
+      ...doneSet,
+      ...results.filter((r) => r.status === "pass").map((r) => r.nodeId),
+    ]);
+    // split 노드는 실행 결과가 skipped라 "pass"가 아니다. 실행 가능한 leaf(tool 보유)만
+    // 전체 pass 판정 대상으로 삼는다.
+    const allProcedureIds = [...store.getNodes(opts.sessionId).values()]
+      .filter((n) => n.tool)
+      .map((n) => n.id);
+    const allPassed =
+      !opts.nodeId &&
+      !opts.changed &&
+      allProcedureIds.length > 0 &&
+      allProcedureIds.every((id) => passedIds.has(id));
+    if (
+      accState &&
+      accStateDir &&
+      accumulate &&
+      !accState.applied &&
+      allPassed
+    ) {
+      try {
+        writeBackAccumulate({
+          state: accState,
+          stateDir: accStateDir,
+          fsDir,
+        });
+        markAccumulateApplied(opts.procforgeDir, runId, accState);
+        logger.info("accumulate write-back", {
+          runId,
+          files: accumulate.map((s) => s.path),
+        });
+      } catch (e) {
+        const err = e as {
+          code?: string;
+          path?: string;
+          node?: string;
+          message?: string;
+        };
+        const nodeId = err.node ?? accumulate[0].node;
+        const detail = `accumulate ${err.code ?? "error"}: ${err.path ?? ""} ${err.message ?? String(e)}`.trim();
+        const idx = results.findIndex((r) => r.nodeId === nodeId);
+        if (idx >= 0) {
+          results[idx] = {
+            ...results[idx],
+            status: "fail",
+            failedConstraints: [
+              ...new Set([...results[idx].failedConstraints, "accumulate"]),
+            ],
+            detail,
+          };
+        } else {
+          results.push({
+            nodeId,
+            status: "fail",
+            failedConstraints: ["accumulate"],
+            detail,
+            durationMs: 0,
+          });
+        }
+        logger.warn("accumulate write-back failed", {
+          runId,
+          nodeId,
+          path: err.path,
+          code: err.code,
+          err: err.message ?? String(e),
+        });
+      }
+    }
+
     const summary = {
       pass: results.filter((r) => r.status === "pass").length,
       fail: results.filter((r) => r.status === "fail").length,
@@ -533,6 +650,7 @@ export async function runSession(opts: RunOptions): Promise<RunReport> {
         runId,
         sessionId: opts.sessionId,
         procedure: opts.procedure ?? "",
+        ...(opts.stateRoot ? { stateRoot: opts.stateRoot } : {}),
         params: session.params,
         pending,
         done: doneIds,
@@ -790,6 +908,7 @@ function requireUnattendedApproval(
         : undefined,
       toHashableMap(byId),
       readScript,
+      opts.accumulate,
     ),
     server,
     tool,

@@ -25,6 +25,8 @@ export type ProcedureRunOptions = {
   toolRetry?: { attempts?: number; baseMs?: number; extraTransient?: string[] };
   /** unverified>0 통과 허용 (M5.7.1. 기본 false = 무인 실행 fail-on). */
   allowUnverified?: boolean;
+  /** M7-close-i: 누적 상태 루트 (--state). 기본 .procforge/state */
+  stateRoot?: string;
 };
 
 export function resolveProcedureRef(procforgeDir: string, ref: string): { dir: string; file: string } {
@@ -88,7 +90,9 @@ export async function runProcedureTest(
     allowBash: o.allowBash ?? false,
     allowProjectRead: o.allowProjectRead ?? false,
     changed: o.changed ?? false,
+    procedure: doc.name,
     procedureDir: dir,
+    ...(o.stateRoot ? { stateRoot: o.stateRoot } : {}),
     unattended: o.unattended ?? false,
     ...(o.toolRetry ? { toolRetry: o.toolRetry } : {}),
     ...(o.allowUnverified !== undefined ? { allowUnverified: o.allowUnverified } : {}),

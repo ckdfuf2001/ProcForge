@@ -19,6 +19,8 @@ export type CliValues = {
   redact?: boolean;
   "include-originals"?: boolean;
   out?: string;
+  /** M7-close-i: 누적 상태 루트 (기본 .procforge/state) */
+  state?: string;
   param?: string[];
   discard?: string;
   force?: boolean;
@@ -54,6 +56,7 @@ export function parseCliArgs(argv: string[]): {
       redact: { type: "boolean", default: false },
       "include-originals": { type: "boolean", default: false },
       out: { type: "string" },
+      state: { type: "string" },
       param: { type: "string", multiple: true },
       discard: { type: "string" },
       force: { type: "boolean", default: false },
