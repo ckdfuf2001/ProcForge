@@ -144,6 +144,41 @@ echo $env:PROCFORGE_DIR; echo $env:PROCFORGE_OPENCODE_URL; echo $env:PROCFORGE_O
 
 - 권고: **B**. A는 임시 편의용으로만.
 
+### 5.2 accumulate(B) 구현·검증 (M7-close-i, `7f6fd95`)
+
+- 구현: `procedure.json`의 `accumulate:[{path,node}]` 선언을 `AccumulateSpecSchema`로 검증하고,
+  기본 `.procforge/state/<procedure>/`에 파일을 보존한다. `--state`로 루트를 바꿀 수 있다.
+- run 시작 시 절차서 `.run.lock`을 잡은 뒤 상태 파일을 run fs로 overlay하고, runId별
+  `runs/<runId>/accumulate.json` marker로 UI의 단계별 `runSession` 재호출에서도 seed를 1회만 한다.
+  상태 파일이 없으면 fixture가 있어도 `startSha=null`로 시작한다(fixture hash를 시작점으로 쓰면
+  첫 write-back이 충돌하므로).
+- write-back은 **전체 실행 가능 leaf(`tool` 보유)가 pass**이고 `--node`/`--changed` 부분 실행이
+  아닐 때만 수행한다. 시작 sha와 현재 상태 sha를 모두 precheck하고, 다르면 conflict로 상태를
+  건드리지 않는다. 성공 시 `${dest}.bak` 1세대 백업 후 temp+rename, 실패 시 report를 fail로 바꾼다.
+- resume 시 `setupRunFs`가 누적 대상 파일을 fixture로 덮어쓰지 않도록 `preservePaths`를 적용했다.
+- 승인: 누적 선언을 `approvalHash`에 포함해 변경 시 stale이 된다. 선언이 없는 기존 절차서의
+  approvalHash는 바뀌지 않는다.
+- 절차서 선언: `hn-daily-dogfood-20261020`에 `{"path":"daily.csv","node":"1.3"}` 추가 후
+  1.1/1.2/1.3 approvals를 재생성했다(새 hash `7d6acc6a…`, `09bc7556…`, `49d8c501…`).
+- 마이그레이션: 기존 `.procforge/out/hn-daily-dogfood-20261020/daily.csv`
+  (헤더+**1562행**: 10-19 859 + 10-20 703)을
+  `.procforge/state/hn-daily-dogfood-20261020/daily.csv`로 1회 복사했다.
+- 검증 0(마이그레이션 canonical): run `227eb898-8dea-4eec-aad1-187c5459ed24`(10-21)
+  → **1562행 유지**, write-back 전후 sha256 동일(`B6F8E2DC…`). canonical 상태를 실제로 읽었다.
+- 검증 1(기존 10-19 상태에서 10-20 추가): 10-19 859행 상태에서 10-20 run
+  `7b2b4820-7e2a-46cb-b0e4-1f6fdd80bf11` → **1692행**(859+833, 중복 0). 이어서 10-21 run
+  `102534eb-c9cb-4fcd-b1ca-08ebdd0bca18` → **1692행 유지**(UTC 10-21 신규 0). 로그는
+  `누적 상태 로드: daily.csv`, marker `startSha`는 직전 상태 hash였고, 예전처럼 fixture 859행으로
+  되돌아가지 않았다.
+- 검증 2(빈 상태에서 2회): run `ef9d9379-7aea-44b0-9e08-7a2d8ff9303a`(10-19) → 859행,
+  run `829354cd-ffd4-4f2d-8091-5a10cdf61553`(10-20) → **1688행**(859+829, 중복 objectID 0).
+  D1은 `초기화: daily.csv (누적 상태 없음 — fixture 사용)`, D2는 `누적 상태 로드: daily.csv`.
+- 테스트: `packages/local/test/m7-accumulate.test.ts` **6건 pass** — D1→D2→D3, 실패 상태 불변,
+  `--node` 부분 실행 미커밋, replay fixture 고정, 시작 sha conflict, approvalHash stale.
+  전체 `pnpm -w test`는 **80 files / 466 tests pass(2 skipped)**, `pnpm -w build`·`pnpm -w lint` pass.
+- CI: `7f6fd95` push 후 run `39517399038`, 7/7 success(head_sha 일치).
+- 판정: **5.1 누적 유실 결함 해소**. 남은 M7/M5.8(a) 마감 조건은 6.1 신호 B 실사용 확인 하나다.
+
 ## 6. Show HN / Ask HN 잔존 수 (이번 UTC 날짜 행만)
 
 - CSV 경로: `.procforge/out/hn-daily-dogfood-20261020/daily.csv` (파일명 `daily.csv`)
@@ -240,15 +275,16 @@ Get-Content ".procforge\sessions\$sid\calls.jsonl" |
 | 기준 | 판정 | 근거 |
 |---|---|---|
 | M5.8(a) serve+웹 UI/attach + dist MCP 분해 (1.2·1.3·finalize 포함) | [ ] (신호 B 재확인 후) | 2절 4·8단계, 7절. dist MCP(stdio)로 1.1~1.3 분해·finalize, UI 실행 `done`. 단 신호 B 사람 재확인(6.1) 전에는 닫지 않는다. OpenCode URL 페어링(attach)은 여전히 degraded |
-| M7 dogfood (UI 의견 1건 → 부분 재실행 → finalize → 무인 exit 0) | [ ] (누적 유실 수정 + 신호 B 재확인 후) | 2절 5~9단계, 5절. 기능 흐름은 통과했으나 5.1 결함과 6.1 `delivered:true` 확인 전에는 `[x]` 아님 |
-| 누적 실행 데이터 보존 (전날 신규 행) | [ ] (결함 재현) | 5.1 — D1 1562행(10-20 703 포함) → D2 859행, **10-20 703→0** |
+| M7 dogfood (UI 의견 1건 → 부분 재실행 → finalize → 무인 exit 0) | [ ] (신호 B 재확인 후) | 2절 5~9단계, 5절·5.2. 누적 유실은 5.2에서 해소됐고 전체 테스트·CI도 green. 6.1 `delivered:true` 확인 전에는 `[x]` 아님 |
+| 누적 실행 데이터 보존 (전날 신규 행) | [x] | 5.2 — 859행 상태에 10-20 833행 추가해 1692행, 이어 10-21에도 1692행 유지(유실 0). 빈 상태 2회도 859→1688행 |
+| 실행 중 취소 경쟁 (waiting 기록 직후 취소) | [x] | `e319426`, CI `39512901431` 7/7. `m75-waiting.test.ts` 회귀 포함 |
 | 의견 반영 (Show/Ask HN 잔존 0) | [x] | 6절 — 703행 중 0 |
 | (선택) 데이터 유실 0 (409·초안 보존) — E2E (c)(e) 커버 | [x] | 3절 UI 문구 확인 + E2E (c)(e) |
-| 무인 실행 exit 0 | [x] | 5절 — `791fac8b…` exit 0 (`--force`는 출력 덮어쓰기 전용, 검사 우회 없음 확인 / 누적 유실 여부는 5.1에서 재현) |
+| 무인 실행 exit 0 | [x] | 5절 — `791fac8b…` exit 0 (`--force`는 출력 덮어쓰기 전용, 검사 우회 없음 확인) |
 
-- 종합: **기능 흐름 통과, M7 결함 1건 재현.** `--force`는 승인·stale·검증을 우회하지 않았다(5절).
-  다만 누적 시작점이 finalize 픽스처라 D2에서 D1의 신규 703행이 유실된다(5.1) — **수정 전**.
-  M7/M5.8(a) 마감은 (1) 이 누적 유실 수정과 (2) 6.1 신호 B 사람 재확인 후다.
+- 종합: **기능 흐름 통과, 누적 결함·취소 경쟁 수정 완료.** `--force`는 승인·stale·검증을 우회하지 않았다(5절).
+  누적 시작점 문제는 5.2의 accumulate(B)로 해소됐고, 마이그레이션 상태·빈 상태 2회 실행 모두
+  데이터 유실 0을 확인했다. M7/M5.8(a) 마감은 **6.1 신호 B 사람 재확인** 후다.
   환경/도구 제약으로 degraded 기록: (1) `PROCFORGE_OPENCODE_URL` 미설정 → attach·신호 B 미도착,
   (2) MCP 재개마다 connectionId 신규 발급(11회, **시간 겹침 없음** — 기준을 "같은 clientName 순차·비중첩"으로 재정의).
 - M8 후보(이번 dogfood에서 발견한 것만):
@@ -280,8 +316,15 @@ Get-Content ".procforge\sessions\$sid\calls.jsonl" |
     `57bd2834-…`·`5d74c812-…`(Playwright 로그로 run fs 가드 실패)
   - 누적 유실 재현: `5607ee83-fc6c-461f-82eb-f22df4f34258` (D2, exit 0/pass 3, daily.csv 859행),
     out 사본 `.procforge/out/m7-loss-test/`
+  - accumulate 검증: `227eb898-…`(canonical 1562 유지), `7b2b4820-…`(859→1692),
+    `102534eb-…`(1692 유지), `ef9d9379-…`(빈 상태→859), `829354cd-…`(859→1688)
+- 누적 상태: `.procforge/state/hn-daily-dogfood-20261020/daily.csv` (헤더+1562행 마이그레이션,
+  `.bak` 1세대), 증명용 별도 state `D:\Local\Temp\opencode\pf-m7-acc-verify*`
 - 세션 이벤트: `.procforge/sessions/d290a93d-dd9d-42d6-9e37-5a6ceb90a282/events.jsonl`(seq1~29),
   `calls.jsonl`(40건), `.procforge/sessions/f70c4687-…/calls.jsonl`(ui run start 1건)
-- 절차서: `.procforge/procedures/hn-daily-dogfood-20261020/` (`procedure.json`, `approvals.json`,
-  `scripts/1_1.py`·`1_2.py`·`1_3.py`, `tests/fixtures/`, `command.md`)
-- CI(코드 head `56ad2c5`): https://github.com/ckdfuf2001/ProcForge/actions/runs/39330988892
+- 절차서: `.procforge/procedures/hn-daily-dogfood-20261020/` (`procedure.json`에 `accumulate` 선언,
+  재생성된 `approvals.json`, `scripts/1_1.py`·`1_2.py`·`1_3.py`, `tests/fixtures/`, `command.md`)
+- 코드/CI:
+  - 취소 수정 `e319426` — CI [39512901431](https://github.com/ckdfuf2001/ProcForge/actions/runs/39512901431) 7/7
+  - accumulate `7f6fd95` — CI [39517399038](https://github.com/ckdfuf2001/ProcForge/actions/runs/39517399038) 7/7
+  - 이전 docs/기능 head `56ad2c5` — CI [39330988892](https://github.com/ckdfuf2001/ProcForge/actions/runs/39330988892)
