@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { ProcForgeApp } from "../src/app/app.js";
+import { ProcForgeApp, type AppDeps } from "../src/app/app.js";
 import { testStack } from "./client-mode.js";
 import { readRunState } from "../src/services/run-state.js";
 import { readEvents } from "../src/trace.js";
@@ -38,14 +38,19 @@ beforeEach(() => {
   );
 });
 
-async function mkApp() {
+async function mkApp(extra?: Partial<AppDeps>) {
   const { client } = testStack(pfdir);
-  return new ProcForgeApp({ core: client, procforgeDir: pfdir, projectRoot: root });
+  return new ProcForgeApp({
+    core: client,
+    procforgeDir: pfdir,
+    projectRoot: root,
+    ...extra,
+  });
 }
 
 /** external(승인 필요) leaf 하나짜리 절차서를 만들고 uiRun 까지 진행해 **대기 상태**로 둔다 */
-async function waitingRun(name = "ext-proc") {
-  const app = await mkApp();
+async function waitingRun(name = "ext-proc", extra?: Partial<AppDeps>) {
+  const app = await mkApp(extra);
   const started = await app.core.pfStart({
     request: "ext",
     toolCatalog: ECHO_CAT as never,
@@ -175,6 +180,37 @@ describe("M7-5-b 대기 실행 영속", () => {
     expect(st?.waiting).toBeUndefined();
     const again = await app.uiRun({ procedure: "ext-proc" });
     expect(again.runId).not.toBe(run.runId);
+  }, 60000);
+
+  it("waiting 기록 직후·캐시 등록 전 취소도 cancelled 로 확정된다", async () => {
+    let open!: () => void;
+    let reached!: () => void;
+    const gate = new Promise<void>((r) => (open = r));
+    const atGate = new Promise<void>((r) => (reached = r));
+    let calls = 0;
+    const { app, run } = await waitingRun("ext-proc", {
+      onWaitingPersisted: async () => {
+        calls += 1;
+        if (calls === 1) {
+          reached();
+          await gate;
+        }
+      },
+    });
+    await atGate;
+    // 아직 driveRun 은 waitingRuns 캐시에 넣기 전이다.
+    expect(readRunState(pfdir, run.runId)?.status).toBe("suspended");
+    expect(readRunState(pfdir, run.runId)?.waiting).toBeDefined();
+
+    await app.uiRunCancel({ runId: run.runId });
+    expect(readRunState(pfdir, run.runId)?.status).toBe("cancelled");
+    expect(readRunState(pfdir, run.runId)?.waiting).toBeUndefined();
+
+    // 잠금이 풀렸는지: 같은 절차서를 다시 시작할 수 있어야 한다.
+    const again = await app.uiRun({ procedure: "ext-proc" });
+    expect(again.runId).not.toBe(run.runId);
+    open();
+    await app.uiRunCancel({ runId: again.runId });
   }, 60000);
 
   it("재시작 후에도 승인이 재개된다 (대기는 디스크)", async () => {

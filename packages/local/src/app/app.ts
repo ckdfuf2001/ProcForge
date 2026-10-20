@@ -240,6 +240,11 @@ export type AppDeps = {  core: CoreClient;
    * 미지정 시 환경변수(PROCFORGE_OPENCODE_URL / _MODE)로 본다.
    */
   signal?: Partial<SignalTarget>;
+  /**
+   * 테스트 전용: 대기 상태가 디스크에 기록된 직후, waitingRuns 캐시 등록 전에
+   * 호출된다. 이 구간의 취소 경쟁을 결정적으로 재현하기 위한 훅이다.
+   */
+  onWaitingPersisted?: (runId: string, procedure: string) => void | Promise<void>;
 };
 
 /** M7-ui4-b/c: 신호 대상 (서버 설정에서만 온다) */
@@ -260,6 +265,7 @@ export class ProcForgeApp {
   private maxArtifactBytes: number;
   private catalogTimeoutMs: number | undefined;
   private linkFetchImpl: typeof fetch | undefined;
+  private onWaitingPersisted: AppDeps["onWaitingPersisted"];
   /** M7-ui4: UI 연결 id (호출 귀속 기록용. 연결마다 1개) */
   private readonly uiConnectionId = `ui-${randomUUID()}`;
   private readonly signal: SignalTarget;
@@ -304,6 +310,7 @@ export class ProcForgeApp {
     this.maxArtifactBytes = deps.maxArtifactBytes ?? 5 * 1024 * 1024;
     this.catalogTimeoutMs = deps.catalogTimeoutMs;
     this.linkFetchImpl = deps.linkFetchImpl;
+    this.onWaitingPersisted = deps.onWaitingPersisted;
     // M7-ui4-b: 신호 대상은 여기서 한 번만 정한다.
     this.signal = {
       baseUrl: deps.signal?.baseUrl ?? process.env.PROCFORGE_OPENCODE_URL ?? "",
@@ -2462,10 +2469,13 @@ private hasCurrentApproval(
       return { runId, cancelled: false, killed: [], failed: [] };
     }
     this.recordUiCall(st.sessionId, "pf_run_cancel", "", undefined);
+    // 대기 표식은 cancelRun 전에 읽어 둔다. 취소가 waiting 기록 직후·캐시 등록
+    // 전에 들어와도 디스크가 진실이므로 여기서 취소를 확정해야 한다.
+    const persistedWaiting = st.waiting !== undefined;
     const r = await cancelRun(this.procforgeDir, runId, "UI 실행 화면에서 취소");
     // M7-5-b: **대기 중** 취소는 driveRun 이 이미 빠져나갔으므로 그 자식의 종료를 볼 주체가 없다.
     // 여기서 바로 잠금을 푼다 (안 하면 그 절차서는 409 고착).
-    if (this.waitingRuns.has(runId)) {
+    if (persistedWaiting || this.waitingRuns.has(runId)) {
       const wst = readRunState(this.procforgeDir, runId) as RunState | undefined;
       if (wst?.procedure) this.markCancelled(runId, wst.procedure);
     }
@@ -2662,7 +2672,24 @@ private hasCurrentApproval(
               ? "승인 대기 — 결정을 기다립니다"
               : "생성값 대기 — 값을 기다립니다",
         });
+        // 테스트 전용 경쟁 재현: waiting 기록 후·캐시 등록 전.
+        if (this.onWaitingPersisted) {
+          await this.onWaitingPersisted(runId, procedure);
+        }
         this.waitingRuns.add(runId);
+        // 캐시 등록 직후 다시 본다. 이 시점의 확인은 await 없이 끝나므로,
+        // 취소가 그 전에 들어왔으면 여기서, 후에 들어왔으면 uiRunCancel 이
+        // waitingRuns 캐시를 보고 정리한다. 두 경우 모두 잠금이 남지 않는다.
+        const afterWaiting = readRunState(this.procforgeDir, runId) as
+          | RunState
+          | undefined;
+        if (afterWaiting?.status === "cancelled") {
+          this.releaseRun(procedure, runId);
+          return;
+        }
+        if (readCancelFlag(this.procforgeDir, runId)) {
+          this.markCancelled(runId, procedure);
+        }
         return;
       }
       appendRunLog(this.procforgeDir, runId, {
@@ -2676,8 +2703,14 @@ private hasCurrentApproval(
         message: `실행 오류: ${e instanceof Error ? e.message : String(e)}`,
       });
     } finally {
-      if (!this.waitingRuns.has(runId)) this.activeRuns.delete(procedure);
+      if (!this.waitingRuns.has(runId)) this.releaseRun(procedure, runId);
     }
+  }
+
+  /** runId 가 실제 잠금 소유자일 때만 푼다 (뒤에 시작한 실행의 잠금을 지우지 않는다). */
+  private releaseRun(procedure: string, runId: string): void {
+    this.waitingRuns.delete(runId);
+    if (this.activeRuns.get(procedure) === runId) this.activeRuns.delete(procedure);
   }
 
   /** M7-close-a: 취소 플래그를 반영한 표시용 상태 (종료 상태는 덮지 않는다). */
@@ -2695,17 +2728,25 @@ private hasCurrentApproval(
    */
   private markCancelled(runId: string, procedure: string): void {
     const st = readRunState(this.procforgeDir, runId) as RunState | undefined;
-    if (st) {
-      writeRunState(this.procforgeDir, {
-        ...st,
-        status: "cancelled",
-        waiting: undefined,
-        suspended: undefined,
-        failedNodeId: undefined,
-        failedDetail: undefined,
-        updatedAt: new Date().toISOString(),
-      });
+    if (!st) {
+      this.finishRun(runId, procedure, "info", "취소됨");
+      return;
     }
+    // 취소 확정은 여러 경로(uiRunCancel·driveRun)에서 동시에 불릴 수 있다.
+    // 이미 확정됐으면 로그를 중복으로 남기지 않고 잠금만 정리한다.
+    if (st.status === "cancelled") {
+      this.releaseRun(procedure, runId);
+      return;
+    }
+    writeRunState(this.procforgeDir, {
+      ...st,
+      status: "cancelled",
+      waiting: undefined,
+      suspended: undefined,
+      failedNodeId: undefined,
+      failedDetail: undefined,
+      updatedAt: new Date().toISOString(),
+    });
     this.finishRun(runId, procedure, "info", "취소됨");
   }
 
@@ -2722,8 +2763,8 @@ private hasCurrentApproval(
       message,
       ...(nodeId !== undefined ? { nodeId } : {}),
     });
-    this.activeRuns.delete(procedure);
-    this.waitingRuns.delete(runId);
+    // 뒤에 시작한 실행이 잠금을 가져갔을 수 있다. runId 가 소유자일 때만 푼다.
+    this.releaseRun(procedure, runId);
   }
 
   /**
