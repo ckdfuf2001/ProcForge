@@ -118,6 +118,32 @@ echo $env:PROCFORGE_DIR; echo $env:PROCFORGE_OPENCODE_URL; echo $env:PROCFORGE_O
 - run 로그: `.procforge/runs/791fac8b-0f94-483e-9c0c-3dfe61bf62b3/report.json`
   (직전 pass=3/exit 2 run: `7786857f-fd50-47a8-95b1-42526ee79c74`)
 
+### 5.1 누적 시작점 재현 (M7 결함 후보)
+
+- 시작점은 `--out`이 아니라 **finalize golden fixture**다.
+  `packages/local/src/runner/run.ts:277-285`가 `setupRunFs`에 `projectRoot`·`params`만 넘기고
+  outDir는 넘기지 않는다. `packages/local/src/runner/workdir.ts:31-38`가 `n.golden.fixtures`를
+  `sessions/<sourceSession>/fixtures-manifest.json`의 원본 경로로 run fs에 복사한다.
+  1.3은 `fixtures/1.3/80a990bc-…/0-daily.csv → daily.csv`(859행, 2026-10-19)로 시작한다.
+  `packages/local/src/app/app.ts:3279`의 `copyRunFsToOut`은 실행 **후** out으로 복사만 한다.
+- 재현(원본 out은 건드리지 않고 사본 사용): D1 out
+  `.procforge/out/hn-daily-dogfood-20261020/daily.csv` = **1562행**(10-19 859 + 10-20 703)을
+  `.procforge/out/m7-loss-test`로 복사 → D2
+  `run procedures/hn-daily-dogfood-20261020 --param date=2026-10-21 --out .procforge/out/m7-loss-test --unattended --force`
+  (run `5607ee83-fc6c-461f-82eb-f22df4f34258`, exit 0, pass=3).
+- 결과: D2 run fs·out의 `daily.csv` 모두 **859행(10-19만)**, **D1의 10-20 703행 = 0**.
+  D2의 10-21 신규가 0(실행 시점 UTC 2026-10-20T17:28Z, 아직 미래)이라 D1 신규 703행이 사라졌다.
+- 원인: 픽스처가 finalize 시점(859행)에 고정되어 이후 실행의 산출물을 반영하지 않는다.
+  `--force`는 out 덮어쓰기를 허용할 뿐이지만, out을 시작점으로 쓰지 않으므로 누적이 끊긴다.
+- 수정안 비교:
+
+| 안 | 방법 | 장점 | 단점 |
+|---|---|---|---|
+| A | `--out` 기존본을 run fs 시작점으로 | 절차서 무변경 | out은 출력물이라 입력 오염·재현성 상실, 실행마다 out 경로가 달라지면 누적 불가, 동시성/보안 검증 필요 |
+| B | 절차서에 accumulate 입력 선언(`inout`) + 통과 후 원자적 write-back | 입력이 명시적·절차서에 이식, 스케줄러/out 경로와 무관, 승인 해시에 포함 | runner write-back·잠금·실패 시 미기록 구현 필요 |
+
+- 권고: **B**. A는 임시 편의용으로만.
+
 ## 6. Show HN / Ask HN 잔존 수 (이번 UTC 날짜 행만)
 
 - CSV 경로: `.procforge/out/hn-daily-dogfood-20261020/daily.csv` (파일명 `daily.csv`)
@@ -214,13 +240,15 @@ Get-Content ".procforge\sessions\$sid\calls.jsonl" |
 | 기준 | 판정 | 근거 |
 |---|---|---|
 | M5.8(a) serve+웹 UI/attach + dist MCP 분해 (1.2·1.3·finalize 포함) | [ ] (신호 B 재확인 후) | 2절 4·8단계, 7절. dist MCP(stdio)로 1.1~1.3 분해·finalize, UI 실행 `done`. 단 신호 B 사람 재확인(6.1) 전에는 닫지 않는다. OpenCode URL 페어링(attach)은 여전히 degraded |
-| M7 dogfood (UI 의견 1건 → 부분 재실행 → finalize → 무인 exit 0) | [ ] (신호 B 재확인 후) | 2절 5~9단계, 5절. 기능 흐름은 통과했으나 6.1의 `delivered:true` 확인 전에는 `[x]` 아님 |
+| M7 dogfood (UI 의견 1건 → 부분 재실행 → finalize → 무인 exit 0) | [ ] (누적 유실 수정 + 신호 B 재확인 후) | 2절 5~9단계, 5절. 기능 흐름은 통과했으나 5.1 결함과 6.1 `delivered:true` 확인 전에는 `[x]` 아님 |
+| 누적 실행 데이터 보존 (전날 신규 행) | [ ] (결함 재현) | 5.1 — D1 1562행(10-20 703 포함) → D2 859행, **10-20 703→0** |
 | 의견 반영 (Show/Ask HN 잔존 0) | [x] | 6절 — 703행 중 0 |
 | (선택) 데이터 유실 0 (409·초안 보존) — E2E (c)(e) 커버 | [x] | 3절 UI 문구 확인 + E2E (c)(e) |
-| 무인 실행 exit 0 | [x] | 5절 — `791fac8b…` exit 0 (`--force`는 출력 덮어쓰기 전용, 승인/검증 우회 없음) |
+| 무인 실행 exit 0 | [x] | 5절 — `791fac8b…` exit 0 (`--force`는 출력 덮어쓰기 전용, 검사 우회 없음 확인 / 누적 유실 여부는 5.1에서 재현) |
 
-- 종합: **기능 흐름 통과.** 무인 exit 0의 `--force`는 산출물 덮어쓰기만 허용했고 승인·stale·검증은
-  우회하지 않았다(5절). 다만 **M7/M5.8(a) 마감은 6.1 신호 B 사람 재확인 대기**다.
+- 종합: **기능 흐름 통과, M7 결함 1건 재현.** `--force`는 승인·stale·검증을 우회하지 않았다(5절).
+  다만 누적 시작점이 finalize 픽스처라 D2에서 D1의 신규 703행이 유실된다(5.1) — **수정 전**.
+  M7/M5.8(a) 마감은 (1) 이 누적 유실 수정과 (2) 6.1 신호 B 사람 재확인 후다.
   환경/도구 제약으로 degraded 기록: (1) `PROCFORGE_OPENCODE_URL` 미설정 → attach·신호 B 미도착,
   (2) MCP 재개마다 connectionId 신규 발급(11회, **시간 겹침 없음** — 기준을 "같은 clientName 순차·비중첩"으로 재정의).
 - M8 후보(이번 dogfood에서 발견한 것만):
@@ -250,6 +278,8 @@ Get-Content ".procforge\sessions\$sid\calls.jsonl" |
   - 무인: `.procforge/runs/791fac8b-0f94-483e-9c0c-3dfe61bf62b3/report.json` (exit 0, pass 3)
   - 실패 기록: `7786857f-…`(pass 3, out 충돌 exit 2), `d05b4c7b-…`(approval exit 3),
     `57bd2834-…`·`5d74c812-…`(Playwright 로그로 run fs 가드 실패)
+  - 누적 유실 재현: `5607ee83-fc6c-461f-82eb-f22df4f34258` (D2, exit 0/pass 3, daily.csv 859행),
+    out 사본 `.procforge/out/m7-loss-test/`
 - 세션 이벤트: `.procforge/sessions/d290a93d-dd9d-42d6-9e37-5a6ceb90a282/events.jsonl`(seq1~29),
   `calls.jsonl`(40건), `.procforge/sessions/f70c4687-…/calls.jsonl`(ui run start 1건)
 - 절차서: `.procforge/procedures/hn-daily-dogfood-20261020/` (`procedure.json`, `approvals.json`,
