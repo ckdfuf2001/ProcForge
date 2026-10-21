@@ -201,14 +201,29 @@ $rows = Import-Csv -LiteralPath $csv | Where-Object { $_.date -eq $date }
   (UI 의견은 `llm_rubric`으로 붙었으나 무인 실행에서 unverified가 되므로,
   finalize 전에 결정적 `csv_rows(daily.csv ≥ 1)`로 교체하고 날짜 행 수는 6절에서 직접 확인했다. 8절 M8 후보 참고.)
 
-### 6.1 신호 B 사람 재확인 (대기)
+### 6.1 신호 B 사람 재확인 (완료)
 
 - 사유: 2절 6단계 신호 B가 `PROCFORGE_OPENCODE_URL` 미설정으로 degraded였다. "UI에서 고치면 모델이
-  이어서 한다"는 대표 기능이 실사용으로 아직 증명되지 않았다(설정 누락이며 코드 결함은 아님).
-- 절차(사장님 직접): `$env:PROCFORGE_OPENCODE_URL="http://127.0.0.1:40999"`로 UI 기동 →
-  같은 세션 `d290a93d-dd9d-42d6-9e37-5a6ceb90a282`에 의견 1건 등록 →
-  응답 `delivered:true`(C 문구 없음)이고 모델이 `pf_*`를 이어서 호출하는지 확인.
-- 결과: **대기**. 통과하면 이 칸을 채우고 8절 M5.8(a)·M7을 함께 `[x]`로 닫는다.
+  이어서 한다"는 대표 기능이 실사용으로 아직 증명되지 않았다.
+- 1차 실패(2026-10-21): `http://127.0.0.1:40999` + UI 43123에서 `advise-and-signal` 실행.
+  advise는 성공했지만 signal은 `delivered:false`, `버전 미확인. 전송하지 않음`.
+  원인: OpenCode 1.18.18은 `/version`·`/app`이 HTML, `/config`에 `version`이 없고
+  `/global/health`에만 `{"healthy":true,"version":"1.18.18"}`를 준다. `fetchServerVersion`이
+  `/global/health`를 보지 않아 버전을 몰랐다.
+- 2차 실패: 신호는 전송됐으나 60초 timeout(`모델 무응답/plan 모드 의심`). OpenCode 세션에는
+  `procforge_pf_start(completed)`가 실제로 남아 있었다. 원인: `GET /session/:id/message`가
+  `{data:parts[]}`가 아니라 `[{info,parts[]}, …]` 메시지 배열을 주어 `listParts`가 빈 배열만 봤다.
+- 수정: `packages/local/src/services/opencode-link.ts`에서 `/global/health`를 1순위로 조회하고,
+  `extractParts`가 두 응답 형태를 모두 평탄화한다. `m74-signal.test.ts`(HTML `/version` + health),
+  `m71-link.test.ts`(메시지 배열) 회귀 추가.
+- 최종 실측: 안정 서버 `http://127.0.0.1:5552` + UI 43123. 세션
+  `d290a93d-dd9d-42d6-9e37-5a6ceb90a282` revision 31에 의견 등록(rev32) 후 signal
+  `delivered:true`, `mode:"b"`, 8.3초. OpenCode `ses_ea0e239ebffeelVJJ5IaS1QDMD`가
+  `procforge_pf_start`(completed)를 호출하고 `DONE` 응답.
+- 주의: 모델이 `pf_start`로 새 ProcForge 세션 `13f9e1f4-9111-4f77-add7-b0bc026e91d5`를 만들어
+  pairing이 그쪽으로 갱신됐다. 기존 `d290a93d`에 대한 “이어서” 호출 자체는 아직 증명하지 못했고,
+  위 실측을 위해 `d290a93d`에 테스트 advise 3건(events seq30~32, calls 40→43)이 추가됐다.
+- 판정: **신호 B 전달·`pf_*` 호출은 통과**. 같은 세션 연속성은 M8 후보로 남긴다.
 - 사용 소감(불편했던 점 한두 줄): **대기**.
 
 ## 7. 증명 표 (사람/모델/UI 구분)
@@ -274,19 +289,21 @@ Get-Content ".procforge\sessions\$sid\calls.jsonl" |
 
 | 기준 | 판정 | 근거 |
 |---|---|---|
-| M5.8(a) serve+웹 UI/attach + dist MCP 분해 (1.2·1.3·finalize 포함) | [ ] (신호 B 재확인 후) | 2절 4·8단계, 7절. dist MCP(stdio)로 1.1~1.3 분해·finalize, UI 실행 `done`. 단 신호 B 사람 재확인(6.1) 전에는 닫지 않는다. OpenCode URL 페어링(attach)은 여전히 degraded |
-| M7 dogfood (UI 의견 1건 → 부분 재실행 → finalize → 무인 exit 0) | [ ] (신호 B 재확인 후) | 2절 5~9단계, 5절·5.2. 누적 유실은 5.2에서 해소됐고 전체 테스트·CI도 green. 6.1 `delivered:true` 확인 전에는 `[x]` 아님 |
+| M5.8(a) serve+웹 UI/attach + dist MCP 분해 (1.2·1.3·finalize 포함) | [x] | 2절 4·8단계, 7절. dist MCP(stdio)로 1.1~1.3 분해·finalize, UI 실행 `done`. 6.1에서 수동 pairing 후 신호 B `delivered:true`+`pf_start` 확인. 자동 attach UX는 M8 후보 |
+| M7 dogfood (UI 의견 1건 → 부분 재실행 → finalize → 무인 exit 0) | [x] | 2절 5~9단계, 5절·5.2, 6.1. 누적 유실은 5.2에서 해소됐고 전체 테스트·CI green. 6.1 신호 B `delivered:true`+`pf_*` 호출 확인 |
 | 누적 실행 데이터 보존 (전날 신규 행) | [x] | 5.2 — 859행 상태에 10-20 833행 추가해 1692행, 이어 10-21에도 1692행 유지(유실 0). 빈 상태 2회도 859→1688행 |
 | 실행 중 취소 경쟁 (waiting 기록 직후 취소) | [x] | `e319426`, CI `39512901431` 7/7. `m75-waiting.test.ts` 회귀 포함 |
 | 의견 반영 (Show/Ask HN 잔존 0) | [x] | 6절 — 703행 중 0 |
 | (선택) 데이터 유실 0 (409·초안 보존) — E2E (c)(e) 커버 | [x] | 3절 UI 문구 확인 + E2E (c)(e) |
 | 무인 실행 exit 0 | [x] | 5절 — `791fac8b…` exit 0 (`--force`는 출력 덮어쓰기 전용, 검사 우회 없음 확인) |
 
-- 종합: **기능 흐름 통과, 누적 결함·취소 경쟁 수정 완료.** `--force`는 승인·stale·검증을 우회하지 않았다(5절).
-  누적 시작점 문제는 5.2의 accumulate(B)로 해소됐고, 마이그레이션 상태·빈 상태 2회 실행 모두
-  데이터 유실 0을 확인했다. M7/M5.8(a) 마감은 **6.1 신호 B 사람 재확인** 후다.
-  환경/도구 제약으로 degraded 기록: (1) `PROCFORGE_OPENCODE_URL` 미설정 → attach·신호 B 미도착,
-  (2) MCP 재개마다 connectionId 신규 발급(11회, **시간 겹침 없음** — 기준을 "같은 clientName 순차·비중첩"으로 재정의).
+- 종합: **기능 흐름 통과, 누적 결함·취소 경쟁 수정 완료, M7/M5.8(a) 마감.** `--force`는 승인·stale·검증을
+  우회하지 않았다(5절). 누적 시작점 문제는 5.2의 accumulate(B)로 해소됐고, 마이그레이션 상태·빈 상태
+  2회 실행 모두 데이터 유실 0을 확인했다. 신호 B는 6.1에서 `delivered:true`+`pf_start`로 실측했고,
+  그 과정에서 `/global/health` 버전 조회와 메시지 배열 `listParts` 결함을 수정했다.
+  환경/도구 제약 기록: (1) 초기 `PROCFORGE_OPENCODE_URL` 미설정 → 신호 B degraded였고 6.1에서 해소,
+  (2) 자동 attach/pairing 없이 수동 `pairings.json`이 필요했고, (3) MCP 재개마다 connectionId 신규
+  발급(11회, **시간 겹침 없음** — 기준을 "같은 clientName 순차·비중첩"으로 재정의).
 - M8 후보(이번 dogfood에서 발견한 것만):
   1. UI `pf_advise`가 만든 `llm_rubric`은 무인 실행에서 unverified → exit 1. 의견 입력 시
      "무인 검증 불가" 경고를 띄우고 결정적 제약(`numeric_match`/`csv_rows`)으로 바꾸도록 제안해야 한다
@@ -301,6 +318,8 @@ Get-Content ".procforge\sessions\$sid\calls.jsonl" |
   6. Playwright MCP가 저장소 루트(`.playwright-mcp/`)에 로그를 써서 run fs 가드에 걸림
      (`57bd2834`, `5d74c812` 실패) → 도구 로그 경로를 run fs 밖/임시로 분리.
   7. llm_rubric이 남은 절차서의 finalize는 warning뿐 — `strict`처럼 경고를 실패로 승격하는 옵션 검토.
+  8. 신호 B에서 모델이 `pf_start`로 새 세션을 만들어 기존 `d290a93d` 연속성이 끊겼다 → 신호에
+     대상 세션 ID/의도를 싣거나 “이어서”용 continue API를 제공해야 한다. 자동 attach/pairing도 필요.
 
 ## 9. 증거 링크
 
@@ -320,8 +339,12 @@ Get-Content ".procforge\sessions\$sid\calls.jsonl" |
     `102534eb-…`(1692 유지), `ef9d9379-…`(빈 상태→859), `829354cd-…`(859→1688)
 - 누적 상태: `.procforge/state/hn-daily-dogfood-20261020/daily.csv` (헤더+1562행 마이그레이션,
   `.bak` 1세대), 증명용 별도 state `D:\Local\Temp\opencode\pf-m7-acc-verify*`
-- 세션 이벤트: `.procforge/sessions/d290a93d-dd9d-42d6-9e37-5a6ceb90a282/events.jsonl`(seq1~29),
-  `calls.jsonl`(40건), `.procforge/sessions/f70c4687-…/calls.jsonl`(ui run start 1건)
+- 세션 이벤트: `.procforge/sessions/d290a93d-dd9d-42d6-9e37-5a6ceb90a282/events.jsonl`(seq1~32,
+  seq30~32는 6.1 신호 테스트 advise), `calls.jsonl`(43건),
+  `.procforge/sessions/f70c4687-…/calls.jsonl`(ui run start 1건)
+- 신호 B: `http://127.0.0.1:5552` + UI 43123, `delivered:true`/`mode:"b"`, OpenCode
+  `ses_ea0e239ebffeelVJJ5IaS1QDMD`의 `procforge_pf_start`(completed), 새 PF 세션
+  `13f9e1f4-9111-4f77-add7-b0bc026e91d5`
 - 절차서: `.procforge/procedures/hn-daily-dogfood-20261020/` (`procedure.json`에 `accumulate` 선언,
   재생성된 `approvals.json`, `scripts/1_1.py`·`1_2.py`·`1_3.py`, `tests/fixtures/`, `command.md`)
 - 코드/CI:
