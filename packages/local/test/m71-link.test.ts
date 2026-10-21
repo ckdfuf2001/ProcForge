@@ -212,6 +212,26 @@ describe("M7-1 opencode-link", () => {
     }
   });
 
+  it("listParts: 1.18.18 메시지 배열 응답을 parts로 평탄화", async () => {
+    const payload = [
+      { info: { role: "user" }, parts: [{ type: "text", text: "계속" }] },
+      {
+        info: { role: "assistant" },
+        parts: [{ type: "tool", tool: "procforge_pf_start", state: { status: "completed" } }],
+      },
+    ];
+    const impl = async (): Promise<Response> =>
+      new Response(JSON.stringify(payload), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    const parts = await httpLinkDeps("http://x", impl).listParts("ses-a");
+    expect(parts).toEqual([
+      { type: "text", text: "계속" },
+      { type: "tool", tool: "procforge_pf_start", state: { status: "completed" } },
+    ]);
+  });
+
   it("B body 변형(래퍼)은 400 (실서버 확인 재현)", async () => {
     const fake = await startFake("b-ok");
     try {

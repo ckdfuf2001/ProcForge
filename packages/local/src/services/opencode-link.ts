@@ -41,7 +41,9 @@ export async function fetchServerVersion(
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), Math.min(deps.timeoutMs ?? 3000, 5000));
   try {
-    for (const path of ["/version", "/config", "/app"]) {
+    // /global/health is the only endpoint that survives the web UI fallback
+    // (in 1.18.18 /version may serve index.html, /config has no version).
+    for (const path of ["/global/health", "/version", "/config", "/app"]) {
       try {
         const r = await doFetch(`${base}${path}`, {
           signal: ac.signal,
@@ -119,10 +121,30 @@ export function extractPfSessionId(parts: unknown): string | undefined {
 }
 
 /**
- * M7-0 실측형 읽기. GET /session/:id/message → {data: parts[]}.
+ * M7-0 실측형 읽기. 응답 형태가 버전/엔드포인트에 따라 다르다:
+ * - 구형/목업: {data: parts[]}
+ * - 1.18.18 실서버: [{info, parts: Part[]}, ...]
  * 대용량 세션은 빈 페이지를 돌려줄 수 있어 (M7-0 §3) 폴백일 뿐이다.
  * 1순위는 SSE message.part.updated (아래 sseNewPfCall).
  */
+function extractParts(payload: unknown): unknown[] {
+  if (Array.isArray(payload)) {
+    return payload.flatMap((item) => {
+      if (item !== null && typeof item === "object") {
+        const parts = (item as Record<string, unknown>)["parts"];
+        if (Array.isArray(parts)) return parts;
+      }
+      return [item];
+    });
+  }
+  if (payload !== null && typeof payload === "object") {
+    const rec = payload as Record<string, unknown>;
+    if (Array.isArray(rec["data"])) return extractParts(rec["data"]);
+    if (Array.isArray(rec["parts"])) return rec["parts"];
+  }
+  return [];
+}
+
 export function httpLinkDeps(
   baseUrl: string,
   fetchImpl?: typeof fetch,
@@ -136,12 +158,7 @@ export function httpLinkDeps(
         { headers: { accept: "application/json" } },
       );
       if (!r.ok) return [];
-      const v = (await r.json()) as unknown;
-      if (v !== null && typeof v === "object") {
-        const data = (v as Record<string, unknown>)["data"];
-        if (Array.isArray(data)) return data;
-      }
-      return [];
+      return extractParts((await r.json()) as unknown);
     },
   };
 }

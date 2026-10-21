@@ -184,6 +184,29 @@ describe("M7-ui4-i serverVersion·timeoutMs는 서버 설정/조회값만", () =
     expect(clampTimeoutMs(5_000)).toBe(5_000);
   });
 
+  it("web UI fallback: /version HTML이어도 /global/health에서 버전을 읽는다", async () => {
+    const seen: string[] = [];
+    const impl = async (input: RequestInfo | URL): Promise<Response> => {
+      const path = new URL(String(input)).pathname;
+      seen.push(path);
+      if (path === "/global/health") {
+        return new Response(JSON.stringify({ healthy: true, version: "1.18.18" }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (path === "/version") {
+        return new Response("<!doctype html><html></html>", {
+          status: 200,
+          headers: { "content-type": "text/html" },
+        });
+      }
+      return new Response(JSON.stringify({}), { status: 200 });
+    };
+    expect(await fetchServerVersion("http://x", { fetchImpl: impl })).toBe("1.18.18");
+    expect(seen).toEqual(["/global/health"]);
+  });
+
   it("버전 조회는 서버가 밝힌 값만 쓴다", async () => {
     const fake = fakeServer("1.18.18");
     expect(await fetchServerVersion("http://x", { fetchImpl: fake.impl })).toBe("1.18.18");
