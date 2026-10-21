@@ -223,6 +223,8 @@ $rows = Import-Csv -LiteralPath $csv | Where-Object { $_.date -eq $date }
 - 주의: 모델이 `pf_start`로 새 ProcForge 세션 `13f9e1f4-9111-4f77-add7-b0bc026e91d5`를 만들어
   pairing이 그쪽으로 갱신됐다. 기존 `d290a93d`에 대한 “이어서” 호출 자체는 아직 증명하지 못했고,
   위 실측을 위해 `d290a93d`에 테스트 advise 3건(events seq30~32, calls 40→43)이 추가됐다.
+- 테스트 의견 혼입: `d290a93d` node 1.3에 human `llm_rubric` 3건이 추가됐으나 status는 `leaf` 유지·stale 미생성. 확정 절차서 `hn-daily-dogfood-20261020` 파일은 불변(재-finalize 시 승인 해시 갱신 필요).
+- `13f9e1f4` 생성 사유: 신호 문구가 `계속`뿐이라 모델이 기존 `d290a93d`를 이어갈 근거를 받지 못했고, 새 PF 세션을 시작하는 `pf_start`를 선택했다.
 - 판정: **신호 B 전달·`pf_*` 호출은 통과**. 같은 세션 연속성은 M8 후보로 남긴다.
 - 사용 소감(불편했던 점 한두 줄): **대기**.
 

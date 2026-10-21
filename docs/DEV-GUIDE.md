@@ -62,6 +62,7 @@
 - UI는 M7 전까지 착수하지 않는다.
 - 새 기능은 CoreClient → App → 어댑터 순서로 만든다. server.ts/cli.ts에는 판단 로직, 파일 접근, store 접근을 넣지 않는다 (R1~R4).
 - 테스트가 무한 대기하면 자식 프로세스·연결 정리 누락부터 의심한다.
+- 실사용(dogfood) 세션에 테스트 advise/run을 섞지 않는다. 테스트는 별도 PF 세션(또는 별도 `PROCFORGE_DIR`)에서 수행한다. 같은 세션에 추가하면 revision·events·approval 증거가 오염된다.
 
 ---
 
@@ -583,12 +584,18 @@ c·d·j는 하네스 과제로 DECISIONS에 기록만.
 | M5.8.2 | E2E 2회차 후속 | [x] | `ec592a0` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38429848946 | 0 사실확인·1 ref 의미·2 probing/run 차단·3 script 승인·4 csv_rows·5 주석 정정 + 후속(golden 기준·검증불가·R8 분리·stable). 코드 head 기준, 최종 head b2a74e2(docs만) CI success |
 | M6 | 원격 core | [x] | `9458704` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38604361482 | 0~6 + M6.1 후속(1~5) 완료 (docs/REVIEW-M6.md) |
 | M6.1 | 원격 core 후속 | [x] | `9458704` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38604361482 | 1 egress R8·2 전체 remote+egress 단언·3 재시도 제거·4 인증·5 공개유지 (docs/REVIEW-M6.md) |
-| M7 | UI | [~] | `b25c688` (1~6) · `0604023` (close-a~e) | https://github.com/ckdfuf2001/ProcForge/actions/runs/39295325570 | 0 SDK 확인(opencode serve 세션 메시지·pf_next 재개) · 1 로컬 서버+SPA+pairings [x] · 2 트리+SSE [x] · 3 노드 상세 [x] · 4 텍스트 편집/의견+stale 미리보기 [x] · 5 실행 화면 [x] · 6 Playwright E2E [x] · 마감 전 보정 M7-close-a~e(실행 E2E (e)+실행 승인/취소·SSE 결함 수정, 초안 복사, 인코딩 위생, dogfood 양식, §8 표기) · **남음: 사람 dogfood — M5.8(a)와 한 세션에서 통합 종료, 기록 `docs/M7-dogfood.md`** (connectionId·actor로 사람/모델/UI 구분 증명) |
+| M7 | UI | [x] | `b25c688` (1~6) · `0604023` (close-a~e) · `1d58e2b` (신호 B) | https://github.com/ckdfuf2001/ProcForge/actions/runs/39628824951 | 0 SDK 확인(opencode serve 세션 메시지·pf_next 재개) · 1 로컬 서버+SPA+pairings [x] · 2 트리+SSE [x] · 3 노드 상세 [x] · 4 텍스트 편집/의견+stale 미리보기 [x] · 5 실행 화면 [x] · 6 Playwright E2E [x] · 마감 전 보정 M7-close-a~e(실행 E2E (e)+실행 승인/취소·SSE 결함 수정, 초안 복사, 인코딩 위생, dogfood 양식, §8 표기) · 사람 dogfood 완료 `docs/M7-dogfood.md` (6.1 신호 B `delivered:true`+`pf_start`, connectionId·actor 증명) · 같은 세션 연속성은 M8-1 |
 | M7-0.1 | OpenCode 연결 (UI 없이 App·CLI까지) | [x] | `d73988f` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38814839031 | B/A/C 신호+plan degraded+짝짓기 latest-wins·이력+저장소 PROCFORGE_DIR 통일+connectionId 기록 — 실서버 오동작 6건은 M7-0.2로 보정 |
 | M7-0.2 | "계속" 신호 실서버 보정 | [x] | `d73988f` | https://github.com/ckdfuf2001/ProcForge/actions/runs/38814839031 | 1 plan 감지 기준점 · 2 버전 default-deny · 3 짝 검증 · 4 실서버 4조합 확정(msg+parts) · 5 R5 생성자 주입 · 6 SSE 우선·폴링 폴백 (+tsc narrowing 빌드 수정) |
+| M8-1 | 신호 문구 보강 + 짝 유지 E2E | [ ] | | | 신호에 sessionId·nodeId·“pf_start 금지, pf_next로 이어서” 포함. 가짜 서버 E2E: 신호 후 모델이 `pf_start`를 호출하면 경고하고 짝 변경을 감지. **완료: 사장님 실측 “UI 의견 → 모델이 같은 세션에서 `pf_next` → 해당 노드만 재실행”** |
+| M8-2 | UI 신호 대상 상태 배지 | [ ] | | | 신호 대상 OpenCode/PF 짝과 전달 상태를 UI에 표시 |
+| M8-3 | rubric 무인 불가 경고 + 결정적 제약 제안 | [ ] | | | `llm_rubric`은 무인 실행에서 unverified/exit 1이므로 경고하고 `numeric_match`/`csv_rows` 등 결정적 제약을 제안 |
+| M8-4 | finalize → 승인 흐름 연결 | [ ] | | | finalize가 만든 `approvals.json`을 UI의 “승인 필요” 흐름으로 연결하거나 안내 |
+| M8-5 | 설치/전역 명령 | [ ] | | | 설치·전역 실행 명령 정리 |
+| M8-6 | core-server 분리·고객 PC | [ ] | | | 원격 core와 고객 PC 설치·연결 테스트 |
+| M8-7 | job object·dependsOn 누락 경고 | [ ] | | | job 객체 도입, 사후 `dependsOn` 누락 경고 |
 
-> **M8은 dogfood(`docs/M7-dogfood.md`) 결과를 반영한 뒤 정의한다.** 그 전에 범위를 확정하지 않는다.
-> 현 후보(확정 아님): core-server 분리·원격 PC 테스트, 사후 dependsOn 편집, 그 밖에 dogfood에서 나온 것.
+> M8은 dogfood(`docs/M7-dogfood.md`) 결과를 반영해 정의했다. 완료 기준은 각 항목 비고에 따른다.
 
 ---
 
