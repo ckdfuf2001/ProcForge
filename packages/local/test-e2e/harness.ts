@@ -131,9 +131,30 @@ export type Harness = {
   pfdir: string;
   app: ProcForgeApp;
   fake: FakeOpenCode;
-  ui: { url: string; token: string; close: () => Promise<void> };
+  ui: {
+    url: string;
+    token: string;
+    port: number;
+    instance: string;
+    close: () => Promise<void>;
+  };
   close: () => Promise<void>;
 };
+
+/**
+ * M8-ui4: 같은 포트로 UI 서버만 재기동한다 (재시작 안내 E2E).
+ * 포트를 유지해야 sessionStorage 의 이전 토큰·인스턴스가 그대로 남는다.
+ */
+export async function restartUi(h: Harness): Promise<void> {
+  const port = h.ui.port;
+  await h.ui.close();
+  h.ui = await createUiServer({
+    app: h.app,
+    pollMs: 40,
+    heartbeatMs: 5000,
+    port,
+  });
+}
 
 export async function setup(opts: { fakeMode?: FakeMode } = {}): Promise<Harness> {
   const root = mkdtempSync(join(tmpdir(), "pf-e2e-"));
