@@ -509,6 +509,7 @@ argv: [...]}` 고정. runner는 run fs에서 직접 실행해 stdout을 golden�
 - [M7-ui1-5] 토큰은 메모리에만 두고 읽자마자 fragment를 지운다. 따라서
   새로고침하면 401이 난다 — **의도된 동작**이다. 401 화면은
   "터미널에 출력된 URL로 다시 열기"를 안내한다.
+  **→ [M8-ui4-a]에서 개정: 저장 위치를 sessionStorage로 옮겼다** (새로고침 유지).
 - [M7-ui2-1] SSE 클라는 EventSource를 쓰지 않는다 (토큰 헤더를 붙일 수
   없다). fetch ReadableStream으로 SSE를 직접 파싱한다. 쿼리스트링
   토큰은 금지(로그·기록 잔류). 서버는 헤더를 먼저 flush하고,
@@ -1058,4 +1059,24 @@ argv: [...]}` 고정. runner는 run fs에서 직접 실행해 stdout을 golden�
 - [M8-ui-2-h] **(M8 후보) `causeAdviceFor` 는 분해마다 전체 events 를 스캔한다.**
   세션 이벤트가 수천 건으로 늘면 이벤트 로그 인덱스(revision→actor, node→last split/report)가
   필요하다. M8 범위에서는 단순 스캔으로 둔다. 근거: causeAdviceFor().
+
+### M8-ui-4 토큰 입력 화면
+
+- [M8-ui4-a] **토큰은 sessionStorage에 둔다 — [M7-ui1-5] 메모리 전용을 개정한다.**
+  저장 키에 `location.origin`을 넣어 출처(스킴·호스트·포트) 단위임을 명시한다.
+  쿠키는 쓰지 않는다: `127.0.0.1` 쿠키는 포트를 구분하지 않아 같은 호스트의
+  다른 로컬 서버와 토큰이 섞인다. sessionStorage는 탭 단위라 같은 주소의 새 탭은
+  다시 입력해야 한다(의도). XSS 방어선은 저장 위치가 아니라 CSP
+  (`default-src 'self'`, `script-src 'self'`, 인라인 금지)다. 근거: `packages/ui/src/auth.ts`.
+- [M8-ui4-b] **`#t=` 진입은 저장 후 즉시 주소에서 제거한다** (`history.replaceState`).
+  입력 화면은 토큰 자체와 `#t=`가 포함된 전체 URL 붙여넣기를 모두 받는다.
+  쿼리 토큰(`?t=`)은 서버가 거부하므로 UI도 받지 않는다. "연결 해제"는 저장소를
+  비우고 입력 화면으로 돌아간다. 근거: parseTokenInput(), TokenGate.tsx.
+- [M8-ui4-c] **서버는 토큰 비교를 timingSafeEqual로 하고, /api/*만 토큰을 요구한다.**
+  SPA 정적 파일(index·assets)은 무토큰으로 서빙한다(데이터 없음). 401이 IP당
+  1분에 30회를 넘으면 429로 끊는다(무차별 대입 완화). 근거: ui-server.ts tokenOk/bumpUnauthorized.
+- [M8-ui4-d] **서버 재시작은 인스턴스 id로 감지한다.** 기동마다 새 `instance`를
+  index.html의 `<meta name="pf-instance">`에 심고, UI는 sessionStorage의 이전 값과
+  비교해 다르면 "서버가 재시작되어 토큰이 바뀌었습니다"를 안내하고 토큰을 버린다.
+  근거: createUiServer(), initAuth().
 
