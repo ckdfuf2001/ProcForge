@@ -287,8 +287,19 @@ export const NodeSchema = z.object({
   sideEffect: SideEffectSchema,
   constraints: z.array(ConstraintSchema).default([]),
   advice: z
-    .array(z.object({ at: z.string(), text: z.string() }))
+    .array(
+      z.object({
+        at: z.string(),
+        text: z.string(),
+        /** M8-ui2: 분해 사유의 causeAdviseIds 연결용 안정 ID */
+        id: z.string().min(1).optional(),
+        /** M8-ui2: 적용된 revision (직전 split/report 이후 판정용) */
+        revision: z.number().int().min(0).optional(),
+      }),
+    )
     .default([]),
+  /** M8-ui1: 이 노드를 분해한 사유 (hash 제외, 사람이 읽는 기록) */
+  splitReason: z.string().min(1).optional(),
   attempts: z.array(AttemptSchema).default([]),
   golden: z
     .object({

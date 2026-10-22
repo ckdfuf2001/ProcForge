@@ -3,7 +3,9 @@ import {
   ArgSpecSchema,
   ConstraintSchema,
   NodeIdSchema,
+  NodeStatusSchema,
   SessionIdSchema,
+  SideEffectSchema,
   ToolCatalogEntrySchema,
   ToolRefSchema,
 } from "./schema.js";
@@ -16,6 +18,43 @@ import { PROCEDURE_NAME_RE } from "./procedure.js";
 export const ActorSchema = z.enum(["host", "human", "runner", "ui"]);
 export type Actor = z.infer<typeof ActorSchema>;
 
+/** M8-ui2: 이벤트 스냅샷·특정 revision 트리에 쓰는 노드 (attempts 등 큰 필드 제외) */
+export const HistoryNodeSchema = z.object({
+  id: NodeIdSchema,
+  parentId: NodeIdSchema.nullable(),
+  goal: z.string().nullable(),
+  status: NodeStatusSchema.nullable(),
+  depth: z.number().int().min(0),
+  children: z.array(NodeIdSchema),
+  dependsOn: z.array(NodeIdSchema),
+  locked: z.boolean(),
+  sideEffect: SideEffectSchema.nullable(),
+  staleSince: z
+    .object({
+      revision: z.number().int().min(0),
+      causeNodeId: NodeIdSchema,
+    })
+    .optional(),
+  hash: z.string().nullable(),
+});
+export type HistoryNode = z.infer<typeof HistoryNodeSchema>;
+
+/**
+ * 상태 변경 이벤트 상세 (M8-ui1).
+ * split 전용 필드는 이벤트에, 공통 필드는 모든 쓰기 이벤트에 기록한다.
+ */
+export const EventDetailSchema = z.object({
+  parentId: NodeIdSchema.optional(),
+  childIds: z.array(NodeIdSchema).optional(),
+  reason: z.string().optional(),
+  alternatives: z.array(z.string()).optional(),
+  causeAdviseIds: z.array(z.string()).optional(),
+  /** 이 이벤트로 값이 바뀐 노드의 스냅샷 (변경분만, 큰 필드 제외) */
+  nodesAfter: z.array(HistoryNodeSchema).optional(),
+  removedIds: z.array(NodeIdSchema).optional(),
+});
+export type EventDetail = z.infer<typeof EventDetailSchema>;
+
 /** 상태 변경 이벤트 1건 (R7, events.jsonl 한 줄). seq == revision */
 export const EventEntrySchema = z.object({
   seq: z.number().int().min(1),
@@ -27,6 +66,8 @@ export const EventEntrySchema = z.object({
   beforeHash: z.string(),
   afterHash: z.string(),
   summary: z.string(),
+  /** M8-ui1: 패치 없는 구간은 detail 자체가 없다 (구 이벤트 호환) */
+  detail: EventDetailSchema.optional(),
 });
 export type EventEntry = z.infer<typeof EventEntrySchema>;
 
@@ -105,6 +146,14 @@ export const SplitInputSchema = z
         }),
       )
       .min(1),
+    /**
+     * M8-ui1: 왜 이렇게 나눴는지 (사람이 읽고 의견을 준다).
+     * zod는 형태만 본다 — 필수 여부·길이 판정은 App(사용자 경로)이
+     * bad_request + 힌트로 알린다 (MCP SDK 검증 에러와 다른 봉투).
+     */
+    reason: z.string().optional(),
+    /** M8-ui1: 버린 대안 (최대 3개) */
+    alternatives: z.array(z.string()).max(3).optional(),
   })
   .merge(RevisionOptsSchema);
 export type SplitInput = z.infer<typeof SplitInputSchema>;
@@ -180,6 +229,42 @@ export const GetNodeInputSchema = z.object({
   nodeId: NodeIdSchema,
 });
 export type GetNodeInput = z.infer<typeof GetNodeInputSchema>;
+
+/** M8-ui2: 분해 라운드 1건 (읽기 전용, touch 없음) */
+export const DecompositionHistoryEntrySchema = z.object({
+  revision: z.number().int().min(0),
+  at: z.string().min(1),
+  actor: ActorSchema,
+  depth: z.number().int().min(0),
+  parentId: NodeIdSchema,
+  childIds: z.array(NodeIdSchema),
+  reason: z.string().nullable(),
+  alternatives: z.array(z.string()),
+  causeAdviseIds: z.array(z.string()),
+});
+export type DecompositionHistoryEntry = z.infer<
+  typeof DecompositionHistoryEntrySchema
+>;
+
+export const DecompositionHistoryInputSchema = z.object({
+  sessionId: SessionIdSchema,
+});
+export type DecompositionHistoryInput = z.infer<
+  typeof DecompositionHistoryInputSchema
+>;
+
+/** M8-ui2: 특정 revision 시점 트리 노드 (구간 미상은 null) */
+export const TreeAtInputSchema = z.object({
+  sessionId: SessionIdSchema,
+  revision: z.number().int().min(0),
+});
+export type TreeAtInput = z.infer<typeof TreeAtInputSchema>;
+
+export const TreeAtOutputSchema = z.object({
+  nodes: z.array(HistoryNodeSchema),
+  structureOnly: z.boolean(),
+});
+export type TreeAtOutput = z.infer<typeof TreeAtOutputSchema>;
 
 export const LockInputSchema = z
   .object({ sessionId: SessionIdSchema, nodeId: NodeIdSchema })
