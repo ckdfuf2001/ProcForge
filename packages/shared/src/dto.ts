@@ -235,7 +235,9 @@ export const DecompositionHistoryEntrySchema = z.object({
   revision: z.number().int().min(0),
   at: z.string().min(1),
   actor: ActorSchema,
+  /** 부모 노드의 그 시점 스냅샷 depth 우선, 없으면 ID 세그먼트 (depthSource 참고) */
   depth: z.number().int().min(0),
+  depthSource: z.enum(["snapshot", "id"]),
   parentId: NodeIdSchema,
   childIds: z.array(NodeIdSchema),
   reason: z.string().nullable(),

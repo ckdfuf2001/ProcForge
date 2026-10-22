@@ -103,6 +103,7 @@ export type DecompositionRound = {
   at: string;
   actor: string;
   depth: number;
+  depthSource: "snapshot" | "id";
   parentId: string;
   childIds: string[];
   reason: string | null;

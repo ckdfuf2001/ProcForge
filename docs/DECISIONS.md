@@ -1033,9 +1033,11 @@ argv: [...]}` 고정. runner는 run fs에서 직접 실행해 stdout을 golden�
   `getDecompositionHistory`(분해 라운드 목록)·`getTreeAt`(특정 revision 시점 트리).
   화면만 봐도 세션이 살아 있으면 안 된다는 M7-ui3-b 원칙을 그대로 따른다.
   근거: `packages/core/src/service.ts` getDecompositionHistory/getTreeAt.
-- [M8-ui-2-c] **라운드 깊이는 ID 세그먼트 기준으로 계산한다.** 노드 id 는 전역 불변식이 아니다
-  (import 는 임의 id 를 보존하고, 재분해도 id 를 다시 매긴다). 그래서 라운드의 `depth` 는
-  저장된 필드가 아니라 `parentId` 의 세그먼트 수 - 1 로 계산한다. 근거: roundOfEvent().
+- [M8-ui-2-c] **라운드 깊이는 부모의 그 시점 스냅샷(`detail.nodesAfter`) depth 를 우선한다.**
+  노드 id 는 전역 불변식이 아니다 (import 는 "2.9" 처럼 세그먼트 수와 실제 depth 가 다른 id 를
+  보존한다). 그래서 스냅샷에 부모 depth 가 있으면 그 값을 쓰고, 없을 때(구 이벤트)만
+  `parentId` 세그먼트 수 - 1 로 되돌린다. 어느 쪽을 썼는지 `depthSource: "snapshot"|"id"` 로
+  드러낸다. 근거: roundOfEvent(), `m8-decomposition.test.ts` import 2단계 split 테스트.
 - [M8-ui-2-d] **패치가 없는 구간은 "구조만, 상태 null" 이다.** 구 세션(d290 등)에는 스냅샷이 없다.
   그럴 때 상태를 지어내지 않고 `structureOnly: true` 로 알린다(상태는 null).
   판단 대신 표시로 처리한다. 근거: getTreeAt().

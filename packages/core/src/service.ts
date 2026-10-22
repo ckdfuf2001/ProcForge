@@ -2199,11 +2199,18 @@ if (oldHash !== next.hash) this.propagateStale(s.id, input.nodeId, s.revision + 
             id.split(".").length === parentDepth + 2,
         )
         .sort(compareNodeIds);
+    // M8-ui2 정정: 노드 id 는 전역 불변식이 아니다 (import 는 임의 id 를 보존).
+    // 부모의 그 시점 스냅샷에 depth 가 있으면 그 값을 쓰고, 없을 때만 ID 세그먼트로
+    // 되돌린다. 어느 쪽을 썼는지 depthSource 로 드러낸다.
+    const parentSnap = e.detail?.nodesAfter?.find((n) => n.id === parentId);
+    const depth = parentSnap?.depth ?? parentDepth;
+    const depthSource = parentSnap?.depth !== undefined ? "snapshot" : "id";
     return {
       revision: e.revision,
       at: e.at,
       actor: e.actor,
-      depth: parentDepth,
+      depth,
+      depthSource,
       parentId,
       childIds,
       reason: e.detail?.reason ?? null,

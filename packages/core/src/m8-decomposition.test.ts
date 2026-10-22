@@ -189,6 +189,43 @@ describe("M8-ui2 분해 라운드 이력 (getDecompositionHistory)", () => {
     expect(rounds[0].revision).toBeLessThan(rounds[1].revision);
   });
 
+  it("import 임의 id 세션도 부모 스냅샷 depth를 쓴다 (2단계 split → depth 1)", async () => {
+    const s = svc();
+    // id "2.9" 는 세그먼트로는 깊이 1이지만 import 문서상 depth 0 이다.
+    const doc = {
+      format: "procforge-procedure",
+      version: 1,
+      name: "imp-depth",
+      sourceSession: "external",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      params: {},
+      toolCatalog: catalog,
+      nodes: [
+        {
+          id: "2.9", parentId: null, goal: "루트", depth: 0,
+          dependsOn: [], children: [], sideEffect: "none", constraints: [],
+        },
+      ],
+    };
+    const { sessionId } = await s.pfImportProcedure({ doc: doc as never });
+    await s.pfResolve({
+      sessionId, nodeId: "2.9", decision: "split",
+      children: [{ goal: "a" }], reason: REASON,
+    });
+    await s.pfResolve({
+      sessionId, nodeId: "2.9.1", decision: "split",
+      children: [{ goal: "b" }], reason: REASON,
+    });
+    const rounds = await s.getDecompositionHistory({ sessionId });
+    // ID 세그먼트로 계산하면 1·2 가 된다. 스냅샷(0·1)이 이긴다.
+    expect(rounds[0]).toMatchObject({
+      parentId: "2.9", depth: 0, depthSource: "snapshot",
+    });
+    expect(rounds[1]).toMatchObject({
+      parentId: "2.9.1", depth: 1, depthSource: "snapshot",
+    });
+  });
+
   it("읽기 전용이다 (revision·노드 상태 불변)", async () => {
     const s = svc();
     const sid = await started(s);
@@ -335,6 +372,7 @@ describe("M8-ui2 구 세션 호환 (패치 없는 이벤트)", () => {
       parentId: "1",
       childIds: ["1.1", "1.2"],
       depth: 0,
+      depthSource: "id",
       reason: null,
       alternatives: [],
       causeAdviseIds: [],
