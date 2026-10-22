@@ -7,6 +7,14 @@ import {
   type StoreInfo,
   type NodeRow,
 } from "./api.js";
+import {
+  clearToken,
+  initAuth,
+  onAuthLost,
+  saveToken,
+  type AuthNotice,
+} from "./auth.js";
+import { TokenGate } from "./TokenGate.js";
 import { TreeView } from "./TreeView.js";
 import { RoundView } from "./RoundView.js";
 import { RunPanel } from "./RunPanel.js";
@@ -39,6 +47,13 @@ function isoTime(value: string | number | null): string | undefined {
 }
 
 export function App() {
+  // M8-ui4: 토큰이 없거나 401/재시작이면 입력 화면. #t= 는 initAuth 가 흡수·제거한다.
+  const [authNotice, setAuthNotice] = useState<AuthNotice | null>(
+    () => initAuth()?.notice ?? null,
+  );
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [authBusy, setAuthBusy] = useState(false);
+  const [authEpoch, setAuthEpoch] = useState(0);
   const [store, setStore] = useState<StoreInfo | null>(null);
   const [sessions, setSessions] = useState<SessionRow[] | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
@@ -59,29 +74,67 @@ export function App() {
     setFocus({ sessionId, nodeId, n: Date.now() });
   };
 
+  // 다른 화면(트리·실행·SSE)에서 먼저 401 이 나도 입력 화면으로 돌아간다.
+  useEffect(
+    () =>
+      onAuthLost(() => {
+        setStore(null);
+        setSessions(null);
+        setAuthNotice("unauthorized");
+      }),
+    [],
+  );
+
   useEffect(() => {
+    if (authNotice !== null) return;
+    let alive = true;
+    setAuthBusy(true);
     (async () => {
       try {
-        setStore(await api.store());
-        setSessions((await api.sessions()).sessions);
+        const s = await api.store();
+        const list = await api.sessions();
+        if (!alive) return;
+        setStore(s);
+        setSessions(list.sessions);
+        setError(null);
       } catch (e) {
-        if (e instanceof ApiError) setError(e);
+        if (!alive) return;
+        if (e instanceof ApiError && (e.status === 401 || e.status === 429)) {
+          clearToken();
+          setStore(null);
+          setSessions(null);
+          setAuthNotice(e.status === 401 ? "unauthorized" : "none");
+          setAuthError(
+            e.status === 429
+              ? "시도가 너무 많습니다. 잠시 후 다시 시도해 주세요."
+              : null,
+          );
+        } else if (e instanceof ApiError) setError(e);
         else setError(new ApiError("?", 0));
+      } finally {
+        if (alive) setAuthBusy(false);
       }
     })();
-  }, []);
+    return () => {
+      alive = false;
+    };
+  }, [authNotice, authEpoch]);
 
-  // M7-ui1-3: 새로고침하면 토큰이 사라진다 (fragment 제거). 401이면 안내.
-  if (error?.status === 401) {
+  const submitToken = (token: string) => {
+    saveToken(token);
+    setAuthError(null);
+    setAuthNotice(null);
+    setAuthEpoch((n) => n + 1);
+  };
+
+  if (authNotice !== null) {
     return (
-      <main className="app-shell auth-shell">
-        <h1>ProcForge</h1>
-        <div className="empty-state">
-          <strong>인증 정보가 없습니다.</strong>
-          <span>새로고침하면 토큰이 사라집니다(의도된 동작).</span>
-          <span>터미널에 출력된 <code>#t=...</code> URL로 다시 열어 주세요.</span>
-        </div>
-      </main>
+      <TokenGate
+        notice={authNotice}
+        busy={authBusy}
+        error={authError}
+        onSubmit={submitToken}
+      />
     );
   }
   if (error) {

@@ -1066,3 +1066,35 @@ a:hover {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* M8-ui4: 토큰 입력 */
+.token-panel {
+  display: grid;
+  gap: 14px;
+}
+.token-form {
+  display: grid;
+  gap: 8px;
+}
+.token-form label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.token-form input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+}
+.token-form input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.token-note {
+  font-size: 12px;
+  line-height: 1.5;
+}

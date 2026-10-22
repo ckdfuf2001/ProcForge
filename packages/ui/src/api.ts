@@ -1,3 +1,5 @@
+import { getToken, notifyAuthLost } from "./auth.js";
+
 // UI API 타입 (JSON 계약. shared DTO 모양을 미러링 — ui는 local import 금지).
 export type SessionRow = {
   sessionId: string;
@@ -24,17 +26,6 @@ export type Pairings = {
   >;
   history: { openCodeSessionId: string; pfSessionId: string; at: string }[];
 };
-
-let token = "";
-
-export function takeToken(): string {
-  if (!token) {
-    token = (location.hash.match(/t=([^&]+)/) || [])[1] || "";
-    // 읽자마자 fragment 삭제 (XSS 시 토큰 유출 방지).
-    history.replaceState(null, "", location.pathname);
-  }
-  return token;
-}
 
 export type NodeRow = {
   id: string;
@@ -221,16 +212,18 @@ async function post<T>(path: string, body: unknown): Promise<T> {
     method: "POST",
     headers: {
       "content-type": "application/json",
-      "x-procforge-token": takeToken(),
+      "x-procforge-token": getToken(),
     },
     body: JSON.stringify(body),
   });
+  if (r.status === 401) notifyAuthLost();
   if (!r.ok) throw await fail(path, r);
   return (await r.json()) as T;
 }
 
 async function get<T>(path: string): Promise<T> {
-  const r = await fetch(path, { headers: { "x-procforge-token": takeToken() } });
+  const r = await fetch(path, { headers: { "x-procforge-token": getToken() } });
+  if (r.status === 401) notifyAuthLost();
   if (!r.ok) throw await fail(path, r);
   return (await r.json()) as T;
 }
@@ -340,7 +333,7 @@ function subscribeSse(
     try {
       const r = await fetch(path, {
         headers: {
-          "x-procforge-token": takeToken(),
+          "x-procforge-token": getToken(),
           accept: "text/event-stream",
           ...(lastEventId && lastEventId.v > 0
             ? { "last-event-id": String(lastEventId.v) }
@@ -349,6 +342,7 @@ function subscribeSse(
         signal: ctrl.signal,
       });
       if (!r.ok || !r.body) {
+        if (r.status === 401) notifyAuthLost();
         handlers.onStatus?.(r.status === 401 ? "closed" : "error");
         return;
       }
