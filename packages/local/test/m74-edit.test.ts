@@ -26,6 +26,7 @@ async function started() {
   await app.split({
     sessionId: s.sessionId,
     nodeId: "1",
+    reason: "M8 테스트용 분해 사유입니다.",
     children: [{ goal: "a" }, { goal: "b" }],
     expectedRevision: 0,
   });
@@ -243,6 +244,7 @@ describe("M7-ui4 UI 쓰기 API", () => {
     await app.split({
       sessionId: sid,
       nodeId: "1",
+      reason: "M8 테스트용 분해 사유입니다.",
       children: [{ goal: "a" }, { goal: "b" }],
       expectedRevision: 0,
     });

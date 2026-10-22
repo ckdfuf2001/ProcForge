@@ -181,6 +181,7 @@ export async function seedTwoLeaves(
   await h.app.split({
     sessionId: sid,
     nodeId: "1",
+    reason: "M8 테스트용 분해 사유입니다.",
     children: [
       { goal: "데이터 수집" },
       { goal: "보고서 작성", ...(opts.dep12 ? { dependsOn: ["1.1"] } : {}) },
@@ -262,6 +263,7 @@ export async function seedExternalProcedure(
   await h.app.split({
     sessionId: sid,
     nodeId: "1",
+    reason: "M8 테스트용 분해 사유입니다.",
     children: [{ goal: "x" }],
     expectedRevision: 0,
   });
@@ -299,6 +301,7 @@ export async function seedSlowProcedure(
   await h.app.split({
     sessionId: sid,
     nodeId: "1",
+    reason: "M8 테스트용 분해 사유입니다.",
     children: [{ goal: "run script" }],
     expectedRevision: 0,
   });

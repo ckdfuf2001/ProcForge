@@ -55,7 +55,7 @@ describe("M4 MCP finalize/procedure", () => {
       };
       const started = await call("pf_start", { request: "보고서", params: { month: "2026-09" } });
       const sid = started["sessionId"] as string;
-      await call("pf_split", { sessionId: sid, nodeId: "1", children: [{ goal: "목록" }] });
+      await call("pf_split", { sessionId: sid, nodeId: "1", reason: "M8 테스트용 분해 사유입니다.", children: [{ goal: "목록" }] });
       await call("pf_report", {
         sessionId: sid, nodeId: "1.1",
         tool: { server: "fake-ppt", name: "list_slides" }, args: { file: "data.pptx" },
@@ -96,7 +96,7 @@ describe("M4 MCP finalize/procedure", () => {
       };
       const started = await call("pf_start", { request: "보고서", params: { month: "2026-09" } });
       const sid = started["sessionId"] as string;
-      await call("pf_split", { sessionId: sid, nodeId: "1", children: [{ goal: "목록" }] });
+      await call("pf_split", { sessionId: sid, nodeId: "1", reason: "M8 테스트용 분해 사유입니다.", children: [{ goal: "목록" }] });
       await call("pf_report", {
         sessionId: sid, nodeId: "1.1",
         tool: { server: "fake-ppt", name: "list_slides" }, args: { file: "data.pptx" },
@@ -167,7 +167,7 @@ describe("M4 MCP finalize/procedure", () => {
       };
       const started = await call("pf_start", { request: "조언" });
       const sid = started["sessionId"] as string;
-      await call("pf_split", { sessionId: sid, nodeId: "1", children: [{ goal: "a" }] });
+      await call("pf_split", { sessionId: sid, nodeId: "1", reason: "M8 테스트용 분해 사유입니다.", children: [{ goal: "a" }] });
       await call("pf_ask_human", { sessionId: sid, nodeId: "1.1", question: "?" });
       const adv = await call("pf_advise", {
         sessionId: sid, nodeId: "1.1", text: "개수는 세 개",

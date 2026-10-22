@@ -186,7 +186,7 @@ describe("M4.1.1-1 수정 노드 확정·replay (E2E)", () => {
       await call("pf_split", {
         sessionId: sid,
         nodeId: "1",
-        children: [{ goal: "수정" }],
+        reason: "M8 테스트용 분해 사유입니다.", children: [{ goal: "수정" }],
       });
       await call("pf_next", { sessionId: sid });
       // 에이전트가 sandbox 사본 수정
@@ -243,7 +243,7 @@ describe("M4.1.1-1 수정 노드 확정·replay (E2E)", () => {
       await call("pf_split", {
         sessionId: sid,
         nodeId: "1",
-        children: [{ goal: "수정" }],
+        reason: "M8 테스트용 분해 사유입니다.", children: [{ goal: "수정" }],
       });
       mkdirSync(join(pfdir, "sandbox", sid), { recursive: true });
       writeFileSync(join(pfdir, "sandbox", sid, "work.txt"), "V1");
@@ -284,7 +284,7 @@ describe("M4.1.1-1 수정 노드 확정·replay (E2E)", () => {
       await call("pf_split", {
         sessionId: sid,
         nodeId: "1",
-        children: [{ goal: "수정" }],
+        reason: "M8 테스트용 분해 사유입니다.", children: [{ goal: "수정" }],
       });
       mkdirSync(join(pfdir, "sandbox", sid), { recursive: true });
       writeFileSync(join(pfdir, "sandbox", sid, "ghost.txt"), "G1");

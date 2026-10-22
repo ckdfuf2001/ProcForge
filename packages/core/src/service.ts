@@ -81,7 +81,13 @@ import {
 } from "@procforge/shared/procedure.js";
 import { validateTree } from "@procforge/shared/validator.js";
 import { combineHashes } from "@procforge/shared/hash.js";
-import type { Actor, EventEntry } from "@procforge/shared/dto.js";
+import type {
+  Actor,
+  EventDetail,
+  EventEntry,
+  HistoryNode,
+  DecompositionHistoryEntry,
+} from "@procforge/shared/dto.js";
 import {
   pfError,
   type ErrorCode,
@@ -249,7 +255,12 @@ export class CoreService implements CoreClient {
   private async change<R>(
     sessionId: string,
     op: { method: string; expectedRevision?: number; actor?: Actor },
-    body: () => { result: R; summary: string },
+    body: () => {
+      result: R;
+      summary: string;
+      /** M8-ui1: split 등 변경별 상세 (nodesAfter는 change()가 채운다) */
+      detail?: EventDetail;
+    },
   ): Promise<{ result: R; revision: number; changedNodeIds: string[] }> {
     return this.base.withLock(sessionId, () => {
       const pre = this.checkFresh(sessionId);
@@ -265,15 +276,18 @@ export class CoreService implements CoreClient {
       const before = new Map<string, string>();
       for (const [id, n] of this.base.getNodes(sessionId))
         before.set(id, n.hash);
+      const beforeIds = [...before.keys()];
       const prev = this.tx;
       const tx = new TxStore(this.base);
       this.tx = tx;
       try {
-        const out = body() as { result: R; summary: string } | Promise<unknown>;
+        const out = body() as
+          | { result: R; summary: string; detail?: EventDetail }
+          | Promise<unknown>;
         // M4.2-2.5-7: 본문은 동기 실행 (await 금지). Promise 반환은 즉시 internal 실패.
         if (out instanceof Promise)
           throw err("internal", "change() body must be sync");
-        const { result, summary } = out;
+        const { result, summary, detail: bodyDetail } = out;
         const changed = tx.writtenNodeIds(sessionId);
         if (changed.length === 0 && !tx.sessionWritten(sessionId)) {
           return {
@@ -282,7 +296,7 @@ export class CoreService implements CoreClient {
             changedNodeIds: [] as string[],
           };
         }
-const cur = tx.getSession(sessionId);
+        const cur = tx.getSession(sessionId);
         if (!cur) throw err("not_found", `session ${sessionId} not found`);
         // M7-ui4-h: **커밋 세션에 core가** lastWriteAt를 찍는다.
         // 저장소가 찍으면 테스트용 메모리 store와 판정이 달라지고(저장소가 모르는
@@ -298,6 +312,20 @@ const cur = tx.getSession(sessionId);
         for (const [id, n] of tx.getNodes(sessionId)) after.set(n.id, n.hash);
         const pick = (m: Map<string, string>) =>
           combineHashes(changed.map((id) => m.get(id) ?? `missing:${id}`));
+        // M8-ui1: 변경된 노드의 사본을 이벤트에 남긴다 (revision별 트리 복원용).
+        const nodesAfter = [...changed]
+          .sort(compareNodeIds)
+          .map((id) => tx.getNode(sessionId, id))
+          .filter((n): n is Node => n !== undefined)
+          .map((n) => this.historyNodeOf(n));
+        const removedIds = beforeIds
+          .filter((id) => !after.has(id))
+          .sort(compareNodeIds);
+        const detail: EventDetail = {
+          ...(bodyDetail ?? {}),
+          nodesAfter,
+          ...(removedIds.length > 0 ? { removedIds } : {}),
+        };
         tx.appendEvents(sessionId, [
           {
             seq: bumped.revision,
@@ -309,6 +337,7 @@ const cur = tx.getSession(sessionId);
             beforeHash: pick(before),
             afterHash: pick(after),
             summary,
+            detail,
           },
         ]);
         tx.commit();
@@ -321,6 +350,49 @@ const cur = tx.getSession(sessionId);
         this.tx = prev;
       }
     });
+  }
+
+  /** M8-ui1: 노드 → 이벤트/트리 스냅샷 (attempts 등 큰 필드는 뺀다) */
+  private historyNodeOf(n: Node): HistoryNode {
+    return {
+      id: n.id,
+      parentId: n.parentId,
+      goal: n.goal,
+      status: n.status,
+      depth: n.depth,
+      children: [...n.children],
+      dependsOn: [...n.dependsOn],
+      locked: n.locked,
+      sideEffect: n.sideEffect,
+      ...(n.staleSince ? { staleSince: { ...n.staleSince } } : {}),
+      hash: n.hash,
+    };
+  }
+
+  /**
+   * M8-ui1: 이 노드의 직전 split/report 이후 등록된 조언 id 목록.
+   * 분해 사유의 "무엇 때문에 다시 나눴는가"를 자동으로 잇는다.
+   * 구 세션의 조언에는 id가 없으므로 자동으로 비어 있다.
+   */
+  private causeAdviseIdsFor(sid: string, nodeId: string): string[] {
+    let cutoff = -1;
+    for (const e of this.store.readEvents(sid)) {
+      const isSplit = e.method === "pfResolve" && e.summary.startsWith("split ");
+      const isReport = e.method === "pfReport";
+      if (!isSplit && !isReport) continue;
+      if (!e.nodeIds.includes(nodeId)) continue;
+      if (e.revision > cutoff) cutoff = e.revision;
+    }
+    const n = this.store.getNode(sid, nodeId);
+    if (!n) return [];
+    return n.advice
+      .filter(
+        (a) =>
+          typeof a.id === "string" &&
+          a.revision !== undefined &&
+          a.revision > cutoff,
+      )
+      .map((a) => a.id as string);
   }
 
   private sess(sid: string): Session {
@@ -909,6 +981,29 @@ const cur = tx.getSession(sessionId);
               throw err("bad_request", `map 노드는 분해 불가: ${n.id}`);
             if ((n as { kind?: string }).kind === "until")
               throw err("bad_request", `until 노드는 분해 불가: ${n.id}`);
+            // M8-ui1: 분해 사유·대안 (core는 optional — import·fixture 호환).
+            // 길이·개수 검증은 core가 단일 기준으로 삼는다.
+            const reason = input.reason?.trim();
+            if (reason !== undefined && (reason.length < 10 || reason.length > 1000))
+              throw pfError(
+                "bad_request",
+                `reason은 10~1000자여야 한다 (현재 ${reason.length}자).`,
+                "왜 이렇게 나눴는지 10자 이상으로 설명해라.",
+              );
+            const alternatives = (input.alternatives ?? []).map((a) => a.trim());
+            if (alternatives.length > 3)
+              throw pfError(
+                "bad_request",
+                `alternatives는 최대 3개다 (현재 ${alternatives.length}개).`,
+                "버린 대안은 3개까지만 적어라.",
+              );
+            for (const a of alternatives)
+              if (a.length === 0 || a.length > 300)
+                throw pfError(
+                  "bad_request",
+                  "alternatives 항목은 1~300자여야 한다.",
+                  "대안 설명을 300자 이내로 줄여라.",
+                );
             const all = [...this.store.getNodes(s.id).values()];
             if (
               all.some(
@@ -1014,10 +1109,15 @@ const cur = tx.getSession(sessionId);
               ...n,
               status: "split",
               children: withHashes.map((c) => c.id),
+              // M8-ui1: 분해 사유를 부모 노드에 남긴다 (hash 계산 대상 아님 —
+              // computeNodeHash는 goal/args/constraints/dependsOn만 본다).
+              ...(reason !== undefined ? { splitReason: reason } : {}),
             };
             next.hash = this.hashFor(s.id, next);
             this.store.saveNode(s.id, next);
             this.propagateStale(s.id, n.id, s.revision + 1);
+            // M8-ui1: 이번 분해를 요구한 조언 (직전 split/report 이후 등록분).
+            const causeAdviseIds = this.causeAdviseIdsFor(s.id, n.id);
             // M5.8.1-4(a): 형제 2개 이상인데 ref/dependsOn 전부 비어 있으면 경고.
             const depWarn =
               withHashes.length >= 2 &&
@@ -1031,6 +1131,13 @@ const cur = tx.getSession(sessionId);
                 instruction: `분해 완료. 자식 ${withHashes.length}개를 순서대로 pf_next로 처리하라.${depWarn}`,
               },
               summary: `split ${n.id} +${withHashes.length}`,
+              detail: {
+                parentId: n.id,
+                childIds: withHashes.map((c) => c.id),
+                ...(reason !== undefined ? { reason } : {}),
+                ...(alternatives.length > 0 ? { alternatives } : {}),
+                ...(causeAdviseIds.length > 0 ? { causeAdviseIds } : {}),
+              },
             };
           }
           case "leaf": {
@@ -1383,7 +1490,13 @@ const cur = tx.getSession(sessionId);
           constraints: [...n.constraints, ...constraints],
           advice: [
             ...n.advice,
-            { at: new Date().toISOString(), text: input.text },
+            {
+              at: new Date().toISOString(),
+              text: input.text,
+              // M8-ui1: 조언 id·revision (분해 reason의 causeAdviseIds 연결용)
+              id: randomUUID(),
+              revision: s.revision + 1,
+            },
           ],
           status: n.status === "needs_human" ? "open" : n.status,
         };
@@ -2050,6 +2163,172 @@ if (oldHash !== next.hash) this.propagateStale(s.id, input.nodeId, s.revision + 
     const n = this.store.getNode(sessionId, nodeId);
     if (!n) throw err("not_found", `node ${nodeId} not found`);
     return n;
+  }
+
+  /**
+   * M8-ui2: 분해 라운드 이력 (읽기 전용. touch 없음).
+   * 분해 이벤트마다 1건. 사유는 detail.reason(없으면 null).
+   * parentId·childIds는 detail에 있으면 그것을, 없으면(구 세션) 이벤트 요약에서 복원한다.
+   */
+  async getDecompositionHistory(input: {
+    sessionId: string;
+  }): Promise<DecompositionHistoryEntry[]> {
+    this.checkFreshRead(input.sessionId);
+    const out: DecompositionHistoryEntry[] = [];
+    for (const e of this.store.readEvents(input.sessionId)) {
+      const round = this.roundOfEvent(e);
+      if (round) out.push(round);
+    }
+    return out;
+  }
+
+  /** 분해 이벤트 1건 → 라운드 1건 (구 이벤트·신 이벤트 모두 처리) */
+  private roundOfEvent(e: EventEntry): DecompositionHistoryEntry | null {
+    const m = /^split (\S+)/.exec(e.summary);
+    const parentId = e.detail?.parentId ?? m?.[1];
+    if (!parentId) return null;
+    // maxdepth 분해(needs_human 전환)는 라운드가 아니다.
+    if (!e.detail?.parentId && e.summary.includes("maxdepth")) return null;
+    const parentDepth = parentId.split(".").length - 1;
+    const childIds =
+      e.detail?.childIds ??
+      e.nodeIds
+        .filter(
+          (id) =>
+            id.startsWith(parentId + ".") &&
+            id.split(".").length === parentDepth + 2,
+        )
+        .sort(compareNodeIds);
+    return {
+      revision: e.revision,
+      at: e.at,
+      actor: e.actor,
+      depth: parentDepth,
+      parentId,
+      childIds,
+      reason: e.detail?.reason ?? null,
+      alternatives: e.detail?.alternatives ?? [],
+      causeAdviseIds: e.detail?.causeAdviseIds ?? [],
+    };
+  }
+
+  /**
+   * M8-ui2: 특정 revision 시점 트리 (읽기 전용. touch 없음).
+   * 이벤트 detail.nodesAfter(변경분 스냅샷)를 되감아 그 시점 상태를 복원한다.
+   * 패치가 없는 구간(구 세션)이 있으면 그 구간은 상태를 확정할 수 없다
+   * → structureOnly=true, 해당 노드 상태는 null.
+   */
+  async getTreeAt(input: {
+    sessionId: string;
+    revision: number;
+  }): Promise<{ nodes: HistoryNode[]; structureOnly: boolean }> {
+    const s = this.checkFreshRead(input.sessionId);
+    if (input.revision > s.revision)
+      throw err(
+        "bad_request",
+        `revision ${input.revision} is ahead of session revision ${s.revision}`,
+      );
+    const all = this.store.readEvents(input.sessionId);
+    const target = all.filter((e) => e.revision <= input.revision);
+    const later = all.filter((e) => e.revision > input.revision);
+    // 패치가 없는 이벤트(구 세션)가 하나라도 있으면 그 구간은 상태를 확정할 수 없다.
+    let structureOnly = false;
+    // 노드가 생성된 revision (분해로 생긴 자식만 revision>0, 나머지는 0).
+    const createdAt = new Map<string, number>();
+    // 그 시점까지의 마지막 스냅샷.
+    const lastPatch = new Map<string, HistoryNode>();
+    // 구 이벤트(패치 없음)가 건드린 노드 → 그 시점 상태를 확정할 수 없다.
+    const legacyTouched = new Set<string>();
+    // 1) 생성 revision은 **전체** 이벤트에서 본다 (미래에 생긴 노드를 걸러야 한다).
+    for (const e of all) {
+      if (e.detail?.childIds?.length) {
+        for (const cid of e.detail.childIds) {
+          if (!createdAt.has(cid)) createdAt.set(cid, e.revision);
+        }
+      } else if (!e.detail) {
+        for (const cid of this.legacyChildIdsOf(e)) {
+          if (!createdAt.has(cid)) createdAt.set(cid, e.revision);
+        }
+      }
+    }
+    // 2) 그 시점까지의 스냅샷을 모은다.
+    for (const e of target) {
+      const d = e.detail;
+      if (!d) {
+        structureOnly = true;
+        for (const id of e.nodeIds) legacyTouched.add(id);
+        continue;
+      }
+      for (const n of d.nodesAfter ?? []) lastPatch.set(n.id, n);
+      for (const id of d.removedIds ?? []) {
+        lastPatch.delete(id);
+        createdAt.delete(id);
+      }
+    }
+    const nodes: HistoryNode[] = [];
+    for (const n of this.store.getNodes(input.sessionId).values()) {
+      const born = createdAt.get(n.id) ?? 0;
+      if (born > input.revision) continue; // 아직 존재하지 않던 노드
+      const patch = lastPatch.get(n.id);
+      if (patch) {
+        nodes.push({ ...patch });
+        continue;
+      }
+      if (legacyTouched.has(n.id)) {
+        // 구 이벤트만 건드린 노드 → 그 시점 상태를 알 수 없다.
+        structureOnly = true;
+        nodes.push({
+          id: n.id,
+          parentId: n.parentId,
+          goal: null,
+          status: null,
+          depth: n.depth,
+          children: [],
+          dependsOn: [],
+          locked: false,
+          sideEffect: null,
+          hash: null,
+        });
+        continue;
+      }
+      // 스냅샷이 없는 노드: 그 뒤에 손대지 않았다면 현재 값이 곧 그 시점 값이다.
+      const touchedLater = later.some((e) => e.nodeIds.includes(n.id));
+      if (touchedLater) {
+        structureOnly = true;
+        nodes.push({
+          id: n.id,
+          parentId: n.parentId,
+          goal: null,
+          status: null,
+          depth: n.depth,
+          children: [],
+          dependsOn: [],
+          locked: false,
+          sideEffect: null,
+          hash: null,
+        });
+        continue;
+      }
+      nodes.push(this.historyNodeOf(n));
+    }
+    nodes.sort((a, b) => compareNodeIds(a.id, b.id));
+    for (const n of nodes) if (n.status === null) structureOnly = true;
+    return { nodes, structureOnly };
+  }
+
+  /** 구 분해 이벤트에서 자식 id 목록을 복원 (summary + nodeIds) */
+  private legacyChildIdsOf(e: EventEntry): string[] {
+    const m = /^split (\S+)/.exec(e.summary);
+    if (!m) return [];
+    const parentId = m[1];
+    const parentDepth = parentId.split(".").length - 1;
+    return e.nodeIds
+      .filter(
+        (id) =>
+          id.startsWith(parentId + ".") &&
+          id.split(".").length === parentDepth + 2,
+      )
+      .sort(compareNodeIds);
   }
 
   /** 세션 목록 (M7-ui1, 읽기 전용. 테넌트 저장소 기준) */

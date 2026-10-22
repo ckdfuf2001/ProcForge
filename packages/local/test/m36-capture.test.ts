@@ -89,7 +89,7 @@ describe("M3.6-2 입력 자동 캡처", () => {
       await call("pf_split", {
         sessionId: sid,
         nodeId: "1",
-        children: [
+        reason: "M8 테스트용 분해 사유입니다.", children: [
           { goal: "목록" },
           { goal: "읽기", dependsOn: ["1.1"] },
           { goal: "채우기", dependsOn: ["1.1", "1.2"] },
@@ -197,7 +197,7 @@ describe("M3.6-2 입력 자동 캡처", () => {
       await call("pf_split", {
         sessionId: sid,
         nodeId: "1",
-        children: [{ goal: "a" }],
+        reason: "M8 테스트용 분해 사유입니다.", children: [{ goal: "a" }],
       });
       await call("pf_report", {
         sessionId: sid,

@@ -83,7 +83,7 @@ describe("core-server", () => {
         headers: {
           "content-type": "application/json",
           authorization: "Bearer barekey",
-          [PROTOCOL_VERSION_HEADER]: "1",
+          [PROTOCOL_VERSION_HEADER]: String(PROTOCOL_VERSION),
         },
         body: JSON.stringify({
           sessionId: "123e4567-e89b-42d3-a456-426614174000",
@@ -96,7 +96,7 @@ describe("core-server", () => {
         headers: {
           "content-type": "application/json",
           authorization: "Bearer barekey",
-          [PROTOCOL_VERSION_HEADER]: "1",
+          [PROTOCOL_VERSION_HEADER]: String(PROTOCOL_VERSION),
         },
         body: JSON.stringify({
           sessionId: "123e4567-e89b-42d3-a456-426614174000",
@@ -123,7 +123,7 @@ describe("core-server", () => {
     const noKey = await post(
       "/v1/pfTree",
       { sessionId: "x" },
-      { "content-type": "application/json", [PROTOCOL_VERSION_HEADER]: "1" },
+      { "content-type": "application/json", [PROTOCOL_VERSION_HEADER]: String(PROTOCOL_VERSION) },
     );
     expect(noKey.status).toBe(401);
     expect(noKey.json.error?.code).toBe("unauthorized");

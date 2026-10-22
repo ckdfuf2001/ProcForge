@@ -16,7 +16,14 @@ export type LocalEvaluation = {
   failedConstraints: string[];
   unverified?: string[];
 };
-import type { Actor, EventEntry } from "./dto.js";
+import type {
+  Actor,
+  DecompositionHistoryEntry,
+  DecompositionHistoryInput,
+  EventEntry,
+  TreeAtInput,
+  TreeAtOutput,
+} from "./dto.js";
 import type { ProcedureDoc } from "./procedure.js";
 
 // local → core 호출은 반드시 이 인터페이스를 통해서만 한다. (가이드 §3, §8)
@@ -121,6 +128,10 @@ export type PfResolveInput = {
   nodeId: string;
   decision: PfResolveDecision;
   children?: { goal: string; dependsOn?: string[]; sideEffect?: SideEffect }[];
+  /** M8-ui1: 분해 사유 (사용자·MCP 경로는 필수, import/fixture는 면제) */
+  reason?: string;
+  /** M8-ui1: 버린 대안 */
+  alternatives?: string[];
   argSpecs?: Record<string, ArgSpec>;
   sideEffect?: SideEffect;
   tool?: { server: string; name: string };
@@ -306,6 +317,12 @@ export interface CoreClient {
   ): Promise<{ node: Node; instruction: string } & ChangeMeta>;
   /** 상태 이벤트 조회 (M4.2-2, R7 히스토리 원천) */
   getEvents(sessionId: string, sinceSeq?: number): Promise<EventEntry[]>;
+  /** M8-ui2: 분해 라운드 목록 (읽기 전용, touch 없음) */
+  getDecompositionHistory(
+    input: DecompositionHistoryInput,
+  ): Promise<DecompositionHistoryEntry[]>;
+  /** M8-ui2: 특정 revision 시점 트리 (읽기 전용, touch 없음) */
+  getTreeAt(input: TreeAtInput): Promise<TreeAtOutput>;
   /** 세션 조회 (M4.2-2.5, TTL 판정 포함) */
   getSession(sessionId: string): Promise<Session>;
   /** 노드 조회 (M4.2-2.5) */

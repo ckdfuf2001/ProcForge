@@ -119,6 +119,9 @@ function deferredRemoteClient(basePromise: Promise<string>): CoreClient {
     getNode: (sid, nid) => invoke("getNode", [sid, nid]) as never,
     getSessions: () => invoke("getSessions", []) as never,
     getEventsPage: (i) => invoke("getEventsPage", [i]) as never,
+    getDecompositionHistory: (i) =>
+      invoke("getDecompositionHistory", [i]) as never,
+    getTreeAt: (i) => invoke("getTreeAt", [i]) as never,
     getBlocked: (i) => invoke("getBlocked", [i]) as never,
     previewEdit: (i) => invoke("previewEdit", [i]) as never,
     pfBuildProcedure: (sid, name) =>

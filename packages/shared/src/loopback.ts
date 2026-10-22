@@ -12,7 +12,12 @@ import {
   ToolCatalogEntrySchema,
   ToolRefSchema,
 } from "./schema.js";
-import { ActorSchema, EventEntrySchema } from "./dto.js";
+import {
+  ActorSchema,
+  DecompositionHistoryEntrySchema,
+  EventEntrySchema,
+  TreeAtOutputSchema,
+} from "./dto.js";
 import { ProcedureDocSchema } from "./procedure.js";
 
 // Loopback CoreClient (M4.2-4-4). 모든 입출력을 JSON 왕복시킨 뒤 DTO zod로 검증한다.
@@ -98,6 +103,8 @@ const Methods = {
       nodeId: NodeIdSchema,
       decision: z.enum(["leaf", "split", "retry", "ask_human"]),
       children: z.array(ChildSchema).optional(),
+      reason: z.string().optional(),
+      alternatives: z.array(z.string()).optional(),
       argSpecs: z.record(ArgSpecSchema).optional(),
       sideEffect: SideEffectSchema.optional(),
       tool: ToolRefSchema.optional(),
@@ -189,6 +196,17 @@ const Methods = {
       nodeId: NodeIdSchema.optional(),
     }).passthrough(),
     out: z.object({ events: z.array(EventEntrySchema), lastRevision: z.number().int().min(0) }).passthrough(),
+  },
+  getDecompositionHistory: {
+    in: z.object({ sessionId: SessionIdSchema }).passthrough(),
+    out: z.array(DecompositionHistoryEntrySchema),
+  },
+  getTreeAt: {
+    in: z.object({
+      sessionId: SessionIdSchema,
+      revision: z.number().int().min(0),
+    }).passthrough(),
+    out: TreeAtOutputSchema,
   },
   getBlocked: {
     in: z.object({ sessionId: SessionIdSchema }).passthrough(),
@@ -304,6 +322,11 @@ export function createLoopbackClient(inner: CoreClient): CoreClient {
     getNode: (sid, nid) => wrapArgs("getNode", [sid, nid], ([a, b]) => inner.getNode(a, b)),
     getSessions: () => wrapArgs("getSessions", [], () => inner.getSessions()),
     getEventsPage: (i) => wrapObj("getEventsPage", i, (x) => inner.getEventsPage(x)),
+    getDecompositionHistory: (i) =>
+      wrapObj("getDecompositionHistory", i, (x) =>
+        inner.getDecompositionHistory(x),
+      ),
+    getTreeAt: (i) => wrapObj("getTreeAt", i, (x) => inner.getTreeAt(x)),
     getBlocked: (i) => wrapObj("getBlocked", i, (x) => inner.getBlocked(x)),
     pfBuildProcedure: (sid, name) => wrapArgs("pfBuildProcedure", [sid, name], ([a, b]) => inner.pfBuildProcedure(a, b)),
     previewEdit: (i) => wrapObj("previewEdit", i, (x) => inner.previewEdit(x)),

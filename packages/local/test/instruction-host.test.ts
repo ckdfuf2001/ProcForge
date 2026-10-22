@@ -131,7 +131,7 @@ describe("instruction-following host E2E", () => {
             entries: { id: string; node: { status: string } }[];
           };
           const target = tree.entries.find((e) => e.node.status === "open")!.id;
-          const r = await call("pf_split", { sessionId: sid, nodeId: target, children: [{ goal: "a" }, { goal: "b" }] });
+          const r = await call("pf_split", { sessionId: sid, nodeId: target, reason: "M8 테스트용 분해 사유입니다.", children: [{ goal: "a" }, { goal: "b" }] });
           action = firstOf((r as { instruction: string }).instruction);
         } else {
           throw new Error(`instruction이 다음 행동이 아닌 도구를 지목: ${action}`);

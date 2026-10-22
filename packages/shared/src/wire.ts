@@ -11,7 +11,12 @@ import {
   ToolCatalogEntrySchema,
   ToolRefSchema,
 } from "./schema.js";
-import { ActorSchema, EventEntrySchema } from "./dto.js";
+import {
+  ActorSchema,
+  DecompositionHistoryEntrySchema,
+  EventEntrySchema,
+  TreeAtOutputSchema,
+} from "./dto.js";
 import { ProcedureDocSchema } from "./procedure.js";
 import { errorCodeOf, pfError } from "./errors.js";
 
@@ -22,7 +27,7 @@ import { errorCodeOf, pfError } from "./errors.js";
  */
 
 /** 프로토콜 버전 (M6-1). 클라이언트는 헤더로 전송, 서버는 검사. */
-export const PROTOCOL_VERSION = 1;
+export const PROTOCOL_VERSION = 2;
 export const PROTOCOL_VERSION_HEADER = "x-procforge-version";
 
 const RevActor = {
@@ -80,6 +85,8 @@ export type WireMethodName =
   | "pfEditNode"
   | "getEvents"
   | "getEventsPage"
+  | "getDecompositionHistory"
+  | "getTreeAt"
   | "getBlocked"
   | "previewEdit"
   | "getSession"
@@ -178,6 +185,9 @@ export const WireMethods: Record<WireMethodName, WireDef> = {
       nodeId: NodeIdSchema,
       decision: z.enum(["leaf", "split", "retry", "ask_human"]),
       children: z.array(SplitChildSchema).optional(),
+      /** M8-ui1: split 사유·대안 (MCP/UI 경로에서 필수, core는 import 호환) */
+      reason: z.string().trim().min(10).max(1000).optional(),
+      alternatives: z.array(z.string().trim().min(1).max(300)).max(3).optional(),
       argSpecs: z.record(ArgSpecSchema).optional(),
       sideEffect: SideEffectSchema.optional(),
       tool: ToolRefSchema.optional(),
@@ -341,6 +351,19 @@ export const WireMethods: Record<WireMethodName, WireDef> = {
       events: z.array(EventEntrySchema),
       lastRevision: z.number().int().min(0),
     }),
+  },
+  getDecompositionHistory: {
+    path: "/v1/getDecompositionHistory",
+    input: z.object({ sessionId: SessionIdSchema }),
+    output: z.array(DecompositionHistoryEntrySchema),
+  },
+  getTreeAt: {
+    path: "/v1/getTreeAt",
+    input: z.object({
+      sessionId: SessionIdSchema,
+      revision: z.number().int().min(0),
+    }),
+    output: TreeAtOutputSchema,
   },
   getBlocked: {
     path: "/v1/getBlocked",

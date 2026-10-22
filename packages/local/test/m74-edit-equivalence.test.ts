@@ -26,18 +26,21 @@ async function built(pfdir: string) {
   await app.split({
     sessionId: sid,
     nodeId: "1",
+    reason: "M8 테스트용 분해 사유입니다.",
     children: [{ goal: "a" }, { goal: "b" }],
     expectedRevision: await rev(),
   });
   await app.split({
     sessionId: sid,
     nodeId: "1.2",
+    reason: "M8 테스트용 분해 사유입니다.",
     children: [{ goal: "c" }],
     expectedRevision: await rev(),
   });
   await app.split({
     sessionId: sid,
     nodeId: "1.1",
+    reason: "M8 테스트용 분해 사유입니다.",
     children: [{ goal: "d" }],
     expectedRevision: await rev(),
   });

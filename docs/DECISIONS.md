@@ -1000,3 +1000,53 @@ argv: [...]}` 고정. runner는 run fs에서 직접 실행해 stdout을 golden�
     state/view/lang-json/lint/commands 만 조립한다.
   - [M7-5-3-b] nonce 는 `<meta name="csp-nonce">` 에서 읽어 `EditorView.cspNonce` 로만 넘긴다.
     승인 diff 는 merge 확장 대신 서버 unified diff 를 `<pre>`+textContent 로 보여준다(5-4 화면).
+
+## M8-ui
+
+### M8-ui-1 공통 스키마 (분해 사유·이벤트 상세)
+
+- [M8-ui-1-a] **분해 사유는 `pf_split`(사용자 경로)에서 필수, core `pfResolve` 에서는 선택.**
+  사유 없이는 "왜 이렇게 나눴는지"를 남길 수 없고, 사람이 읽을 근거가 사라진다.
+  그런데 core 를 직접 부르는 경로(fixture·import·기존 테스트)는 사유가 없다.
+  그래서 규칙을 두 층으로 나눈다: MCP/UI(App)층은 사유를 **요구**하고 없으면 `bad_request` + 힌트로
+  되돌린다, core 층은 사유가 **있으면** 형식(10~1000자, 대안 최대 3개·각 300자)만 검증한다.
+  import·fixture 는 사유 없이도 분해된다(=면제). 근거: `packages/local/src/app/app.ts` split().
+- [M8-ui-1-b] **사유는 해시 밖이다.** `computeNodeHash` 는 goal/args/constraints/dependsOn 만
+  보므로 `Node.splitReason` 을 넣어도 노드 해시(=승인·재검증 기준)는 변하지 않는다.
+  "사유만 고쳤는데 승인/재검정이 깨진다" 는 일이 없다. 근거: `packages/shared/src/schema.ts`
+  computeNodeHash + `packages/core/src/service.ts` historyNodeOf.
+- [M8-ui-1-c] **이벤트 상세는 평면(flat) 스키마 하나**로 둔다.
+  `EventEntry.detail` = {parentId?, childIds?, reason?, alternatives?, causeAdviseIds?,
+  nodesAfter?, removedIds?}. 분해 전용 필드와 공통 필드를 같은 객체에 두는 이유는
+  UI 가 "이벤트 1건 = 무엇이 왜 바뀌었는지"를 한 번에 읽게 하려는 것이다.
+  근거: `packages/shared/src/dto.ts` EventDetailSchema.
+- [M8-ui-1-d] **`detail` 은 선택 필드다.** 구 세션(events.jsonl 에 detail 없음)을 그대로 읽을 수 있어야
+  하므로 `EventEntrySchema` 는 detail 이 없어도 통과한다. 근거: dto.ts EventEntrySchema.
+
+### M8-ui-2 이벤트 상세·읽기 API
+
+- [M8-ui-2-a] **모든 쓰기 이벤트가 `detail.nodesAfter` 를 갖는다.** 노드 스냅샷(변경분만,
+  attempts 같은 큰 필드 제외)이 이벤트마다 기록되므로, revision 별 트리를 이벤트 로그만으로
+  되돌릴 수 있다. 스냅샷은 `change()` 한 곳에서만 만들어 붙인다(쓰기 경로마다 따로 만들지 않는다).
+  근거: `packages/core/src/service.ts` change().
+- [M8-ui-2-b] **읽기 API 2종은 읽기 전용(touch 없음)이다.**
+  `getDecompositionHistory`(분해 라운드 목록)·`getTreeAt`(특정 revision 시점 트리).
+  화면만 봐도 세션이 살아 있으면 안 된다는 M7-ui3-b 원칙을 그대로 따른다.
+  근거: `packages/core/src/service.ts` getDecompositionHistory/getTreeAt.
+- [M8-ui-2-c] **라운드 깊이는 ID 세그먼트 기준으로 계산한다.** 노드 id 는 전역 불변식이 아니다
+  (import 는 임의 id 를 보존하고, 재분해도 id 를 다시 매긴다). 그래서 라운드의 `depth` 는
+  저장된 필드가 아니라 `parentId` 의 세그먼트 수 - 1 로 계산한다. 근거: roundOfEvent().
+- [M8-ui-2-d] **패치가 없는 구간은 "구조만, 상태 null" 이다.** 구 세션(d290 등)에는 스냅샷이 없다.
+  그럴 때 상태를 지어내지 않고 `structureOnly: true` 로 알린다(상태는 null).
+  판단 대신 표시로 처리한다. 근거: getTreeAt().
+- [M8-ui-2-e] **`causeAdviseIds` 는 자동 산출한다.** 분해의 원인이 된 조언(직전 split/report 이후
+  등록분)을 core 가 이벤트에 기록한다. 사람이 "이 분해는 그 조언에서 나왔다" 를 직접 입력하지 않는다.
+  조언 id·revision 은 `pfAdvise` 가 붙인다. 근거: causeAdviseIdsFor().
+- [M8-ui-2-f] **wire 계약이 바뀌었으므로 프로토콜 버전을 1 → 2 로 올린다.**
+  새 메서드(getDecompositionHistory·getTreeAt) 2종이 추가되어 메서드 수는 23 → 25 다.
+  구버전 클라이언트와 신서버가 섞이면 409 conflict 로 끊는다(조용히 오인하지 않는다).
+  근거: `packages/shared/src/wire.ts` PROTOCOL_VERSION.
+- [M8-ui-2-g] **3 client 모드가 같은 결과를 낸다.** inprocess/loopback/remote 모두
+  `CoreClient` 인터페이스를 구현하므로 새 읽기 API는 세 모드에서 동일 계약이다.
+  근거: `packages/local/test/m8-decomposition.test.ts`(PROCFORGE_CLIENT 로 3모드 검증).
+

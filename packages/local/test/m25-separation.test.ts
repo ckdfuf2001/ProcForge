@@ -61,7 +61,7 @@ describe("M4.2-2.5 core/파일 저장소 분리 실증", () => {
       };
       const started = await call("pf_start", { request: "분리", toolCatalog: [READ], seedFiles: ["data.pptx"] });
       const sid = started["sessionId"] as string;
-      await call("pf_split", { sessionId: sid, nodeId: "1", children: [{ goal: "a" }, { goal: "b", dependsOn: ["1.1"] }] });
+      await call("pf_split", { sessionId: sid, nodeId: "1", reason: "M8 테스트용 분해 사유입니다.", children: [{ goal: "a" }, { goal: "b", dependsOn: ["1.1"] }] });
       const nxt = await call("pf_next", { sessionId: sid });
       expect((nxt["node"] as { id: string }).id).toBe("1.1");
       const slides = JSON.stringify({ slides: ["a"] });

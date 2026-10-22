@@ -161,6 +161,10 @@ async function dispatch(
       return svc.getSessions();
     case "getEventsPage":
       return svc.getEventsPage(b as never);
+    case "getDecompositionHistory":
+      return svc.getDecompositionHistory(b as never);
+    case "getTreeAt":
+      return svc.getTreeAt(b as never);
     case "getBlocked":
       return svc.getBlocked(b as never);
     case "previewEdit":

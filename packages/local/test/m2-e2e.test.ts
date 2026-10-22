@@ -134,7 +134,7 @@ describe("M2 E2E 월간보고서 (fake-ppt-mcp + scripted host, 신도구)", () 
       await call("pf_split", {
         sessionId: sid,
         nodeId: "1",
-        children: [
+        reason: "M8 테스트용 분해 사유입니다.", children: [
           { goal: "슬라이드 목록 읽기" },
           { goal: "2번 슬라이드 읽기", dependsOn: ["1.1"] },
           { goal: "템플릿 채우기", dependsOn: ["1.1", "1.2"] },
@@ -224,7 +224,7 @@ describe("M2 E2E 월간보고서 (fake-ppt-mcp + scripted host, 신도구)", () 
       await call("pf_split", {
         sessionId: sid,
         nodeId: "1",
-        children: [{ goal: "읽기" }],
+        reason: "M8 테스트용 분해 사유입니다.", children: [{ goal: "읽기" }],
       });
 
       const fail = () =>

@@ -295,6 +295,8 @@ export function buildServer(deps: ServerDeps): McpServer {
         "선수: pf_next. 도구 1회로 안 될 때.",
         'children(필수, 최소 1개, 예: [{"goal":"슬라이드 목록 읽기"}]).',
         '외부 부작용 자식은 sideEffect 지정 (예: {"goal":"발송", "sideEffect":"external"}).',
+        "reason(필수, 10~1000자): 왜 이렇게 나눴는지 쓴다. 사람이 이 사유와 대안을 읽고 의견을 준다. 왜 이렇게 나눴는지, 버린 방법은 무엇인지 쓴다.",
+        "alternatives(선택, 최대 3개·각 300자): 버린 대안.",
         "부모와 생성된 자식 반환. 다음: pf_next로 자식 처리.",
       ].join("\n"),
       inputSchema: SplitInputSchema,

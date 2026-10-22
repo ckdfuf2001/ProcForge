@@ -1009,11 +1009,43 @@ export class ProcForgeApp {
         "children이 비었다.",
         "최소 1개의 {goal}을 넣어 pf_split 재호출.",
       );
+    // M8-ui1: 분해 사유는 필수 — 사람이 읽고 의견을 준다.
+    const reason = typeof a.reason === "string" ? a.reason.trim() : "";
+    if (reason.length < 10)
+      throw pfError(
+        "bad_request",
+        `reason이 없다(또는 너무 짧다): ${reason.length}자.`,
+        "왜 이렇게 나눴는지 10자 이상으로 적어라. 버린 대안은 alternatives에 (최대 3개).",
+      );
+    if (reason.length > 1000)
+      throw pfError(
+        "bad_request",
+        `reason이 너무 길다: ${reason.length}자.`,
+        "1000자 이내로 줄여라.",
+      );
+    const alternatives = ((a.alternatives ?? []) as string[])
+      .map((x) => x.trim())
+      .filter((x) => x.length > 0);
+    if (alternatives.length > 3)
+      throw pfError(
+        "bad_request",
+        `alternatives가 너무 많다: ${alternatives.length}개.`,
+        "버린 대안은 최대 3개만 적어라.",
+      );
+    for (const alt of alternatives)
+      if (alt.length > 300)
+        throw pfError(
+          "bad_request",
+          "alternatives 항목이 너무 길다.",
+          "대안 설명은 300자 이내로 줄여라.",
+        );
     const out = await this.core.pfResolve({
       sessionId: sid,
       nodeId: a.nodeId as string,
       decision: "split",
       children: kids,
+      reason,
+      ...(alternatives.length > 0 ? { alternatives } : {}),
       expectedRevision: a.expectedRevision as number | undefined,
       actor: (a.actor as Actor | undefined) ?? "host",
     });
@@ -1178,6 +1210,21 @@ export class ProcForgeApp {
     tail?: boolean;
   }): Promise<{ events: import("@procforge/shared/dto.js").EventEntry[]; lastRevision: number }> {
     return this.core.getEventsPage(input);
+  }
+
+  /** M8-ui2: 분해 라운드 이력 (읽기 전용. touch 없음) */
+  async getDecompositionHistory(input: {
+    sessionId: string;
+  }): Promise<import("@procforge/shared/dto.js").DecompositionHistoryEntry[]> {
+    return this.core.getDecompositionHistory(input);
+  }
+
+  /** M8-ui2: 특정 revision 시점 트리 (읽기 전용. touch 없음) */
+  async getTreeAt(input: {
+    sessionId: string;
+    revision: number;
+  }): Promise<import("@procforge/shared/dto.js").TreeAtOutput> {
+    return this.core.getTreeAt(input);
   }
 
   /** 읽기 전용 세션 조회 (M7-ui3 내부·테스트용. touch 없음) */

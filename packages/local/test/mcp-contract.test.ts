@@ -188,7 +188,7 @@ describe("도구 응답 계약 (outputSchema 통과)", () => {
       expect((started["instruction"] as string)).toContain(PROMPT_TEXT.slice(0, 20));
 
       await call("pf_next", { sessionId: sid });
-      await call("pf_split", { sessionId: sid, nodeId: "1", children: [{ goal: "a" }, { goal: "b" }] });
+      await call("pf_split", { sessionId: sid, nodeId: "1", reason: "M8 계약 테스트용 분해 사유입니다.", children: [{ goal: "a" }, { goal: "b" }] });
       await call("pf_report", {
         sessionId: sid, nodeId: "1.1",
         tool: { server: "opencode", name: "read" }, args: { path: "x" },
@@ -230,7 +230,7 @@ describe("도구 응답 계약 (outputSchema 통과)", () => {
       };
       const started = await call("pf_start", { request: "서브트리" });
       const sid = started["sessionId"] as string;
-      await call("pf_split", { sessionId: sid, nodeId: "1", children: [{ goal: "a" }, { goal: "b" }] });
+      await call("pf_split", { sessionId: sid, nodeId: "1", reason: "M8 계약 테스트용 분해 사유입니다.", children: [{ goal: "a" }, { goal: "b" }] });
       for (const nid of ["1.1", "1.2"]) {
         await call("pf_report", {
           sessionId: sid, nodeId: nid,
@@ -275,7 +275,7 @@ describe("도구 응답 계약 (outputSchema 통과)", () => {
       };
       const started = await call("pf_start", { request: "편집" });
       const sid = started["sessionId"] as string;
-      await call("pf_split", { sessionId: sid, nodeId: "1", children: [{ goal: "a" }] });
+      await call("pf_split", { sessionId: sid, nodeId: "1", reason: "M8 계약 테스트용 분해 사유입니다.", children: [{ goal: "a" }] });
       await call("pf_report", {
         sessionId: sid, nodeId: "1.1",
         tool: { server: "opencode", name: "read" }, args: { path: "x" },
@@ -313,7 +313,7 @@ describe("도구 응답 계약 (outputSchema 통과)", () => {
       };
       const started = await call("pf_start", { request: "rev" });
       const sid = started["sessionId"] as string;
-      await call("pf_split", { sessionId: sid, nodeId: "1", children: [{ goal: "a" }] });
+      await call("pf_split", { sessionId: sid, nodeId: "1", reason: "M8 계약 테스트용 분해 사유입니다.", children: [{ goal: "a" }] });
       const rep = await call("pf_report", {
         sessionId: sid, nodeId: "1.1",
         tool: { server: "opencode", name: "read" }, args: { path: "x" },
@@ -357,7 +357,7 @@ describe("도구 응답 계약 (outputSchema 통과)", () => {
     try {
       const started = (await mcp.callTool({ name: "pf_start", arguments: { request: "deadlock" } })).structuredContent as { sessionId: string };
       const sid = started.sessionId;
-      const r = await mcp.callTool({ name: "pf_split", arguments: { sessionId: sid, nodeId: "1", children: [{ goal: "x", dependsOn: ["9.9"] }] } });
+      const r = await mcp.callTool({ name: "pf_split", arguments: { sessionId: sid, nodeId: "1", reason: "M8 계약 테스트용 분해 사유입니다.", children: [{ goal: "x", dependsOn: ["9.9"] }] } });
       expect(r.isError).toBe(true);
       expect(errText(r)).toMatch(/^bad_request:/);
       expect(errText(r)).toMatch(/dep_missing/);

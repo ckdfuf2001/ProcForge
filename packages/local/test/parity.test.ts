@@ -64,7 +64,7 @@ describe("App 직접 호출 ↔ MCP parity", () => {
       // A: 직접 호출
       const a0 = await appDirect.start({ request: "parity", toolCatalog: CATALOG as never });
       const sidA = a0.sessionId as string;
-      await appDirect.split({ sessionId: sidA, nodeId: "1", children: [{ goal: "a" }, { goal: "b" }] });
+      await appDirect.split({ sessionId: sidA, nodeId: "1", reason: "parity 검증용 분해 사유입니다.", children: [{ goal: "a" }, { goal: "b" }] });
       for (const nid of ["1.1", "1.2"]) {
         await appDirect.report({
           sessionId: sidA, nodeId: nid,
@@ -81,7 +81,7 @@ describe("App 직접 호출 ↔ MCP parity", () => {
       // B: MCP 전송
       const b0 = await call("pf_start", { request: "parity", toolCatalog: CATALOG });
       const sidB = b0["sessionId"] as string;
-      await call("pf_split", { sessionId: sidB, nodeId: "1", children: [{ goal: "a" }, { goal: "b" }] });
+      await call("pf_split", { sessionId: sidB, nodeId: "1", reason: "parity 검증용 분해 사유입니다.", children: [{ goal: "a" }, { goal: "b" }] });
       for (const nid of ["1.1", "1.2"]) {
         await call("pf_report", {
           sessionId: sidB, nodeId: nid,

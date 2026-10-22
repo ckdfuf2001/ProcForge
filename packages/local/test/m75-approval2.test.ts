@@ -58,6 +58,7 @@ async function withScriptNode() {
   await app.split({
     sessionId: s.sessionId,
     nodeId: "1",
+    reason: "M8 테스트용 분해 사유입니다.",
     children: [{ goal: "a" }],
     expectedRevision: 0,
   });
@@ -174,6 +175,7 @@ describe("M7-5-d 스크립트 읽기 sandbox e2e", () => {
     await app.split({
       sessionId: s.sessionId,
       nodeId: "1",
+      reason: "M8 테스트용 분해 사유입니다.",
       children: [{ goal: "a" }],
       expectedRevision: 0,
     });

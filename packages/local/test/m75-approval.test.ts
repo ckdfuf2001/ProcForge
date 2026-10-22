@@ -32,6 +32,7 @@ async function withScriptNode() {
   await app.split({
     sessionId: s.sessionId,
     nodeId: "1",
+    reason: "M8 테스트용 분해 사유입니다.",
     children: [{ goal: "a" }],
     expectedRevision: 0,
   });
