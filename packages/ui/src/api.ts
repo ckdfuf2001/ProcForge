@@ -97,6 +97,40 @@ export type NodeEvent = {
   summary: string;
 };
 
+/** M8-ui2: 분해 라운드 1건 — core가 정한 값만 그대로 (판단 없음) */
+export type DecompositionRound = {
+  revision: number;
+  at: string;
+  actor: string;
+  depth: number;
+  parentId: string;
+  childIds: string[];
+  reason: string | null;
+  alternatives: string[];
+  causeAdviseIds: string[];
+};
+
+/** M8-ui2: 특정 revision 시점 트리 노드 (status null = 그 시점 상태 미상) */
+export type HistoryNode = {
+  id: string;
+  parentId: string | null;
+  goal: string | null;
+  status: string | null;
+  depth: number;
+  children: string[];
+  dependsOn: string[];
+  locked: boolean;
+  sideEffect: string | null;
+  staleSince?: { revision: number; causeNodeId: string };
+  hash: string | null;
+};
+
+/** M8-ui2: 시점 트리 응답 (structureOnly = 상태 미상 구간이 있음) */
+export type TreeAtResponse = {
+  nodes: HistoryNode[];
+  structureOnly: boolean;
+};
+
 export type NodeDetailResponse = {
   detail: NodeDetail;
   events: NodeEvent[];
@@ -217,6 +251,16 @@ export const api = {
   store: () => get<StoreInfo>("/api/store"),
   pairings: () => get<Pairings>("/api/pairings"),
   tree: (sid: string) => get<TreeResponse>(`/api/sessions/${encodeURIComponent(sid)}/tree`),
+  // M8-ui2: 분해 라운드 이력 (읽기 전용)
+  decompositionHistory: (sid: string) =>
+    get<DecompositionRound[]>(
+      `/api/sessions/${encodeURIComponent(sid)}/decomposition-history`,
+    ),
+  // M8-ui2: 특정 revision 시점 트리 (읽기 전용)
+  treeAt: (sid: string, revision: number) =>
+    get<TreeAtResponse>(
+      `/api/sessions/${encodeURIComponent(sid)}/tree-at?revision=${revision}`,
+    ),
   nodeDetail: (sid: string, nid: string) =>
     get<NodeDetailResponse>(
       `/api/sessions/${encodeURIComponent(sid)}/nodes/${encodeURIComponent(nid)}`,

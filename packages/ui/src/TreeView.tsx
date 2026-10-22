@@ -81,7 +81,7 @@ export function TreeView({
     <div className="tree-view">
       <div className="live-line">
         <span className={`live-dot live-${live}`} aria-hidden="true" />
-        <span>실시간 {live}</span>
+        <span>실시간: {live}</span>
         <span className="muted">revision {revision}</span>
         <span className="muted">{nodes.length}개 노드</span>
       </div>

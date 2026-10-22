@@ -25,6 +25,8 @@ export type UiApp = Pick<
   | "storeInfo"
   | "getEventsPage"
   | "getBlocked"
+  | "getDecompositionHistory"
+  | "getTreeAt"
   | "sessionTree"
   | "nodeDetail"
   | "artifactContent"
@@ -434,6 +436,37 @@ export async function createUiServer(opts: {
             await opts.app.uiApprovalInfo({
               sessionId: pathId(mApproval[1], "sessionId"),
               nodeId: pathId(mApproval[2], "nodeId"),
+            }),
+          );
+          return;
+        }
+        // M8-ui2: 분해 라운드 이력 (읽기 전용)
+        const mHistory = /^\/api\/sessions\/([^/]+)\/decomposition-history$/.exec(
+          url.pathname,
+        );
+        if (req.method === "GET" && mHistory) {
+          send(
+            res,
+            await opts.app.getDecompositionHistory({
+              sessionId: pathId(mHistory[1], "sessionId"),
+            }),
+          );
+          return;
+        }
+        // M8-ui2: 특정 revision 시점 트리 (읽기 전용)
+        const mTreeAt = /^\/api\/sessions\/([^/]+)\/tree-at$/.exec(url.pathname);
+        if (req.method === "GET" && mTreeAt) {
+          const revRaw = url.searchParams.get("revision");
+          const revision = Number(revRaw);
+          if (!Number.isInteger(revision) || revision < 0) {
+            err(res, 400, "revision은 0 이상의 정수여야 한다");
+            return;
+          }
+          send(
+            res,
+            await opts.app.getTreeAt({
+              sessionId: pathId(mTreeAt[1], "sessionId"),
+              revision,
             }),
           );
           return;

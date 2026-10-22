@@ -43,7 +43,8 @@ export function NodeDetailPanel({
   return (
     <section className="node-detail">
       <div className="detail-heading">
-        <h3>{detail.nodeId}</h3>
+        {/* M8-ui3: 접근 가능한 이름에 상태를 함께 넣는다 (E2E·스크린리더가 "1.1 · leaf" 로 읽는다) */}
+        <h3 aria-label={`${detail.nodeId} · ${detail.status}`}>{detail.nodeId}</h3>
         <span className={`status status-${detail.status}`}>{detail.status}</span>
       </div>
       <p>목표: {detail.goal}</p>

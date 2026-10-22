@@ -8,6 +8,7 @@ import {
   type NodeRow,
 } from "./api.js";
 import { TreeView } from "./TreeView.js";
+import { RoundView } from "./RoundView.js";
 import { RunPanel } from "./RunPanel.js";
 
 // M7-1: 세션 목록 화면 (저장소 경로·중복 경고·연결 배지·짝 이력).
@@ -43,6 +44,8 @@ export function App() {
   const [error, setError] = useState<ApiError | null>(null);
   const [picked, setPicked] = useState<string | null>(null);
   const [tab, setTab] = useState<"sessions" | "run">("sessions");
+  // M8-ui3: 세션 안에서 "분해 라운드" 3단 화면과 "트리"를 고른다.
+  const [view, setView] = useState<"rounds" | "tree">("rounds");
   // M7-5-4: 실행 화면 "이 노드 열기" → 세션 탭의 상세로 이동 (n 은 재진입 강제용)
   const [focus, setFocus] = useState<{
     sessionId: string;
@@ -138,12 +141,39 @@ export function App() {
             <button className="btn btn-ghost" type="button" onClick={() => setPicked(null)}>
               ← 세션 목록
             </button>
+            <div className="tabs tabs-inline" role="tablist" aria-label="세션 보기">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={view === "rounds"}
+                aria-pressed={view === "rounds"}
+                onClick={() => setView("rounds")}
+              >
+                분해 라운드
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={view === "tree"}
+                aria-pressed={view === "tree"}
+                onClick={() => setView("tree")}
+              >
+                트리
+              </button>
+            </div>
           </div>
-          <TreeView
-            key={`${picked}:${focus?.sessionId === picked ? focus.n : 0}`}
-            sessionId={picked}
-            focusNodeId={focus?.sessionId === picked ? focus.nodeId : null}
-          />
+          {view === "rounds" ? (
+            <RoundView
+              key={`${picked}:${focus?.sessionId === picked ? focus.n : 0}`}
+              sessionId={picked}
+            />
+          ) : (
+            <TreeView
+              key={`${picked}:${focus?.sessionId === picked ? focus.n : 0}`}
+              sessionId={picked}
+              focusNodeId={focus?.sessionId === picked ? focus.nodeId : null}
+            />
+          )}
         </section>
       )}
       {tab === "sessions" && !picked && (
