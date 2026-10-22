@@ -1,4 +1,9 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
+import {
+  assertAllTrackedReplays,
+  assertReplayMatchesStore,
+  trackReplay,
+} from "../test/replay-invariant.js";
 import { mkdtempSync, mkdirSync, writeFileSync, cpSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -23,15 +28,21 @@ const REASON = "한 파일로는 크다. 읽기와 쓰기를 나눠 각각 검�
 const ALT = "전체를 한 노드로 처리하기";
 
 function svc(store: Store = createMemoryStore()) {
-  return new CoreService(store, passEval);
+  return trackReplay(new CoreService(store, passEval));
 }
 
 /** 구 세션(과거 시각)을 TTL 만료 없이 읽기 위한 서비스. */
 function legacySvc(store: Store) {
-  return new CoreService(store, passEval, {
-    now: () => Date.parse("2026-01-01T00:00:10.000Z"),
-  });
+  return trackReplay(
+    new CoreService(store, passEval, {
+      now: () => Date.parse("2026-01-01T00:00:10.000Z"),
+    }),
+  );
 }
+
+afterEach(async () => {
+  await assertAllTrackedReplays();
+});
 
 async function started(s: CoreService) {
   const { session } = await s.pfStart({ request: "M8 분해 이력", toolCatalog: catalog });
@@ -135,6 +146,20 @@ describe("M8-ui2 이벤트 상세 (detail.nodesAfter)", () => {
     expect(split.detail?.nodesAfter?.map((n) => n.id).sort()).toEqual(["1", "1.1", "1.2"]);
     const advise = events.find((e) => e.method === "pfAdvise")!;
     expect(advise.detail?.nodesAfter?.map((n) => n.id)).toEqual(["1.1"]);
+  });
+
+  it("재생 불변식 헬퍼가 스냅샷 없는 직접 쓰기를 잡는다", async () => {
+    const store = createMemoryStore();
+    // 일부러 track 하지 않는다 — afterEach 가 이 드리프트를 다시 검증하면 안 된다.
+    const s = new CoreService(store, passEval);
+    const sid = await started(s);
+    await s.pfResolve({
+      sessionId: sid, nodeId: "1", decision: "split",
+      children: [{ goal: "a" }], reason: REASON,
+    });
+    const n = store.getNode(sid, "1")!;
+    store.saveNode(sid, { ...n, goal: "이벤트 없이 바꾼 목표" });
+    await expect(assertReplayMatchesStore(s, sid)).rejects.toThrow(/goal/);
   });
 
   it("이벤트를 되감아 현재 store와 같은 트리를 복원한다 (재생 불변식)", async () => {

@@ -1,5 +1,9 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
 import { CoreService, consumeRetry, isResolved, autoConstraints, computeDeadlock } from "../src/service.js";
+import {
+  assertAllTrackedReplays,
+  trackReplay,
+} from "../test/replay-invariant.js";
 import { compareNodeIds } from "@procforge/shared/ids.js";
 import { createMemoryStore } from "../src/store.js";
 import type { Store } from "@procforge/shared/store.js";
@@ -11,6 +15,15 @@ const catalog: Session["toolCatalog"] = [
 ];
 
 const passEval = () => ({ verdict: "pass" as const, failedConstraints: [] as string[] });
+
+/** M8-ui2-c: core 테스트가 만든 모든 서비스를 재생 불변식 afterEach에 건다. */
+function newTrackedCore(...args: ConstructorParameters<typeof CoreService>) {
+  return trackReplay(new CoreService(...args));
+}
+
+afterEach(async () => {
+  await assertAllTrackedReplays();
+});
 const failEval = () => ({ verdict: "fail" as const, failedConstraints: ["c1"] });
 
 const rep = (over: Record<string, unknown> = {}) => ({
@@ -34,7 +47,7 @@ describe("M3.4-7 additionalProperties:false 낯선 키 거부", () => {
     },
   ];
   it("오타 키 거부 + 유사 키 제안, 허용 스키마는 통과", async () => {
-    const svc = new CoreService(createMemoryStore(), passEval);
+    const svc = newTrackedCore(createMemoryStore(), passEval);
     const { session } = await svc.pfStart({ request: "r", toolCatalog: strictCat });
     await svc.pfReport({ ...rep(), sessionId: session.id, tool: { server: "fs", name: "read" }, args: { file_path: "a" } });
     const typoSpecs = {
@@ -58,7 +71,7 @@ describe("M3.4-7 additionalProperties:false 낯선 키 거부", () => {
       expect((e as { code?: string }).code).toBe("bad_args");
     }
     // additionalProperties:true 스키마는 통과
-    const svc2 = new CoreService(createMemoryStore(), passEval);
+    const svc2 = newTrackedCore(createMemoryStore(), passEval);
     const openCat: Session["toolCatalog"] = [
       { server: "fs", name: "read", inputSchema: { type: "object", properties: {}, additionalProperties: true } as unknown as Record<string, unknown>, schemaHash: "h1" },
     ];
@@ -106,7 +119,7 @@ describe("M3.4.3-1 pfNext 교착", () => {
   });
 
   it("API 유효 트리에서는 교착 오탐 없음", async () => {
-    const svc = new CoreService(createMemoryStore(), passEval);
+    const svc = newTrackedCore(createMemoryStore(), passEval);
     const { session } = await svc.pfStart({ request: "r", toolCatalog: catalog });
     await svc.pfResolve({ sessionId: session.id, nodeId: "1", decision: "split", children: [{ goal: "a" }, { goal: "b", dependsOn: ["1.1"] }] });
     await svc.pfReport({ ...rep(), sessionId: session.id, nodeId: "1.1", args: { v: 1 } });
@@ -125,7 +138,7 @@ describe("M3.4.3-1 pfNext 교착", () => {
 
 describe("M3.4.4-1 실효 의존 ready/stale", () => {
   it("(a) 조상 의존 상속: 1.2 미완료 시 1.3.2 not ready", async () => {
-    const svc = new CoreService(createMemoryStore(), passEval);
+    const svc = newTrackedCore(createMemoryStore(), passEval);
     const { session } = await svc.pfStart({ request: "r", toolCatalog: catalog });
     const sid = session.id;
     await svc.pfResolve({
@@ -149,7 +162,7 @@ describe("M3.4.4-1 실효 의존 ready/stale", () => {
   });
 
   it("(c) var 참조: dependsOn 없어도 1.1 이후 의미 + 1.1 변경 시 stale", async () => {
-    const svc = new CoreService(createMemoryStore(), passEval);
+    const svc = newTrackedCore(createMemoryStore(), passEval);
     const { session } = await svc.pfStart({ request: "r", toolCatalog: catalog });
     const sid = session.id;
     await svc.pfResolve({ sessionId: sid, nodeId: "1", decision: "split", children: [{ goal: "a" }, { goal: "b" }] });
@@ -255,7 +268,7 @@ describe("M3.4.4-2 교착 불변식 (seed 고정 무작위)", () => {
 
 describe("M3.4.4-1 실효 의존 ready/stale", () => {
   it("(a) 조상 의존 상속: 1.2 미완료 시 1.3.2 not ready", async () => {
-    const svc = new CoreService(createMemoryStore(), passEval);
+    const svc = newTrackedCore(createMemoryStore(), passEval);
     const { session } = await svc.pfStart({ request: "r", toolCatalog: catalog });
     const sid = session.id;
     await svc.pfResolve({
@@ -275,7 +288,7 @@ describe("M3.4.4-1 실효 의존 ready/stale", () => {
   });
 
   it("(c) var 참조: dependsOn 없어도 1.1 변경 시 stale", async () => {
-    const svc = new CoreService(createMemoryStore(), passEval);
+    const svc = newTrackedCore(createMemoryStore(), passEval);
     const { session } = await svc.pfStart({ request: "r", toolCatalog: catalog });
     const sid = session.id;
     await svc.pfResolve({ sessionId: sid, nodeId: "1", decision: "split", children: [{ goal: "a" }, { goal: "b" }] });
@@ -303,7 +316,7 @@ describe("M3.4.4-1 실효 의존 ready/stale", () => {
 
 describe("M3.4.4-3 split dependsOn 검증", () => {
   it("기존도 형제도 아니면 bad_request", async () => {
-    const svc = new CoreService(createMemoryStore(), passEval);
+    const svc = newTrackedCore(createMemoryStore(), passEval);
     const { session } = await svc.pfStart({ request: "r", toolCatalog: catalog });
     await expect(
       svc.pfResolve({
@@ -322,7 +335,7 @@ describe("M3.4.4-3 split dependsOn 검증", () => {
 
 describe("M3.4.3-2 펼친 순환 split 거부", () => {
   it("자기 조상 의존 분해는 bad_request", async () => {
-    const svc = new CoreService(createMemoryStore(), passEval);
+    const svc = newTrackedCore(createMemoryStore(), passEval);
     const { session } = await svc.pfStart({ request: "r", toolCatalog: catalog });
     await svc.pfResolve({ sessionId: session.id, nodeId: "1", decision: "split", children: [{ goal: "a" }] });
     await expect(
@@ -341,7 +354,7 @@ describe("M3.4.3-2 펼친 순환 split 거부", () => {
 
 describe("M3.4.3-3 stale: split 유지 + 자손 leaf만 open", () => {
   it("2.1 변경 → 1.3 split 유지, 1.3.1 open, 1.3.2 유지", async () => {
-    const svc = new CoreService(createMemoryStore(), passEval);
+    const svc = newTrackedCore(createMemoryStore(), passEval);
     const { session } = await svc.pfStart({ request: "r", toolCatalog: catalog });
     const sid = session.id;
     await svc.pfResolve({
@@ -395,7 +408,7 @@ describe("M4 advise 제안/채택", () => {
   const unverifiedEval = () => ({ verdict: "pass" as const, failedConstraints: [] as string[], unverified: ["x"] });
 
   it("유효 제안 채택 / 참조 오류·rubric 거부 / 전부 거부 시 rubric 저장", async () => {
-    const svc = new CoreService(createMemoryStore(), fxEval as never);
+    const svc = newTrackedCore(createMemoryStore(), fxEval as never);
     const { session } = await svc.pfStart({ request: "r", toolCatalog: catalog });
     const sid = session.id;
     await svc.pfResolve({ sessionId: sid, nodeId: "1", decision: "ask_human" });
@@ -420,7 +433,7 @@ describe("M4 advise 제안/채택", () => {
   });
 
   it("판정 불가(unverified) 제안은 거부", async () => {
-    const svc = new CoreService(createMemoryStore(), unverifiedEval as never);
+    const svc = newTrackedCore(createMemoryStore(), unverifiedEval as never);
     const { session } = await svc.pfStart({ request: "r", toolCatalog: catalog });
     const sid = session.id;
     await svc.pfResolve({ sessionId: sid, nodeId: "1", decision: "ask_human" });
@@ -437,7 +450,7 @@ describe("M4 advise 제안/채택", () => {
   });
 
   it("부가세 조언은 rubric + numeric 제안 안내", async () => {
-    const svc = new CoreService(createMemoryStore(), passEval);
+    const svc = newTrackedCore(createMemoryStore(), passEval);
     const { session } = await svc.pfStart({ request: "r", toolCatalog: catalog });
     const sid = session.id;
     const out = await svc.pfAdvise({ sessionId: sid, nodeId: "1", text: "매출은 부가세 제외로" });
@@ -448,7 +461,7 @@ describe("M4 advise 제안/채택", () => {
 
 describe("M2.5-6 세션 핸들 UUID", () => {
   it("세션 id는 UUID", async () => {
-    const svc = new CoreService(createMemoryStore(), passEval);
+    const svc = newTrackedCore(createMemoryStore(), passEval);
     const { session } = await svc.pfStart({ request: "r", toolCatalog: catalog });
     expect(session.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
   });
@@ -469,7 +482,7 @@ describe("M3.4-6 펼친 의존 hash + stale 전파", () => {
     ...over,
   });
   async function confirmedTree() {
-    const svc = new CoreService(createMemoryStore(), passEval);
+    const svc = newTrackedCore(createMemoryStore(), passEval);
     const { session } = await svc.pfStart({ request: "r", toolCatalog: echoCat });
     const sid = session.id;
     await svc.pfResolve({
@@ -512,7 +525,7 @@ describe("M2.6-4 external 승인 흐름", () => {
     { server: "mail", name: "send", inputSchema: {}, schemaHash: "h9" },
   ];
   it("ask_human(plan) → approve → confirm_leaf, 거부 시 open+조언", async () => {
-    const svc = new CoreService(createMemoryStore(), passEval);
+    const svc = newTrackedCore(createMemoryStore(), passEval);
     const { session } = await svc.pfStart({ request: "메일 발송", toolCatalog: extCatalog });
     await svc.pfResolve({
       sessionId: session.id,
@@ -560,7 +573,7 @@ describe("M2.6-4 external 승인 흐름", () => {
   });
 
   it("미승인 external은 leaf 불가", async () => {
-    const svc = new CoreService(createMemoryStore(), passEval);
+    const svc = newTrackedCore(createMemoryStore(), passEval);
     const { session } = await svc.pfStart({ request: "r", toolCatalog: extCatalog });
     await svc.pfResolve({
       sessionId: session.id,
@@ -622,7 +635,7 @@ describe("M1.5-5 dependsOn 충족 (leaf 또는 전체-leaf split)", () => {
 
 describe("M1.5-1 pass여도 leaf 자동 확정 없음", () => {
   it("report pass → probing 유지, resolve(leaf)로만 확정", async () => {
-    const svc = new CoreService(createMemoryStore(), passEval);
+    const svc = newTrackedCore(createMemoryStore(), passEval);
     const { session } = await svc.pfStart({ request: "r", toolCatalog: catalog });
     const r = await svc.pfReport({ ...rep(), sessionId: session.id });
     expect(r.verdict).toBe("pass");
@@ -635,7 +648,7 @@ describe("M1.5-1 pass여도 leaf 자동 확정 없음", () => {
       svc.pfResolve({ sessionId: session.id, nodeId: "1", decision: "leaf", tool: { server: "fs", name: "read" } }),
     ).rejects.toThrow();
     // 키 누락 → bad_request
-    const svc2 = new CoreService(createMemoryStore(), passEval);
+    const svc2 = newTrackedCore(createMemoryStore(), passEval);
     const s2 = await svc2.pfStart({ request: "r", toolCatalog: catalog });
     await svc2.pfReport({ ...rep(), sessionId: s2.session.id, args: { path: "a", extra: 1 } });
     await expect(
@@ -662,7 +675,7 @@ describe("M1.5-1 pass여도 leaf 자동 확정 없음", () => {
   });
 
   it("fixed≈params 경고는 resolve 경로에서", async () => {
-    const svc = new CoreService(createMemoryStore(), passEval);
+    const svc = newTrackedCore(createMemoryStore(), passEval);
     const s = await svc.pfStart({ request: "r", params: { month: "2026-09" }, toolCatalog: catalog });
     await svc.pfReport({ ...rep(), sessionId: s.session.id, args: { month: "2026-09" } });
     const leaf = await svc.pfResolve({
@@ -676,7 +689,7 @@ describe("M1.5-1 pass여도 leaf 자동 확정 없음", () => {
   });
 
   it("M3.6-7 세션에 opencode 버전 기록", async () => {
-    const svc = new CoreService(createMemoryStore(), passEval);
+    const svc = newTrackedCore(createMemoryStore(), passEval);
     const s = await svc.pfStart({ request: "r", toolCatalog: catalog, opencodeVersion: "1.2.3" });
     expect(s.session.opencodeVersion).toBe("1.2.3");
     const s2 = await svc.pfStart({ request: "r", toolCatalog: catalog });
@@ -684,7 +697,7 @@ describe("M1.5-1 pass여도 leaf 자동 확정 없음", () => {
   });
 
   it("M4.2-0 새 세션 revision 0", async () => {
-    const svc = new CoreService(createMemoryStore(), passEval);
+    const svc = newTrackedCore(createMemoryStore(), passEval);
     const s = await svc.pfStart({ request: "r", toolCatalog: catalog });
     expect(s.session.revision).toBe(0);
   });
@@ -729,7 +742,7 @@ function recordingStore(inner = createMemoryStore(), opts: { failCommit?: boolea
 describe("M4.2-0.5 revision·이벤트 트랜잭션", () => {
   it("expectedRevision 불일치 → conflict, 쓰기 없음", async () => {
     const { store, calls } = recordingStore();
-    const svc = new CoreService(store, passEval);
+    const svc = newTrackedCore(store, passEval);
     const s = await svc.pfStart({ request: "r", toolCatalog: catalog });
     await svc.pfReport({ ...rep(), sessionId: s.session.id, resultJson: { ok: true } });
     const savesBefore = calls.filter((c) => c.startsWith("saveNode")).length;
@@ -742,7 +755,7 @@ describe("M4.2-0.5 revision·이벤트 트랜잭션", () => {
 
   it("변경 1회당 revision +1·이벤트 1건, 원자 커밋 1회", async () => {
     const { store, calls } = recordingStore();
-    const svc = new CoreService(store, passEval);
+    const svc = newTrackedCore(store, passEval);
     const s = await svc.pfStart({ request: "r", toolCatalog: catalog });
     const r = await svc.pfReport({ ...rep(), sessionId: s.session.id, resultJson: { ok: true }, expectedRevision: 0, actor: "human" });
     expect(r.verdict).toBe("pass");
@@ -762,7 +775,7 @@ describe("M4.2-0.5 revision·이벤트 트랜잭션", () => {
 
   it("커밋 실패 주입 시 상태 미변경", async () => {
     const { store, calls } = recordingStore(createMemoryStore(), { failCommit: true });
-    const svc = new CoreService(store, passEval);
+    const svc = newTrackedCore(store, passEval);
     const s = await svc.pfStart({ request: "r", toolCatalog: catalog });
     const savesBefore = calls.filter((c) => c.startsWith("saveNode")).length;
     await expect(svc.pfReport({ ...rep(), sessionId: s.session.id })).rejects.toThrow(/injected commit failure/);
@@ -772,7 +785,7 @@ describe("M4.2-0.5 revision·이벤트 트랜잭션", () => {
   });
 
   it("M4.2-2.5.1-3 첫 분기는 enteredProbing + probing 전환", async () => {
-    const svc = new CoreService(createMemoryStore(), passEval);
+    const svc = newTrackedCore(createMemoryStore(), passEval);
     const s = await svc.pfStart({ request: "r", toolCatalog: catalog });
     const first = await svc.pfNext({ sessionId: s.session.id });
     expect(first.done).toBe(false);
@@ -788,7 +801,7 @@ describe("M4.2-0.5 revision·이벤트 트랜잭션", () => {
   });
 
   it("M4.2-2.5-7 change 본문이 Promise면 internal + tx 복구", async () => {
-    const svc = new CoreService(createMemoryStore(), passEval);
+    const svc = newTrackedCore(createMemoryStore(), passEval);
     const s = await svc.pfStart({ request: "r", toolCatalog: catalog });
     await expect(
       (svc as unknown as { change: (sid: string, op: object, body: () => unknown) => Promise<unknown> }).change(
@@ -804,14 +817,14 @@ describe("M4.2-0.5 revision·이벤트 트랜잭션", () => {
 
   it("M4.2-2.5-2 변경은 withLock 안에서 실행", async () => {
     const { store, calls } = recordingStore();
-    const svc = new CoreService(store, passEval);
+    const svc = newTrackedCore(store, passEval);
     const s = await svc.pfStart({ request: "r", toolCatalog: catalog });
     await svc.pfReport({ ...rep(), sessionId: s.session.id });
     expect(calls).toContain("withLock");
   });
 
   it("amendAttemptArtifacts: 교체 + revision +1", async () => {
-    const svc = new CoreService(createMemoryStore(), passEval);
+    const svc = newTrackedCore(createMemoryStore(), passEval);
     const s = await svc.pfStart({ request: "r", toolCatalog: catalog });
     await svc.pfReport({ ...rep(), sessionId: s.session.id, args: { path: "a" } });
     const tree = await svc.pfTree(s.session.id);
@@ -827,7 +840,7 @@ describe("M4.2-0.5 revision·이벤트 트랜잭션", () => {
 });
 
   it("M3.6-5 미참조 dependsOn은 경고만 (dep_without_dataflow)", async () => {
-    const svc = new CoreService(createMemoryStore(), passEval);
+    const svc = newTrackedCore(createMemoryStore(), passEval);
     const s = await svc.pfStart({ request: "r", toolCatalog: catalog });
     await svc.pfResolve({
       sessionId: s.session.id, nodeId: "1", decision: "split",
@@ -872,7 +885,7 @@ describe("M4.2-0.5 revision·이벤트 트랜잭션", () => {
 
 describe("M1.5-2 selfVerdict + auto constraint", () => {
   it("selfVerdict/selfReason 없으면 bad_request", async () => {
-    const svc = new CoreService(createMemoryStore(), passEval);
+    const svc = newTrackedCore(createMemoryStore(), passEval);
     const { session } = await svc.pfStart({ request: "r", toolCatalog: catalog });
     await expect(
       svc.pfReport({ sessionId: session.id, nodeId: "1", tool: { server: "fs", name: "read" }, args: {}, resultSummary: "x" } as never),
@@ -880,7 +893,7 @@ describe("M1.5-2 selfVerdict + auto constraint", () => {
   });
 
   it("constraints 비었으면 selfVerdict 사용 (fail 포함)", async () => {
-    const svc = new CoreService(createMemoryStore(), passEval);
+    const svc = newTrackedCore(createMemoryStore(), passEval);
     const { session } = await svc.pfStart({
       request: "r",
       toolCatalog: catalog,
@@ -900,7 +913,7 @@ describe("M1.5-2 selfVerdict + auto constraint", () => {
   });
 
   it("첫 pass 보고에 auto constraint가 노드에 부착됨", async () => {
-    const svc = new CoreService(createMemoryStore(), passEval);
+    const svc = newTrackedCore(createMemoryStore(), passEval);
     const { session } = await svc.pfStart({ request: "r", toolCatalog: catalog });
     await svc.pfReport({
       ...rep(),
@@ -916,7 +929,7 @@ describe("M1.5-2 selfVerdict + auto constraint", () => {
 
 describe("M1.5-3 llm_rubric 사유 필수", () => {
   it("사유 없으면 needs_human, 보충 후 open 복귀 아님 retry로 재보고", async () => {
-    const svc = new CoreService(createMemoryStore(), passEval);
+    const svc = newTrackedCore(createMemoryStore(), passEval);
     const { session } = await svc.pfStart({ request: "r", toolCatalog: catalog });
     await svc.pfAdvise({ sessionId: session.id, nodeId: "1", text: "문체를 자연스럽게" });
     let tree = await svc.pfTree(session.id);
@@ -937,7 +950,7 @@ describe("M1.5-3 llm_rubric 사유 필수", () => {
 
 describe("core 상태머신 회귀 (M1)", () => {
   it("실패 누적 → needs_human (maxRetries=1이면 2회)", async () => {
-    const svc = new CoreService(createMemoryStore(), failEval);
+    const svc = newTrackedCore(createMemoryStore(), failEval);
     const { session } = await svc.pfStart({ request: "r", toolCatalog: catalog, limits: { maxDepth: 3, maxRetries: 1, maxNodes: 10 } });
     await svc.pfReport({ ...rep(), sessionId: session.id, selfVerdict: "pass", resultJson: undefined });
     // constraints 비어 selfVerdict pass지만 checker fail → fail 1회 → probing
@@ -947,7 +960,7 @@ describe("core 상태머신 회귀 (M1)", () => {
   });
 
   it("checker fail + self pass → fail, 소진 시 needs_human", async () => {
-    const svc = new CoreService(createMemoryStore(), failEval);
+    const svc = newTrackedCore(createMemoryStore(), failEval);
     const { session } = await svc.pfStart({ request: "r", toolCatalog: catalog, limits: { maxDepth: 3, maxRetries: 1, maxNodes: 10 } });
     await svc.pfAdvise({ sessionId: session.id, nodeId: "1", text: "결과 파일 out/report.md 생성" });
     await svc.pfReport({ ...rep(), sessionId: session.id });
@@ -959,7 +972,7 @@ describe("core 상태머신 회귀 (M1)", () => {
   });
 
   it("split → 자식 open, needs_human 조언 후 open 복귀", async () => {
-    const svc = new CoreService(createMemoryStore(), passEval);
+    const svc = newTrackedCore(createMemoryStore(), passEval);
     const { session } = await svc.pfStart({ request: "r", toolCatalog: catalog });
     const sp = await svc.pfResolve({ sessionId: session.id, nodeId: "1", decision: "split", children: [{ goal: "a" }, { goal: "b" }] });
     expect(sp.created?.length).toBe(2);
@@ -972,7 +985,7 @@ describe("core 상태머신 회귀 (M1)", () => {
   });
 
   it("split 자식이 전부 leaf면 부모 의존 충족 (pfNext 진행)", async () => {
-    const svc = new CoreService(createMemoryStore(), passEval);
+    const svc = newTrackedCore(createMemoryStore(), passEval);
     const { session } = await svc.pfStart({ request: "r", toolCatalog: catalog });
     await svc.pfResolve({
       sessionId: session.id,
@@ -1001,14 +1014,14 @@ describe("core 상태머신 회귀 (M1)", () => {
   });
 
   it("depth 초과 split 거부 → needs_human", async () => {
-    const svc = new CoreService(createMemoryStore(), passEval);
+    const svc = newTrackedCore(createMemoryStore(), passEval);
     const { session } = await svc.pfStart({ request: "r", toolCatalog: catalog, limits: { maxDepth: 0, maxRetries: 1, maxNodes: 10 } });
     const sp = await svc.pfResolve({ sessionId: session.id, nodeId: "1", decision: "split", children: [{ goal: "a" }] });
     expect(sp.node.status).toBe("needs_human");
   });
 
   it("external 노드 probing 실행 금지", async () => {
-    const svc = new CoreService(createMemoryStore(), passEval);
+    const svc = newTrackedCore(createMemoryStore(), passEval);
     const { session } = await svc.pfStart({ request: "r", toolCatalog: catalog });
     await svc.pfResolve({
       sessionId: session.id,
@@ -1024,7 +1037,7 @@ describe("core 상태머신 회귀 (M1)", () => {
   });
 
   it("locked 노드 재분해 금지 + leaf 확정 불가", async () => {
-    const svc = new CoreService(createMemoryStore(), passEval);
+    const svc = newTrackedCore(createMemoryStore(), passEval);
     const { session } = await svc.pfStart({ request: "r", toolCatalog: catalog });
     await svc.pfLock({ sessionId: session.id, nodeId: "1" });
     await expect(svc.pfResolve({ sessionId: session.id, nodeId: "1", decision: "split", children: [{ goal: "x" }] })).rejects.toThrow();
@@ -1034,7 +1047,7 @@ describe("core 상태머신 회귀 (M1)", () => {
   });
 
   it("조언 추가 시 하위 dependsOn 노드만 stale 처리", async () => {
-    const svc = new CoreService(createMemoryStore(), passEval);
+    const svc = newTrackedCore(createMemoryStore(), passEval);
     const { session } = await svc.pfStart({ request: "r", toolCatalog: catalog });
     await svc.pfResolve({ sessionId: session.id, nodeId: "1", decision: "split", children: [{ goal: "a" }, { goal: "b" }] });
     await svc.pfReport({ ...rep(), sessionId: session.id, nodeId: "1.1" });
@@ -1044,7 +1057,7 @@ describe("core 상태머신 회귀 (M1)", () => {
   });
 
   it("leaf 확정은 passing attempt 없이 불가 + tool 불일치 불가", async () => {
-    const svc = new CoreService(createMemoryStore(), passEval);
+    const svc = newTrackedCore(createMemoryStore(), passEval);
     const { session } = await svc.pfStart({ request: "r", toolCatalog: catalog });
     await expect(
       svc.pfResolve({ sessionId: session.id, nodeId: "1", decision: "leaf", tool: { server: "fs", name: "read" }, argSpecs: {} }),
@@ -1078,7 +1091,7 @@ describe("M4.2-2 pfEditArgs/pfEditNode", () => {
   ];
 
   async function leafed() {
-    const svc = new CoreService(createMemoryStore(), passEval);
+    const svc = newTrackedCore(createMemoryStore(), passEval);
     const s = await svc.pfStart({ request: "r", toolCatalog: editCat });
     await svc.pfReport({ ...rep(), sessionId: s.session.id, args: { file_path: "a" } });
     await svc.pfResolve({
@@ -1164,7 +1177,7 @@ describe("M4.2-2 pfEditArgs/pfEditNode", () => {
 
 describe("M4.2-2 pfUpdateCatalog", () => {
   it("교체 + revision, 형식 오류 거부", async () => {
-    const svc = new CoreService(createMemoryStore(), passEval);
+    const svc = newTrackedCore(createMemoryStore(), passEval);
     const s = await svc.pfStart({ request: "r", toolCatalog: catalog });
     const next = [
       { server: "fs", name: "read", inputSchema: {}, schemaHash: "h2" },
@@ -1182,7 +1195,7 @@ describe("M4.2-2 pfUpdateCatalog", () => {
 
 describe("M4.2-2 getEvents", () => {
   it("이벤트 조회 + sinceSeq", async () => {
-    const svc = new CoreService(createMemoryStore(), passEval);
+    const svc = newTrackedCore(createMemoryStore(), passEval);
     const s = await svc.pfStart({ request: "r", toolCatalog: catalog });
     expect(await svc.getEvents(s.session.id)).toEqual([]);
     await svc.pfReport({ ...rep(), sessionId: s.session.id });
@@ -1198,21 +1211,21 @@ describe("M4.2-2 getEvents", () => {
   });
 
   it("없는 세션 조회 거부", async () => {
-    const svc = new CoreService(createMemoryStore(), passEval);
+    const svc = newTrackedCore(createMemoryStore(), passEval);
     await expect(svc.getEvents("123e4567-e89b-42d3-a456-426614174000")).rejects.toThrow(/not found/);
   });
 });
 
 describe("M4.2-2.5-1 getSession/getNode + TTL", () => {
   it("조회 + 만료 세션 거부", async () => {
-    const svc = new CoreService(createMemoryStore(), passEval);
+    const svc = newTrackedCore(createMemoryStore(), passEval);
     const s = await svc.pfStart({ request: "r", toolCatalog: catalog });
     expect((await svc.getSession(s.session.id)).request).toBe("r");
     expect((await svc.getNode(s.session.id, "1")).goal).toBe("r");
     await expect(svc.getNode(s.session.id, "9")).rejects.toThrow(/node .* not found/);
     await expect(svc.getSession("123e4567-e89b-42d3-a456-426614174000")).rejects.toThrow(/세션 없음/);
     // M7-ui3-b: 읽기는 TTL을 연장하지 않는다 — 마지막 쓰기(시작) 직후면 곧바로 만료다.
-    const svc2 = new CoreService(createMemoryStore(), passEval, { sessionTtlMs: -1 });
+    const svc2 = newTrackedCore(createMemoryStore(), passEval, { sessionTtlMs: -1 });
     const s2 = await svc2.pfStart({ request: "r", toolCatalog: catalog });
     await expect(svc2.getSession(s2.session.id)).rejects.toThrow(/세션 만료/);
     await expect(svc2.getNode(s2.session.id, "1")).rejects.toThrow(/세션 만료/);
@@ -1221,7 +1234,7 @@ describe("M4.2-2.5-1 getSession/getNode + TTL", () => {
 
 describe("M4.2-2.5-4 leaf artifacts 통합", () => {
   it("확정 실패 시 revision·attempt 불변, 성공 시 반영", async () => {
-    const svc = new CoreService(createMemoryStore(), passEval);
+    const svc = newTrackedCore(createMemoryStore(), passEval);
     const s = await svc.pfStart({ request: "r", toolCatalog: catalog });
     await svc.pfReport({ ...rep(), sessionId: s.session.id, args: { path: "a" } });
     const before = await svc.pfTree(s.session.id);
@@ -1247,7 +1260,7 @@ describe("M4.2-2.5-4 leaf artifacts 통합", () => {
 
 describe("M3.5.1-1 auto 재생성", () => {
   it("file_exists는 논리 경로 저장 + 재보고 시 재생성 (human 유지)", async () => {
-    const svc = new CoreService(createMemoryStore(), passEval);
+    const svc = newTrackedCore(createMemoryStore(), passEval);
     const s = await svc.pfStart({ request: "r", toolCatalog: catalog });
     await svc.pfReport({
       ...rep(), sessionId: s.session.id,
@@ -1285,7 +1298,7 @@ describe("M3.5.1-1 auto 재생성", () => {
 });
 
 describe("M4.2-1 pfBuildProcedure", () => {  it("검증·경고·문서 조립", async () => {
-    const svc = new CoreService(createMemoryStore(), passEval);
+    const svc = newTrackedCore(createMemoryStore(), passEval);
     const s = await svc.pfStart({ request: "r", params: { month: "2026-09" }, toolCatalog: catalog });
     await svc.pfReport({ ...rep(), sessionId: s.session.id, args: { f: "report-2026-09.txt" } });
     await svc.pfResolve({
@@ -1302,7 +1315,7 @@ describe("M4.2-1 pfBuildProcedure", () => {  it("검증·경고·문서 조립",
 
   it("M5.3.1-4 golden.output은 원문 그대로 + 경고 없음 (replay 전용)", async () => {
     const backing = createMemoryStore();
-    const svc = new CoreService(backing, passEval);
+    const svc = newTrackedCore(backing, passEval);
     const s = await svc.pfStart({ request: "r", params: { month: "2026-09" }, toolCatalog: catalog });
     await svc.pfReport({ ...rep(), sessionId: s.session.id, resultSummary: "report for 2026-09" });
     await svc.pfResolve({
@@ -1327,7 +1340,7 @@ describe("M5.3-0-1 confirm required 강제", () => {
     },
   ];
   it("required 누락 → bad_request + 목록, 충족 시 확정", async () => {
-    const svc = new CoreService(createMemoryStore(), passEval);
+    const svc = newTrackedCore(createMemoryStore(), passEval);
     const { session } = await svc.pfStart({ request: "r", toolCatalog: bashCat });
     await svc.pfReport({ ...rep(), sessionId: session.id, tool: { server: "opencode", name: "bash" }, args: { lang: "ko" } });
     await expect(
@@ -1337,7 +1350,7 @@ describe("M5.3-0-1 confirm required 강제", () => {
     expect(ok.node.status).toBe("leaf");
   });
   it("required 없는 스키마 → 확정 + 경고", async () => {
-    const svc = new CoreService(createMemoryStore(), passEval);
+    const svc = newTrackedCore(createMemoryStore(), passEval);
     const { session } = await svc.pfStart({ request: "r", toolCatalog: catalog });
     await svc.pfReport({ ...rep(), sessionId: session.id });
     const ok = await svc.pfResolve({ sessionId: session.id, nodeId: "1", decision: "leaf", tool: { server: "fs", name: "read" }, argSpecs: {} as never });
@@ -1345,7 +1358,7 @@ describe("M5.3-0-1 confirm required 강제", () => {
     expect(ok.instruction).toMatch(/required 없음/);
   });
   it("M5.3-0-4 증거 없는 leaf → 경고", async () => {
-    const svc = new CoreService(createMemoryStore(), passEval);
+    const svc = newTrackedCore(createMemoryStore(), passEval);
     const { session } = await svc.pfStart({ request: "r", toolCatalog: catalog });
     await svc.pfReport({ ...rep(), sessionId: session.id });
     const warned = await svc.pfResolve({ sessionId: session.id, nodeId: "1", decision: "leaf", tool: { server: "fs", name: "read" }, argSpecs: {} as never });
@@ -1359,7 +1372,7 @@ describe("M5.8.1-1 runner 실행 가능 집합 + 경로 역할 검증", () => {
     { server: "opencode", name: "bash", inputSchema: { type: "object", properties: { command: { type: "string" } }, additionalProperties: true } as unknown as Record<string, unknown>, schemaHash: "h" },
   ];
   async function bashReported() {
-    const svc = new CoreService(createMemoryStore(), passEval);
+    const svc = newTrackedCore(createMemoryStore(), passEval);
     const { session } = await svc.pfStart({ request: "r", toolCatalog: bashCat });
     await svc.pfReport({ ...rep(), sessionId: session.id, tool: { server: "opencode", name: "bash" }, args: { command: "curl x" } });
     return { svc, sid: session.id };
@@ -1393,7 +1406,7 @@ describe("M5.8.1-1 runner 실행 가능 집합 + 경로 역할 검증", () => {
 
 describe("M5.8.1-4 dependsOn", () => {
   it("split: 형제 전부 의존 없음 → 경고 + 연결 문구", async () => {
-    const svc = new CoreService(createMemoryStore(), passEval);
+    const svc = newTrackedCore(createMemoryStore(), passEval);
     const { session } = await svc.pfStart({ request: "r", toolCatalog: catalog });
     const out = await svc.pfResolve({
       sessionId: session.id, nodeId: "1", decision: "split",
@@ -1403,7 +1416,7 @@ describe("M5.8.1-4 dependsOn", () => {
     expect(out.instruction).toMatch(/pf_edit_node로 dependsOn을 연결/);
   });
   it("split: 의존 있으면 경고 없음", async () => {
-    const svc = new CoreService(createMemoryStore(), passEval);
+    const svc = newTrackedCore(createMemoryStore(), passEval);
     const { session } = await svc.pfStart({ request: "r", toolCatalog: catalog });
     const out = await svc.pfResolve({
       sessionId: session.id, nodeId: "1", decision: "split",
@@ -1412,7 +1425,7 @@ describe("M5.8.1-4 dependsOn", () => {
     expect(out.instruction).not.toMatch(/의존 없음/);
   });
   it("editNode dependsOn + advise → 해당 하류만 stale, 나머지 불변", async () => {
-    const svc = new CoreService(createMemoryStore(), passEval);
+    const svc = newTrackedCore(createMemoryStore(), passEval);
     const { session } = await svc.pfStart({ request: "r", toolCatalog: catalog });
     await svc.pfResolve({
       sessionId: session.id, nodeId: "1", decision: "split",
@@ -1430,7 +1443,7 @@ describe("M5.8.1-4 dependsOn", () => {
     expect(after.nodes.find((n) => n.id === "1.3")!.hash).not.toBe(h13);
   });
   it("editNode dependsOn: 미존재·자기참조·순환 거부", async () => {
-    const svc = new CoreService(createMemoryStore(), passEval);
+    const svc = newTrackedCore(createMemoryStore(), passEval);
     const { session } = await svc.pfStart({ request: "r", toolCatalog: catalog });
     await svc.pfResolve({
       sessionId: session.id, nodeId: "1", decision: "split",
@@ -1448,7 +1461,7 @@ describe("M5.8.2-2 probing/run 차이 차단", () => {
     { server: "fs", name: "read", inputSchema: { type: "object", properties: { input: {} }, additionalProperties: true } as unknown as Record<string, unknown>, schemaHash: "h1" },
   ];
   async function twoLeaves() {
-    const svc = new CoreService(createMemoryStore(), passEval);
+    const svc = newTrackedCore(createMemoryStore(), passEval);
     const { session } = await svc.pfStart({ request: "r", toolCatalog: refCat });
     await svc.pfResolve({
       sessionId: session.id, nodeId: "1", decision: "split",
@@ -1537,7 +1550,7 @@ describe("M5.8.2-2 probing/run 차이 차단", () => {
 
 describe("M6.1-1 원격 사전평가 신뢰 경로", () => {
   async function splitOnce() {
-    const svc = new CoreService(createMemoryStore(), passEval);
+    const svc = newTrackedCore(createMemoryStore(), passEval);
     const { session } = await svc.pfStart({ request: "r", toolCatalog: catalog });
     await svc.pfResolve({
       sessionId: session.id, nodeId: "1", decision: "split",
