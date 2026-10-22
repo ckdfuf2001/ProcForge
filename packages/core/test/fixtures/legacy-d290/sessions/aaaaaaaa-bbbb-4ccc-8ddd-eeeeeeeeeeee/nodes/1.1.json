@@ -1,0 +1,16 @@
+{
+  "id": "1.1",
+  "parentId": "1",
+  "goal": "자식1: 입력을 모은다.",
+  "status": "split",
+  "depth": 1,
+  "dependsOn": [],
+  "children": ["1.1.1"],
+  "sideEffect": "none",
+  "constraints": [],
+  "advice": [],
+  "attempts": [],
+  "retries": 0,
+  "hash": "h-1.1",
+  "locked": false
+}

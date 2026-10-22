@@ -1,0 +1,16 @@
+{
+  "id": "1.1.1",
+  "parentId": "1.1",
+  "goal": "손자: 입력을 정규화한다.",
+  "status": "open",
+  "depth": 2,
+  "dependsOn": [],
+  "children": [],
+  "sideEffect": "none",
+  "constraints": [],
+  "advice": [],
+  "attempts": [],
+  "retries": 0,
+  "hash": "h-1.1.1",
+  "locked": false
+}

@@ -366,6 +366,39 @@ describe("도구 응답 계약 (outputSchema 통과)", () => {
     }
   });
 
+  it("pf_split 사유 누락·공백 거부 (bad_request + 힌트)", async () => {
+    const { mcp, close } = await linked();
+    try {
+      const started = (
+        await mcp.callTool({ name: "pf_start", arguments: { request: "reason" } })
+      ).structuredContent as { sessionId: string };
+      const missing = await mcp.callTool({
+        name: "pf_split",
+        arguments: {
+          sessionId: started.sessionId,
+          nodeId: "1",
+          children: [{ goal: "a" }],
+        },
+      });
+      expect(missing.isError).toBe(true);
+      expect(errText(missing)).toMatch(/^bad_request:/);
+      expect(errText(missing)).toMatch(/10자/);
+      const blank = await mcp.callTool({
+        name: "pf_split",
+        arguments: {
+          sessionId: started.sessionId,
+          nodeId: "1",
+          reason: "          ",
+          children: [{ goal: "a" }],
+        },
+      });
+      expect(blank.isError).toBe(true);
+      expect(errText(blank)).toMatch(/^bad_request:/);
+    } finally {
+      await close();
+    }
+  });
+
   it("에러 텍스트: bad_request 힌트 (빈 children)", async () => {
     const { mcp, close } = await linked();
     try {

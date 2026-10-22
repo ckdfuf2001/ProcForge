@@ -1,0 +1,16 @@
+{
+  "id": "1",
+  "parentId": null,
+  "goal": "루트: 두 단계로 나눠 정리한다.",
+  "status": "split",
+  "depth": 0,
+  "dependsOn": [],
+  "children": ["1.1", "1.2"],
+  "sideEffect": "none",
+  "constraints": [],
+  "advice": [],
+  "attempts": [],
+  "retries": 0,
+  "hash": "h-1",
+  "locked": false
+}

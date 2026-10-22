@@ -7,6 +7,7 @@ import {
 import { mkdtempSync, mkdirSync, writeFileSync, cpSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
 import { CoreService } from "../src/service.js";
 import { createMemoryStore } from "../src/store.js";
 import { FileStore } from "@procforge/shared/filestore.js";
@@ -90,13 +91,19 @@ describe("M8-ui2 분해 사유 (reason·alternatives)", () => {
     expect(b.splitReason).toBeUndefined();
   });
 
-  it("사유 누락·공백·1001자는 bad_request", async () => {
+  it("core는 사유가 있으면 10~1000자·대안 3개를 검증한다 (누락은 통과)", async () => {
     const s = svc();
     const sid = await started(s);
     await expect(
       s.pfResolve({
         sessionId: sid, nodeId: "1", decision: "split",
         children: [{ goal: "a" }], reason: "짧음",
+      }),
+    ).rejects.toThrow(/reason/);
+    await expect(
+      s.pfResolve({
+        sessionId: sid, nodeId: "1", decision: "split",
+        children: [{ goal: "a" }], reason: "          ",
       }),
     ).rejects.toThrow(/reason/);
     await expect(
@@ -522,23 +529,27 @@ describe("M8-ui2 파일 저장소 왕복", () => {
     expect(tree.nodes.map((n) => n.id)).toEqual(["1", "1.1"]);
   });
 
-  it("구 세션 디렉터리를 그대로 읽는다 (d290 스타일)", async () => {
-    // 실제 저장소를 복사해 구 이벤트 세션을 읽는다 (파일을 못 읽으면 조용히 넘어가지 않는다).
-    const src = join(process.cwd(), ".procforge", "sessions");
-    const d290 = join(src, "d290a93d-dd9d-42d6-9e37-5a6ceb90a282");
-    const exists = await import("node:fs").then((fs) => fs.existsSync(d290));
-    if (!exists) return; // 로컬에만 있는 세션이면 건너뛴다 (CI는 계속 green).
+  it("구 세션 디렉터리를 그대로 읽는다 (정리된 d290 형식 픽스처)", async () => {
+    // 실제 .procforge 는 읽지 않는다. 저장소에 커밋된 민감정보 제거 픽스처만 쓴다.
+    const sid = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+    const fixture = fileURLToPath(
+      new URL("../test/fixtures/legacy-d290", import.meta.url),
+    );
     const dir = mkdtempSync(join(tmpdir(), "pf-m8-d290-"));
-    cpSync(d290, join(dir, "sessions", "d290a93d-dd9d-42d6-9e37-5a6ceb90a282"), {
+    cpSync(join(fixture, "sessions", sid), join(dir, "sessions", sid), {
       recursive: true,
     });
     const store = new FileStore(dir);
-    const sid = "d290a93d-dd9d-42d6-9e37-5a6ceb90a282";
-    const s = svc(store);
+    const s = legacySvc(store);
     const rounds = await s.getDecompositionHistory({ sessionId: sid });
-    expect(rounds.length).toBeGreaterThan(0);
-    for (const r of rounds) expect(r.reason).toBeNull();
-    const tree = await s.getTreeAt({ sessionId: sid, revision: 1 });
+    expect(rounds.map((r) => r.parentId)).toEqual(["1", "1.1"]);
+    for (const r of rounds) {
+      expect(r.reason).toBeNull();
+      expect(r.depthSource).toBe("id");
+    }
+    const tree = await s.getTreeAt({ sessionId: sid, revision: 3 });
     expect(tree.structureOnly).toBe(true);
+    expect(tree.nodes.map((n) => n.id)).toEqual(["1", "1.1", "1.1.1", "1.2"]);
+    for (const n of tree.nodes) expect(n.status).toBeNull();
   });
 });

@@ -1,0 +1,17 @@
+{
+  "id": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+  "request": "정리된 레거시 픽스처: 두 단계로 나눈 뒤 보고한다.",
+  "params": {},
+  "toolCatalog": [
+    {
+      "server": "fixture",
+      "name": "read",
+      "inputSchema": { "type": "object" },
+      "schemaHash": "fixture-hash"
+    }
+  ],
+  "rootId": "1",
+  "limits": { "maxDepth": 5, "maxRetries": 2, "maxNodes": 50 },
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "revision": 3
+}
