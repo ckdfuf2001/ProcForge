@@ -2262,7 +2262,8 @@ if (oldHash !== next.hash) this.propagateStale(s.id, input.nodeId, s.revision + 
     for (const e of target) {
       const d = e.detail;
       if (!d) {
-        structureOnly = true;
+        // 구 이벤트: 상태 스냅샷이 없다. 구조만 알고, 상태는 아래에서 null 로 둔다.
+        // structureOnly 는 "null 상태 노드가 있는가" 로만 정한다 (뒤에서 한 번).
         for (const id of e.nodeIds) legacyTouched.add(id);
         continue;
       }
@@ -2283,7 +2284,6 @@ if (oldHash !== next.hash) this.propagateStale(s.id, input.nodeId, s.revision + 
       }
       if (legacyTouched.has(n.id)) {
         // 구 이벤트만 건드린 노드 → 그 시점 상태를 알 수 없다.
-        structureOnly = true;
         nodes.push({
           id: n.id,
           parentId: n.parentId,
@@ -2301,7 +2301,6 @@ if (oldHash !== next.hash) this.propagateStale(s.id, input.nodeId, s.revision + 
       // 스냅샷이 없는 노드: 그 뒤에 손대지 않았다면 현재 값이 곧 그 시점 값이다.
       const touchedLater = later.some((e) => e.nodeIds.includes(n.id));
       if (touchedLater) {
-        structureOnly = true;
         nodes.push({
           id: n.id,
           parentId: n.parentId,

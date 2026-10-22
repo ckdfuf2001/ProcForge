@@ -387,6 +387,94 @@ describe("M8-ui2 구 세션 호환 (패치 없는 이벤트)", () => {
     expect(tree.nodes.map((n) => n.id).sort()).toEqual(["1", "1.1", "1.2"]);
     for (const n of tree.nodes) expect(n.status).toBeNull();
   });
+
+  /**
+   * 혼합 세션: 구 split 2건(detail 없음) + 신 advise 1건(detail 있음).
+   * 상태는 노드별로 null 을 허용하고, structureOnly 는 "null 상태 노드 존재" 로만 정한다.
+   */
+  function mixedSession(): { store: FileStore; sid: string } {
+    const dir = mkdtempSync(join(tmpdir(), "pf-m8-mixed-"));
+    const store = new FileStore(dir);
+    const sid = "22222222-3333-4444-8555-666666666666";
+    mkdirSync(join(dir, "sessions", sid, "nodes"), { recursive: true });
+    writeFileSync(
+      join(dir, "sessions", sid, "session.json"),
+      JSON.stringify({
+        id: sid, request: "혼합 세션", params: {}, toolCatalog: catalog,
+        rootId: "1", limits: { maxDepth: 5, maxRetries: 2, maxNodes: 50 },
+        createdAt: "2026-01-01T00:00:00.000Z", revision: 4,
+      }),
+    );
+    const raw = (id: string, parentId: string | null, goal: string, depth: number, status: string, children: string[]) => ({
+      id, parentId, goal, status, depth, children,
+      dependsOn: [], sideEffect: "none", constraints: [], advice: [],
+      attempts: [], retries: 0, hash: `h-${id}`, locked: false,
+    });
+    const all = [
+      raw("1", null, "루트", 0, "split", ["1.1", "1.2"]),
+      raw("1.1", "1", "자식1", 1, "split", ["1.1.1"]),
+      raw("1.2", "1", "자식2", 1, "open", []),
+      raw("1.1.1", "1.1", "손자", 2, "open", []),
+    ];
+    for (const n of all)
+      writeFileSync(join(dir, "sessions", sid, "nodes", `${n.id}.json`), JSON.stringify(n));
+    const snap = (id: string) => {
+      const n = all.find((x) => x.id === id)!;
+      return {
+        id: n.id, parentId: n.parentId, goal: n.goal, status: n.status, depth: n.depth,
+        children: n.children, dependsOn: [], locked: false, sideEffect: "none", hash: n.hash,
+      };
+    };
+    const events = [
+      {
+        seq: 1, revision: 1, at: "2026-01-01T00:00:01.000Z", actor: "host",
+        method: "pfResolve", nodeIds: ["1", "1.1", "1.2"],
+        beforeHash: "b", afterHash: "a", summary: "split 1 +2",
+      },
+      {
+        seq: 2, revision: 2, at: "2026-01-01T00:00:02.000Z", actor: "host",
+        method: "pfResolve", nodeIds: ["1.1", "1.1.1"],
+        beforeHash: "b", afterHash: "a", summary: "split 1.1 +1",
+      },
+      {
+        seq: 3, revision: 3, at: "2026-01-01T00:00:03.000Z", actor: "human",
+        method: "pfAdvise", nodeIds: ["1.1.1"],
+        beforeHash: "a", afterHash: "c", summary: "advise 1.1.1 +1",
+        detail: { nodesAfter: [snap("1.1.1")] },
+      },
+      {
+        seq: 4, revision: 4, at: "2026-01-01T00:00:04.000Z", actor: "host",
+        method: "pfReport", nodeIds: ["1", "1.1", "1.2"],
+        beforeHash: "a", afterHash: "d", summary: "report 1.1 pass",
+        detail: { nodesAfter: [snap("1"), snap("1.1"), snap("1.2")] },
+      },
+    ];
+    writeFileSync(
+      join(dir, "sessions", sid, "events.jsonl"),
+      events.map((e) => JSON.stringify(e)).join("\n") + "\n",
+    );
+    return { store, sid };
+  }
+
+  it("혼합 세션: 신 이벤트가 닿은 노드만 상태가 있고 나머지는 null", async () => {
+    const { store, sid } = mixedSession();
+    const s = legacySvc(store);
+    const tree = await s.getTreeAt({ sessionId: sid, revision: 3 });
+    expect(tree.structureOnly).toBe(true);
+    const byId = new Map(tree.nodes.map((n) => [n.id, n]));
+    expect(byId.get("1.1.1")?.status).toBe("open");
+    expect(byId.get("1")?.status).toBeNull();
+    expect(byId.get("1.1")?.status).toBeNull();
+    expect(byId.get("1.2")?.status).toBeNull();
+  });
+
+  it("혼합 세션이라도 null 상태 노드가 없으면 structureOnly=false", async () => {
+    const { store, sid } = mixedSession();
+    const s = legacySvc(store);
+    const tree = await s.getTreeAt({ sessionId: sid, revision: 4 });
+    expect(tree.structureOnly).toBe(false);
+    for (const n of tree.nodes) expect(n.status).not.toBeNull();
+  });
 });
 
 describe("M8-ui2 파일 저장소 왕복", () => {
