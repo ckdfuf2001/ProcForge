@@ -1017,7 +1017,7 @@ argv: [...]}` 고정. runner는 run fs에서 직접 실행해 stdout을 golden�
   computeNodeHash + `packages/core/src/service.ts` historyNodeOf.
 - [M8-ui-1-c] **이벤트 상세는 평면(flat) 스키마 하나**로 둔다.
   `EventEntry.detail` = {parentId?, childIds?, reason?, alternatives?, causeAdviseIds?,
-  nodesAfter?, removedIds?}. 분해 전용 필드와 공통 필드를 같은 객체에 두는 이유는
+  causeAdvice?, nodesAfter?, removedIds?}. 분해 전용 필드와 공통 필드를 같은 객체에 두는 이유는
   UI 가 "이벤트 1건 = 무엇이 왜 바뀌었는지"를 한 번에 읽게 하려는 것이다.
   근거: `packages/shared/src/dto.ts` EventDetailSchema.
 - [M8-ui-1-d] **`detail` 은 선택 필드다.** 구 세션(events.jsonl 에 detail 없음)을 그대로 읽을 수 있어야
@@ -1038,12 +1038,16 @@ argv: [...]}` 고정. runner는 run fs에서 직접 실행해 stdout을 golden�
   보존한다). 그래서 스냅샷에 부모 depth 가 있으면 그 값을 쓰고, 없을 때(구 이벤트)만
   `parentId` 세그먼트 수 - 1 로 되돌린다. 어느 쪽을 썼는지 `depthSource: "snapshot"|"id"` 로
   드러낸다. 근거: roundOfEvent(), `m8-decomposition.test.ts` import 2단계 split 테스트.
-- [M8-ui-2-d] **패치가 없는 구간은 "구조만, 상태 null" 이다.** 구 세션(d290 등)에는 스냅샷이 없다.
-  그럴 때 상태를 지어내지 않고 `structureOnly: true` 로 알린다(상태는 null).
-  판단 대신 표시로 처리한다. 근거: getTreeAt().
-- [M8-ui-2-e] **`causeAdviseIds` 는 자동 산출한다.** 분해의 원인이 된 조언(직전 split/report 이후
-  등록분)을 core 가 이벤트에 기록한다. 사람이 "이 분해는 그 조언에서 나왔다" 를 직접 입력하지 않는다.
-  조언 id·revision 은 `pfAdvise` 가 붙인다. 근거: causeAdviseIdsFor().
+- [M8-ui-2-d] **상태는 노드별로 null 일 수 있다 (혼합 세션).** 구 이벤트(스냅샷 없음)와 신 이벤트가
+  섞인 세션에서는 신 이벤트가 닿은 노드만 상태가 채워지고 나머지는 null 이다. "구 세션 전체"와
+  "혼합 세션"을 구분하지 않는다. `structureOnly` 는 **null 상태 노드가 하나라도 있으면** true 이고,
+  라운드마다 따로 판정한다(세션 단위 플래그가 아니다). 판단 대신 표시로 처리한다. 근거: getTreeAt(),
+  `mixedSession()` 테스트.
+- [M8-ui-2-e] **`causeAdviseIds` 와 `causeAdvice` 사본을 자동 산출한다.** 분해의 원인이 된 조언
+  (직전 split/report 이후 등록분)을 core 가 이벤트에 기록한다. 사본은 id·textPreview(≤200자)·
+  actor 이며, 노드 advice 가 나중에 바뀌어도 "그때 무엇을 보고 나눴는지"가 이벤트 로그에 남는다.
+  actor 는 `Node.advice` 에 없으므로 해당 revision 의 `pfAdvise` 이벤트 actor 로 복원한다.
+  사람이 "이 분해는 그 조언에서 나왔다" 를 직접 입력하지 않는다. 근거: causeAdviceFor().
 - [M8-ui-2-f] **wire 계약이 바뀌었으므로 프로토콜 버전을 1 → 2 로 올린다.**
   새 메서드(getDecompositionHistory·getTreeAt) 2종이 추가되어 메서드 수는 23 → 25 다.
   구버전 클라이언트와 신서버가 섞이면 409 conflict 로 끊는다(조용히 오인하지 않는다).
@@ -1051,4 +1055,7 @@ argv: [...]}` 고정. runner는 run fs에서 직접 실행해 stdout을 golden�
 - [M8-ui-2-g] **3 client 모드가 같은 결과를 낸다.** inprocess/loopback/remote 모두
   `CoreClient` 인터페이스를 구현하므로 새 읽기 API는 세 모드에서 동일 계약이다.
   근거: `packages/local/test/m8-decomposition.test.ts`(PROCFORGE_CLIENT 로 3모드 검증).
+- [M8-ui-2-h] **(M8 후보) `causeAdviceFor` 는 분해마다 전체 events 를 스캔한다.**
+  세션 이벤트가 수천 건으로 늘면 이벤트 로그 인덱스(revision→actor, node→last split/report)가
+  필요하다. M8 범위에서는 단순 스캔으로 둔다. 근거: causeAdviceFor().
 
