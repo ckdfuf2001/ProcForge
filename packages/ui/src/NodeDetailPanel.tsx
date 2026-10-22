@@ -41,10 +41,11 @@ export function NodeDetailPanel({
   if (!detail) return <p>상세 불러오는 중…</p>;
 
   return (
-    <section>
-      <h3>
-        {detail.nodeId} · {detail.status}
-      </h3>
+    <section className="node-detail">
+      <div className="detail-heading">
+        <h3>{detail.nodeId}</h3>
+        <span className={`status status-${detail.status}`}>{detail.status}</span>
+      </div>
       <p>목표: {detail.goal}</p>
       <p>
         도구:{" "}

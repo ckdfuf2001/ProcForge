@@ -78,17 +78,20 @@ export function TreeView({
   const sorted = [...nodes].sort((a, b) => compareNodeIds(a.id, b.id));
 
   return (
-    <div>
-      <p>
-        실시간: {live} (revision {revision} · {nodes.length}노드)
-      </p>
+    <div className="tree-view">
+      <div className="live-line">
+        <span className={`live-dot live-${live}`} aria-hidden="true" />
+        <span>실시간 {live}</span>
+        <span className="muted">revision {revision}</span>
+        <span className="muted">{nodes.length}개 노드</span>
+      </div>
       {needsHuman.length > 0 && (
         <p role="status">사람 확인 필요: {needsHuman.join(", ")}</p>
       )}
       {blocked.length > 0 && <p>막힘: {blocked.join(", ")}</p>}
       {picked && (
-        <div>
-          <button type="button" onClick={() => setPicked(null)}>
+        <div className="node-detail-wrap">
+          <button className="btn btn-ghost" type="button" onClick={() => setPicked(null)}>
             ← 트리로
           </button>
           <NodeDetailPanel
@@ -98,44 +101,64 @@ export function TreeView({
           />
         </div>
       )}
-      <table>
-        <thead>
-          <tr>
-            <th>id</th>
-            <th>목표</th>
-            <th>상태</th>
-            <th>반복</th>
-            <th>남은</th>
-            <th>자물쇠</th>
-            <th>부작용</th>
-            <th>stale</th>
-            <th>의존</th>
-          </tr>
-        </thead>
-        <tbody>
-          {sorted.map((n) => (
-            <tr key={n.id} className={STATUS_CLASS[n.status] ?? "st-other"}>
-              <td>
-                <button type="button" onClick={() => setPicked(n.id)}>
-                  {n.id}
-                </button>
-              </td>
-              <td>{n.goal}</td>
-              <td>{n.status}</td>
-              <td>{n.attempts}</td>
-              <td>{n.retriesLeft}</td>
-              <td>{n.locked ? "잠김" : ""}</td>
-              <td>{n.sideEffect === "external" ? "외부" : ""}</td>
-              <td>
-                {n.staleSince
-                  ? `stale rev${n.staleSince.revision} (원인 ${n.staleSince.causeNodeId})`
-                  : ""}
-              </td>
-              <td>{n.dependsOn.join(",")}</td>
+      <div className="table-card">
+        <table className="data-table tree-table">
+          <thead>
+            <tr>
+              <th>id</th>
+              <th>목표</th>
+              <th>상태</th>
+              <th className="col-num">반복</th>
+              <th className="col-num">남은</th>
+              <th>자물쇠</th>
+              <th>부작용</th>
+              <th>stale</th>
+              <th>의존</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {sorted.map((n) => (
+              <tr key={n.id} className={STATUS_CLASS[n.status] ?? "st-other"}>
+                <td>
+                  <button className="btn-id" type="button" onClick={() => setPicked(n.id)}>
+                    {n.id}
+                  </button>
+                </td>
+                <td className="cell-goal">{n.goal}</td>
+                <td>
+                  <span className={`status status-${n.status}`}>{n.status}</span>
+                </td>
+                <td className="col-num">{n.attempts}</td>
+                <td className="col-num">{n.retriesLeft}</td>
+                <td>{n.locked ? <span className="status status-probing">잠김</span> : ""}</td>
+                <td>
+                  {n.sideEffect === "external" ? (
+                    <span className="status status-split">외부</span>
+                  ) : (
+                    ""
+                  )}
+                </td>
+                <td>
+                  {n.staleSince ? (
+                    <span className="status status-needs_human">
+                      stale rev{n.staleSince.revision} · {n.staleSince.causeNodeId}
+                    </span>
+                  ) : (
+                    ""
+                  )}
+                </td>
+                <td>
+                  {n.dependsOn.length === 0 ? (
+                    <span className="muted">-</span>
+                  ) : (
+                    n.dependsOn.map((id) => <code key={id}>{id}</code>)
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

@@ -155,7 +155,7 @@ export function RunPanel({
   );
 
   return (
-    <section>
+    <section className="panel run-panel">
       <h2>실행</h2>
       <label>
         절차서
