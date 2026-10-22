@@ -49,6 +49,19 @@ export const EventDetailSchema = z.object({
   reason: z.string().optional(),
   alternatives: z.array(z.string()).optional(),
   causeAdviseIds: z.array(z.string()).optional(),
+  /**
+   * M8-ui2: 원인이 된 조언의 사본. 노드 advice 가 나중에 바뀌어도
+   * "그때 무엇을 보고 나눴는지"가 이벤트에 남는다 (textPreview ≤ 200자).
+   */
+  causeAdvice: z
+    .array(
+      z.object({
+        id: z.string().min(1),
+        textPreview: z.string().max(200),
+        actor: ActorSchema,
+      }),
+    )
+    .optional(),
   /** 이 이벤트로 값이 바뀐 노드의 스냅샷 (변경분만, 큰 필드 제외) */
   nodesAfter: z.array(HistoryNodeSchema).optional(),
   removedIds: z.array(NodeIdSchema).optional(),

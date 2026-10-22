@@ -374,9 +374,19 @@ export class CoreService implements CoreClient {
    * 분해 사유의 "무엇 때문에 다시 나눴는가"를 자동으로 잇는다.
    * 구 세션의 조언에는 id가 없으므로 자동으로 비어 있다.
    */
-  private causeAdviseIdsFor(sid: string, nodeId: string): string[] {
+  private causeAdviceFor(
+    sid: string,
+    nodeId: string,
+  ): {
+    ids: string[];
+    copies: { id: string; textPreview: string; actor: Actor }[];
+  } {
     let cutoff = -1;
+    // 조언 revision → 등록 actor (pfAdvise 이벤트에서 복원).
+    const adviseActor = new Map<number, Actor>();
     for (const e of this.store.readEvents(sid)) {
+      if (e.method === "pfAdvise" && e.nodeIds.includes(nodeId))
+        adviseActor.set(e.revision, e.actor);
       const isSplit = e.method === "pfResolve" && e.summary.startsWith("split ");
       const isReport = e.method === "pfReport";
       if (!isSplit && !isReport) continue;
@@ -384,15 +394,22 @@ export class CoreService implements CoreClient {
       if (e.revision > cutoff) cutoff = e.revision;
     }
     const n = this.store.getNode(sid, nodeId);
-    if (!n) return [];
-    return n.advice
-      .filter(
-        (a) =>
-          typeof a.id === "string" &&
-          a.revision !== undefined &&
-          a.revision > cutoff,
-      )
-      .map((a) => a.id as string);
+    if (!n) return { ids: [], copies: [] };
+    const picked = n.advice.filter(
+      (a) =>
+        typeof a.id === "string" &&
+        a.revision !== undefined &&
+        a.revision > cutoff,
+    );
+    return {
+      ids: picked.map((a) => a.id as string),
+      // M8-ui2 정정: 이벤트에 사본을 남긴다 (textPreview ≤ 200자, actor 포함).
+      copies: picked.map((a) => ({
+        id: a.id as string,
+        textPreview: a.text.length > 200 ? a.text.slice(0, 200) : a.text,
+        actor: adviseActor.get(a.revision as number) ?? "host",
+      })),
+    };
   }
 
   private sess(sid: string): Session {
@@ -1117,7 +1134,7 @@ export class CoreService implements CoreClient {
             this.store.saveNode(s.id, next);
             this.propagateStale(s.id, n.id, s.revision + 1);
             // M8-ui1: 이번 분해를 요구한 조언 (직전 split/report 이후 등록분).
-            const causeAdviseIds = this.causeAdviseIdsFor(s.id, n.id);
+            const cause = this.causeAdviceFor(s.id, n.id);
             // M5.8.1-4(a): 형제 2개 이상인데 ref/dependsOn 전부 비어 있으면 경고.
             const depWarn =
               withHashes.length >= 2 &&
@@ -1136,7 +1153,9 @@ export class CoreService implements CoreClient {
                 childIds: withHashes.map((c) => c.id),
                 ...(reason !== undefined ? { reason } : {}),
                 ...(alternatives.length > 0 ? { alternatives } : {}),
-                ...(causeAdviseIds.length > 0 ? { causeAdviseIds } : {}),
+                ...(cause.ids.length > 0
+                  ? { causeAdviseIds: cause.ids, causeAdvice: cause.copies }
+                  : {}),
               },
             };
           }

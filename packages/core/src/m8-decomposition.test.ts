@@ -317,6 +317,35 @@ describe("M8-ui2 조언→재분해 연결 (causeAdviseIds)", () => {
     });
     const ev = (await s.getEvents(sid)).at(-1)!;
     expect(ev.detail?.causeAdviseIds).toEqual([adviceId]);
+    expect(ev.detail?.causeAdvice).toEqual([
+      {
+        id: adviceId,
+        textPreview: "여기는 사람이 확인해야 한다.",
+        actor: "host",
+      },
+    ]);
+  });
+
+  it("causeAdvice 사본은 200자로 자르고 등록 actor를 남긴다", async () => {
+    const s = svc();
+    const sid = await started(s);
+    await s.pfResolve({
+      sessionId: sid, nodeId: "1", decision: "split",
+      children: [{ goal: "a" }], reason: REASON,
+    });
+    const long = "가".repeat(250);
+    await s.pfAdvise({
+      sessionId: sid, nodeId: "1.1", text: long, actor: "human",
+    });
+    const adviceId = (await s.getNode(sid, "1.1")).advice.at(-1)!.id;
+    await s.pfResolve({
+      sessionId: sid, nodeId: "1.1", decision: "split",
+      children: [{ goal: "a1" }], reason: "조언을 반영해 다시 나눈다.",
+    });
+    const ev = (await s.getEvents(sid)).at(-1)!;
+    expect(ev.detail?.causeAdvice).toEqual([
+      { id: adviceId, textPreview: "가".repeat(200), actor: "human" },
+    ]);
   });
 
   it("직전 split 이전의 조언은 원인이 아니다", async () => {
