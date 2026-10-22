@@ -49,6 +49,8 @@ export type UiServer = {
   url: string;
   token: string;
   port: number;
+  /** M8-ui4: 서버 재시작 감지용 인스턴스 id (매 기동마다 새 값) */
+  instance: string;
   close: () => Promise<void>;
   /** 테스트용: 현재 구독 수 */
   subscriberCount: (sessionId: string) => number;
@@ -274,6 +276,21 @@ export async function createUiServer(opts: {
   heartbeatMs?: number;
 }): Promise<UiServer> {
   const token = randomBytes(32).toString("hex");
+  // M8-ui4: 매 기동마다 다른 값. SPA 가 sessionStorage 의 이전 값과 비교해 재시작을 안다.
+  const instance = randomBytes(8).toString("hex");
+  // M8-ui4: 401 분당 상한 (IP 단위 고정 창). 초과분은 429.
+  const UNAUTHORIZED_PER_MINUTE = 30;
+  const unauthorized = new Map<string, { start: number; count: number }>();
+  const bumpUnauthorized = (ip: string): number => {
+    const now = Date.now();
+    const cur = unauthorized.get(ip);
+    if (!cur || now - cur.start >= 60_000) {
+      unauthorized.set(ip, { start: now, count: 1 });
+      return 1;
+    }
+    cur.count += 1;
+    return cur.count;
+  };
   // M7-ui2: 세션 이벤트 hub (App.getEventsPage 폴러 1개를 구독자들에 공유).
   const runSubs = new Map<string, number>();
   const hub = new SessionEventHub({
@@ -308,7 +325,8 @@ export async function createUiServer(opts: {
       // M7-5-3: 화면이 <meta> 또는 전역에서 nonce 를 읽을 수 있게 심어준다.
       const html = readFileSync(p, "utf8").replace(
         /<head>/i,
-        `<head><meta name="csp-nonce" content="${NONCES.get(res) as string}">`,
+        `<head><meta name="csp-nonce" content="${NONCES.get(res) as string}">` +
+          `<meta name="pf-instance" content="${instance}">`,
       );
       res.writeHead(200, {
         "content-type": MIME[".html"],
@@ -367,8 +385,14 @@ export async function createUiServer(opts: {
           err(res, 404, "not found");
           return;
         }
-        // 이후는 토큰 필수 (없음·불일치 401). 쿼리 토큰은 받지 않는다.
-        if (!tokenOk(req.headers["x-procforge-token"], token)) {
+        // M8-ui4: /api/* 만 토큰 필수. SPA 정적 파일은 위에서 무토큰으로 나간다.
+        // 쿼리 토큰은 받지 않는다 (헤더만). 401 이 분당 상한을 넘으면 429.
+        if (url.pathname.startsWith("/api/") && !tokenOk(req.headers["x-procforge-token"], token)) {
+          const ip = req.socket.remoteAddress ?? "unknown";
+          if (bumpUnauthorized(ip) > UNAUTHORIZED_PER_MINUTE) {
+            err(res, 429, "too many unauthorized attempts");
+            return;
+          }
           err(res, 401, "unauthorized");
           return;
         }
@@ -808,10 +832,11 @@ export async function createUiServer(opts: {
   );
   await listenWithRetry(server, opts.port ?? 0);
   const port = (server.address() as { port: number }).port;
-  return {
-    url: `http://127.0.0.1:${port}`,
-    token,
-    port,
+    return {
+      url: `http://127.0.0.1:${port}`,
+      token,
+      port,
+      instance,
     subscriberCount: (sid) => hub.count(sid),
     close: () =>
       new Promise<void>((r) => {

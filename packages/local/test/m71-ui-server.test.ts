@@ -211,6 +211,54 @@ describe("M7-1 ui-server 보안", () => {
     }
   });
 
+  it("M8-ui4: 정적 파일 무토큰·/api 토큰, 인스턴스 meta 주입", async () => {
+    writeFileSync(
+      join(emptyDir, "index.html"),
+      "<html><head><title>x</title></head><body></body></html>",
+    );
+    const srv = await createUiServer({
+      app: makeStubApp() as unknown as ProcForgeApp,
+      staticDir: emptyDir,
+    });
+    try {
+      const html = await fetch(`${srv.url}/`);
+      expect(html.status).toBe(200);
+      expect(await html.text()).toContain(
+        `<meta name="pf-instance" content="${srv.instance}">`,
+      );
+      // SPA 정적 경로는 토큰 없이도 401 이 아니다.
+      const asset = await fetch(`${srv.url}/assets/nope.js`);
+      expect(asset.status).not.toBe(401);
+      expect((await fetch(`${srv.url}/api/sessions`)).status).toBe(401);
+    } finally {
+      await srv.close();
+    }
+  });
+
+  it("M8-ui4: 401 분당 상한 초과 → 429 (정상 토큰은 계속 200)", async () => {
+    const srv = await stubServer();
+    try {
+      let last = 0;
+      for (let i = 0; i < 31; i++) {
+        last = (
+          await fetch(`${srv.url}/api/sessions`, {
+            headers: { "x-procforge-token": "bad" },
+          })
+        ).status;
+      }
+      expect(last).toBe(429);
+      expect(
+        (
+          await fetch(`${srv.url}/api/sessions`, {
+            headers: { "x-procforge-token": srv.token },
+          })
+        ).status,
+      ).toBe(200);
+    } finally {
+      await srv.close();
+    }
+  });
+
   it("SSE도 쿼리 토큰으로는 안 된다 (헤더 필수)", async () => {
     const srv = await stubServer([mkEvent(1, "1.1")]);
     try {
