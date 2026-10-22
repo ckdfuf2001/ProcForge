@@ -74,7 +74,8 @@ export function TokenGate(props: {
           </p>
         )}
         <p className="muted token-note">
-          토큰은 이 탭에서만 보관하며 쿠키는 쓰지 않습니다.
+          토큰은 이 탭의 sessionStorage에만 보관하며 쿠키는 쓰지 않습니다. 주소창의
+          #t= 값은 저장 직후 지웁니다.
         </p>
       </section>
     </main>

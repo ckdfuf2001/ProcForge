@@ -1067,7 +1067,13 @@ a:hover {
   }
 }
 
-/* M8-ui4: 토큰 입력 */
+/* M8-ui4: 토큰 입력 + 헤더 동작 */
+.header-actions {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+}
 .token-panel {
   display: grid;
   gap: 14px;

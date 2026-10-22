@@ -127,6 +127,17 @@ export function App() {
     setAuthEpoch((n) => n + 1);
   };
 
+  const disconnect = () => {
+    clearToken();
+    setStore(null);
+    setSessions(null);
+    setError(null);
+    setAuthError(null);
+    setPicked(null);
+    setAuthNotice("none");
+    setAuthEpoch((n) => n + 1);
+  };
+
   if (authNotice !== null) {
     return (
       <TokenGate
@@ -163,9 +174,14 @@ export function App() {
             <p className="brand-sub">절차 실행·검토 콘솔</p>
           </div>
         </div>
-        <div className="store-chip" title={store.storeDir}>
-          <span className="store-label">저장소</span>
-          <code>{store.storeDir}</code>
+        <div className="header-actions">
+          <div className="store-chip" title={store.storeDir}>
+            <span className="store-label">저장소</span>
+            <code>{store.storeDir}</code>
+          </div>
+          <button className="btn btn-ghost" type="button" onClick={disconnect}>
+            연결 해제
+          </button>
         </div>
       </header>
       {store.duplicateWarning && (
