@@ -91,9 +91,13 @@ describe("dto", () => {
       reason: null,
       alternatives: [],
       causeAdviseIds: [],
+      depthSource: "snapshot",
     };
     expect(DecompositionHistoryEntrySchema.safeParse(round).success).toBe(true);
     expect(DecompositionHistoryEntrySchema.safeParse({ ...round, reason: "사유" }).success).toBe(true);
+    expect(
+      DecompositionHistoryEntrySchema.safeParse({ ...round, depthSource: "guess" }).success,
+    ).toBe(false);
     expect(TreeAtOutputSchema.safeParse({ nodes: [], structureOnly: true }).success).toBe(true);
     expect(TreeAtOutputSchema.safeParse({ nodes: [] }).success).toBe(false);
   });
