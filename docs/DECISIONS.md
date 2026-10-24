@@ -1098,12 +1098,39 @@ argv: [...]}` 고정. runner는 run fs에서 직접 실행해 stdout을 golden�
   메시지에 대상 노드 id 를 함께 준다. 승인이 있던 노드는 승인 시점 hash 를 남기고,
   재확정으로 hash 가 바뀌면 "재승인 필요" 경고를 낸다. 근거: app.finalize().
 - [M8-1-0-e] **`needs_reverify` 는 pf_next 가 ready 로 취급해 probing 으로 넘긴다.**
-  재시도 한도(retries)는 리셋하고 attempt 이력은 유지한다. 러너(--changed 포함)도
-  재검증 대기 노드를 재실행 대상으로 본다. 근거: pfNext(), runner/run.ts.
+  재시도 한도(retries)는 리셋하고 attempt 이력은 유지한다.
+  (보정: 러너는 재검증 대기 노드를 **실행하지 않는다** — [M8-1-0-i].)
+  근거: pfNext(), enterProbing().
 - [M8-1-0-f] **이 wire 계약이 바뀌었으므로 프로토콜 버전을 2 → 3 으로 올린다.**
   노드 상태에 `needs_reverify` 가 추가되었다. 근거: `packages/shared/src/wire.ts`.
 - [M8-1-0-g] **마이그레이션은 없다.** 기존 leaf 를 자동으로 전이시키지 않는다
   (d290 1.3 포함). 확정 이후에 실제로 hash 가 바뀐 노드만 재검증 대상이 된다.
   근거: docs/M8-1-0-spec.md.
+
+### M8-1-0 보정 (2026-10-24, 검토 반영)
+
+- [M8-1-0-h] **타임라인 이벤트는 "그 노드를 만든 라운드" 에 귀속한다.**
+  라운드 뒤 이벤트의 범위를 "다음 분해 라운드 직전까지"로 자르면, 나중에 준
+  의견이 어느 라운드에도 뜨지 않는다(R1 후 R2 로 1.2 를 다시 나눈 뒤 1.3 에 준
+  의견 → 사라짐). 노드별로 "만든 라운드 revision" 부터 "다시 나뉘거나 삭제될
+  때까지" 를 범위로 삼는다. 근거: getDecompositionHistory().
+- [M8-1-0-i] **러너는 `needs_reverify` 노드를 실행하지 않는다.**
+  옛 인자로 돌려 pass 로 세면 "재확정 전" 결과가 확정처럼 보인다. 실행하지 않고
+  `status:"needs_reverify"` 로 별도 보고한다(pass 미포함, 종료 코드 ≠ 0,
+  마지막 pass hash 제거 → 다음 실행 대상 유지). 근거: runner/run.ts.
+- [M8-1-0-j] **`pfReopen` 은 `reverifySince` 를 지우지 않는다.**
+  지우면 옛 golden attempt 로 다시 확정할 수 있어 재검증 가드가 뚫린다.
+  근거: pfReopen().
+- [M8-1-0-k] **재승인 안내는 `approvals.json` 과도 비교한다.**
+  core 승인 기록(사람이 external 계획을 승인)뿐 아니라, 무인 실행이 실제로 쓰는
+  `procedures/<name>/approvals.json` 의 고정값(approvalHash)도 현재 값과 비교해
+  같은 문구("재승인 필요")로 나열한다. 근거: app.finalize().
+- [M8-1-0-l] **재검증 전환은 `pfNext`·`pfReport` 가 공유한다.**
+  `pf_next` 를 거치지 않고 바로 보고하는 경로도 같은 전환을 탄다(probing 전환 +
+  재시도 한도 리셋 + 타임라인 'reverify' 이벤트). 근거: enterProbing().
+- [M8-1-0-m] **`pfAdvise` 의 잠금 거절은 확정 leaf 에만 적용한다.**
+  M8-1-0 이전에는 `pfAdvise` 에 잠금 검사가 없었다. 사양("잠긴 leaf 에 대한
+  쓰기는 거절") 범위를 넓혀 잠긴 split 노드에 의견을 거는 기존 경로를 바꾸지
+  않는다. 근거: pfAdvise().
 
 

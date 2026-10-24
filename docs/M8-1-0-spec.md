@@ -134,13 +134,33 @@ confirm 거절 → 새 report로 재확정 → done
 | `163581d` | [M8-1-0-7] e2e: leaf 의견→재검증 배지→재확정→타임라인 |
 | `161e231` | [M8-1-0-8] docs: DECISIONS [M8-1-0] + M5.8 주석 + 사양 상태 |
 | `4ecd750` | [M8-1-0-9] docs: UI 스크린샷 4장 |
+| `759588b` | [M8-1-0-10] docs: 완료 보고(커밋표·CI·스크린샷) |
+| `736a6cb` | [M8-1-0-b1] core: 타임라인 이벤트를 노드→라운드 귀속으로 변경 |
+| `969879b` | [M8-1-0-b2] core: pfReopen 이 reverifySince 유지 |
+| `e2400fd` | [M8-1-0-b3] core: pfReport 직접 경로도 pfNext 와 같은 전환 |
+| `23a1784` | [M8-1-0-b4] core: pfAdvise 잠금 거절을 확정 leaf 로 한정 |
+| `cf5f6bb` | [M8-1-0-b5] local: 러너는 needs_reverify 노드를 실행하지 않음 |
+| `524744b` | [M8-1-0-b6] local: finalize 이 approvals.json 불일치도 재승인 안내 |
+| `dee8a1c` | [M8-1-0-b7] e2e: 재검증 체인 라벨 정합 |
+
+### 검토 보정 (2026-10-24)
+
+| 항목 | 보정 | 커밋 |
+| --- | --- | --- |
+| a 타임라인 귀속 | 이벤트를 "그 노드를 만든 라운드"에 붙이고, 재분해·삭제까지 표시 | `736a6cb` |
+| b 러너 실행 | 재검증 대기 노드는 실행 없이 `status:"needs_reverify"` 보고, exit ≠ 0 | `cf5f6bb` |
+| c reopen | `reverifySince` 유지 → 옛 attempt confirm 거절 | `969879b` |
+| d 재승인 | `approvals.json` 고정값 불일치도 같은 문구로 나열 | `524744b` |
+| e 직접 보고 | `pfReport` 도 `pfNext` 와 같은 전환(재시도 리셋·reverify 이벤트) | `e2400fd` |
+| f 잠금 범위 | `pfAdvise` 잠금 거절을 확정 leaf 로 한정(기존 경로 유지) | `23a1784` |
 
 ### 검증
 
-- 로컬: shared 76 / core 116 / local 477(+2 skip) 통과, E2E 15건 통과
+- 로컬: shared 76 / core 120 / local 480(+2 skip) 통과, E2E 15건 통과
   (신규 `m8-1-reverify.spec.ts` 1건 포함).
 - CI: run `40073225619` (head_sha `161e231`) 7잡 green —
   build-test 4(inprocess/loopback × ubuntu/windows) + remote-mode 2 + e2e 1.
 - 스크린샷: `docs/ui-shots/m8-1-0-1-token.png` · `m8-1-0-2-rounds.png` ·
   `m8-1-0-3-round-selected.png`(라운드 클릭 → 의견/실행/재확정 3이벤트) ·
   `m8-1-0-4-reverify.png`(재검증 배지·안내·필터).
+  (보정 이후 라벨은 의견 → 재검증 → 재확정 으로 바뀐다 — e2e `dee8a1c`.)
