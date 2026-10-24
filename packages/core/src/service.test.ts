@@ -1102,13 +1102,13 @@ describe("M4.2-2 pfEditArgs/pfEditNode", () => {
     return { svc, sid: s.session.id };
   }
 
-  it("fixed 값 수정: leaf→open + suggestedArgs + golden 보존", async () => {
+  it("fixed 값 수정: leaf→needs_reverify + suggestedArgs + golden 보존", async () => {
     const { svc, sid } = await leafed();
     const goldenBefore = (await svc.pfTree(sid)).nodes[0].golden!;
     const r = await svc.pfEditArgs({
       sessionId: sid, nodeId: "1", patch: { set: { file_path: { kind: "fixed", value: "b" } } },
     });
-    expect(r.node.status).toBe("open");
+    expect(r.node.status).toBe("needs_reverify");
     expect(r.node.args).toEqual({ file_path: { kind: "fixed", value: "b" } });
     expect(r.node.suggestedArgs).toEqual({ file_path: { kind: "fixed", value: "b" } });
     expect(r.node.golden).toEqual(goldenBefore);
@@ -1128,7 +1128,7 @@ describe("M4.2-2 pfEditArgs/pfEditNode", () => {
     const v = await svc.pfEditArgs({
       sessionId: sid, nodeId: "1", patch: { set: { file_path: { kind: "var", ref: "${params.p}" } } },
     });
-    expect(v.node.status).toBe("open");
+    expect(v.node.status).toBe("needs_reverify");
     // 타입 위반
     await expect(
       svc.pfEditArgs({ sessionId: sid, nodeId: "1", patch: { set: { file_path: { kind: "fixed", value: 123 } } } }),
@@ -1150,9 +1150,9 @@ describe("M4.2-2 pfEditArgs/pfEditNode", () => {
 
   it("pfEditNode: 목표·조건 직접 수정", async () => {
     const { svc, sid } = await leafed();
-    // 목표 변경: leaf→open
+    // 목표 변경: leaf→needs_reverify
     const g = await svc.pfEditNode({ sessionId: sid, nodeId: "1", goal: "새 목표" });
-    expect(g.node.status).toBe("open");
+    expect(g.node.status).toBe("needs_reverify");
     expect(g.node.goal).toBe("새 목표");
     // 조건 추가 (형식 오류 거부)
     await expect(

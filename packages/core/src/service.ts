@@ -86,6 +86,7 @@ import type {
   EventDetail,
   EventEntry,
   HistoryNode,
+  DecompositionEvent,
   DecompositionHistoryEntry,
 } from "@procforge/shared/dto.js";
 import {
@@ -365,6 +366,7 @@ export class CoreService implements CoreClient {
       locked: n.locked,
       sideEffect: n.sideEffect,
       ...(n.staleSince ? { staleSince: { ...n.staleSince } } : {}),
+      ...(n.reverifySince ? { reverifySince: { ...n.reverifySince } } : {}),
       hash: n.hash,
     };
   }
@@ -449,6 +451,29 @@ export class CoreService implements CoreClient {
       ...(until !== undefined ? { until } : {}),
       ...(stateWrites !== undefined ? { stateWrites } : {}),
     });
+  }
+
+  /**
+   * M8-1-0: 확정 leaf의 hash를 바꾼 쓰기 → needs_reverify.
+   * hash가 같으면 leaf 유지(순수 메모). leaf가 아닌 노드는 호출부 동작 유지.
+   */
+  private withLeafReverify(
+    prev: Node,
+    next: Node,
+    cause: "advise" | "edit_args" | "edit_node",
+    revision: number,
+  ): Node {
+    if (prev.status !== "leaf") return next;
+    if (next.hash === prev.hash) return { ...next, status: "leaf" };
+    return {
+      ...next,
+      status: "needs_reverify",
+      reverifySince: {
+        revision,
+        causeNodeId: prev.id,
+        cause,
+      },
+    };
   }
 
   /**
@@ -577,7 +602,9 @@ export class CoreService implements CoreClient {
         const ready = nodes
           .filter(
             (n) =>
-              (n.status === "open" || n.status === "probing") &&
+              (n.status === "open" ||
+                n.status === "probing" ||
+                n.status === "needs_reverify") &&
               effectiveDeps(n, byId).every((d) => {
                 const dep = byId.get(d);
                 return dep !== undefined && isResolved(dep, byId);
@@ -589,6 +616,7 @@ export class CoreService implements CoreClient {
             (n) =>
               n.status === "open" ||
               n.status === "probing" ||
+              n.status === "needs_reverify" ||
               n.status === "needs_human",
           );
           if (!pending) return { result: { done: true }, summary: "next done" };
@@ -608,7 +636,12 @@ export class CoreService implements CoreClient {
           }
           // M3.4.3-1 교착: ready 0 + pending + needs_human 없음
           const stuck = nodes
-            .filter((n) => n.status === "open" || n.status === "probing")
+            .filter(
+              (n) =>
+                n.status === "open" ||
+                n.status === "probing" ||
+                n.status === "needs_reverify",
+            )
             .sort((a, b) => compareNodeIds(a.id, b.id));
           const { blocked, causes } = computeDeadlock(stuck, byId);
           // 원인 노드 needs_human 승격. 승격 가능 원인이 하나도 없으면 첫 stuck 자승격.
@@ -616,14 +649,22 @@ export class CoreService implements CoreClient {
           const promoted: string[] = [];
           for (const cid of causes) {
             const c = this.node(sessionId, cid);
-            if (c.status === "open" || c.status === "probing") {
+            if (
+              c.status === "open" ||
+              c.status === "probing" ||
+              c.status === "needs_reverify"
+            ) {
               this.store.saveNode(sessionId, { ...c, status: "needs_human" });
               promoted.push(cid);
             }
           }
           if (blocked.length > 0 && promoted.length === 0 && stuck.length > 0) {
             const f = this.node(sessionId, stuck[0].id);
-            if (f.status === "open" || f.status === "probing") {
+            if (
+              f.status === "open" ||
+              f.status === "probing" ||
+              f.status === "needs_reverify"
+            ) {
               this.store.saveNode(sessionId, { ...f, status: "needs_human" });
             }
           }
@@ -655,9 +696,17 @@ export class CoreService implements CoreClient {
           };
         }
         // M4.2-2.5.1-3: 분기 시 open→probing 전환 저장. 처음 전환될 때만 enteredProbing.
-        const wasOpen = n.status === "open";
-        const disp = wasOpen ? { ...n, status: "probing" as const } : n;
-        if (wasOpen) this.store.saveNode(sessionId, disp);
+        // M8-1-0: needs_reverify도 probing으로 전환하고 재시도 한도를 리셋한다
+        // (attempt 이력은 유지 — 재확정 가드는 revision으로 판정한다).
+        const entering = n.status === "open" || n.status === "needs_reverify";
+        const disp = entering
+          ? {
+              ...n,
+              status: "probing" as const,
+              ...(n.status === "needs_reverify" ? { retries: 0 } : {}),
+            }
+          : n;
+        if (entering) this.store.saveNode(sessionId, disp);
         return {
           result: {
             done: false,
@@ -668,7 +717,7 @@ export class CoreService implements CoreClient {
                 `pf_report(selfVerdict/selfReason 필수), 아니면 pf_split. pass여도 leaf 자동 확정 없음 — pf_confirm_leaf(tool, argSpecs) 제출이 필요하다. ` +
                 `항목 반복은 map, 페이지는 until, 지난 실행 기억은 state를 쓰라. ` +
                 `offset·cursor 증가 연산은 ref로 못 하므로 until 본문을 script로 받아라.`,
-            enteredProbing: wasOpen,
+            enteredProbing: entering,
           },
           summary: `next ${n.id}`,
         };
@@ -697,7 +746,13 @@ export class CoreService implements CoreClient {
         if (!input.selfVerdict || !input.selfReason)
           throw err("bad_request", "selfVerdict and selfReason are required");
         if (n.locked) throw err("conflict", `node ${n.id} is locked`);
-        if (n.status !== "open" && n.status !== "probing")
+        // M8-1-0: 재검증 대기(needs_reverify) 노드도 새 attempt를 보고할 수 있다.
+        // (pf_next를 거치지 않고 바로 재검증 결과를 제출하는 경로)
+        if (
+          n.status !== "open" &&
+          n.status !== "probing" &&
+          n.status !== "needs_reverify"
+        )
           throw err("conflict", `node ${n.id} is not reportable (${n.status})`);
 
         // external 차단 (§5)
@@ -757,6 +812,8 @@ export class CoreService implements CoreClient {
         const attemptBase = {
           id: input.attemptId ?? newAttemptId(),
           at: new Date().toISOString(),
+          // M8-1-0: 재확정 가드가 "재검증 이후 attempt"를 revision으로 판정한다.
+          revision: s.revision + 1,
           tool: input.tool,
           args: input.args,
           resultSummary: input.resultSummary,
@@ -1125,6 +1182,8 @@ export class CoreService implements CoreClient {
             const next: Node = {
               ...n,
               status: "split",
+              // M8-1-0: 재검증 대기 중 분해하면 재검증 표시는 더 이상 유효하지 않다.
+              reverifySince: undefined,
               children: withHashes.map((c) => c.id),
               // M8-ui1: 분해 사유를 부모 노드에 남긴다 (hash 계산 대상 아님 —
               // computeNodeHash는 goal/args/constraints/dependsOn만 본다).
@@ -1162,7 +1221,11 @@ export class CoreService implements CoreClient {
           case "leaf": {
             // M1.5-1: leaf 확정은 여기서만. pass여도 report에서 자동 확정 없음.
             if (n.locked) throw err("conflict", `node ${n.id} is locked`);
-            if (n.status !== "probing" && n.status !== "open")
+            if (
+              n.status !== "probing" &&
+              n.status !== "open" &&
+              n.status !== "needs_reverify"
+            )
               throw err(
                 "conflict",
                 `node ${n.id} is not resolvable (${n.status})`,
@@ -1226,6 +1289,17 @@ export class CoreService implements CoreClient {
                 throw err(
                   "conflict",
                   "leaf requires passing attempt. report first.",
+                );
+            }
+            // M8-1-0: 재검증 이후의 attempt만 재확정에 쓸 수 있다.
+            if (n.reverifySince) {
+              if (
+                last!.revision === undefined ||
+                last!.revision <= n.reverifySince.revision
+              )
+                throw err(
+                  "bad_request",
+                  `재검증 필요: 새 pf_report 후 confirm (attempt ${last!.id}는 재검증 이전 것이다).`,
                 );
             }
             if (
@@ -1378,6 +1452,9 @@ export class CoreService implements CoreClient {
             const next: Node = {
               ...n,
               status: "leaf",
+              // M8-1-0: 재확정으로 재검증·stale 표시를 모두 해제한다.
+              reverifySince: undefined,
+              staleSince: undefined,
               tool: {
                 server: input.tool.server,
                 name: input.tool.name,
@@ -1433,6 +1510,7 @@ export class CoreService implements CoreClient {
       () => {
         const s = this.sess(input.sessionId);
         const n = this.node(input.sessionId, input.nodeId);
+        if (n.locked) throw err("conflict", `node ${n.id} is locked`);
         let constraints: Constraint[];
         let rejected: { proposal: unknown; reason: string }[] = [];
         let suggestNote = "";
@@ -1521,8 +1599,9 @@ export class CoreService implements CoreClient {
         };
         const oldHash = n.hash;
         next.hash = this.hashFor(s.id, next);
-        this.store.saveNode(s.id, next);
-if (oldHash !== next.hash) this.propagateStale(s.id, input.nodeId, s.revision + 1);
+        const saved = this.withLeafReverify(n, next, "advise", s.revision + 1);
+        this.store.saveNode(s.id, saved);
+if (oldHash !== saved.hash) this.propagateStale(s.id, input.nodeId, s.revision + 1);
         const node = this.node(input.sessionId, input.nodeId);
         return {
           result: {
@@ -1596,19 +1675,18 @@ if (oldHash !== next.hash) this.propagateStale(s.id, input.nodeId, s.revision + 
           );
         const problem = checkFixedAgainstInputSchema(merged, cat.inputSchema);
         if (problem) throw err("bad_request", problem);
-        const reopened = n.status === "leaf" ? ("open" as const) : n.status;
         const next: Node = {
           ...n,
-          status: reopened,
           args: merged,
           suggestedArgs: merged,
         };
         next.hash = this.hashFor(s.id, next);
-        this.store.saveNode(s.id, next);
+        const saved = this.withLeafReverify(n, next, "edit_args", s.revision + 1);
+        this.store.saveNode(s.id, saved);
         this.propagateStale(s.id, n.id, s.revision + 1);
         return {
           result: {
-            node: next,
+            node: saved,
             instruction: `인자 수정됨. pf_next로 계속하라.`,
           },
           summary: `editArgs ${n.id}`,
@@ -1632,6 +1710,8 @@ if (oldHash !== next.hash) this.propagateStale(s.id, input.nodeId, s.revision + 
     wouldStale: string[];
     newHash: string;
     revision: number;
+    /** M8-1-0: 대상이 leaf이고 hash가 바뀌면 재검증 대상이 된다. */
+    selfReverify: boolean;
   }> {
     // 읽기 전용 확인 (touch 없음) — 여기서 상태가 바뀌면 안 된다.
     const s = this.checkFreshRead(input.sessionId);
@@ -1675,7 +1755,12 @@ if (oldHash !== next.hash) this.propagateStale(s.id, input.nodeId, s.revision + 
       }
     }
     wouldStale.sort(compareNodeIds);
-    return { wouldStale, newHash: nextHash, revision: s.revision };
+    return {
+      wouldStale,
+      newHash: nextHash,
+      revision: s.revision,
+      selfReverify: n.status === "leaf" && nextHash !== n.hash,
+    };
   }
 
   /** 목표·검사 조건 직접 수정 (M4.2-2) */
@@ -1895,11 +1980,12 @@ if (oldHash !== next.hash) this.propagateStale(s.id, input.nodeId, s.revision + 
         if (retrySpec !== undefined)
           (next as { retry?: unknown }).retry = retrySpec;
         next.hash = this.hashFor(s.id, next);
-        this.store.saveNode(s.id, next);
+        const saved = this.withLeafReverify(n, next, "edit_node", s.revision + 1);
+        this.store.saveNode(s.id, saved);
         this.propagateStale(s.id, n.id, s.revision + 1);
         return {
           result: {
-            node: next,
+            node: saved,
             instruction: `노드 수정됨. pf_next로 계속하라.`,
           },
           summary: `editNode ${n.id}`,
@@ -2193,12 +2279,68 @@ if (oldHash !== next.hash) this.propagateStale(s.id, input.nodeId, s.revision + 
     sessionId: string;
   }): Promise<DecompositionHistoryEntry[]> {
     this.checkFreshRead(input.sessionId);
+    const all = this.store.readEvents(input.sessionId);
     const out: DecompositionHistoryEntry[] = [];
-    for (const e of this.store.readEvents(input.sessionId)) {
+    for (const e of all) {
       const round = this.roundOfEvent(e);
       if (round) out.push(round);
     }
+    // M8-1-0: 라운드 뒤에 이어진 노드 이벤트(의견 → 재검증 → 재확정)를 붙인다.
+    // 범위: 해당 라운드의 자식 노드에 닿는 이벤트만, 다음 분해 라운드 직전까지.
+    for (let i = 0; i < out.length; i++) {
+      const round = out[i]!;
+      const nextRevision = out[i + 1]?.revision ?? Number.MAX_SAFE_INTEGER;
+      const children = new Set(round.childIds);
+      const events = all
+        .filter(
+          (e) =>
+            e.revision > round.revision &&
+            e.revision < nextRevision &&
+            e.nodeIds.some((id) => children.has(id)),
+        )
+        .filter((e) => this.decompositionEventKind(e, children) !== null)
+        .map((e) => ({
+          revision: e.revision,
+          at: e.at,
+          actor: e.actor,
+          method: e.method,
+          summary: e.summary,
+          kind: this.decompositionEventKind(e, children) ?? "other",
+          nodeIds: e.nodeIds.filter((id) => children.has(id)),
+        }));
+      if (events.length > 0) out[i] = { ...round, events };
+    }
     return out;
+  }
+
+  /**
+   * M8-1-0: 라운드 자식 노드 이벤트의 분류.
+   * null = 타임라인에 넣지 않는 이벤트(분해 자체·잠금 등).
+   */
+  private decompositionEventKind(
+    e: EventEntry,
+    children: Set<string>,
+  ): DecompositionEvent["kind"] | null {
+    switch (e.method) {
+      case "pfAdvise":
+        return "advise";
+      case "pfNext":
+        // 재검증 대기가 실제로 probing으로 넘어간 이벤트만 "reverify"로 본다.
+        return e.detail?.nodesAfter?.some(
+          (n) => children.has(n.id) && n.reverifySince !== undefined,
+        )
+          ? "reverify"
+          : null;
+      case "pfReport":
+        return "report";
+      case "pfResolve":
+        return e.summary.startsWith("leaf ") ? "confirm" : null;
+      case "pfEditArgs":
+      case "pfEditNode":
+        return "edit";
+      default:
+        return null;
+    }
   }
 
   /** 분해 이벤트 1건 → 라운드 1건 (구 이벤트·신 이벤트 모두 처리) */
@@ -2430,11 +2572,18 @@ if (oldHash !== next.hash) this.propagateStale(s.id, input.nodeId, s.revision + 
       .sort((a, b) => compareNodeIds(a.id, b.id))
       .map((n) => n.id);
     const stuck = nodes
-      .filter((n) => n.status === "open" || n.status === "probing")
+      .filter(
+        (n) =>
+          n.status === "open" ||
+          n.status === "probing" ||
+          n.status === "needs_reverify",
+      )
       .sort((a, b) => compareNodeIds(a.id, b.id));
     const ready = nodes.some(
       (n) =>
-        (n.status === "open" || n.status === "probing") &&
+        (n.status === "open" ||
+          n.status === "probing" ||
+          n.status === "needs_reverify") &&
         effectiveDeps(n, byId).every((d) => {
           const dep = byId.get(d);
           return dep !== undefined && isResolved(dep, byId);
@@ -2484,7 +2633,13 @@ if (oldHash !== next.hash) this.propagateStale(s.id, input.nodeId, s.revision + 
           const next: Node = {
             ...n,
             status: "probing",
-            approval: { at: new Date().toISOString(), note: input.note },
+            // M8-1-0: 승인 시점 hash를 남긴다 — 재확정으로 hash가 바뀌면
+            // finalize이 "재승인 필요"로 안내한다.
+            approval: {
+              at: new Date().toISOString(),
+              note: input.note,
+              hash: n.hash,
+            },
           };
           this.store.saveNode(s.id, next);
           return { result: next, summary: `approve ${input.nodeId} yes` };
@@ -2544,7 +2699,12 @@ if (oldHash !== next.hash) this.propagateStale(s.id, input.nodeId, s.revision + 
       },
       () => {
         const n = this.node(input.sessionId, input.nodeId);
-        const next = { ...n, locked: false, status: "open" as const };
+        const next = {
+          ...n,
+          locked: false,
+          status: "open" as const,
+          reverifySince: undefined,
+        };
         this.store.saveNode(input.sessionId, next);
         return { result: next, summary: `reopen ${input.nodeId}` };
       },
