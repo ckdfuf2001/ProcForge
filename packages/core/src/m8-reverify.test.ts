@@ -253,6 +253,25 @@ describe("M8-1-0 leaf 자기 재검증", () => {
     expect(advised.node.reverifySince).toBeUndefined();
   });
 
+  it("잠긴 split 노드의 의견은 거절하지 않는다(M8-1-0 이전 동작 유지)", async () => {
+    const s = svc();
+    const { session } = await s.pfStart({ request: "잠금", toolCatalog: catalog });
+    const sid = session.id;
+    await s.pfResolve({
+      sessionId: sid,
+      nodeId: "1",
+      decision: "split",
+      children: [{ goal: "a" }],
+      reason: "잠금 확인용 분해. 자식 하나를 만든다.",
+    });
+    await s.pfLock({ sessionId: sid, nodeId: "1" });
+    const advised = await s.pfAdvise({
+      sessionId: sid,
+      nodeId: "1",
+      text: "방향을 더 다듬자.",
+    });
+    expect(advised.node.id).toBe("1");
+  });
 
   it("reopen해도 reverifySince는 남는다 — 옛 attempt로 확정 불가", async () => {
     const s = svc();

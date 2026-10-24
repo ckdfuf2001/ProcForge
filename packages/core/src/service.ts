@@ -1532,7 +1532,11 @@ export class CoreService implements CoreClient {
       () => {
         const s = this.sess(input.sessionId);
         const n = this.node(input.sessionId, input.nodeId);
-        if (n.locked) throw err("conflict", `node ${n.id} is locked`);
+        // M8-1-0: 잠긴 **확정 leaf**에 대한 쓰기는 거절한다(재검증 전이 대상).
+        // non-leaf(잠긴 split 등)의 조언 거부는 M8-1-0 이전 동작을 그대로 둔다 —
+        // 범위를 넓히면 기존 경로(잠긴 split에 의견)가 바뀐다.
+        if (n.locked && n.status === "leaf")
+          throw err("conflict", `node ${n.id} is locked`);
         let constraints: Constraint[];
         let rejected: { proposal: unknown; reason: string }[] = [];
         let suggestNote = "";
