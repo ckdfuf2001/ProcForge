@@ -35,6 +35,14 @@ export const HistoryNodeSchema = z.object({
       causeNodeId: NodeIdSchema,
     })
     .optional(),
+  /** M8-1-0: 자기 재검증 대기 사유 (확정 후 hash 변경으로 leaf가 열린 상태) */
+  reverifySince: z
+    .object({
+      revision: z.number().int().min(0),
+      causeNodeId: NodeIdSchema,
+      cause: z.enum(["advise", "edit_args", "edit_node"]),
+    })
+    .optional(),
   hash: z.string().nullable(),
 });
 export type HistoryNode = z.infer<typeof HistoryNodeSchema>;
@@ -244,6 +252,28 @@ export const GetNodeInputSchema = z.object({
 export type GetNodeInput = z.infer<typeof GetNodeInputSchema>;
 
 /** M8-ui2: 분해 라운드 1건 (읽기 전용, touch 없음) */
+/**
+ * M8-1-0: 라운드 아래 노드 이벤트 1건.
+ * "의견 → 재검증 → 재확정" 체인이 UI 타임라인에서 보이도록 붙인다.
+ */
+export const DecompositionEventSchema = z.object({
+  revision: z.number().int().min(0),
+  at: z.string().min(1),
+  actor: ActorSchema,
+  method: z.string().min(1),
+  summary: z.string().min(1),
+  kind: z.enum([
+    "advise",
+    "reverify",
+    "report",
+    "confirm",
+    "edit",
+    "other",
+  ]),
+  nodeIds: z.array(z.string()),
+});
+export type DecompositionEvent = z.infer<typeof DecompositionEventSchema>;
+
 export const DecompositionHistoryEntrySchema = z.object({
   revision: z.number().int().min(0),
   at: z.string().min(1),
@@ -256,6 +286,8 @@ export const DecompositionHistoryEntrySchema = z.object({
   reason: z.string().nullable(),
   alternatives: z.array(z.string()),
   causeAdviseIds: z.array(z.string()),
+  /** M8-1-0: 이 라운드 뒤에 이어진 노드 이벤트 (의견 → 재검증 → 재확정) */
+  events: z.array(DecompositionEventSchema).optional(),
 });
 export type DecompositionHistoryEntry = z.infer<
   typeof DecompositionHistoryEntrySchema

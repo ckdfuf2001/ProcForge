@@ -27,7 +27,7 @@ import { errorCodeOf, pfError } from "./errors.js";
  */
 
 /** 프로토콜 버전 (M6-1). 클라이언트는 헤더로 전송, 서버는 검사. */
-export const PROTOCOL_VERSION = 2;
+export const PROTOCOL_VERSION = 3;
 export const PROTOCOL_VERSION_HEADER = "x-procforge-version";
 
 const RevActor = {

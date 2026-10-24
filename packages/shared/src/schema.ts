@@ -6,6 +6,8 @@ import { createHash } from "node:crypto";
 export const NodeStatusSchema = z.enum([
   "open",
   "probing",
+  /** M8-1-0: 확정 leaf의 hash가 바뀌어 재검증이 필요하다 (pf_next가 probing으로 전환) */
+  "needs_reverify",
   "leaf",
   "split",
   "needs_human",
@@ -244,6 +246,8 @@ export type ToolWithSchema = z.infer<typeof ToolWithSchemaSchema>;
 export const AttemptSchema = z.object({
   id: AttemptIdSchema,
   at: z.string().min(1),
+  /** M8-1-0: 이 attempt를 만든 세션 revision (재검증 이후 attempt 판정용) */
+  revision: z.number().int().min(0).optional(),
   tool: ToolRefSchema,
   args: z.record(z.unknown()),
   resultSummary: z.string(),
@@ -311,8 +315,14 @@ export const NodeSchema = z.object({
       ignore: z.array(z.string()).default([]),
     })
     .optional(),
-  /** external dry-run 승인 기록 (M2.6-4) */
-  approval: z.object({ at: z.string(), note: z.string().optional() }).optional(),
+  /** external dry-run 승인 기록 (M2.6-4). hash는 승인 시점 노드 hash (M8-1-0) */
+  approval: z
+    .object({
+      at: z.string(),
+      note: z.string().optional(),
+      hash: z.string().optional(),
+    })
+    .optional(),
   /** 사람이 수정한 인자 제안 (M4.2-2 pfEditArgs). 다음 보고 시 소진 */
   suggestedArgs: z.record(ArgSpecSchema).optional(),
   retries: z.number().int().min(0).default(0),
@@ -324,6 +334,17 @@ export const NodeSchema = z.object({
    */
   staleSince: z
     .object({ revision: z.number().int().min(0), causeNodeId: NodeIdSchema })
+    .optional(),
+  /**
+   * M8-1-0: 확정 leaf의 hash를 바꾼 쓰기 (advise/edit_args/edit_node).
+   * 이 revision 이후 attempt로만 재확정할 수 있다.
+   */
+  reverifySince: z
+    .object({
+      revision: z.number().int().min(0),
+      causeNodeId: NodeIdSchema,
+      cause: z.enum(["advise", "edit_args", "edit_node"]),
+    })
     .optional(),
 });
 export type Node = z.infer<typeof NodeSchema>;
@@ -427,6 +448,7 @@ export function computeNodeHash(input: {
 export const NodeStatusValues: NodeStatus[] = [
   "open",
   "probing",
+  "needs_reverify",
   "leaf",
   "split",
   "needs_human",

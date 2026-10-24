@@ -352,6 +352,8 @@ export interface CoreClient {
     wouldStale: string[];
     newHash: string;
     revision: number;
+    /** M8-1-0: 대상이 확정 leaf면 자기 재검증(needs_reverify) 대상이 된다 */
+    selfReverify: boolean;
   }>;
   /** 절차서 문서 조립 (M4.2-1, 검증·params 경고 포함. 파일 쓰기는 local) */
   pfBuildProcedure(
