@@ -103,6 +103,12 @@
 | `18e1802` | [M8-1-e] e2e: 가짜 OpenCode 생존 확인 경로 + C 문구 정합 |
 | `c6945f6` | [M8-1-f] docs: DECISIONS [M8-1] 6행 + 사양 상태 |
 | `83bf6aa` | [M8-1-er] shared: previewEdit wire 계약(advice·selfReverify·procedure) |
+| `3f08b90` | [M8-1-f2] docs: 완료 표 보완 |
+| `a5afe28` | [M8-1-ba] 보정 a: 신호 판정(첫 pf_* 분류·pf_start 경고·노란 배지) |
+| `0994dd5` | [M8-1-bb] 보정 b: 생존 확인 3초 상한·ocSid 인코딩 |
+| `152482d` | [M8-1-bc] 보정 c: toolPrefix 형식 검증 |
+| `fc285ac` | [M8-1-bd] 보정 d: 짝 확인 순서(②→①)·m74 네트워크 격리 |
+| (이 커밋) | [M8-1-be] 보정 e: dogfood 실측 양식 |
 
 ## 검증
 
