@@ -6,7 +6,8 @@ export type LinkMode = "b" | "a" | "c";
 export type LinkResult =
   // M8-1: copyText 는 B(전송 문구)와 같은 문자열 — 성공 시에도 함께 돌려준다
   // (전송·복사 문구가 언제나 같다는 계약을 확인하게 한다).
-  | { delivered: true; mode: "b" | "a"; copyText?: string }
+  // M8-1 a: warning = 신호 이후 첫 pf_* 호출이 pf_start 면 새 세션 시작이다.
+  | { delivered: true; mode: "b" | "a"; copyText?: string; warning?: string }
   | { delivered: false; degraded: string; copyText: string };
 
 export type LinkDeps = {
@@ -175,15 +176,37 @@ export function isPfToolPart(p: unknown): boolean {
   );
 }
 
+/** M8-1 a: pf_ tool part 의 도구 이름 */
+export function pfToolName(p: unknown): string | undefined {
+  if (!isPfToolPart(p)) return undefined;
+  return String((p as Record<string, unknown>)["tool"] ?? "");
+}
+
+/**
+ * M8-1 a: 기준점 이후의 **첫** 새 pf_* 호출 도구 이름.
+ * 신호 판정에 쓴다 — pf_start 면 "새 세션을 시작함" 경고다.
+ */
+export function firstNewPfTool(
+  parts: unknown[],
+  before: Set<string>,
+): string | undefined {
+  for (const p of parts) {
+    if (!isPfToolPart(p)) continue;
+    if (before.has(JSON.stringify(p))) continue;
+    return pfToolName(p);
+  }
+  return undefined;
+}
+
 /** 최신 pf_start 기준 sessionId (latest-wins. 재연결 시 새 세션이 이긴다) */
 export function readLatestPfSessionId(parts: unknown[]): string | undefined {
   return extractPfSessionId([...parts].reverse());
 }
 
 /**
- * SSE 1순위 감지. GET /event에서 message.part.updated를 읽어
- * 기준점 이후의 새 pf_ 호출이면 true. 스트림 종료·에러·기한 초과는
- * false (폴링 폴백으로 넘긴다).
+ * M8-1 a: SSE 1순위 감지. GET /event에서 message.part.updated를 읽어
+ * 기준점 이후의 **첫** 새 pf_* 호출의 도구 이름을 돌려준다.
+ * 스트림 종료·에러·기한 초과는 undefined (폴링 폴백으로 넘긴다).
  */
 async function sseNewPfCall(o: {
   baseUrl: string;
@@ -191,7 +214,7 @@ async function sseNewPfCall(o: {
   before: Set<string>;
   until: number;
   fetchImpl: typeof fetch;
-}): Promise<boolean> {
+}): Promise<string | undefined> {
   const ctrl = new AbortController();
   const timer = setTimeout(
     () => ctrl.abort(),
@@ -202,14 +225,14 @@ async function sseNewPfCall(o: {
       headers: { accept: "text/event-stream" },
       signal: ctrl.signal,
     });
-    if (!r.ok || !r.body) return false;
+    if (!r.ok || !r.body) return undefined;
     const reader = r.body.getReader();
     const dec = new TextDecoder();
     let buf = "";
     for (;;) {
-      if (Date.now() >= o.until) return false;
+      if (Date.now() >= o.until) return undefined;
       const { done, value } = await reader.read();
-      if (done) return false;
+      if (done) return undefined;
       buf += dec.decode(value, { stream: true });
       const blocks = buf.split("\n\n");
       buf = blocks.pop() ?? "";
@@ -225,14 +248,14 @@ async function sseNewPfCall(o: {
           const part = props?.part;
           if (!isPfToolPart(part)) continue;
           if (o.before.has(JSON.stringify(part))) continue;
-          return true;
+          return pfToolName(part);
         } catch {
           // 다음 블록
         }
       }
     }
   } catch {
-    return false;
+    return undefined;
   } finally {
     clearTimeout(timer);
   }
@@ -302,29 +325,26 @@ export async function sendContinue(opts: {
   const timeoutMs = clampTimeoutMs(opts.timeoutMs);
   const pollMs = opts.pollMs ?? 1000;
   const deadline = Date.now() + timeoutMs;
-  const isNewPfCall = (parts: unknown[]): boolean =>
-    parts.some((p) => isPfToolPart(p) && !before.has(JSON.stringify(p)));
   // M7-ui1.1-6: SSE 1순위, messages 폴링은 폴백 (대용량 세션 빈 페이지 오탐 회피).
   // 신호 직후엔 이미 호출이 반영돼 있을 수 있어 1회 즉시 확인한다 (지연 최소화).
   try {
-    if (isNewPfCall(await opts.deps.listParts(ocSid))) return paired();
+    const tool = firstNewPfTool(await opts.deps.listParts(ocSid), before);
+    if (tool !== undefined) return paired(tool);
   } catch {
     // 무시
   }
-  if (
-    await sseNewPfCall({
-      baseUrl: base,
-      sid: ocSid,
-      before,
-      until: deadline,
-      fetchImpl: doFetch,
-    })
-  ) {
-    return paired();
-  }
+  const tool = await sseNewPfCall({
+    baseUrl: base,
+    sid: ocSid,
+    before,
+    until: deadline,
+    fetchImpl: doFetch,
+  });
+  if (tool !== undefined) return paired(tool);
   for (;;) {
     try {
-      if (isNewPfCall(await opts.deps.listParts(ocSid))) return paired();
+      const nt = firstNewPfTool(await opts.deps.listParts(ocSid), before);
+      if (nt !== undefined) return paired(nt);
     } catch {
       // 폴링 실패 무시
     }
@@ -334,7 +354,11 @@ export async function sendContinue(opts: {
     await new Promise((r) => setTimeout(r, pollMs));
   }
 
-  async function paired(): Promise<LinkResult> {
+  /**
+   * M8-1 a: 신호 이후 첫 pf_* 호출을 분류한다.
+   * 같은 세션에서의 pf_next/pf_report → 정상. pf_start → 새 세션 시작 경고.
+   */
+  async function paired(tool: string | undefined): Promise<LinkResult> {
     // 짝짓기 갱신 (best-effort).
     try {
       const parts = await opts.deps.listParts(ocSid);
@@ -343,6 +367,15 @@ export async function sendContinue(opts: {
     } catch {
       // 무시
     }
-    return { delivered: true, mode: sigMode, copyText: opts.text };
+    const warning =
+      tool !== undefined && tool.toLowerCase().includes("pf_start")
+        ? "모델이 새 세션을 시작함(pf_start)"
+        : undefined;
+    return {
+      delivered: true,
+      mode: sigMode,
+      copyText: opts.text,
+      ...(warning !== undefined ? { warning } : {}),
+    };
   }
 }

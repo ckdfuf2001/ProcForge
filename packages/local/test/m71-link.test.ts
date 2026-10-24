@@ -21,7 +21,7 @@ import { ProcForgeApp, type SignalTarget } from "../src/app/app.js";
 // GET /event SSE.
 
 type Part = Record<string, unknown>;
-type FakeScenario = "b-ok" | "plan" | "a-ok" | "no-session";
+type FakeScenario = "b-ok" | "plan" | "a-ok" | "no-session" | "b-next";
 
 function startFake(
   scenario: FakeScenario,
@@ -45,8 +45,11 @@ function startFake(
   const toolPart = (sid: string): Part => ({
     // 짝짓기는 pf_start output의 sessionId로 한다 (M7-0 §3, extractPfSessionId).
     type: "tool",
-    tool: "procforge_pf_start",
-    part: { sessionID: sid, tool: "procforge_pf_start" },
+    tool: scenario === "b-next" ? "procforge_pf_next" : "procforge_pf_start",
+    part: {
+      sessionID: sid,
+      tool: scenario === "b-next" ? "procforge_pf_next" : "procforge_pf_start",
+    },
     state: {
       status: "completed",
       output: JSON.stringify({ sessionId: pfQueue.shift() ?? "pf-fake-x" }),
@@ -82,7 +85,7 @@ function startFake(
         send(400, { error: "parts required" });
         return;
       }
-      if (scenario === "b-ok") {
+      if (scenario === "b-ok" || scenario === "b-next") {
         // 신호 시점에 동기 push (폴링-읽기 경쟁 제거. 실서버는 비동기).
         push(sid, toolPart(sid));
       } else if (scenario === "plan") {
@@ -751,4 +754,49 @@ describe("M8-1 신호 문구 + 짝 유효성", () => {
       await fake.close();
     }
   });
+});
+
+describe("M8-1 보정: 신호 판정 + 생존 확인 상한", () => {
+  it("신호 이후 첫 pf_*가 pf_next면 정상(warning 없음)", async () => {
+    const fake = await startFake("b-next", { pfIds: ["pf-1"] });
+    try {
+      const app = stubApp({
+        signal: { baseUrl: fake.baseUrl, mode: "b", serverVersion: "1.18.18" },
+      });
+      const r = await app.adviseAndSignal({
+        sessionId: "pf-1",
+        nodeId: "1.2",
+        text: "x",
+        link: { openCodeSessionId: "ses-g" },
+      });
+      expect(r.signal.delivered).toBe(true);
+      if (r.signal.delivered) expect(r.signal.warning).toBeUndefined();
+    } finally {
+      await fake.close();
+    }
+  });
+
+  it("신호 이후 첫 pf_*가 pf_start면 delivered:true + 새 세션 경고", async () => {
+    const fake = await startFake("b-ok", { pfIds: ["pf-2"] });
+    try {
+      const app = stubApp({
+        signal: { baseUrl: fake.baseUrl, mode: "b", serverVersion: "1.18.18" },
+      });
+      const r = await app.adviseAndSignal({
+        sessionId: "pf-1",
+        nodeId: "1.2",
+        text: "x",
+        link: { openCodeSessionId: "ses-g" },
+      });
+      expect(r.signal.delivered).toBe(true);
+      if (r.signal.delivered) {
+        expect(r.signal.warning).toBe("모델이 새 세션을 시작함(pf_start)");
+      }
+      // pf_start 의 output 세션 id 로 짝이 갱신된다(새 세션이 이긴다).
+      expect(getPairing(pfdir, "ses-g")?.pfSessionId).toBe("pf-2");
+    } finally {
+      await fake.close();
+    }
+  });
+
 });

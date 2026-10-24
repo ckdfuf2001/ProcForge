@@ -55,6 +55,8 @@ export function EditPanel({
   const [externalChange, setExternalChange] = useState(false);
   // M7-5-6-d: 신호 실패 시 OpenCode 에 붙여넣을 문구(C 모드)
   const [signalCopy, setSignalCopy] = useState<string | null>(null);
+  // M8-1 a: 신호는 갔지만 모델이 새 세션(pf_start)으로 가면 노란 배지
+  const [signalWarning, setSignalWarning] = useState<string | null>(null);
   // M7-close-c: "최신 다시 읽기" 전에 초안을 보관/복사한다 (409로 유실 방지).
   const [preserved, setPreserved] = useState<string | null>(null);
 
@@ -266,6 +268,7 @@ export function EditPanel({
         disabled={busy}
         onClick={async () => {
           setSignalCopy(null);
+          setSignalWarning(null);
           // M8-1 c: 의견 저장 전 미리보기 — 재검증으로 이어지고 확정 절차서에 들어 있으면 확인
           const pv = (await api.post(`/api/sessions/${sessionId}/preview-edit`, {
             nodeId,
@@ -280,7 +283,18 @@ export function EditPanel({
           }
           const r = (await post(`/api/sessions/${sessionId}/advise-and-signal`, {
             text: adviceText,
-          })) as { signal?: { delivered: boolean; degraded?: string; copyText?: string } } | null;
+          })) as {
+            signal?: {
+              delivered: boolean;
+              degraded?: string;
+              copyText?: string;
+              warning?: string;
+            };
+          } | null;
+          if (r?.signal?.delivered && r.signal.warning) {
+            // M8-1 a: pf_start → 새 세션 시작 경고(노란 배지)
+            setSignalWarning(r.signal.warning);
+          }
           if (r && r.signal && !r.signal.delivered) {
             setError(`저장은 끝났습니다. 신호 실패: ${r.signal.degraded ?? ""}`);
             setSignalCopy(r.signal.copyText ?? null);
@@ -289,6 +303,11 @@ export function EditPanel({
       >
         의견 등록 + 계속 신호
       </button>
+      {signalWarning && (
+        <p role="status" className="status status-probing sig-warning">
+          {signalWarning}
+        </p>
+      )}
       {signalCopy && (
         <div>
           <p>신호 대신 이 문구를 OpenCode에 붙여넣으세요.</p>
