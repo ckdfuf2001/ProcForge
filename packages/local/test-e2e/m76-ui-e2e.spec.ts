@@ -220,7 +220,7 @@ test("(d) plan 모드: 신호 실패 + C 복사 문구", async ({ page }) => {
   await expect(
     page.getByText("신호 대신 이 문구를 OpenCode에 붙여넣으세요."),
   ).toBeVisible();
-  await expect(page.locator("pre", { hasText: "계속" })).toBeVisible();
+  await expect(page.locator("pre", { hasText: "pf_start 금지" })).toBeVisible();
 
   await expectNoCspViolation(page);
 });
@@ -280,7 +280,7 @@ test("(d) 버전 미확인: 전송 없이 degraded + C 복사 문구", async ({ 
 
   await expect(page.getByText(/신호 실패/)).toBeVisible({ timeout: 20000 });
   await expect(page.getByText(/미확인 버전/)).toBeVisible();
-  await expect(page.locator("pre", { hasText: "계속" })).toBeVisible();
+  await expect(page.locator("pre", { hasText: "pf_start 금지" })).toBeVisible();
   // 모델 호출은 보내지 않았다 (default-deny)
   expect(h.fake.requests.some((r) => r.startsWith("POST /session/"))).toBe(false);
 

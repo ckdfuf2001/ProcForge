@@ -100,6 +100,12 @@ export async function startFakeOpenCode(mode: FakeMode): Promise<FakeOpenCode> {
       send(200, { data: parts.get(mMsg[1]) ?? [] });
       return;
     }
+    // M8-1 ①: 짝 세션 생존 확인 (GET /session/:id). 이 가짜는 모든 세션을 산다.
+    const mSession = /^\/session\/([^/]+)$/.exec(url.pathname);
+    if (req.method === "GET" && mSession) {
+      send(200, { id: mSession[1] });
+      return;
+    }
     if (req.method === "POST" && url.pathname.startsWith("/tui/")) {
       send(200, true);
       return;
