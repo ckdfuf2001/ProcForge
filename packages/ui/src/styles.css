@@ -370,6 +370,66 @@ nav.tabs button:hover:not(:disabled) {
   line-height: 1.5;
 }
 
+/* M8-1-0: 라운드 이후 이벤트(의견 -> 재검증 -> 재확정) */
+.reason-events {
+  margin: 0;
+  padding-left: 0;
+  list-style: none;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.reason-event {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: baseline;
+  padding: 4px 0;
+  border-bottom: 1px dashed var(--border);
+}
+
+.reason-event:last-child {
+  border-bottom: none;
+}
+
+.reason-event-kind {
+  min-width: 42px;
+  color: var(--text);
+  font-weight: 600;
+}
+
+.reason-event-rev,
+.reason-event-nodes {
+  color: var(--muted);
+}
+
+.reason-event-summary {
+  color: var(--muted);
+}
+
+.reason-event.ev-reverify .reason-event-kind {
+  color: var(--warn);
+}
+
+.reason-event.ev-confirm .reason-event-kind {
+  color: var(--success);
+}
+
+/* M8-1-0: 트리 상태 필터 + 재검증 대기 안내 */
+.tree-filter {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 8px 12px;
+  font-size: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.reverify-line {
+  color: var(--warn);
+  font-size: 13px;
+}
+
 .reason-panel textarea {
   width: 100%;
   margin-top: 6px;
@@ -867,6 +927,14 @@ tbody tr:hover {
   border-color: color-mix(in srgb, var(--violet) 24%, transparent);
 }
 
+/* M8-1-0: 자기 재검증 대기 - 주의색이지만 점선 테두리로 probing과 구분 */
+.status-needs_reverify {
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 14%, transparent);
+  border-color: color-mix(in srgb, var(--warn) 40%, transparent);
+  border-style: dashed;
+}
+
 .status-needs_human,
 .status-needs-human,
 .status-failed,
@@ -895,6 +963,12 @@ tr.st-probing td:first-child {
 
 tr.st-split td:first-child {
   border-left-color: var(--violet);
+}
+
+/* M8-1-0: 재검증 대기 노드 */
+tr.st-needs-reverify td:first-child {
+  border-left-color: var(--warn);
+  border-left-style: dashed;
 }
 
 tr.st-needs-human td:first-child {

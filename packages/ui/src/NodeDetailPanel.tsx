@@ -56,6 +56,9 @@ export function NodeDetailPanel({
         {detail.staleSince
           ? ` · stale rev${detail.staleSince.revision} (원인 ${detail.staleSince.causeNodeId})`
           : ""}
+        {detail.reverifySince
+          ? ` · 재검증 대기 rev${detail.reverifySince.revision} (원인 ${detail.reverifySince.cause})`
+          : ""}
       </p>
       <h4>인자 (argSpecs)</h4>
       <ul>

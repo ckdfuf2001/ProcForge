@@ -8,11 +8,30 @@ import { NodeDetailPanel } from "./NodeDetailPanel.js";
 const STATUS_CLASS: Record<string, string> = {
   open: "st-open",
   probing: "st-probing",
+  /** M8-1-0: 확정 후 hash 변경 → 재검증 대기 */
+  needs_reverify: "st-needs-reverify",
   leaf: "st-leaf",
   split: "st-split",
   needs_human: "st-needs-human",
   failed: "st-failed",
 };
+
+/** M8-1-0: 재검증 대기의 한국어 라벨 (core가 준 상태값은 그대로 둔다) */
+const STATUS_LABEL: Record<string, string> = {
+  needs_reverify: "needs_reverify · 재검증 대기",
+};
+
+/** M8-1-0: 상태 필터 (전체 + core 상태값) */
+const STATUS_FILTERS = [
+  "all",
+  "open",
+  "probing",
+  "needs_reverify",
+  "leaf",
+  "split",
+  "needs_human",
+  "failed",
+] as const;
 
 /** 숫자 정렬 (1, 1.2, 1.10 순 — core compareNodeIds와 같은 규칙) */
 export function compareNodeIds(a: string, b: string): number {
@@ -43,6 +62,8 @@ export function TreeView({
     "connecting",
   );
   const [error, setError] = useState<string | null>(null);
+  // M8-1-0: 상태 필터 (기본은 전체)
+  const [statusFilter, setStatusFilter] = useState<string>("all");
 
   const reload = () => {
     void (async () => {
@@ -76,6 +97,13 @@ export function TreeView({
   if (error) return <p role="alert">오류: {error}</p>;
   if (!nodes) return <p>트리 불러오는 중…</p>;
   const sorted = [...nodes].sort((a, b) => compareNodeIds(a.id, b.id));
+  const shown =
+    statusFilter === "all"
+      ? sorted
+      : sorted.filter((n) => n.status === statusFilter);
+  const reverifying = sorted
+    .filter((n) => n.status === "needs_reverify")
+    .map((n) => n.id);
 
   return (
     <div className="tree-view">
@@ -87,6 +115,11 @@ export function TreeView({
       </div>
       {needsHuman.length > 0 && (
         <p role="status">사람 확인 필요: {needsHuman.join(", ")}</p>
+      )}
+      {reverifying.length > 0 && (
+        <p role="status" className="reverify-line">
+          재검증 대기: {reverifying.join(", ")} — 새 attempt로 다시 확정해야 합니다.
+        </p>
       )}
       {blocked.length > 0 && <p>막힘: {blocked.join(", ")}</p>}
       {picked && (
@@ -102,6 +135,23 @@ export function TreeView({
         </div>
       )}
       <div className="table-card">
+        <div className="tree-filter">
+          <label htmlFor="status-filter">상태 필터</label>
+          <select
+            id="status-filter"
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+          >
+            {STATUS_FILTERS.map((s) => (
+              <option key={s} value={s}>
+                {s === "all" ? "전체" : s}
+              </option>
+            ))}
+          </select>
+          <span className="muted">
+            {shown.length} / {sorted.length}개 노드
+          </span>
+        </div>
         <table className="data-table tree-table">
           <thead>
             <tr>
@@ -117,7 +167,7 @@ export function TreeView({
             </tr>
           </thead>
           <tbody>
-            {sorted.map((n) => (
+            {shown.map((n) => (
               <tr key={n.id} className={STATUS_CLASS[n.status] ?? "st-other"}>
                 <td>
                   <button className="btn-id" type="button" onClick={() => setPicked(n.id)}>
@@ -126,7 +176,12 @@ export function TreeView({
                 </td>
                 <td className="cell-goal">{n.goal}</td>
                 <td>
-                  <span className={`status status-${n.status}`}>{n.status}</span>
+                  <span
+                    className={`status status-${n.status}`}
+                    title={STATUS_LABEL[n.status] ?? n.status}
+                  >
+                    {STATUS_LABEL[n.status] ?? n.status}
+                  </span>
                 </td>
                 <td className="col-num">{n.attempts}</td>
                 <td className="col-num">{n.retriesLeft}</td>

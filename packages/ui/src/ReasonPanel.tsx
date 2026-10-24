@@ -6,6 +6,16 @@ import { api, ApiError, type DecompositionRound, type NodeDetail } from "./api.j
 // 의견 등록 UI는 **따로 만들지 않는다**: 기존 노드 상세(EditPanel)의
 // advise-and-signal 경로를 그대로 쓴다 (로직 재구현 금지).
 
+/** M8-1-0: 라운드 이벤트 종류 라벨 (core가 준 kind만 옮긴다) */
+const EVENT_KIND_LABEL: Record<string, string> = {
+  advise: "의견",
+  reverify: "재검증",
+  report: "실행",
+  confirm: "재확정",
+  edit: "수정",
+  other: "기타",
+};
+
 export function ReasonPanel({
   sessionId,
   round,
@@ -97,6 +107,28 @@ export function ReasonPanel({
             {round.causeAdviseIds.map((id) => (
               <li key={id}>
                 <code>{id}</code>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+      {round.events && round.events.length > 0 && (
+        <>
+          <h4>라운드 이후 이벤트</h4>
+          <ul className="reason-events">
+            {round.events.map((ev) => (
+              <li
+                key={`${ev.revision}-${ev.method}-${ev.nodeIds.join(",")}`}
+                className={`reason-event ev-${ev.kind}`}
+              >
+                <span className="reason-event-kind">
+                  {EVENT_KIND_LABEL[ev.kind] ?? ev.kind}
+                </span>
+                <span className="reason-event-rev">rev{ev.revision}</span>
+                <span className="reason-event-nodes">
+                  {ev.nodeIds.join(", ")}
+                </span>
+                <span className="reason-event-summary">{ev.summary}</span>
               </li>
             ))}
           </ul>

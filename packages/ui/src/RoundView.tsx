@@ -18,10 +18,17 @@ import { NodeDetailPanel } from "./NodeDetailPanel.js";
 const STATUS_CLASS: Record<string, string> = {
   open: "st-open",
   probing: "st-probing",
+  /** M8-1-0: 확정 후 hash 변경 → 재검증 대기 */
+  needs_reverify: "st-needs-reverify",
   leaf: "st-leaf",
   split: "st-split",
   needs_human: "st-needs-human",
   failed: "st-failed",
+};
+
+/** M8-1-0: 재검증 대기의 한국어 라벨 */
+const STATUS_LABEL: Record<string, string> = {
+  needs_reverify: "needs_reverify · 재검증 대기",
 };
 
 /** 숫자 정렬 (core compareNodeIds 와 같은 규칙) */
@@ -160,8 +167,11 @@ export function RoundView({ sessionId }: { sessionId: string }) {
                         {n.status === null ? (
                           <span className="muted">미상</span>
                         ) : (
-                          <span className={`status status-${n.status}`}>
-                            {n.status}
+                          <span
+                            className={`status status-${n.status}`}
+                            title={STATUS_LABEL[n.status] ?? n.status}
+                          >
+                            {STATUS_LABEL[n.status] ?? n.status}
                           </span>
                         )}
                       </td>

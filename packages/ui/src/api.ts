@@ -49,6 +49,12 @@ export type NodeDetail = {
   locked: boolean;
   sideEffect: string;
   staleSince: { revision: number; causeNodeId: string } | null;
+  /** M8-1-0: 자기 재검증 대기 사유 */
+  reverifySince: {
+    revision: number;
+    causeNodeId: string;
+    cause: "advise" | "edit_args" | "edit_node";
+  } | null;
   hash: string;
   tool: { server: string; name: string } | null;
   args: Record<string, unknown>;
@@ -88,6 +94,17 @@ export type NodeEvent = {
   summary: string;
 };
 
+/** M8-1-0: 라운드 아래 노드 이벤트 (의견 → 재검증 → 재확정) */
+export type DecompositionEvent = {
+  revision: number;
+  at: string;
+  actor: string;
+  method: string;
+  summary: string;
+  kind: "advise" | "reverify" | "report" | "confirm" | "edit" | "other";
+  nodeIds: string[];
+};
+
 /** M8-ui2: 분해 라운드 1건 — core가 정한 값만 그대로 (판단 없음) */
 export type DecompositionRound = {
   revision: number;
@@ -100,6 +117,7 @@ export type DecompositionRound = {
   reason: string | null;
   alternatives: string[];
   causeAdviseIds: string[];
+  events?: DecompositionEvent[];
 };
 
 /** M8-ui2: 특정 revision 시점 트리 노드 (status null = 그 시점 상태 미상) */
@@ -114,6 +132,12 @@ export type HistoryNode = {
   locked: boolean;
   sideEffect: string | null;
   staleSince?: { revision: number; causeNodeId: string };
+  /** M8-1-0: 자기 재검증 대기 사유 */
+  reverifySince?: {
+    revision: number;
+    causeNodeId: string;
+    cause: "advise" | "edit_args" | "edit_node";
+  };
   hash: string | null;
 };
 
