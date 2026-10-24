@@ -118,6 +118,8 @@ export type DecompositionRound = {
   alternatives: string[];
   causeAdviseIds: string[];
   events?: DecompositionEvent[];
+  /** M8-1: 라운드의 부모 노드에 달린 이벤트(분해의 계기) */
+  parentEvents?: DecompositionEvent[];
 };
 
 /** M8-ui2: 특정 revision 시점 트리 노드 (status null = 그 시점 상태 미상) */

@@ -2323,30 +2323,30 @@ if (oldHash !== saved.hash) this.propagateStale(s.id, input.nodeId, s.revision +
     }
     // M8-1-0 보정: 이벤트는 **그 노드를 만든 라운드**에 귀속한다.
     // (예전: "다음 분해 라운드 직전까지"라는 전역 경계 → 나중에 준 의견이 사라졌다)
-    // 노드는 다시 나뉘거나 삭제될 때까지 그 라운드에 붙는다.
+    // M8-1 d2 보정: 같은 노드를 두 번 분해하면 id 가 재사용되므로, 생성 구간은
+    // **(라운드, 자식) 세대 단위**로 계산한다 — 세대가 섞이지 않게.
     const kinds = this.decompositionEventKinds(all);
-    // 노드 → 만든 라운드 revision / 그 노드의 마지막 유효 revision(재분해·삭제 전)
-    const createdAt = new Map<string, number>();
-    for (const r of out) {
-      for (const cid of r.childIds) {
-        if (!createdAt.has(cid)) createdAt.set(cid, r.revision);
-      }
-    }
-    const endAt = new Map<string, number>();
-    for (const e of all) {
-      for (const id of e.nodeIds) {
-        const start = createdAt.get(id);
-        if (start === undefined || e.revision <= start) continue;
-        if (endAt.has(id)) continue;
-        const reSplit =
-          e.method === "pfResolve" && e.detail?.parentId === id;
-        const removed = e.detail?.removedIds?.includes(id) === true;
-        if (reSplit || removed) endAt.set(id, e.revision);
-      }
-    }
     for (let i = 0; i < out.length; i++) {
       const round = out[i]!;
       const children = new Set(round.childIds);
+      // 이 세대 자식별 종료 revision: 그 id 를 **다시 만드는 라운드**(재사용)나
+      // 삭제 revision 중 가장 가까운 것. 없으면 ∞.
+      const ends = new Map<string, number>();
+      for (const cid of round.childIds) {
+        let end = Number.MAX_SAFE_INTEGER;
+        for (const later of out) {
+          if (later.revision > round.revision && later.childIds.includes(cid)) {
+            end = Math.min(end, later.revision);
+          }
+        }
+        for (const e of all) {
+          if (e.revision <= round.revision) continue;
+          if (e.detail?.removedIds?.includes(cid) === true) {
+            end = Math.min(end, e.revision);
+          }
+        }
+        ends.set(cid, end);
+      }
       const picked: DecompositionEvent[] = [];
       for (const e of all) {
         if (e.revision <= round.revision) continue;
@@ -2354,11 +2354,8 @@ if (oldHash !== saved.hash) this.propagateStale(s.id, input.nodeId, s.revision +
         if (!kind) continue;
         const mine = e.nodeIds.filter((id) => {
           if (!children.has(id)) return false;
-          const start = createdAt.get(id);
-          if (start === undefined || e.revision <= start) return false;
-          const end = endAt.get(id);
-          if (end !== undefined && e.revision >= end) return false;
-          return true;
+          const end = ends.get(id);
+          return end === undefined || e.revision < end;
         });
         if (mine.length === 0) continue;
         picked.push({
@@ -2371,7 +2368,51 @@ if (oldHash !== saved.hash) this.propagateStale(s.id, input.nodeId, s.revision +
           nodeIds: mine,
         });
       }
-      if (picked.length > 0) out[i] = { ...round, events: picked };
+      // M8-1 d1: 라운드의 **부모 노드**에 달린 이벤트(분해의 계기)도 함께 준다.
+      const parentPicked = this.roundParentEvents(round, all, out, kinds);
+      const next = { ...round };
+      if (picked.length > 0) next.events = picked;
+      if (parentPicked.length > 0) next.parentEvents = parentPicked;
+      if (picked.length > 0 || parentPicked.length > 0) out[i] = next;
+    }
+    return out;
+  }
+
+  /**
+   * M8-1 d1: 라운드의 부모 노드 이벤트.
+   * 부모가 (재)만들어진 라운드 revision 다음부터 이 라운드(분해) 직전까지의
+   * 이벤트 — 그 분해의 계기가 된 의견·수정이 여기 나온다.
+   */
+  private roundParentEvents(
+    round: DecompositionHistoryEntry,
+    all: EventEntry[],
+    rounds: DecompositionHistoryEntry[],
+    kinds: Map<EventEntry, DecompositionEvent["kind"]>,
+  ): DecompositionEvent[] {
+    const parent = round.parentId;
+    // 부모의 생성 revision — 부모를 만든 가장 최근 라운드(이 라운드보다 앞)의
+    // revision. 루트는 0.
+    let created = 0;
+    for (const r of rounds) {
+      if (r.revision < round.revision && r.childIds.includes(parent)) {
+        created = Math.max(created, r.revision);
+      }
+    }
+    const out: DecompositionEvent[] = [];
+    for (const e of all) {
+      if (e.revision <= created || e.revision >= round.revision) continue;
+      if (!e.nodeIds.includes(parent)) continue;
+      const kind = kinds.get(e);
+      if (!kind) continue;
+      out.push({
+        revision: e.revision,
+        at: e.at,
+        actor: e.actor,
+        method: e.method,
+        summary: e.summary,
+        kind,
+        nodeIds: [parent],
+      });
     }
     return out;
   }

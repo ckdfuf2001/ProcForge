@@ -288,6 +288,8 @@ export const DecompositionHistoryEntrySchema = z.object({
   causeAdviseIds: z.array(z.string()),
   /** M8-1-0: 이 라운드 뒤에 이어진 노드 이벤트 (의견 → 재검증 → 재확정) */
   events: z.array(DecompositionEventSchema).optional(),
+  /** M8-1: 라운드의 부모 노드에 달린 이벤트(분해의 계기가 된 의견 등) */
+  parentEvents: z.array(DecompositionEventSchema).optional(),
 });
 export type DecompositionHistoryEntry = z.infer<
   typeof DecompositionHistoryEntrySchema

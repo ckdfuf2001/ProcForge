@@ -422,6 +422,87 @@ describe("M8-1-0 leaf 자기 재검증", () => {
     expect(r2.events ?? []).toHaveLength(0);
   });
 
+  it("라운드의 부모 노드에 달린 의견은 그 라운드의 parentEvents 로 보인다", async () => {
+    const s = svc();
+    const { session } = await s.pfStart({ request: "부모", toolCatalog: catalog });
+    const sid = session.id;
+    await s.pfResolve({
+      sessionId: sid,
+      nodeId: "1",
+      decision: "split",
+      children: [{ goal: "a" }, { goal: "b" }],
+      reason: "첫 분해. 둘로 나눈다.",
+    });
+    // 부모(1.1)에 의견 → 그 의견이 이후의 분해 계기다.
+    await s.pfAdvise({
+      sessionId: sid,
+      nodeId: "1.1",
+      text: "이 부분은 두 단계로 쪼개라",
+    });
+    await s.pfResolve({
+      sessionId: sid,
+      nodeId: "1.1",
+      decision: "split",
+      children: [{ goal: "x" }, { goal: "y" }],
+      reason: "의견에 따라 1.1을 다시 나눈다.",
+    });
+
+    const rounds = await s.getDecompositionHistory({ sessionId: sid });
+    expect(rounds.length).toBe(2);
+    const advise = rounds[1]?.parentEvents?.filter((e) => e.kind === "advise") ?? [];
+    expect(advise.length).toBe(1);
+    expect(advise[0]!.nodeIds).toEqual(["1.1"]);
+    // 부모 의견은 그 라운드의 events 가 아니라 parentEvents 로 표시한다.
+    expect(rounds[1]?.events ?? []).toHaveLength(0);
+  });
+
+  it("같은 노드 두 번 분해(id 재사용) — 세대별로 이벤트가 갈라진다", async () => {
+    // 1.1 을 열고 split(1.1.1·1.1.2) → reopen → 다시 split(1.1.1 재사용) →
+    // 새 1.1.1 에 의견. 예전 구현은 생성 구간을 id 단위로 계산해 새 세대의
+    // 의견이 첫 라운드에 섞였다(또는 사라졌다).
+    const s = svc();
+    const { session } = await s.pfStart({ request: "재사용", toolCatalog: catalog });
+    const sid = session.id;
+    await s.pfResolve({
+      sessionId: sid,
+      nodeId: "1",
+      decision: "split",
+      children: [{ goal: "a" }, { goal: "b" }],
+      reason: "첫 분해. 둘로 나눈다.",
+    });
+    await s.pfResolve({
+      sessionId: sid,
+      nodeId: "1.1",
+      decision: "split",
+      children: [{ goal: "x" }, { goal: "y" }],
+      reason: "1.1 을 나눈다. 세대 1.",
+    });
+    await s.pfReopen({ sessionId: sid, nodeId: "1.1" });
+    await s.pfResolve({
+      sessionId: sid,
+      nodeId: "1.1",
+      decision: "split",
+      children: [{ goal: "z" }],
+      reason: "1.1 을 다시 나눈다. 세대 2 — 1.1.1 이 재사용된다.",
+    });
+    // 새 세대( reused 1.1.1)에 의견
+    await s.pfAdvise({
+      sessionId: sid,
+      nodeId: "1.1.1",
+      text: "새 1.1.1 에 준 의견이다",
+    });
+
+    const rounds = await s.getDecompositionHistory({ sessionId: sid });
+    const gen1 = rounds.find((r) => r.parentId === "1.1" && r.childIds.length === 2)!;
+    const gen2 = rounds.find((r) => r.parentId === "1.1" && r.childIds.length === 1)!;
+    // 새 세대의 의견은 두 번째 분해 라운드 아래에 표시된다.
+    const inGen2 = gen2.events?.filter((e) => e.kind === "advise") ?? [];
+    expect(inGen2.length).toBe(1);
+    expect(inGen2[0]!.nodeIds).toEqual(["1.1.1"]);
+    // 첫 세대 라운드에는 새 의견이 섞이지 않는다.
+    expect(gen1.events?.filter((e) => e.kind === "advise") ?? []).toHaveLength(0);
+  });
+
   it("미리보기: 확정 leaf에 의견을 저장하면 selfReverify:true (저장 전 확인용)", async () => {
     const s = svc();
     const sid = await leafed(s);

@@ -134,6 +134,28 @@ export function ReasonPanel({
           </ul>
         </>
       )}
+      {round.parentEvents && round.parentEvents.length > 0 && (
+        <>
+          <h4>이 노드의 계기</h4>
+          <ul className="reason-events">
+            {round.parentEvents.map((ev) => (
+              <li
+                key={`p-${ev.revision}-${ev.method}-${ev.nodeIds.join(",")}`}
+                className={`reason-event ev-${ev.kind}`}
+              >
+                <span className="reason-event-kind">
+                  {EVENT_KIND_LABEL[ev.kind] ?? ev.kind}
+                </span>
+                <span className="reason-event-rev">rev{ev.revision}</span>
+                <span className="reason-event-nodes">
+                  {ev.nodeIds.join(", ")}
+                </span>
+                <span className="reason-event-summary">{ev.summary}</span>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
       {detail && detail.advice.length > 0 && (
         <>
           <h4>부모 노드의 의견 이력</h4>
