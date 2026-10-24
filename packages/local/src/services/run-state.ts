@@ -39,7 +39,16 @@ export type RunState = {
   status: "ready" | "running" | "suspended" | "done" | "failed" | "cancelled";
   failedNodeId?: string;
   failedDetail?: string;
-  summary?: { pass: number; fail: number; unverified: number; skipped: number; blocked: number; suspended: number };
+  summary?: {
+    pass: number;
+    fail: number;
+    unverified: number;
+    skipped: number;
+    blocked: number;
+    suspended: number;
+    /** M8-1-0 보정: 재검증 대기 노드 수 */
+    needsReverify?: number;
+  };
   updatedAt: string;
 };
 

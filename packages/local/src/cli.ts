@@ -166,7 +166,7 @@ async function cmdRun(): Promise<number> {
       ...(toolRetry ? { toolRetry } : {}),
       allowUnverified,
     });
-    console.log(`run ${out.runId} (session ${out.sessionId}): pass=${out.passed} fail=${out.failed} unverified=${out.unverified} skipped=${out.skipped} blocked=${out.blocked} suspended=${out.suspended}`);
+    console.log(`run ${out.runId} (session ${out.sessionId}): pass=${out.passed} fail=${out.failed} unverified=${out.unverified} skipped=${out.skipped} blocked=${out.blocked} suspended=${out.suspended}${out.needsReverify > 0 ? ` needs_reverify=${out.needsReverify}` : ""}`);
     console.log(`report: ${out.reportPath}`);
     if (out.outDir) console.log(`out: ${out.outDir}`);
     // M5.5-4: 종료 코드 0 성공 / 1 실패·중단 / 2 입력 오류 / 3 승인 필요.
@@ -183,8 +183,14 @@ async function cmdRun(): Promise<number> {
     const code = runExitCode({
       failed: out.failed, suspended: out.suspended, approvalBlocked: out.approvalBlocked,
       unverified: out.unverified, allowUnverified: !fou,
+      needsReverify: out.needsReverify,
     });
-    if (code === 1 && out.failed === 0 && out.suspended === 0) {
+    if (out.needsReverify > 0) {
+      console.error(
+        `needs_reverify: 재검증 대기 노드가 있어 실행하지 않았습니다 — 새 attempt로 재확정 후 다시 실행하세요.`,
+      );
+    }
+    if (code === 1 && out.failed === 0 && out.suspended === 0 && out.needsReverify === 0) {
       console.error("unverified: 사람 검토 필요 (llm_rubric 등). --allow-unverified로 우회");
     }
     return code;

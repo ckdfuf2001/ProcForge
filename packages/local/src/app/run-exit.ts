@@ -10,11 +10,15 @@ export type RunExitInput = {
   unverified?: number;
   /** unverified>0도 통과 (M5.7.1. 기본 false). */
   allowUnverified?: boolean;
+  /** M8-1-0 보정: 재검증 대기 노드 수 — 1건이라도 있으면 실패(1)로 끝낸다. */
+  needsReverify?: number;
 };
 
 export function runExitCode(o: RunExitInput): number {
   if (o.approvalBlocked) return 3;
   if (o.failed > 0 || o.suspended > 0) return 1;
+  // M8-1-0 보정: 재검증 대기 노드는 확정 전이므로 성공(0)으로 끝내지 않는다.
+  if ((o.needsReverify ?? 0) > 0) return 1;
   if (!(o.allowUnverified ?? false) && (o.unverified ?? 0) > 0) return 1;
   return 0;
 }

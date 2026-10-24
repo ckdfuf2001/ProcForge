@@ -1843,6 +1843,8 @@ export class ProcForgeApp {
         unverified: report.summary.unverified,
         skipped: report.summary.skipped,
         blocked: report.summary.blocked,
+        // M8-1-0 보정: 재검증 대기 노드 수 (실행 안 함)
+        needsReverify: report.summary.needsReverify,
         reportPath: join(
           this.procforgeDir,
           "runs",
@@ -1895,6 +1897,8 @@ export class ProcForgeApp {
       unverified: report.summary.unverified,
       skipped: report.summary.skipped,
       blocked: report.summary.blocked,
+      // M8-1-0 보정: 재검증 대기 노드 수 (실행 안 함)
+      needsReverify: report.summary.needsReverify,
       reportPath,
       junitPath,
     };
@@ -3392,6 +3396,8 @@ async runApprove(a: {
     approvalBlocked: boolean;
     reportPath: string;
     outDir?: string;
+    /** M8-1-0 보정: 재검증 대기 노드 수 (실행 안 함) */
+    needsReverify: number;
   }> {
     const procRef = a.procedure as string;
     if (!procRef) throw pfError("bad_request", "procedure가 필요하다.");
@@ -3438,6 +3444,8 @@ async runApprove(a: {
       skipped: report.summary.skipped,
       blocked: report.summary.blocked,
       suspended: report.summary.suspended,
+      // M8-1-0 보정: 재검증 대기 노드 수 (실행 안 함)
+      needsReverify: report.summary.needsReverify,
       approvalBlocked: report.results.some((r) =>
         r.failedConstraints.includes("approval"),
       ),

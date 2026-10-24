@@ -49,7 +49,15 @@ export type RunOptions = {
   core?: import("@procforge/shared/core-client.js").CoreClient;
 };
 
-export type NodeResultStatus = "pass" | "fail" | "unverified" | "skipped" | "blocked" | "suspended";
+export type NodeResultStatus =
+  | "pass"
+  | "fail"
+  | "unverified"
+  | "skipped"
+  | "blocked"
+  | "suspended"
+  /** M8-1-0 보정: 재검증 대기 — 실행하지 않고 별도 보고(pass 미포함) */
+  | "needs_reverify";
 
 export type NodeResult = {
   nodeId: string;
@@ -68,7 +76,16 @@ export type RunReport = {
   mode: RunMode;
   at: string;
   results: NodeResult[];
-  summary: { pass: number; fail: number; unverified: number; skipped: number; blocked: number; suspended: number };
+  summary: {
+    pass: number;
+    fail: number;
+    unverified: number;
+    skipped: number;
+    blocked: number;
+    suspended: number;
+    /** M8-1-0 보정: 재검증 대기 노드 수 (실행 안 함) */
+    needsReverify: number;
+  };
   nodeHashes: Record<string, string>;
 };
 

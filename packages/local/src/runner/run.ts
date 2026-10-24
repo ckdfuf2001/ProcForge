@@ -149,7 +149,9 @@ export function toJUnit(report: RunReport): string {
         r.status === "unverified" ||
         r.status === "skipped" ||
         r.status === "blocked" ||
-        r.status === "suspended"
+        r.status === "suspended" ||
+        // M8-1-0 보정: 재검증 대기는 실행하지 않았으므로 skipped로 표기한다.
+        r.status === "needs_reverify"
       ) {
         return `    <testcase classname="procforge" name="${esc(r.nodeId)}" time="${(r.durationMs / 1000).toFixed(3)}"><skipped message="${esc(r.detail ?? r.status)}"/></testcase>`;
       }
@@ -439,8 +441,22 @@ export async function runSession(opts: RunOptions): Promise<RunReport> {
         resultOf.set(n.id, r);
         continue;
       }
-      // M8-1-0: 재검증 대기(needs_reverify) 노드는 확정 전이므로 재실행 대상이다.
-      if ((n.status !== "leaf" && n.status !== "needs_reverify") || !n.tool) {
+      // M8-1-0 보정: 재검증 대기(needs_reverify) 노드는 **실행하지 않는다**.
+      // 옛 인자로 돌려 pass로 세면 "재확정 전" 결과가 확정처럼 보인다 —
+      // 새 attempt로 재확정하기 전까지 별도 상태로 보고한다(pass 미포함).
+      if (n.status === "needs_reverify") {
+        const r: NodeResult = {
+          nodeId: n.id,
+          status: "needs_reverify",
+          failedConstraints: [],
+          detail: `재검증 대기 — 실행하지 않음 (새 attempt로 재확정 필요)`,
+          durationMs: 0,
+        };
+        results.push(r);
+        resultOf.set(n.id, r);
+        continue;
+      }
+      if (n.status !== "leaf" || !n.tool) {
         const r: NodeResult = {
           nodeId: n.id,
           status: "skipped",
@@ -618,6 +634,7 @@ export async function runSession(opts: RunOptions): Promise<RunReport> {
       skipped: results.filter((r) => r.status === "skipped").length,
       blocked: results.filter((r) => r.status === "blocked").length,
       suspended: results.filter((r) => r.status === "suspended").length,
+      needsReverify: results.filter((r) => r.status === "needs_reverify").length,
     };
     const report: RunReport = {
       runId,
@@ -676,7 +693,13 @@ export async function runSession(opts: RunOptions): Promise<RunReport> {
     );
     for (const r of results) {
       if (r.status === "pass") merged[r.nodeId] = hashOf.get(r.nodeId) ?? "";
-      else if (r.status === "fail" || r.status === "blocked")
+      else if (
+        r.status === "fail" ||
+        r.status === "blocked" ||
+        // M8-1-0 보정: 재검증 대기는 유효한 pass가 아니다 — 다음 --changed 실행에서
+        // 다시 대상이 되도록 마지막 pass hash를 지운다.
+        r.status === "needs_reverify"
+      )
         delete merged[r.nodeId];
     }
     const latestPath = latestReportPath(opts.procforgeDir, opts.sessionId);
@@ -696,6 +719,8 @@ export async function runSession(opts: RunOptions): Promise<RunReport> {
       procedureDir &&
       summary.fail === 0 &&
       summary.suspended === 0 &&
+      // M8-1-0 보정: 재검증 대기 노드가 있으면 확정 전이므로 state를 저장하지 않는다.
+      summary.needsReverify === 0 &&
       (summary.unverified === 0 || !fou)
     ) {
       const writers = [...store.getNodes(opts.sessionId).values()].filter(

@@ -742,10 +742,15 @@ describe("M3 runner", () => {
       .map((r) => r.nodeId)
       .sort();
     expect(ids).toEqual(["1.2", "1.3"]);
+    // M8-1-0 보정: 조언받은 1.2는 재검증 대기 → 실행하지 않고 별도 상태로 보고한다.
     expect(rep.results.find((r) => r.nodeId === "1.2")?.status).toBe(
-      "unverified",
+      "needs_reverify",
     );
-    expect(rep.results.find((r) => r.nodeId === "1.3")?.status).toBe("pass");
+    expect(rep.summary.needsReverify).toBe(1);
+    // 1.3은 1.2에 의존한다 — 1.2가 실행되지 않아 출력이 없으므로 blocked.
+    const down = rep.results.find((r) => r.nodeId === "1.3");
+    expect(down?.status).toBe("blocked");
+    expect(down?.detail).toMatch(/1\.2/);
   }, 30000);
 
   it("JUnit XML 출력 (skipped 매핑 포함)", async () => {
