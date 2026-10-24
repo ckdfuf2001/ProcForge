@@ -253,6 +253,9 @@ describe("M8-1-0 leaf 자기 재검증", () => {
     expect(advised.node.reverifySince).toBeUndefined();
   });
 
+
+
+
   it("타임라인에 의견 → 재검증 → 재확정이 보인다", async () => {
     const s = svc();
     const { session } = await s.pfStart({ request: "타임라인", toolCatalog: catalog });
@@ -294,5 +297,45 @@ describe("M8-1-0 leaf 자기 재검증", () => {
     expect(kinds).toContain("reverify");
     expect(kinds).toContain("confirm");
     for (const e of events) expect(e.nodeIds).toContain("1.1");
+  });
+
+  it("나중에 준 의견도 그 노드를 만든 라운드 아래에 표시된다", async () => {
+    // R1: 1 → 1.1~1.4, R2: 1.2 재분해 → 1.2.1·1.2.2, 그 뒤 1.3에 의견.
+    // 예전 구현은 "다음 분해 라운드 직전까지"로 잘라 1.3 의견이 사라졌다.
+    const s = svc();
+    const { session } = await s.pfStart({ request: "귀속", toolCatalog: catalog });
+    const sid = session.id;
+    await s.pfResolve({
+      sessionId: sid,
+      nodeId: "1",
+      decision: "split",
+      children: [{ goal: "a" }, { goal: "b" }, { goal: "c" }, { goal: "d" }],
+      reason: "첫 분해. 네 단계를 만든다.",
+    });
+    await s.pfResolve({
+      sessionId: sid,
+      nodeId: "1.2",
+      decision: "split",
+      children: [{ goal: "b1" }, { goal: "b2" }],
+      reason: "두 번째 분해. 1.2를 다시 나눈다.",
+    });
+    await s.pfAdvise({
+      sessionId: sid,
+      nodeId: "1.3",
+      text: "방향을 더 다듬자.",
+    });
+
+    const rounds = await s.getDecompositionHistory({ sessionId: sid });
+    expect(rounds.length).toBe(2);
+    const r1 = rounds[0]!;
+    const r2 = rounds[1]!;
+    expect(r1.parentId).toBe("1");
+    expect(r1.childIds).toEqual(["1.1", "1.2", "1.3", "1.4"]);
+    expect(r2.parentId).toBe("1.2");
+    // 1.3 의견은 1.3을 만든 R1 아래에 표시된다.
+    const adviseInR1 = (r1.events ?? []).filter((e) => e.kind === "advise");
+    expect(adviseInR1.length).toBe(1);
+    expect(adviseInR1[0]!.nodeIds).toEqual(["1.3"]);
+    expect(r2.events ?? []).toHaveLength(0);
   });
 });

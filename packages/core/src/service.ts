@@ -2285,52 +2285,96 @@ if (oldHash !== saved.hash) this.propagateStale(s.id, input.nodeId, s.revision +
       const round = this.roundOfEvent(e);
       if (round) out.push(round);
     }
-    // M8-1-0: 라운드 뒤에 이어진 노드 이벤트(의견 → 재검증 → 재확정)를 붙인다.
-    // 범위: 해당 라운드의 자식 노드에 닿는 이벤트만, 다음 분해 라운드 직전까지.
+    // M8-1-0 보정: 이벤트는 **그 노드를 만든 라운드**에 귀속한다.
+    // (예전: "다음 분해 라운드 직전까지"라는 전역 경계 → 나중에 준 의견이 사라졌다)
+    // 노드는 다시 나뉘거나 삭제될 때까지 그 라운드에 붙는다.
+    const kinds = this.decompositionEventKinds(all);
+    // 노드 → 만든 라운드 revision / 그 노드의 마지막 유효 revision(재분해·삭제 전)
+    const createdAt = new Map<string, number>();
+    for (const r of out) {
+      for (const cid of r.childIds) {
+        if (!createdAt.has(cid)) createdAt.set(cid, r.revision);
+      }
+    }
+    const endAt = new Map<string, number>();
+    for (const e of all) {
+      for (const id of e.nodeIds) {
+        const start = createdAt.get(id);
+        if (start === undefined || e.revision <= start) continue;
+        if (endAt.has(id)) continue;
+        const reSplit =
+          e.method === "pfResolve" && e.detail?.parentId === id;
+        const removed = e.detail?.removedIds?.includes(id) === true;
+        if (reSplit || removed) endAt.set(id, e.revision);
+      }
+    }
     for (let i = 0; i < out.length; i++) {
       const round = out[i]!;
-      const nextRevision = out[i + 1]?.revision ?? Number.MAX_SAFE_INTEGER;
       const children = new Set(round.childIds);
-      const events = all
-        .filter(
-          (e) =>
-            e.revision > round.revision &&
-            e.revision < nextRevision &&
-            e.nodeIds.some((id) => children.has(id)),
-        )
-        .filter((e) => this.decompositionEventKind(e, children) !== null)
-        .map((e) => ({
+      const picked: DecompositionEvent[] = [];
+      for (const e of all) {
+        if (e.revision <= round.revision) continue;
+        const kind = kinds.get(e);
+        if (!kind) continue;
+        const mine = e.nodeIds.filter((id) => {
+          if (!children.has(id)) return false;
+          const start = createdAt.get(id);
+          if (start === undefined || e.revision <= start) return false;
+          const end = endAt.get(id);
+          if (end !== undefined && e.revision >= end) return false;
+          return true;
+        });
+        if (mine.length === 0) continue;
+        picked.push({
           revision: e.revision,
           at: e.at,
           actor: e.actor,
           method: e.method,
           summary: e.summary,
-          kind: this.decompositionEventKind(e, children) ?? "other",
-          nodeIds: e.nodeIds.filter((id) => children.has(id)),
-        }));
-      if (events.length > 0) out[i] = { ...round, events };
+          kind,
+          nodeIds: mine,
+        });
+      }
+      if (picked.length > 0) out[i] = { ...round, events: picked };
     }
     return out;
   }
 
   /**
-   * M8-1-0: 라운드 자식 노드 이벤트의 분류.
+   * M8-1-0: 이벤트 1건의 타임라인 분류.
+   * needs_reverify → probing 전이가 일어난 이벤트는 "reverify"(재검증)로 본다.
+   * (pf_next 경로·pf_report 직접 경로 모두 같은 전이를 쓴다)
+   */
+  private decompositionEventKinds(
+    all: EventEntry[],
+  ): Map<EventEntry, DecompositionEvent["kind"]> {
+    const out = new Map<EventEntry, DecompositionEvent["kind"]>();
+    const statusByNode = new Map<string, string>();
+    for (const e of all) {
+      let reverify = false;
+      for (const id of e.nodeIds) {
+        const before = statusByNode.get(id);
+        const after = e.detail?.nodesAfter?.find((n) => n.id === id)?.status;
+        if (after === undefined || after === null) continue;
+        if (before === "needs_reverify" && after === "probing") reverify = true;
+        statusByNode.set(id, after);
+      }
+      const kind = reverify ? "reverify" : this.decompositionEventKind(e);
+      if (kind) out.set(e, kind);
+    }
+    return out;
+  }
+
+  /**
+   * M8-1-0: 이벤트 종류 (메서드 기준).
    * null = 타임라인에 넣지 않는 이벤트(분해 자체·잠금 등).
    */
   private decompositionEventKind(
     e: EventEntry,
-    children: Set<string>,
   ): DecompositionEvent["kind"] | null {
     switch (e.method) {
       case "pfAdvise":
         return "advise";
-      case "pfNext":
-        // 재검증 대기가 실제로 probing으로 넘어간 이벤트만 "reverify"로 본다.
-        return e.detail?.nodesAfter?.some(
-          (n) => children.has(n.id) && n.reverifySince !== undefined,
-        )
-          ? "reverify"
-          : null;
       case "pfReport":
         return "report";
       case "pfResolve":
