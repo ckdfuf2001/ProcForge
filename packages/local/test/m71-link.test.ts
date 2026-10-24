@@ -799,4 +799,67 @@ describe("M8-1 보정: 신호 판정 + 생존 확인 상한", () => {
     }
   });
 
+  it("응답 없는 가짜 서버의 생존 확인은 3초 상한 안에 끝난다('모름'→전송 진행)", async () => {
+    // GET /session/:id 에만 응답하지 않는다(생존 확인이 매달리는 상황).
+    // 나머지(message POST/GET)는 정상 응답 → 신호는 진행된다.
+    const seen: string[] = [];
+    const pfParts: Part[] = [];
+    const hanging = createServer(async (req, res) => {
+      const url = new URL(req.url ?? "/", "http://x");
+      seen.push(`${req.method} ${url.pathname}`);
+      const send = (code: number, v: unknown) => {
+        res.writeHead(code, { "content-type": "application/json" });
+        res.end(JSON.stringify(v));
+      };
+      if (req.method === "GET" && /^\/session\/[^/]+$/.test(url.pathname)) {
+        return; // 응답 없음 → AbortSignal.timeout(3000)
+      }
+      const m = /^\/session\/([^/]+)\/message$/.exec(url.pathname);
+      if (req.method === "POST" && m) {
+        pfParts.push({
+          type: "tool",
+          tool: "procforge_pf_next",
+          part: { sessionID: m[1]!, tool: "procforge_pf_next" },
+          state: { status: "completed", output: "{}" },
+        });
+        send(200, { data: { admittedSeq: 1 } });
+        return;
+      }
+      if (req.method === "GET" && m) {
+        send(200, { data: pfParts });
+        return;
+      }
+      send(404, {});
+    });
+    const port = await new Promise<number>((resolve) => {
+      hanging.listen(0, "127.0.0.1", () => {
+        const addr = hanging.address();
+        resolve(typeof addr === "object" && addr ? addr.port : 0);
+      });
+    });
+    try {
+      const app = stubApp({
+        signal: {
+          baseUrl: `http://127.0.0.1:${port}`,
+          mode: "b",
+          serverVersion: "1.18.18",
+        },
+      });
+      const t0 = Date.now();
+      const r = await app.adviseAndSignal({
+        sessionId: "pf-1",
+        nodeId: "1.2",
+        text: "x",
+        link: { openCodeSessionId: "ses-g" },
+      });
+      const elapsed = Date.now() - t0;
+      // 생존 확인 3초 상한 + 신호 정상 완료 (매달려서 죽지 않는다)
+      expect(elapsed).toBeLessThan(6_000);
+      expect(r.signal.delivered).toBe(true);
+      expect(seen.some((s) => s === "GET /session/ses-g")).toBe(true);
+    } finally {
+      hanging.closeAllConnections();
+      hanging.close();
+    }
+  }, 20000);
 });

@@ -1462,14 +1462,18 @@ export class ProcForgeApp {
     });
     if (!cfg.baseUrl) return notSent("OpenCode 주소 미설정");
     if (!openSid) return notSent("OpenCode 세션 짝이 없음");
+    // M8-1 ②(로컬 먼저): 역방향 — 그 ocId 의 최신 짝이 다른 PF 세션이면
+    // 네트워크 조회 전에 보내지 않는다.
+    const pair = getPairing(this.procforgeDir, openSid);
+    const mismatch = pair !== undefined && pair.pfSessionId !== sid;
     // M8-1 ①: 짝 세션이 OpenCode 서버에 살아 있는지 확인한다(없으면 미전송).
+    // ②가 어긋났어도 생존 확인을 먼저 해서, 문구 우선순위('짝 세션 없음'이
+    // '다른 세션과 짝'보다 앞)를 유지한다.
     if (cfg.mode !== "c" && !(await this.openCodeSessionAlive(openSid))) {
       return notSent("짝 세션 없음");
     }
-    // M8-1 ②: 역방향 — 그 ocId 의 최신 짝이 다른 PF 세션이면 보내지 않는다.
-    const pair = getPairing(this.procforgeDir, openSid);
-    if (pair && pair.pfSessionId !== sid) {
-      return notSent(`다른 세션과 짝(${pair.pfSessionId})`);
+    if (mismatch) {
+      return notSent(`다른 세션과 짝(${pair!.pfSessionId})`);
     }
     // M7-ui4-i: 버전은 서버 설정 또는 OpenCode 서버 조회값만 (default-deny 유지)
     const serverVersion =
