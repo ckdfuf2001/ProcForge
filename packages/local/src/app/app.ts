@@ -268,6 +268,8 @@ export type SignalTarget = {
   serverVersion?: string;
 };
 
+/** M8-1 c: 도구 접두어 형식 (위반은 무시 + 경고 로그 — 기동을 죽이지 않는다) */
+const TOOL_PREFIX_RE = /^[A-Za-z0-9_-]{1,40}$/;
 /** M8-1: 신호 문구 길이 상한 */
 export const SIGNAL_TEXT_MAX = 500;
 
@@ -352,14 +354,24 @@ export class ProcForgeApp {
     this.linkFetchImpl = deps.linkFetchImpl;
     this.onWaitingPersisted = deps.onWaitingPersisted;
     // M7-ui4-b: 신호 대상은 여기서 한 번만 정한다.
+    const toolPrefix =
+      deps.signal?.toolPrefix ?? process.env.PROCFORGE_OPENCODE_TOOL_PREFIX;
+    // M8-1 c: 형식 검증 — 위반이면 무시 + 경고 (기동은 계속한다).
+    const validPrefix =
+      toolPrefix !== undefined && TOOL_PREFIX_RE.test(toolPrefix)
+        ? toolPrefix
+        : undefined;
+    if (toolPrefix !== undefined && validPrefix === undefined) {
+      logger.warn("toolPrefix 형식 위반 — 무시 (A-Za-z0-9_- 1~40자)", {
+        length: toolPrefix.length,
+      });
+    }
     this.signal = {
       baseUrl: deps.signal?.baseUrl ?? process.env.PROCFORGE_OPENCODE_URL ?? "",
       mode: (deps.signal?.mode ??
         (process.env.PROCFORGE_OPENCODE_MODE as LinkMode | undefined) ??
         "b") as LinkMode,
-      toolPrefix:
-        deps.signal?.toolPrefix ??
-        process.env.PROCFORGE_OPENCODE_TOOL_PREFIX,
+      toolPrefix: validPrefix,
       timeoutMs: deps.signal?.timeoutMs,
       serverVersion: deps.signal?.serverVersion,
     };
