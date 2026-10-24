@@ -79,9 +79,9 @@ test("(f) leaf 의견 → 재검증 배지 → 재보고·재확정 → 타임�
   await page.locator(".round-item").first().click();
   const events = page.locator(".reason-events .reason-event");
   await expect(events.last()).toBeVisible({ timeout: 20000 });
-  // 마지막 3개 = 이번 재검증 체인(의견 → 실행 → 재확정)
+  // 마지막 3개 = 이번 재검증 체인(의견 → 재검증 → 재확정)
   await expect(events.nth(-3)).toContainText("의견");
-  await expect(events.nth(-2)).toContainText("실행");
+  await expect(events.nth(-2)).toContainText("재검증");
   await expect(events.last()).toContainText("재확정");
 
   await expectNoCspViolation(page);
