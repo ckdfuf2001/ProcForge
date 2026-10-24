@@ -1462,6 +1462,11 @@ export class ProcForgeApp {
     });
     if (!cfg.baseUrl) return notSent("OpenCode 주소 미설정");
     if (!openSid) return notSent("OpenCode 세션 짝이 없음");
+    // M8-1 ①: 짝 세션이 OpenCode 서버에 살아 있는지 확인한다(없으면 미전송).
+    if (cfg.mode !== "c" && !(await this.openCodeSessionAlive(openSid))) {
+      return notSent("짝 세션 없음");
+    }
+    // M8-1 ②: 역방향 — 그 ocId 의 최신 짝이 다른 PF 세션이면 보내지 않는다.
     const pair = getPairing(this.procforgeDir, openSid);
     if (pair && pair.pfSessionId !== sid) {
       return notSent(`다른 세션과 짝(${pair.pfSessionId})`);
@@ -1488,12 +1493,32 @@ export class ProcForgeApp {
     });
   }
 
+  /**
+   * M8-1 ①: OpenCode 서버에 그 세션이 살아 있는지 확인한다 (GET /session/:id).
+   * 404 = 그 세션이 없다 → 미전송. 그 밖의 실패(네트워크·5xx)는 "모름"으로 보고
+   * 전송을 막지 않는다(가짜 경고로 신호를 죽이지 않는다).
+   */
+  private async openCodeSessionAlive(ocSid: string): Promise<boolean> {
+    const base = this.signal.baseUrl.replace(/\/$/, "");
+    const doFetch = this.linkFetchImpl ?? fetch;
+    try {
+      const r = await doFetch(`${base}/session/${ocSid}`, { method: "GET" });
+      return r.status !== 404;
+    } catch {
+      return true;
+    }
+  }
+
   /** 이 세션에 짝지어진 OpenCode 세션 중 가장 최근 것 */
   private latestPairingSessionId(sessionId: string): string | undefined {
-    const pairs = Object.values(loadPairings(this.procforgeDir).pairs)
-      .filter((p) => p.pfSessionId === sessionId)
-      .sort((a, b) => (a.at < b.at ? 1 : -1));
-    return pairs[0]?.openCodeSessionId;
+    const all = loadPairings(this.procforgeDir);
+    // map(ocId별 최신) + history(과거 짝) 를 함께 본다 — ocId 의 짝이 다른
+    // PF 세션으로 바뀌면 map 에서 이 세션의 짝이 사라지므로 history 가 필요하다.
+    const entries = [...Object.values(all.pairs), ...all.history].filter(
+      (p) => p.pfSessionId === sessionId,
+    );
+    entries.sort((a, b) => (a.at < b.at ? 1 : -1));
+    return entries[0]?.openCodeSessionId;
   }
 
   /**

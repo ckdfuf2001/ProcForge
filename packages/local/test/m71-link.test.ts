@@ -596,7 +596,7 @@ describe("M7-1 adviseAndSignal", () => {
         expect(r.signal.degraded).toMatch(/다른 세션과 짝/);
       }
       // M8-1 ①: 짝 세션 생존 확인(GET)만 — 신호 전송은 없다.
-      expect(fake.requests).toEqual([]);
+      expect(fake.requests).toEqual(["GET /session/ses-g"]);
     } finally {
       await fake.close();
     }
@@ -665,8 +665,72 @@ describe("M8-1 신호 문구 + 짝 유효성", () => {
     }
   });
 
+  it("① 짝 세션이 서버에 없으면 미전송 + '짝 세션 없음'", async () => {
+    const fake = await startFake("no-session", { pfIds: ["pf-1"] });
+    try {
+      const app = stubApp({
+        signal: { baseUrl: fake.baseUrl, mode: "b", serverVersion: "1.18.18" },
+      });
+      const r = await app.adviseAndSignal({
+        sessionId: "pf-1",
+        nodeId: "1.2",
+        text: "x",
+        link: { openCodeSessionId: "ses-g" },
+      });
+      expect(r.signal.delivered).toBe(false);
+      if (!r.signal.delivered) {
+        expect(r.signal.degraded).toMatch(/짝 세션 없음/);
+      }
+      // 전송 본문은 없다(신호를 보내지 않았다).
+      expect(fake.bodies).toEqual([]);
+    } finally {
+      await fake.close();
+    }
+  });
 
+  it("② 다른 세션과 짝 → 미전송 + '다른 세션과 짝'", async () => {
+    const fake = await startFake("b-ok", { pfIds: ["pf-1"] });
+    try {
+      savePairing(pfdir, "ses-g", "pf-other");
+      const app = stubApp({
+        signal: { baseUrl: fake.baseUrl, mode: "b", serverVersion: "1.18.18" },
+      });
+      const r = await app.adviseAndSignal({
+        sessionId: "pf-1",
+        nodeId: "1.2",
+        text: "x",
+        link: { openCodeSessionId: "ses-g" },
+      });
+      expect(r.signal.delivered).toBe(false);
+      if (!r.signal.delivered) {
+        expect(r.signal.degraded).toMatch(/다른 세션과 짝/);
+      }
+      expect(fake.bodies).toEqual([]);
+    } finally {
+      await fake.close();
+    }
+  });
 
+  it("③ 양방향 최신 짝이 일치하면 전송한다", async () => {
+    const fake = await startFake("b-ok", { pfIds: ["pf-1"] });
+    try {
+      savePairing(pfdir, "ses-g", "pf-1");
+      const app = stubApp({
+        signal: { baseUrl: fake.baseUrl, mode: "b", serverVersion: "1.18.18" },
+      });
+      const r = await app.adviseAndSignal({
+        sessionId: "pf-1",
+        nodeId: "1.2",
+        text: "x",
+        link: { openCodeSessionId: "ses-g" },
+      });
+      expect(r.signal.delivered).toBe(true);
+      const sent = fake.bodies.at(-1) as { parts?: { text?: string }[] };
+      expect(sent.parts?.[0]?.text).toBe(r.signal.copyText);
+    } finally {
+      await fake.close();
+    }
+  });
 
   it("클라이언트가 신호 문구를 지정하면 400 (문구는 서버가 만든다)", async () => {
     const fake = await startFake("b-ok", { pfIds: ["pf-1"] });
