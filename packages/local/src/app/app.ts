@@ -258,10 +258,43 @@ export type AppDeps = {  core: CoreClient;
 export type SignalTarget = {
   baseUrl: string;
   mode: LinkMode;
-  text?: string;
+  /**
+   * M8-1: 신호 문구에 쓸 **도구 이름 접두어** (예: "procforge" → procforge_pf_next).
+   * 모델이 보는 도구 이름은 OpenCode 의 MCP 등록 키로 정해지므로 서버 설정에서 받는다.
+   * 비우면 접두어 없이 "ProcForge의 pf_next 도구" 로 쓴다.
+   */
+  toolPrefix?: string;
   timeoutMs?: number;
   serverVersion?: string;
 };
+
+/** M8-1: 신호 문구 길이 상한 */
+export const SIGNAL_TEXT_MAX = 500;
+
+/**
+ * M8-1: **신호 문구 함수 하나.**
+ * B(전송 text)와 C(copyText)가 같은 문자열을 쓴다 — 붙여넣은 문구를 모델이 그대로 읽는다.
+ * 의견 본문은 넣지 않는다(모델은 pf_next 로 읽는다).
+ */
+export function signalText(input: {
+  sessionId: string;
+  nodeId: string;
+  /** 도구 이름 접두어 (예: "procforge"). 모르면 생략 */
+  toolPrefix?: string;
+}): string {
+  const sid = input.sessionId;
+  const nid = input.nodeId;
+  const prefix = (input.toolPrefix ?? "").trim().replace(/_+$/, "");
+  const toolRef = prefix
+    ? `${prefix}_pf_next({sessionId:"${sid}"})`
+    : "ProcForge의 pf_next 도구";
+  const text =
+    `ProcForge 세션 ${sid}의 노드 ${nid}에 사람 의견이 추가됐습니다. ` +
+    `새 세션을 만들지 말고(pf_start 금지) ${toolRef}로 이어서 진행하세요.`;
+  return text.length > SIGNAL_TEXT_MAX
+    ? text.slice(0, SIGNAL_TEXT_MAX)
+    : text;
+}
 
 export class ProcForgeApp {
   private core: CoreClient;
@@ -324,7 +357,9 @@ export class ProcForgeApp {
       mode: (deps.signal?.mode ??
         (process.env.PROCFORGE_OPENCODE_MODE as LinkMode | undefined) ??
         "b") as LinkMode,
-      text: deps.signal?.text,
+      toolPrefix:
+        deps.signal?.toolPrefix ??
+        process.env.PROCFORGE_OPENCODE_TOOL_PREFIX,
       timeoutMs: deps.signal?.timeoutMs,
       serverVersion: deps.signal?.serverVersion,
     };
@@ -1399,22 +1434,31 @@ export class ProcForgeApp {
    * M7-ui4-i: baseUrl·mode·timeoutMs·serverVersion은 모두 서버 설정/조회값이다.
    * M7-ui4-j: 짝도 없으면 **전송하지 않는다** — 어디로 보낼지 모르는 신호는
    *   아무것도 바꾸지 않는 쪽이 낫다(가짜 서버 요청 0건).
+   * M8-1: 문구는 서버가 만든다(signalText) — 클라이언트는 정하지 못한다.
+   * M8-1: 짝 유효성 ①생존 확인 ②역방향 짝 ③양방향 일치 때만 전송.
    */
   async signalOnly(input: {
     sessionId: string;
+    /** M8-1: 문구에 들어갈 노드 id (누가的意见인지 모델이 알아야 한다) */
+    nodeId: string;
     /** 미지정 시 이 세션의 최신 짝짓기를 쓴다 (UI는 클라이언트가 못 고른다) */
     openCodeSessionId?: string;
-    text?: string;
   }): Promise<LinkResult> {
     const sid = input.sessionId;
     const cfg = this.signal;
     const openSid = input.openCodeSessionId ?? this.latestPairingSessionId(sid);
-    const copy = `${input.text ?? cfg.text ?? "계속"}\nOpenCode에서 '계속'이라고 입력하세요.`;
-    // M7-ui4-j: 문구 우선순위를 한 곳에 — 1 미설정 → 2 짝 없음 → 3 다른 세션 → 4 전송
+    // M8-1: B(전송)와 C(복사)는 **같은 문구**다.
+    const text = signalText({
+      sessionId: sid,
+      nodeId: input.nodeId,
+      toolPrefix: cfg.toolPrefix,
+    });
+    // M8-1: 문구 우선순위 — 1 미설정 → 2 짝 없음 → 3 짝 세션 없음 →
+    // 4 다른 세션과 짝 → 5 전송 실패
     const notSent = (reason: string): LinkResult => ({
       delivered: false,
       degraded: `${reason}. 전송하지 않음`,
-      copyText: copy,
+      copyText: text,
     });
     if (!cfg.baseUrl) return notSent("OpenCode 주소 미설정");
     if (!openSid) return notSent("OpenCode 세션 짝이 없음");
@@ -1430,7 +1474,7 @@ export class ProcForgeApp {
     return sendContinue({
       baseUrl: cfg.baseUrl,
       openCodeSessionId: openSid,
-      text: input.text ?? cfg.text ?? "계속",
+      text,
       mode: cfg.mode,
       timeoutMs: clampTimeoutMs(cfg.timeoutMs),
       serverVersion,
@@ -1480,12 +1524,20 @@ export class ProcForgeApp {
         "link.serverVersion·timeoutMs는 서버 설정에서만 결정됩니다 (M7-ui4-i).",
       );
     }
+    // M8-1: 신호 문구는 **서버가 만든다**(세션·노드가 있어야 문구가 성립한다).
+    // 타입에서 빠졌지만 JS 클라이언트가 보낼 수 있으므로 런타임에서도 막는다.
+    if ((link as { text?: unknown }).text !== undefined) {
+      throw pfError(
+        "bad_request",
+        "link.text는 서버 설정에서만 결정됩니다 (M8-1 — 신호 문구는 서버가 만듭니다).",
+      );
+    }
     const advised = await this.advise(a);
     // M7-ui4-i: 버전·타임아웃은 위에서 400 처리했으므로 여기서 넘기지 않는다.
     const signal = await this.signalOnly({
       sessionId: a.sessionId as string,
+      nodeId: a.nodeId as string,
       openCodeSessionId: link.openCodeSessionId,
-      text: link.text,
     });
     return { advise: advised, signal };
   }
@@ -1671,7 +1723,7 @@ export class ProcForgeApp {
     if (input.signal === false) return { advise: advised, signal: null };
     // advise는 **이미 저장됐다.** 여기서 신호만 보낸다 (advise 2회 금지 —
     // 같은 expectedRevision으로 두 번째가 conflict 난다).
-    const signal = await this.signalOnly({ sessionId: sid });
+    const signal = await this.signalOnly({ sessionId: sid, nodeId: input.nodeId });
     return { advise: advised, signal };
   }
 

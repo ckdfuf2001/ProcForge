@@ -67,11 +67,13 @@ describe("M7-ui4-j 짝 없음 + openCodeSessionId 없음 → 미전송", () => {
     const a = await app({ baseUrl: "http://127.0.0.1:1", mode: "b" });
     // linkFetchImpl 주입으로 실제 요청이 가짜 서버로 가지 않도록 baseUrl은 미사용
     const sid = await oneSession(a);
-    const r = await a.signalOnly({ sessionId: sid });
+    const r = await a.signalOnly({ sessionId: sid, nodeId: "1" });
     expect(r.delivered).toBe(false);
     if (!r.delivered) {
       expect(r.degraded).toBe("OpenCode 세션 짝이 없음. 전송하지 않음");
-      expect(r.copyText).toContain("계속");
+      // M8-1: C 문구는 서버가 만든 신호 문구(세션·노드·pf_start 금지 포함).
+      expect(r.copyText).toContain(sid);
+      expect(r.copyText).toContain("pf_start 금지");
     }
     expect(fake.seen).toEqual([]);
   });
@@ -79,7 +81,7 @@ describe("M7-ui4-j 짝 없음 + openCodeSessionId 없음 → 미전송", () => {
   it("문구 우선순위: 미설정 주소가 짝보다 먼저", async () => {
     const a = await app(); // baseUrl 미설정
     const sid = await oneSession(a);
-    const r = await a.signalOnly({ sessionId: sid });
+    const r = await a.signalOnly({ sessionId: sid, nodeId: "1" });
     expect(r.delivered).toBe(false);
     if (!r.delivered) expect(r.degraded).toMatch(/^OpenCode 주소 미설정/);
   });
@@ -89,9 +91,15 @@ describe("M7-ui4-j 짝 없음 + openCodeSessionId 없음 → 미전송", () => {
     const a = await app({ baseUrl: "http://127.0.0.1:1", mode: "b" });
     const sid = await oneSession(a);
     savePairing(pfdir, "ses-x", "pf-other");
-    const r = await a.signalOnly({ sessionId: sid, openCodeSessionId: "ses-x" });
+    const r = await a.signalOnly({
+      sessionId: sid,
+      nodeId: "1",
+      openCodeSessionId: "ses-x",
+    });
     expect(r.delivered).toBe(false);
     if (!r.delivered) expect(r.degraded).toBe("다른 세션과 짝(pf-other). 전송하지 않음");
+    // M8-1 ①: 짝 세션 생존 확인은 설정된 주소로 나간다(여긴 127.0.0.1:1 —
+    // 가짜 서버가 아니라 설정 주소다) → 가짜 서버 요청은 0건.
     expect(fake.seen).toEqual([]);
   });
 
@@ -102,13 +110,13 @@ describe("M7-ui4-j 짝 없음 + openCodeSessionId 없음 → 미전송", () => {
       core: client,
       procforgeDir: pfdir,
       projectRoot: pfdir,
-linkFetchImpl: fake.impl,
+      linkFetchImpl: fake.impl,
       // 가짜 서버는 pf_* 응답을 만들지 않는다 → 짧은 타임아웃으로 빨리 포기한다
       signal: { baseUrl: "http://127.0.0.1:9999", mode: "b", timeoutMs: 1_500 },
     });
     const sid = await oneSession(a);
     savePairing(pfdir, "ses-y", sid);
-    const r = await a.signalOnly({ sessionId: sid });
+    const r = await a.signalOnly({ sessionId: sid, nodeId: "1" });
     // 짝이 있으면 버전 조회부터 시도한다 (요청이 나갔다는 증거)
     expect(fake.seen.length).toBeGreaterThan(0);
     expect(r.delivered === true || r.delivered === false).toBe(true);

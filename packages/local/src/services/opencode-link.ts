@@ -4,7 +4,9 @@
 export type LinkMode = "b" | "a" | "c";
 
 export type LinkResult =
-  | { delivered: true; mode: "b" | "a" }
+  // M8-1: copyText 는 B(전송 문구)와 같은 문자열 — 성공 시에도 함께 돌려준다
+  // (전송·복사 문구가 언제나 같다는 계약을 확인하게 한다).
+  | { delivered: true; mode: "b" | "a"; copyText?: string }
   | { delivered: false; degraded: string; copyText: string };
 
 export type LinkDeps = {
@@ -17,7 +19,7 @@ export type LinkDeps = {
   knownVersions?: string[];
 };
 
-const CONTINUE_COPY_FALLBACK = "OpenCode에서 '계속'이라고 입력하세요.";
+/** M8-1: C(복사 문구)는 B(전송 문구)와 **같은 문자열**이다 — 덧붙이지 않는다. */
 
 /** M7-ui4-i: 신호 timeout 상한 (2분). 더 오래 기다려도 사람은 기다리지 않는다. */
 export const SIGNAL_TIMEOUT_CAP_MS = 120_000;
@@ -257,7 +259,8 @@ export async function sendContinue(opts: {
   const fail = (degraded: string): LinkResult => ({
     delivered: false,
     degraded,
-    copyText: `${opts.text}\n${CONTINUE_COPY_FALLBACK}`,
+    // M8-1: C = B (같은 문자열).
+    copyText: opts.text,
   });
   if (!sid || opts.mode === "c") return fail("연결 없음");
   // 클로저 안 narrowing 소멸 방지 (빌드 tsc).
@@ -340,6 +343,6 @@ export async function sendContinue(opts: {
     } catch {
       // 무시
     }
-    return { delivered: true, mode: sigMode };
+    return { delivered: true, mode: sigMode, copyText: opts.text };
   }
 }

@@ -21,7 +21,7 @@ import { ProcForgeApp, type SignalTarget } from "../src/app/app.js";
 // GET /event SSE.
 
 type Part = Record<string, unknown>;
-type FakeScenario = "b-ok" | "plan" | "a-ok";
+type FakeScenario = "b-ok" | "plan" | "a-ok" | "no-session";
 
 function startFake(
   scenario: FakeScenario,
@@ -96,6 +96,17 @@ function startFake(
     }
     if (req.method === "GET" && mMsg) {
       send(200, { data: partsOf(mMsg[1]) });
+      return;
+    }
+    // M8-1 ①: 짝 세션 생존 확인 (GET /session/:id). "no-session" 시나리오에서는
+    // 그 세션이 없는 것으로 답한다(404).
+    const mSession = /^\/session\/([^/]+)$/.exec(url.pathname);
+    if (req.method === "GET" && mSession) {
+      if (scenario === "no-session") {
+        send(404, { error: "session not found" });
+        return;
+      }
+      send(200, { id: mSession[1] });
       return;
     }
     if (req.method === "POST" && url.pathname === "/tui/append-prompt") {
@@ -198,7 +209,7 @@ describe("M7-1 opencode-link", () => {
           },
         },
       });
-      expect(r).toEqual({ delivered: true, mode: "b" });
+      expect(r).toMatchObject({ delivered: true, mode: "b" });
       // M7-1.1 실서버 확인형 body (/session/:id/message + {parts}).
       expect(fake.bodies).toHaveLength(1);
       const sent = fake.bodies[0] as {
@@ -285,8 +296,8 @@ describe("M7-1 opencode-link", () => {
       expect(r.delivered).toBe(false);
       if (!r.delivered) {
         expect(r.degraded).toMatch(/무응답\/plan 모드/);
-        expect(r.copyText).toContain("계속");
-        expect(r.copyText).toContain("계속'이라고 입력하세요");
+        // M8-1: C(복사 문구)는 B(전송 문구)와 같은 문자열이다.
+        expect(r.copyText).toBe("계속");
       }
       // plan 모드도 텍스트 part는 쌓인다 (pf_*만 없음).
       expect(
@@ -353,7 +364,7 @@ describe("M7-1 opencode-link", () => {
         serverVersion: "1.18.18",
         deps: { ...httpLinkDeps(fake.baseUrl) },
       });
-      expect(r).toEqual({ delivered: true, mode: "a" });
+      expect(r).toMatchObject({ delivered: true, mode: "a" });
       expect(fake.requests).toContain("POST /tui/append-prompt");
       expect(fake.requests).toContain("POST /tui/submit-prompt");
       expect(fake.bodies).toEqual([{ text: "계속" }]);
@@ -397,7 +408,7 @@ describe("M7-1 opencode-link", () => {
         serverVersion: "1.18.18",
         deps: { ...httpLinkDeps(fake.baseUrl) },
       });
-      expect(r).toEqual({ delivered: true, mode: "b" });
+      expect(r).toMatchObject({ delivered: true, mode: "b" });
       const sse = await (
         await fetch(`${fake.baseUrl}/event`)
       ).text();
@@ -546,7 +557,7 @@ describe("M7-1 adviseAndSignal", () => {
         sessionId: "pf-1",
         link,
       });
-      expect(r1.signal).toEqual({ delivered: true, mode: "b" });
+      expect(r1.signal).toMatchObject({ delivered: true, mode: "b" });
       expect(getPairing(pfdir, "ses-g")?.pfSessionId).toBe("pf-1");
       // 재연결: OpenCode 세션이 pf-2로 pf_start한 게 먼저 관찰돼 짝이 pf-2로
       // 갱신된 뒤에야 pf-2 조언 신호가 허용된다.
@@ -556,7 +567,7 @@ describe("M7-1 adviseAndSignal", () => {
         sessionId: "pf-2",
         link,
       });
-      expect(r2.signal).toEqual({ delivered: true, mode: "b" });
+      expect(r2.signal).toMatchObject({ delivered: true, mode: "b" });
       expect(getPairing(pfdir, "ses-g")?.pfSessionId).toBe("pf-2");
       const all = loadPairings(pfdir);
       const hist = all.history
@@ -584,7 +595,94 @@ describe("M7-1 adviseAndSignal", () => {
       if (!r.signal.delivered) {
         expect(r.signal.degraded).toMatch(/다른 세션과 짝/);
       }
+      // M8-1 ①: 짝 세션 생존 확인(GET)만 — 신호 전송은 없다.
       expect(fake.requests).toEqual([]);
+    } finally {
+      await fake.close();
+    }
+  });
+});
+
+describe("M8-1 신호 문구 + 짝 유효성", () => {
+  it("문구에 sid·nid·pf_start 금지 가 있고 의견 본문은 없다, C == B", async () => {
+    const fake = await startFake("b-ok", { pfIds: ["pf-1"] });
+    try {
+      const app = stubApp({
+        signal: { baseUrl: fake.baseUrl, mode: "b", serverVersion: "1.18.18" },
+      });
+      const r = await app.adviseAndSignal({
+        sessionId: "pf-1",
+        nodeId: "1.2",
+        text: "이 문장은 모델에게 가지 않는다",
+        link: { openCodeSessionId: "ses-g" },
+      });
+      expect(r.signal.delivered).toBe(true);
+      const copy = r.signal.copyText ?? "";
+      expect(copy).toContain("pf-1");
+      expect(copy).toContain("1.2");
+      expect(copy).toContain("pf_start 금지");
+      expect(copy).not.toContain("이 문장은 모델에게 가지 않는다");
+      // B(전송 본문) == C(복사 문구)
+      const sent = fake.bodies.at(-1) as { parts?: { text?: string }[] };
+      expect(sent.parts?.[0]?.text).toBe(copy);
+    } finally {
+      await fake.close();
+    }
+  });
+
+  it("toolPrefix 설정 → 접두어 있는 도구 이름, 미설정 → 접두어 없이 phrasing", async () => {
+    const fake = await startFake("b-ok", { pfIds: ["pf-1"] });
+    try {
+      const withPrefix = stubApp({
+        signal: {
+          baseUrl: fake.baseUrl,
+          mode: "b",
+          serverVersion: "1.18.18",
+          toolPrefix: "procforge",
+        },
+      });
+      const r1 = await withPrefix.adviseAndSignal({
+        sessionId: "pf-1",
+        nodeId: "1.2",
+        text: "x",
+        link: { openCodeSessionId: "ses-g" },
+      });
+      expect(r1.signal.copyText).toContain('procforge_pf_next({sessionId:"pf-1"})');
+
+      const noPrefix = stubApp({
+        signal: { baseUrl: fake.baseUrl, mode: "b", serverVersion: "1.18.18" },
+      });
+      const r2 = await noPrefix.adviseAndSignal({
+        sessionId: "pf-1",
+        nodeId: "1.2",
+        text: "x",
+        link: { openCodeSessionId: "ses-g" },
+      });
+      expect(r2.signal.copyText).toContain("ProcForge의 pf_next 도구");
+      expect(r2.signal.copyText).not.toContain("pf_next({sessionId");
+    } finally {
+      await fake.close();
+    }
+  });
+
+
+
+
+  it("클라이언트가 신호 문구를 지정하면 400 (문구는 서버가 만든다)", async () => {
+    const fake = await startFake("b-ok", { pfIds: ["pf-1"] });
+    try {
+      const app = stubApp({
+        signal: { baseUrl: fake.baseUrl, mode: "b", serverVersion: "1.18.18" },
+      });
+      await expect(
+        app.adviseAndSignal({
+          sessionId: "pf-1",
+          nodeId: "1.2",
+          text: "x",
+          link: { text: "계속" } as never,
+        }),
+      ).rejects.toThrow(/서버 설정에서만/);
+      expect(fake.bodies).toEqual([]);
     } finally {
       await fake.close();
     }
