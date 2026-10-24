@@ -2067,17 +2067,62 @@ export class ProcForgeApp {
         }[],
       ),
     );
-    // M8-1-0: 자기 재검증으로 hash가 바뀐 노드는 승인이 무효다 → 재승인 안내.
-    for (const n of fullNodes as {
-      id: string;
-      hash?: string;
-      approval?: { at: string; note?: string; hash?: string } | undefined;
-    }[]) {
-      if (!n.approval?.hash || !n.hash) continue;
-      if (n.approval.hash === n.hash) continue;
-      allAudit.push(
-        `재승인 필요: 노드 ${n.id} (승인 후 재검증으로 hash 변경 — pf_approve로 다시 승인하세요)`,
-      );
+    // M8-1-0 보정: 자기 재검증으로 hash가 바뀐 노드는 승인이 무효다 → 재승인 안내.
+    //  - core 승인 기록(사람이 external 계획을 승인) — approval.hash vs 현재 hash
+    //  - approvals.json(무인 실행이 실제로 쓰는 승인 목록) — approvalHash vs 현재 approvalHash
+    {
+      const reapproval = new Set<string>();
+      for (const n of fullNodes as {
+        id: string;
+        hash?: string;
+        approval?: { at: string; note?: string; hash?: string } | undefined;
+      }[]) {
+        if (!n.approval?.hash || !n.hash) continue;
+        if (n.approval.hash === n.hash) continue;
+        reapproval.add(n.id);
+      }
+      const st = readRunStateBySession(this.procforgeDir, sid);
+      if (st?.procedureDir) {
+        const approvals = loadApprovals(st.procedureDir);
+        if (approvals.length > 0) {
+          const byId = new Map(nodes.map((n) => [n.id, n]));
+          const accumulate = loadAccumulateFromProcedure(st.procedureDir);
+          const readScript = (rel: string): string | undefined => {
+            try {
+              return readSandboxed(join(this.procforgeDir, "sessions", sid), rel);
+            } catch {
+              return undefined;
+            }
+          };
+          for (const e of approvals) {
+            const n = byId.get(e.node.id);
+            if (!n) continue;
+            if (!e.approvalHash) continue;
+            const parent = n.parentId ? byId.get(n.parentId) : undefined;
+            const pins = approvalPins(
+              n,
+              parent
+                ? {
+                    id: parent.id,
+                    hash: parent.hash,
+                    kind: (parent as { kind?: string }).kind,
+                  }
+                : undefined,
+              toHashableMap(byId),
+              readScript,
+              accumulate,
+            );
+            const current = pins.find((p) => p.id === e.node.id)?.approvalHash ?? "";
+            if (!current || current === e.approvalHash) continue;
+            reapproval.add(e.node.id);
+          }
+        }
+      }
+      for (const id of [...reapproval].sort()) {
+        allAudit.push(
+          `재승인 필요: 노드 ${id} (승인 후 재검증으로 hash 변경 — procforge approve로 다시 승인하세요)`,
+        );
+      }
     }
     // M5.8.2 후속: var ref 필드 사전검사 (core에는 resultJson 실데이터가 없음).
     // golden→최종pass 파일 기준. 출력은 있는데 필드가 없으면 bad_ref_field.

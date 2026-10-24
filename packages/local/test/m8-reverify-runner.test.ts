@@ -104,3 +104,52 @@ describe("M8-1-0 보정: 러너는 재검증 대기 노드를 실행하지 않�
   });
 });
 
+describe("M8-1-0 보정: finalize 승인 불일치 안내", () => {
+  it("approvals.json의 고정값이 현재와 다르면 '재승인 필요'", async () => {
+    const { app, sid } = await leafSession();
+    // 절차서 승인 목록(무인 실행이 실제로 쓰는 approvals.json)을 만든다.
+    const procDir = join(pfdir, "procedures", "rv-proc");
+    mkdirSync(procDir, { recursive: true });
+    writeFileSync(
+      join(procDir, "approvals.json"),
+      JSON.stringify({
+        version: 2,
+        entries: [
+          {
+            node: { id: "1.1", hash: "old-hash" },
+            approvalHash: "stale-approval-hash",
+            tool: TOOL,
+            args: { path: "x.txt" },
+          },
+        ],
+      }),
+      "utf8",
+    );
+    // 이 세션의 최근 실행이 위 절차서를 가리키게 한다.
+    const runDir = join(pfdir, "runs", "rv-run");
+    mkdirSync(runDir, { recursive: true });
+    writeFileSync(
+      join(runDir, "state.json"),
+      JSON.stringify({
+        version: 1,
+        runId: "rv-run",
+        sessionId: sid,
+        procedure: "rv-proc",
+        procedureDir: procDir,
+        params: {},
+        pending: [],
+        done: [],
+        supplied: {},
+        approved: [],
+        status: "done",
+        updatedAt: new Date().toISOString(),
+      }),
+      "utf8",
+    );
+
+    const out = await app.finalize({ sessionId: sid, name: "rv-proc" });
+    expect(
+      out.warnings.some((w) => w.includes("재승인 필요") && w.includes("1.1")),
+    ).toBe(true);
+  }, 60000);
+});
