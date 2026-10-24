@@ -21,7 +21,7 @@ import { ProcForgeApp, type SignalTarget } from "../src/app/app.js";
 // GET /event SSE.
 
 type Part = Record<string, unknown>;
-type FakeScenario = "b-ok" | "plan" | "a-ok" | "no-session" | "b-next";
+type FakeScenario = "b-ok" | "plan" | "a-ok" | "no-session" | "b-next" | "b-offside";
 
 function startFake(
   scenario: FakeScenario,
@@ -45,13 +45,24 @@ function startFake(
   const toolPart = (sid: string): Part => ({
     // 짝짓기는 pf_start output의 sessionId로 한다 (M7-0 §3, extractPfSessionId).
     type: "tool",
-    tool: scenario === "b-next" ? "procforge_pf_next" : "procforge_pf_start",
+    tool:
+      scenario === "b-next" || scenario === "b-offside"
+        ? "procforge_pf_next"
+        : "procforge_pf_start",
     part: {
       sessionID: sid,
-      tool: scenario === "b-next" ? "procforge_pf_next" : "procforge_pf_start",
+      tool:
+        scenario === "b-next" || scenario === "b-offside"
+          ? "procforge_pf_next"
+          : "procforge_pf_start",
     },
     state: {
       status: "completed",
+      // M8-1 a2: 실서버는 호출 입력을 state.input 에 남긴다 —
+      // b-offside 는 **다른 PF 세션**을 대상으로 pf_next 를 부른 상황.
+      ...(scenario === "b-offside"
+        ? { input: { sessionId: "pf-other" } }
+        : {}),
       output: JSON.stringify({ sessionId: pfQueue.shift() ?? "pf-fake-x" }),
     },
   });
@@ -85,7 +96,11 @@ function startFake(
         send(400, { error: "parts required" });
         return;
       }
-      if (scenario === "b-ok" || scenario === "b-next") {
+      if (
+        scenario === "b-ok" ||
+        scenario === "b-next" ||
+        scenario === "b-offside"
+      ) {
         // 신호 시점에 동기 push (폴링-읽기 경쟁 제거. 실서버는 비동기).
         push(sid, toolPart(sid));
       } else if (scenario === "plan") {
@@ -794,6 +809,27 @@ describe("M8-1 보정: 신호 판정 + 생존 확인 상한", () => {
       }
       // pf_start 의 output 세션 id 로 짝이 갱신된다(새 세션이 이긴다).
       expect(getPairing(pfdir, "ses-g")?.pfSessionId).toBe("pf-2");
+    } finally {
+      await fake.close();
+    }
+  });
+
+  it("첫 pf_next의 입력 sessionId가 다르면 '다른 세션을 이어함' 경고", async () => {
+    const fake = await startFake("b-offside", { pfIds: ["pf-1"] });
+    try {
+      const app = stubApp({
+        signal: { baseUrl: fake.baseUrl, mode: "b", serverVersion: "1.18.18" },
+      });
+      const r = await app.adviseAndSignal({
+        sessionId: "pf-1",
+        nodeId: "1.2",
+        text: "x",
+        link: { openCodeSessionId: "ses-g" },
+      });
+      expect(r.signal.delivered).toBe(true);
+      if (r.signal.delivered) {
+        expect(r.signal.warning).toBe("모델이 다른 세션을 이어함(pf-other)");
+      }
     } finally {
       await fake.close();
     }

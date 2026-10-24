@@ -1496,6 +1496,8 @@ export class ProcForgeApp {
       baseUrl: cfg.baseUrl,
       openCodeSessionId: openSid,
       text,
+      // M8-1 a2:pf_next/pf_report 입력 sessionId 비교용
+      pfSessionId: sid,
       mode: cfg.mode,
       timeoutMs: clampTimeoutMs(cfg.timeoutMs),
       serverVersion,
