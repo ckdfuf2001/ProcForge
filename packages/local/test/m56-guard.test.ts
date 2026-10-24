@@ -84,10 +84,24 @@ async function buildAcc(withRubric = false): Promise<{ app: ProcForgeApp; sid: s
   });
   return {
     app, sid,
+    // M8-1-0: 확정 leaf에 제약을 추가하면 재검증 대기가 되므로
+    // 새 attempt로 다시 보고·확정해야 finalize할 수 있다.
     editCount: () => client.pfEditNode({
       sessionId: sid, nodeId: "1.2",
-      addConstraints: [{ id: "c-n", kind: "count", spec: { min: 1 }, source: "human" }],
-    }).then(() => undefined),
+      addConstraints: [{ id: "c-n", kind: "count", spec: { path: "all", min: 1 }, source: "human" }],
+    }).then(async () => {
+      const rep = await client.pfReport({
+        sessionId: sid, nodeId: "1.2", tool: { server: "fake-ppt", name: "echo" },
+        args: { v: "a" }, resultSummary: "a", resultJson: { v: "a", all: ["a"] },
+        selfVerdict: "pass", selfReason: "ok",
+      });
+      expect(rep.verdict).toBe("pass");
+      await client.pfResolve({
+        sessionId: sid, nodeId: "1.2", decision: "leaf",
+        tool: { server: "fake-ppt", name: "echo" },
+        argSpecs: { v: { kind: "var", ref: "$1.1.v" } } as never,
+      });
+    }),
   };
 }
 

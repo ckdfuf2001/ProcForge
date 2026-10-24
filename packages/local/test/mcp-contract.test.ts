@@ -285,11 +285,13 @@ describe("도구 응답 계약 (outputSchema 통과)", () => {
         sessionId: sid, nodeId: "1.1",
         tool: { server: "opencode", name: "read" }, argSpecs: { path: { kind: "fixed", value: "x" } },
       });
-      // 인자 수정 → open + suggestedArgs 고지
+      // 인자 수정 → needs_reverify(재검증 대기) + suggestedArgs 고지
       const edited = await call("pf_edit_args", {
         sessionId: sid, nodeId: "1.1", patch: { set: { path: { kind: "fixed", value: "y" } } },
       });
-      expect((edited["node"] as { status: string }).status).toBe("open");
+      expect((edited["node"] as { status: string }).status).toBe(
+        "needs_reverify",
+      );
       const nxt = await call("pf_next", { sessionId: sid });
       expect((nxt["instruction"] as string)).toMatch(/사람이 인자를 수정함/);
       // 목표 수정

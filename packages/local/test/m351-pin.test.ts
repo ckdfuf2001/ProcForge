@@ -67,7 +67,10 @@ describe("M3.5.1-1 재보고 pin 해소", () => {
 
   it("edit_args 후 재보고 통과", async () => {
     const { app, sid, rep } = await leafSession();
-    await app.editArgs({ sessionId: sid, nodeId: "1.1", patch: { set: { path: { kind: "fixed", value: "x.txt" } } } });
-    await expectRereportPass(app, rep);
+    // M8-1-0: 인자를 실제로 바꿔야 hash가 바뀌어 재검증 대기가 된다.
+    // (같은 값으로의 무효 수정은 leaf를 그대로 둔다)
+    writeFileSync(join(pfdir, "sandbox", sid, "x2.txt"), "v2");
+    await app.editArgs({ sessionId: sid, nodeId: "1.1", patch: { set: { path: { kind: "fixed", value: "x2.txt" } } } });
+    await expectRereportPass(app, { ...rep, args: { path: "x2.txt" } });
   });
 });

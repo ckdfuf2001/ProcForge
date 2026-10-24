@@ -88,7 +88,9 @@ describe("M4.2-2.5 core/파일 저장소 분리 실증", () => {
       const edited = await call("pf_edit_args", {
         sessionId: sid, nodeId: "1.1", patch: { set: { file: { kind: "fixed", value: "b.pptx" } } },
       });
-      expect((edited["node"] as { status: string }).status).toBe("open");
+      expect((edited["node"] as { status: string }).status).toBe(
+        "needs_reverify",
+      );
       const adv = await call("pf_advise", { sessionId: sid, nodeId: "1.2", text: "다듬어라" });
       expect((adv["node"] as { id: string }).id).toBe("1.2");
       // 카탈로그 수집도 임시 폴더 기준 동작

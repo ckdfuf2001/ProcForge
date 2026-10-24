@@ -160,7 +160,13 @@ describe("M5.8.2-2 ref 해석 인자 내려주기", () => {
     } as never);
     await client.pfEditArgs({
       sessionId: sid, nodeId: "1.2",
-      patch: { set: { input: { kind: "var", ref: "$1.1.raw" } } },
+      // M8-1-0: hash가 바뀌어야 재검증 대기가 된다(무효 수정은 leaf 유지).
+      patch: {
+        set: {
+          input: { kind: "var", ref: "$1.1.raw" },
+          run: { kind: "script", file: "scripts/echo2.py", runtime: "python" },
+        },
+      },
     } as never);
     const nxt = await app.next({ sessionId: sid });
     expect(nxt.done).toBe(false);
