@@ -1080,3 +1080,30 @@ argv: [...]}` 고정. runner는 run fs에서 직접 실행해 stdout을 golden�
   비교해 다르면 "서버가 재시작되어 토큰이 바뀌었습니다"를 안내하고 토큰을 버린다.
   근거: createUiServer(), initAuth().
 
+### M8-1-0 leaf 자기 재검증 (needs_reverify)
+
+- [M8-1-0-a] **확정 leaf의 hash가 바뀌면 상태는 `needs_reverify` 가 된다.**
+  확정 후 hash를 바꾸는 쓰기는 `pfAdvise`·`pfEditArgs`·`pfEditNode` 세 경로뿐이며,
+  세 경로 모두 단일 함수(`withLeafReverify`)를 거친다. 기존 `leaf→open` 전이
+  (pfEditArgs 항상 열기, pfEditNode goal 변경 시 열기)도 여기에 통일된다.
+  근거: `packages/core/src/service.ts` withLeafReverify().
+- [M8-1-0-b] **hash가 같으면 전이하지 않는다.** 무효 수정은 leaf를 그대로 둔다
+  (재검증 대상이 아니므로 pf_next가 다시 내주지 않는다). leaf·split·open 노드의
+  기존 수정 동작은 바꾸지 않는다. 근거: withLeafReverify()의 hash 비교.
+- [M8-1-0-c] **재확정은 `reverifySince.revision` 이후의 attempt만 받는다.**
+  옛 attempt로 확정하면 `bad_request` + "재검증 필요" 힌트를 준다. 재확정 시
+  `reverifySince`·`staleSince` 을 함께 지운다(stale leaf 직접 수정도 needs_reverify 우선).
+  attempt 에 revision 을 심어 판정한다. 근거: pfResolve()의 reverify 가드.
+- [M8-1-0-d] **finalize 은 `needs_reverify` 노드가 하나라도 있으면 거절한다.**
+  메시지에 대상 노드 id 를 함께 준다. 승인이 있던 노드는 승인 시점 hash 를 남기고,
+  재확정으로 hash 가 바뀌면 "재승인 필요" 경고를 낸다. 근거: app.finalize().
+- [M8-1-0-e] **`needs_reverify` 는 pf_next 가 ready 로 취급해 probing 으로 넘긴다.**
+  재시도 한도(retries)는 리셋하고 attempt 이력은 유지한다. 러너(--changed 포함)도
+  재검증 대기 노드를 재실행 대상으로 본다. 근거: pfNext(), runner/run.ts.
+- [M8-1-0-f] **이 wire 계약이 바뀌었으므로 프로토콜 버전을 2 → 3 으로 올린다.**
+  노드 상태에 `needs_reverify` 가 추가되었다. 근거: `packages/shared/src/wire.ts`.
+- [M8-1-0-g] **마이그레이션은 없다.** 기존 leaf 를 자동으로 전이시키지 않는다
+  (d290 1.3 포함). 확정 이후에 실제로 hash 가 바뀐 노드만 재검증 대상이 된다.
+  근거: docs/M8-1-0-spec.md.
+
+

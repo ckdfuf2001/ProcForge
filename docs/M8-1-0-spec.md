@@ -1,7 +1,24 @@
 # M8-1-0 — leaf 자기 재검증 (needs_reverify) 사양
 
-상태: **사양 확정 · 구현 전**
+상태: **구현 완료 (2026-10-24)**
 관련: M8-1(신호 문구·짝 유지), M8-ui-2(이벤트 detail), DECISIONS `[M8-1-0]`
+
+## 결정 (2026-10-24)
+
+항목 0 보고에서 `pf_edit_args`(항상 leaf→open)와 `pf_edit_node`의 goal 변경
+(leaf→open)이라는 기존 재개 경로 2개를 확인했다. 아래와 같이 통일한다.
+
+- **세 경로 모두 `needs_reverify`로 통일**: `pfAdvise`, `pfEditArgs`,
+  `pfEditNode`가 leaf의 hash를 바꾸면 `needs_reverify`로 전이한다.
+  기존 `leaf→open` 단언은 `open→needs_reverify`로 수정하고 커밋 메시지에
+  `파일:테스트명 — open→needs_reverify`로 나열한다. 테스트는 삭제하지 않는다.
+- **hash 불변이면 전이 없음** (`edit_args` 포함). leaf는 leaf로 남는다.
+- `needs_reverify`/`probing`에서도 `pf_split`을 허용한다(reason 필수,
+  `causeAdvice` 자동 연결). 현재 막혀 있으면 이번 범위에서 연다.
+- **stale leaf 직접 수정**: `needs_reverify`가 우선한다. 재확정 시
+  `staleSince`도 함께 지운다. 테스트 1건 추가.
+- **split/open 노드 수정 동작은 바꾸지 않는다.**
+- `status === "open"`을 참조하는 코드는 grep으로 찾아 보고한다.
 
 ## 배경
 
@@ -82,3 +99,23 @@ confirm 거절 → 새 report로 재확정 → done
 - 항목별 커밋표
 - CI run 번호·`head_sha` 일치·7잡 green
 - 스크린샷 4장: 입력 화면 / 3단 전체 / 라운드 클릭 / 재검증 표시
+
+## 구현 결과 (2026-10-24)
+
+| 항목 | 결과 | 근거 |
+| --- | --- | --- |
+| 1 shared | `needs_reverify` 상태·`reverifySince`·`previewEdit.selfReverify`·프로토콜 v3 | `packages/shared/src/{schema,dto,core-client,wire}.ts` |
+| 2 core | `withLeafReverify()` 단일 경로(advise/edit_args/edit_node) + 잠금 거절 | `packages/core/src/service.ts` |
+| 3 pfNext | `needs_reverify` → ready → `probing`(retries 리셋, attempt 유지) | `pfNext()` |
+| 4 pfConfirmLeaf | `reverifySince.revision` 이후 attempt만 허용, 재확정 시 `staleSince` 삭제 | `pfResolve()` 가드 |
+| 5 finalize | `needs_reverify` 있으면 거절 + "재승인 필요" 경고(승인 hash 비교) | `packages/local/src/app/app.ts` |
+| 6 previewEdit/UI | `selfReverify` 반환 + 상태색·라벨·필터 + 타임라인 이벤트 | `packages/ui/src/*` |
+| 7 테스트 | core 8건(`m8-reverify.test.ts`)·local 6건 반영·E2E 1건 | `packages/local/test-e2e/m8-1-reverify.spec.ts` |
+| 8 docs | DECISIONS `[M8-1-0]` 7행 + M5.8 주석 | `docs/DECISIONS.md` |
+
+### 알아둘 점
+
+- `causeAdviseIds`(이벤트 상세 키)는 코드베이스 전체가 `causeAdviseIds` 철자를 쓴다.
+  분해 원인이 된 조언 id 목록은 이 키에 담긴다(별칭 없음).
+- 기존 단언 변경(leaf→open ⇒ needs_reverify)은 커밋 메시지에
+  `파일:테스트명 — open→needs_reverify` 형식으로 적었다. 테스트 삭제는 없다.
