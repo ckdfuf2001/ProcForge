@@ -454,6 +454,27 @@ export class CoreService implements CoreClient {
   }
 
   /**
+   * M8-1-0: (재)작업 시작 전환.
+   * open(재개)·needs_reverify(자기 재검증)를 probing 으로 넘긴다.
+   * pfNext·pfReport 가 **같은 함수**를 쓴다 — 재시도 한도 리셋 규칙이
+   * 경로마다 어긋나지 않게 (pf_next 를 거치지 않고 바로 보고하는 경로도 동일).
+   */
+  private enterProbing(n: Node): { node: Node; entered: boolean } {
+    if (n.status !== "open" && n.status !== "needs_reverify")
+      return { node: n, entered: false };
+    const reverify = n.status === "needs_reverify";
+    return {
+      node: {
+        ...n,
+        status: "probing" as const,
+        // 재검증은 새 시도다 — 재시도 한도는 기본값으로 리셋한다.
+        ...(reverify ? { retries: 0 } : {}),
+      },
+      entered: true,
+    };
+  }
+
+  /**
    * M8-1-0: 확정 leaf의 hash를 바꾼 쓰기 → needs_reverify.
    * hash가 같으면 leaf 유지(순수 메모). leaf가 아닌 노드는 호출부 동작 유지.
    */
@@ -698,14 +719,7 @@ export class CoreService implements CoreClient {
         // M4.2-2.5.1-3: 분기 시 open→probing 전환 저장. 처음 전환될 때만 enteredProbing.
         // M8-1-0: needs_reverify도 probing으로 전환하고 재시도 한도를 리셋한다
         // (attempt 이력은 유지 — 재확정 가드는 revision으로 판정한다).
-        const entering = n.status === "open" || n.status === "needs_reverify";
-        const disp = entering
-          ? {
-              ...n,
-              status: "probing" as const,
-              ...(n.status === "needs_reverify" ? { retries: 0 } : {}),
-            }
-          : n;
+        const { node: disp, entered: entering } = this.enterProbing(n);
         if (entering) this.store.saveNode(sessionId, disp);
         return {
           result: {
@@ -742,7 +756,7 @@ export class CoreService implements CoreClient {
       },
       () => {
         const s = this.sess(input.sessionId);
-        const n = this.node(input.sessionId, input.nodeId);
+        let n = this.node(input.sessionId, input.nodeId);
         if (!input.selfVerdict || !input.selfReason)
           throw err("bad_request", "selfVerdict and selfReason are required");
         if (n.locked) throw err("conflict", `node ${n.id} is locked`);
@@ -754,6 +768,14 @@ export class CoreService implements CoreClient {
           n.status !== "needs_reverify"
         )
           throw err("conflict", `node ${n.id} is not reportable (${n.status})`);
+
+        // M8-1-0: 재검증 대기를 **pf_next 없이** 바로 보고하는 경로도 같은 전환을 탄다
+        // (probing 전환 + 재시도 한도 리셋). 이벤트에는 이 전환이 남는다.
+        if (n.status === "needs_reverify") {
+          const moved = this.enterProbing(n);
+          n = moved.node;
+          this.store.saveNode(s.id, n);
+        }
 
         // external 차단 (§5)
         if (n.sideEffect === "external") {

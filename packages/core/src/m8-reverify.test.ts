@@ -277,6 +277,48 @@ describe("M8-1-0 leaf 자기 재검증", () => {
     ).rejects.toThrow(/재검증 필요/);
   });
 
+  it("pf_next 없이 바로 보고해도 같은 전환을 탄다(재시도 리셋·reverify 이벤트)", async () => {
+    const store = createMemoryStore();
+    const s = svc(store);
+    const { session } = await s.pfStart({ request: "직접 보고", toolCatalog: catalog });
+    const sid = session.id;
+    await s.pfResolve({
+      sessionId: sid,
+      nodeId: "1",
+      decision: "split",
+      children: [{ goal: "a" }],
+      reason: "타임라인 확인용 분해. 자식 하나를 만든다.",
+    });
+    await s.pfReport({ ...rep(), sessionId: sid, nodeId: "1.1" });
+    await s.pfResolve({
+      sessionId: sid,
+      nodeId: "1.1",
+      decision: "leaf",
+      tool: { server: "fs", name: "read" },
+      argSpecs: { file_path: { kind: "fixed", value: "a" } },
+    });
+    // 재시도 한도를 소진시킨 상태로 만든다(저장소 직접 조정 — 시험용).
+    const before = store.getNode(sid, "1.1")!;
+    store.saveNode(sid, { ...before, retries: 2 });
+    await s.pfAdvise({
+      sessionId: sid,
+      nodeId: "1.1",
+      text: "파일 out.json 생성",
+    });
+    const waiting = await s.getNode(sid, "1.1");
+    expect(waiting.status).toBe("needs_reverify");
+    expect(waiting.retries).toBe(2);
+    const reported = await s.pfReport({ ...rep(), sessionId: sid, nodeId: "1.1" });
+    expect(reported.verdict).toBe("pass");
+    const after = await s.getNode(sid, "1.1");
+    expect(after.status).toBe("probing");
+    expect(after.retries).toBe(0);
+    const rounds = await s.getDecompositionHistory({ sessionId: sid });
+    const events = rounds[0]?.events ?? [];
+    const kinds = events.map((e) => e.kind);
+    expect(kinds).toContain("advise");
+    expect(kinds).toContain("reverify");
+  });
 
   it("타임라인에 의견 → 재검증 → 재확정이 보인다", async () => {
     const s = svc();
