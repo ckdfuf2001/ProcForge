@@ -254,6 +254,28 @@ describe("M8-1-0 leaf 자기 재검증", () => {
   });
 
 
+  it("reopen해도 reverifySince는 남는다 — 옛 attempt로 확정 불가", async () => {
+    const s = svc();
+    const sid = await leafed(s);
+    await s.pfAdvise({
+      sessionId: sid,
+      nodeId: "1",
+      text: "파일 out.json 생성",
+    });
+    const reopened = await s.pfReopen({ sessionId: sid, nodeId: "1" });
+    expect(reopened.node.status).toBe("open");
+    expect(reopened.node.reverifySince).toBeDefined();
+    // 옛 attempt(재검증 이전 revision)로 확정하면 거절된다.
+    await expect(
+      s.pfResolve({
+        sessionId: sid,
+        nodeId: "1",
+        decision: "leaf",
+        tool: { server: "fs", name: "read" },
+        argSpecs: { file_path: { kind: "fixed", value: "a" } },
+      }),
+    ).rejects.toThrow(/재검증 필요/);
+  });
 
 
   it("타임라인에 의견 → 재검증 → 재확정이 보인다", async () => {

@@ -2747,7 +2747,8 @@ if (oldHash !== saved.hash) this.propagateStale(s.id, input.nodeId, s.revision +
           ...n,
           locked: false,
           status: "open" as const,
-          reverifySince: undefined,
+          // M8-1-0 보정: 재검증 대기 표시(reverifySince)는 reopen해도 유지한다.
+          // 지우면 옛 attempt로 다시 확정할 수 있어 재검증 가드가 뚫린다.
         };
         this.store.saveNode(input.sessionId, next);
         return { result: next, summary: `reopen ${input.nodeId}` };
