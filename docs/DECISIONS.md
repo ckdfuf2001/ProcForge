@@ -1133,4 +1133,40 @@ argv: [...]}` 고정. runner는 run fs에서 직접 실행해 stdout을 golden�
   쓰기는 거절") 범위를 넓혀 잠긴 split 노드에 의견을 거는 기존 경로를 바꾸지
   않는다. 근거: pfAdvise().
 
+### M8-1 계속 신호 문구 + 짝 유지
+
+- [M8-1-a] **신호 문구는 서버가 만든다 — `signalText()` 하나.**
+  "ProcForge 세션 <sid>의 노드 <nid>에 사람 의견이 추가됐습니다. 새 세션을 만들지
+  말고(pf_start 금지) <prefix>_pf_next({sessionId:"<sid>"})로 이어서 진행하세요."
+  B(전송)와 C(복사)가 **같은 문자열**을 쓴다(C 에 "계속이라고 입력하세요" 를 덧붙이지
+  않는다). 의견 본문은 넣지 않는다(모델은 pf_next 로 읽는다). 상한 500자.
+  클라이언트가 신호 문구를 정하면 400. 근거: app.ts signalText().
+- [M8-1-b] **도구 이름 접두어는 서버 설정이다.** 모델이 보는 도구 이름은
+  OpenCode 의 MCP 등록 키로 정해진다(procforge → procforge_pf_next) —
+  MCP 서버 이름(procforge-local)이 아니다. 접두어는 `signal.toolPrefix`
+  (환경변수 PROCFORGE_OPENCODE_TOOL_PREFIX)로 받고, 모르면 접두어 없이
+  "ProcForge의 pf_next 도구" 로 쓴다. 근거: docs/M7-dogfood.md 실측.
+- [M8-1-c] **짝 유효성을 3단으로 검사한 뒤에만 전송한다.**
+  ① GET /session/:ocId 생존 확인(404 = 없음, 그 밖은 '모름'으로 전송 허용) →
+  ② 역방향(그 ocId 의 최신 짝이 다른 PF 세션) → ③ 양방향 일치 때만 전송.
+  우선순위: 미설정 주소 → 짝 없음 → 짝 세션 없음 → 다른 세션과 짝 → 전송 실패.
+  PF 세션의 최신 짝은 history(과거 짝)도 본다 — ocId 의 짝이 바뀌면 map 에서
+  이 세션의 짝이 사라진다. 근거: signalOnly().
+- [M8-1-d] **확정 절차서의 leaf 에 의견을 저장하는 것은 확인 후에 한다.**
+  previewEdit 가 `change.advice` 를 받아 "의견 → 제약 → leaf 의 hash 변경"을
+  미리 본다(변환은 core 만 한다). 이 노드가 세션의 확정 절차서에 들어 있으면
+  확인창: "재확정 전까지 무인 실행이 exit 1로 멈춥니다" — 무인 실행은
+  재검증 대기 노드가 있으면 exit 1 `[M8-1-0-i]` 이기 때문이다.
+- [M8-1-e] **타임라인의 부모 계기 + 세대 분리.**
+  (1) 라운드의 부모 노드에 달린 이벤트(분해의 계기가 된 의견)를 그 라운드의
+  `parentEvents` 로 표시한다.
+  (2) 같은 노드를 두 번 분해하면 자식 id 가 재사용된다(실험 확인: reopen →
+  re-split 이 1.1.1 을 재사용하고 나머지 자식은 원형 보존). 이벤트 귀속을
+  (라운드, 자식) **세대 단위**로 계산한다 — 종료 경계는 그 id 를 다시 만드는
+  라운드 또는 삭제 revision. 근거: getDecompositionHistory().
+- [M8-1-f] **완료 판정은 실측이다.** "새 PF 세션 실측에서 UI 의견 → 모델이
+  같은 세션에 pf_next 호출, calls.jsonl 에 신호 이후 pfStart 0건, 해당 노드만
+  재확정." 가짜 서버로는 실모델 호출을 대신할 수 없다 — 실측은 사장님 수행
+  대기로 남긴다. 근거: docs/M8-1-spec.md.
+
 
