@@ -421,4 +421,28 @@ describe("M8-1-0 leaf 자기 재검증", () => {
     expect(adviseInR1[0]!.nodeIds).toEqual(["1.3"]);
     expect(r2.events ?? []).toHaveLength(0);
   });
+
+  it("미리보기: 확정 leaf에 의견을 저장하면 selfReverify:true (저장 전 확인용)", async () => {
+    const s = svc();
+    const sid = await leafed(s);
+    const pv = await s.previewEdit({
+      sessionId: sid,
+      nodeId: "1",
+      change: { advice: "파일 out.json 생성" },
+    });
+    expect(pv.selfReverify).toBe(true);
+    // 미리보기는 상태를 바꾸지 않는다
+    expect((await s.getNode(sid, "1")).status).toBe("leaf");
+  });
+
+  it("미리보기: 빈 의견·변경 없음은 selfReverify:false", async () => {
+    const s = svc();
+    const sid = await leafed(s);
+    const pv = await s.previewEdit({
+      sessionId: sid,
+      nodeId: "1",
+      change: { advice: "   " },
+    });
+    expect(pv.selfReverify).toBe(false);
+  });
 });

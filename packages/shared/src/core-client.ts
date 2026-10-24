@@ -257,6 +257,8 @@ export type PreviewEditInput = {
     dependsOn?: string[];
     addConstraints?: Constraint[];
     removeConstraintIds?: string[];
+    /** M8-1: 저장하려는 의견 본문 — 제약으로 바뀌어 hash 를 바꾸는지 미리 본다 */
+    advice?: string;
   };
 };
 

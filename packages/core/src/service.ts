@@ -1744,17 +1744,27 @@ if (oldHash !== saved.hash) this.propagateStale(s.id, input.nodeId, s.revision +
     const n = this.node(input.sessionId, input.nodeId);
     if (n.locked) throw err("conflict", `node ${n.id} is locked`);
     // M7-ui4-f: pfEditNode와 **같은 순수 함수**로 검증·적용한다.
-    const applied = applyEdit(
-      n,
-      input.change as EditChange,
-      {
-        toolCatalog: s.toolCatalog,
-        fail: (m: string) => {
-          throw err("bad_request", m);
-        },
-      },
-    );
-    const next: Node = applied.next;
+    // M8-1: 의견만 미리보는 경우(구조 변경 없음)는 applyEdit 을 건너뛴다(빈 변경 거절 회피).
+    const change = input.change as EditChange & { advice?: string };
+    const adviceOnly =
+      typeof change.advice === "string" &&
+      Object.keys(change).every((k) => k === "advice");
+    const next: Node = adviceOnly
+      ? { ...n }
+      : applyEdit(n, input.change as EditChange, {
+          toolCatalog: s.toolCatalog,
+          fail: (m: string) => {
+            throw err("bad_request", m);
+          },
+        }).next;
+    // M8-1: **의견** 저장 전 미리보기 — 의견은 제약으로 굳어 hash 를 바꾼다.
+    // (의견 → 제약 변환은 core 안에서만 한다 — local 이 재현하지 않는다)
+    if (typeof change.advice === "string" && change.advice.trim() !== "") {
+      next.constraints = [
+        ...next.constraints,
+        ...adviceToConstraints(change.advice),
+      ];
+    }
     // 2) 대상 해시 + stale 전파를 **사본 그래프에서** 계산한다.
     const byId = new Map<string, Node>();
     for (const m of this.store.getNodes(input.sessionId).values()) {

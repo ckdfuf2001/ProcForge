@@ -188,6 +188,8 @@ export type RunInfo = {
     skipped: number;
     blocked: number;
     suspended: number;
+    /** M8-1 c: 재검증 대기 노드 수 (실행 안 함 — 확정 전) */
+    needsReverify?: number;
   };
   failedNodeId?: string;
   failedDetail?: string;

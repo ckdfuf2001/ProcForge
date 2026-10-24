@@ -266,6 +266,18 @@ export function EditPanel({
         disabled={busy}
         onClick={async () => {
           setSignalCopy(null);
+          // M8-1 c: 의견 저장 전 미리보기 — 재검증으로 이어지고 확정 절차서에 들어 있으면 확인
+          const pv = (await api.post(`/api/sessions/${sessionId}/preview-edit`, {
+            nodeId,
+            expectedRevision: baseRevision,
+            change: { advice: adviceText },
+          })) as { selfReverify?: boolean; procedure?: string } | null;
+          if (pv?.selfReverify && pv.procedure) {
+            const ok = window.confirm(
+              `이 노드는 절차서 ${pv.procedure}에 포함됩니다. 재확정 전까지 무인 실행이 exit 1로 멈춥니다.`,
+            );
+            if (!ok) return;
+          }
           const r = (await post(`/api/sessions/${sessionId}/advise-and-signal`, {
             text: adviceText,
           })) as { signal?: { delivered: boolean; degraded?: string; copyText?: string } } | null;

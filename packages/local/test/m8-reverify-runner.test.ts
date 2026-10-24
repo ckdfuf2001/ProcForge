@@ -153,3 +153,47 @@ describe("M8-1-0 보정: finalize 승인 불일치 안내", () => {
     ).toBe(true);
   }, 60000);
 });
+
+describe("M8-1 c: 미리보기가 확정 절차서 이름을 준다", () => {
+  it("확정 절차서에 든 노드면 procedure 이름, 아니면 생략", async () => {
+    const { app, sid } = await leafSession();
+    // 확정 절차서를 실제로 만든다(finalize). 그 뒤 세션 실행 기록이 절차서를 가리킨다.
+    await app.finalize({ sessionId: sid, name: "m8-pv-proc" });
+    // 이 세션의 실행 기록이 그 절차서를 가리키게 한다 (무인 실행의 절차서 연결).
+    const runDir = join(pfdir, "runs", "m8-pv-run");
+    mkdirSync(runDir, { recursive: true });
+    writeFileSync(
+      join(runDir, "state.json"),
+      JSON.stringify({
+        version: 1,
+        runId: "m8-pv-run",
+        sessionId: sid,
+        procedure: "m8-pv-proc",
+        procedureDir: join(pfdir, "procedures", "m8-pv-proc"),
+        params: {},
+        pending: [],
+        done: [],
+        supplied: {},
+        approved: [],
+        status: "done",
+        updatedAt: new Date().toISOString(),
+      }),
+      "utf8",
+    );
+    const pv = await app.previewEdit({
+      sessionId: sid,
+      nodeId: "1.1",
+      change: { advice: "파일 out.json 생성" },
+    });
+    expect(pv.selfReverify).toBe(true);
+    expect(pv.procedure).toBe("m8-pv-proc");
+    // 실행 기록이 없는 세션(절차서 연결 없음)은 procedure 를 주지 않는다
+    const { app: app2, sid: sid2 } = await leafSession();
+    const bare = await app2.previewEdit({
+      sessionId: sid2,
+      nodeId: "1.1",
+      change: { advice: "x" },
+    });
+    expect(bare.procedure).toBeUndefined();
+  }, 60000);
+});

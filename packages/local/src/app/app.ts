@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { randomUUID, createHash } from "node:crypto";
-import { join, resolve } from "node:path";
+import { join, resolve, basename } from "node:path";
 import type { CoreClient } from "@procforge/shared/core-client.js";
 import type { Actor } from "@procforge/shared/dto.js";
 import { pfError } from "@procforge/shared/errors.js";
@@ -1665,15 +1665,38 @@ export class ProcForgeApp {
       dependsOn?: string[];
       addConstraints?: unknown[];
       removeConstraintIds?: string[];
+      /** M8-1: 저장하려는 의견 본문 */
+      advice?: string;
     };
   }): Promise<{
     wouldStale: string[];
     newHash: string;
     revision: number;
     selfReverify: boolean;
+    /** M8-1: 이 노드를 포함한 이 세션의 확정 절차서 이름 (없으면 생략) */
+    procedure?: string;
   }> {
-    return this.core.previewEdit(input as never);
+    const out = await this.core.previewEdit(input as never);
+    const procedure = this.procedureForNode(input.sessionId, input.nodeId);
+    return procedure !== undefined ? { ...out, procedure } : out;
   }
+
+  /**
+   * M8-1: 이 세션의 가장 최근 확정 절차서 중 이 노드를 포함한 것의 이름.
+   * 절차서가 없거나 노드가 없으면 undefined. (무인 실행이 이 노드를 쓴다는 근거)
+   */
+  private procedureForNode(sessionId: string, nodeId: string): string | undefined {
+    const st = readRunStateBySession(this.procforgeDir, sessionId);
+    if (!st?.procedureDir) return undefined;
+    try {
+      const name = basename(st.procedureDir);
+      const { doc } = loadProcedureDoc(this.procforgeDir, name);
+      return doc.nodes.some((n) => n.id === nodeId) ? name : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
 
   /**
    * M7-ui4: UI 편집 저장. actor는 항상 "ui"(M7-0.1 귀속 규칙).

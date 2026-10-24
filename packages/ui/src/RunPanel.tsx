@@ -224,6 +224,12 @@ export function RunPanel({
               pass {info.summary.pass} / fail {info.summary.fail} / unverified{" "}
               {info.summary.unverified} / skipped {info.summary.skipped} / blocked{" "}
               {info.summary.blocked} / suspended {info.summary.suspended}
+              {info.summary.needsReverify !== undefined && info.summary.needsReverify > 0 && (
+                <>
+                  {" "}
+                  / <strong>needs_reverify {info.summary.needsReverify}</strong>
+                </>
+              )}
             </p>
           )}
 
