@@ -392,12 +392,18 @@ export const WireMethods: Record<WireMethodName, WireDef> = {
         dependsOn: z.array(NodeIdSchema).optional(),
         addConstraints: z.array(ConstraintSchema).optional(),
         removeConstraintIds: z.array(z.string()).optional(),
+        /** M8-1: 저장하려는 의견 본문 (제약으로 바뀌어 hash 를 바꾸는지 미리 봄) */
+        advice: z.string().optional(),
       }),
     }),
     output: z.object({
       wouldStale: z.array(NodeIdSchema),
       newHash: z.string(),
       revision: z.number().int().min(0),
+      /** M8-1-0: 대상이 확정 leaf면 재검증 대상이 된다 */
+      selfReverify: z.boolean(),
+      /** M8-1: 이 노드를 포함한 이 세션의 확정 절차서 이름(서버 검증값) */
+      procedure: z.string().optional(),
     }),
   },
   pfBuildProcedure: {
