@@ -197,6 +197,12 @@ export type NodeDetail = {
   locked: boolean;
   sideEffect: string;
   staleSince: { revision: number; causeNodeId: string } | null;
+  /** M8-1-0: 자기 재검증 대기 사유 (확정 후 hash 변경) */
+  reverifySince: {
+    revision: number;
+    causeNodeId: string;
+    cause: "advise" | "edit_args" | "edit_node";
+  } | null;
   hash: string;
   tool: { server: string; name: string } | null;
   args: Record<string, unknown>;
@@ -1281,6 +1287,7 @@ export class ProcForgeApp {
       locked: node.locked,
       sideEffect: node.sideEffect,
       staleSince: node.staleSince ?? null,
+      reverifySince: node.reverifySince ?? null,
       hash: node.hash,
       tool: node.tool ?? null,
       args: node.args ?? {},
@@ -1582,7 +1589,12 @@ export class ProcForgeApp {
       addConstraints?: unknown[];
       removeConstraintIds?: string[];
     };
-  }): Promise<{ wouldStale: string[]; newHash: string; revision: number }> {
+  }): Promise<{
+    wouldStale: string[];
+    newHash: string;
+    revision: number;
+    selfReverify: boolean;
+  }> {
     return this.core.previewEdit(input as never);
   }
 
@@ -1939,6 +1951,18 @@ export class ProcForgeApp {
   async finalize(a: FinalizeInput): Promise<OutputOf<"pf_finalize">> {
     const sid = a.sessionId as string;
     await this.core.getSession(sid);
+    // M8-1-0: 자기 재검증 대기(needs_reverify) 노드가 있으면 확정 금지.
+    const { nodes: treeNodes } = await this.core.pfTree(sid);
+    const reverifying = treeNodes
+      .filter((n) => n.status === "needs_reverify")
+      .map((n) => n.id);
+    if (reverifying.length > 0) {
+      throw pfError(
+        "bad_request",
+        `재검증 대기 노드가 있어 확정할 수 없습니다: ${reverifying.join(", ")}`,
+        "pf_next → pf_report → pf_confirm_leaf로 재검증을 마친 뒤 다시 확정하세요.",
+      );
+    }
     const { doc, warnings } = await this.core.pfBuildProcedure(
       sid,
       a.name as string,
@@ -2039,6 +2063,18 @@ export class ProcForgeApp {
         }[],
       ),
     );
+    // M8-1-0: 자기 재검증으로 hash가 바뀐 노드는 승인이 무효다 → 재승인 안내.
+    for (const n of fullNodes as {
+      id: string;
+      hash?: string;
+      approval?: { at: string; note?: string; hash?: string } | undefined;
+    }[]) {
+      if (!n.approval?.hash || !n.hash) continue;
+      if (n.approval.hash === n.hash) continue;
+      allAudit.push(
+        `재승인 필요: 노드 ${n.id} (승인 후 재검증으로 hash 변경 — pf_approve로 다시 승인하세요)`,
+      );
+    }
     // M5.8.2 후속: var ref 필드 사전검사 (core에는 resultJson 실데이터가 없음).
     // golden→최종pass 파일 기준. 출력은 있는데 필드가 없으면 bad_ref_field.
     {

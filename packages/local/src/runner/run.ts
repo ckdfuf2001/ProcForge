@@ -439,7 +439,8 @@ export async function runSession(opts: RunOptions): Promise<RunReport> {
         resultOf.set(n.id, r);
         continue;
       }
-      if (n.status !== "leaf" || !n.tool) {
+      // M8-1-0: 재검증 대기(needs_reverify) 노드는 확정 전이므로 재실행 대상이다.
+      if ((n.status !== "leaf" && n.status !== "needs_reverify") || !n.tool) {
         const r: NodeResult = {
           nodeId: n.id,
           status: "skipped",

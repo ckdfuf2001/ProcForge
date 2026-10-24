@@ -179,6 +179,27 @@ describe("pf_finalize", () => {
     ).rejects.toThrow(/미해결 노드: 1\.2/);
   }, 30000);
 
+  it("재검증 대기(needs_reverify) 노드가 있으면 확정을 거절한다 (M8-1-0)", async () => {
+    const sid = await scripted();
+    await client.pfAdvise({
+      sessionId: sid,
+      nodeId: "1.1",
+      text: "파일 out.json 생성",
+    });
+    const tree = await client.pfTree(sid);
+    expect(tree.nodes.find((n) => n.id === "1.1")?.status).toBe(
+      "needs_reverify",
+    );
+    try {
+      await appFor().finalize({ sessionId: sid, name: "reverify-test" });
+      expect.unreachable();
+    } catch (e) {
+      expect((e as { code?: string }).code).toBe("bad_request");
+      expect((e as Error).message).toMatch(/재검증 대기 노드/);
+      expect((e as Error).message).toContain("1.1");
+    }
+  }, 30000);
+
   it("M4.1-4 검증 오류 시 bad_request + 목록", async () => {
     const sid = await scripted();
     const store = metaStore(pfdir);
