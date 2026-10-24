@@ -46,13 +46,17 @@ function fakeServer(version: string | null = "1.18.18") {
   };
 }
 
-async function app(signal?: Partial<{ baseUrl: string; mode: "b" | "a" | "c"; serverVersion: string; timeoutMs: number }>) {
+async function app(
+  signal?: Partial<{ baseUrl: string; mode: "b" | "a" | "c"; serverVersion: string; timeoutMs: number }>,
+  fetchImpl?: typeof fetch,
+) {
   const { client } = testStack(pfdir);
   return new ProcForgeApp({
     core: client,
     procforgeDir: pfdir,
     projectRoot: pfdir,
     ...(signal ? { signal } : {}),
+    ...(fetchImpl ? { linkFetchImpl: fetchImpl } : {}),
   });
 }
 
@@ -64,7 +68,8 @@ async function oneSession(a: ProcForgeApp) {
 describe("M7-ui4-j 짝 없음 + openCodeSessionId 없음 → 미전송", () => {
   it("가짜 서버 요청 0건 + C 문구", async () => {
     const fake = fakeServer();
-    const a = await app({ baseUrl: "http://127.0.0.1:1", mode: "b" });
+    // M8-1 d 보정: fetch 를 주입해 실제 네트워크 요청이 나가지 않게 한다.
+    const a = await app({ baseUrl: "http://127.0.0.1:1", mode: "b" }, fake.impl);
     // linkFetchImpl 주입으로 실제 요청이 가짜 서버로 가지 않도록 baseUrl은 미사용
     const sid = await oneSession(a);
     const r = await a.signalOnly({ sessionId: sid, nodeId: "1" });
@@ -88,7 +93,8 @@ describe("M7-ui4-j 짝 없음 + openCodeSessionId 없음 → 미전송", () => {
 
   it("다른 세션과 짝 → 그 다음 문구", async () => {
     const fake = fakeServer();
-    const a = await app({ baseUrl: "http://127.0.0.1:1", mode: "b" });
+    // M8-1 d 보정: 실제 네트워크 대신 주입 fetch (역방향 짝 어긋남 → GET 전에 끊긴다)
+    const a = await app({ baseUrl: "http://127.0.0.1:1", mode: "b" }, fake.impl);
     const sid = await oneSession(a);
     savePairing(pfdir, "ses-x", "pf-other");
     const r = await a.signalOnly({
@@ -98,9 +104,9 @@ describe("M7-ui4-j 짝 없음 + openCodeSessionId 없음 → 미전송", () => {
     });
     expect(r.delivered).toBe(false);
     if (!r.delivered) expect(r.degraded).toBe("다른 세션과 짝(pf-other). 전송하지 않음");
-    // M8-1 ①: 짝 세션 생존 확인은 설정된 주소로 나간다(여긴 127.0.0.1:1 —
-    // 가짜 서버가 아니라 설정 주소다) → 가짜 서버 요청은 0건.
-    expect(fake.seen).toEqual([]);
+    // ②(로컬 역방향)가 어긋났지만 생존 확인은 문구 우선순위를 위해 먼저 나간다 →
+    // 주입된 가짜 서버가 GET 에 답하고, 신호 전송은 없다.
+    expect(fake.seen).toEqual(["/session/ses-x"]);
   });
 
   it("짝이 있으면 전송 시도한다 (기존 동작 유지)", async () => {

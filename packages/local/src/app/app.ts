@@ -1511,18 +1511,20 @@ export class ProcForgeApp {
 
   /**
    * M8-1 ①: OpenCode 서버에 그 세션이 살아 있는지 확인한다 (GET /session/:id).
-   * 404 = 그 세션이 없다 → 미전송. 그 밖의 실패(네트워크·5xx)는 "모름"으로 보고
-   * 전송을 막지 않는다(가짜 경고로 신호를 죽이지 않는다).
+   * 404 = 그 세션이 없다 → 미전송. 그 밖의 실패(네트워크·5xx·**응답 없음**)는
+   * "모름"으로 보고 전송을 막지 않는다(가짜 경고로 신호를 죽이지 않는다).
+   * 응답이 없는 서버에 매달리지 않게 3초 상한(AbortSignal.timeout)을 둔다.
    */
-  private async openCodeSessionAlive(ocSid: string): Promise<boolean> {
+  private openCodeSessionAlive(ocSid: string): Promise<boolean> {
     const base = this.signal.baseUrl.replace(/\/$/, "");
     const doFetch = this.linkFetchImpl ?? fetch;
-    try {
-      const r = await doFetch(`${base}/session/${ocSid}`, { method: "GET" });
-      return r.status !== 404;
-    } catch {
-      return true;
-    }
+    const url = `${base}/session/${encodeURIComponent(ocSid)}`;
+    return doFetch(url, {
+      method: "GET",
+      signal: AbortSignal.timeout(3_000),
+    })
+      .then((r) => r.status !== 404)
+      .catch(() => true);
   }
 
   /** 이 세션에 짝지어진 OpenCode 세션 중 가장 최근 것 */
