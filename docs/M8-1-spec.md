@@ -101,9 +101,13 @@
 | `782338c` | [M8-1-c] UI 확인창(확정 절차서 leaf) + needs_reverify 표시 |
 | `1a047cf` | [M8-1-d] parentEvents + 세대별 이벤트(id 재사용) |
 | `18e1802` | [M8-1-e] e2e: 가짜 OpenCode 생존 확인 경로 + C 문구 정합 |
+| `c6945f6` | [M8-1-f] docs: DECISIONS [M8-1] 6행 + 사양 상태 |
+| `83bf6aa` | [M8-1-er] shared: previewEdit wire 계약(advice·selfReverify·procedure) |
 
 ## 검증
 
 - 로컬: shared 76 / core 124 / local 487(+2 skip) 통과, E2E 16건 통과
-  (`m8-1-signal.spec.ts` 확인창 1건 포함).
+  (`m8-1-signal.spec.ts` 확인창 1건 포함). local 을 3 client 모드
+  (inprocess/loopback/remote)로 전수 재검증 통과.
+- CI: run `40090766520` (head_sha `83bf6aa`) 7잡 green.
 - 남은 것: **실측**(사장님 수행 대기) — 완료 기준은 위 실측 문단과 같다.
