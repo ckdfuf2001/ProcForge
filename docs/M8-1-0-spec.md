@@ -119,3 +119,28 @@ confirm 거절 → 새 report로 재확정 → done
   분해 원인이 된 조언 id 목록은 이 키에 담긴다(별칭 없음).
 - 기존 단언 변경(leaf→open ⇒ needs_reverify)은 커밋 메시지에
   `파일:테스트명 — open→needs_reverify` 형식으로 적었다. 테스트 삭제는 없다.
+
+### 항목별 커밋표
+
+| 커밋 | 내용 |
+| --- | --- |
+| `d2b0681` | [M8-1-0-spec] 사양 문서 + DEV-GUIDE 링크 |
+| `1101783` | [M8-1-0-1] shared: needs_reverify 상태·reverifySince·분해 이벤트 DTO·wire v3 |
+| `3551555` | [M8-1-0-2] core: 자기 재검증 전이·가드·pfNext·타임라인 이벤트 |
+| `d020418` | [M8-1-0-3] core: 재검증 시나리오 테스트 8건 |
+| `e716e5a` | [M8-1-0-4] local: finalize 거절·재승인 경고·러너 재실행 대상 |
+| `f126f64` | [M8-1-0-5] local: 기존 leaf→open 단언을 needs_reverify로 변경 |
+| `f492787` | [M8-1-0-6] ui: 상태색·라벨·필터 + 타임라인 이벤트 표시 |
+| `163581d` | [M8-1-0-7] e2e: leaf 의견→재검증 배지→재확정→타임라인 |
+| `161e231` | [M8-1-0-8] docs: DECISIONS [M8-1-0] + M5.8 주석 + 사양 상태 |
+| `4ecd750` | [M8-1-0-9] docs: UI 스크린샷 4장 |
+
+### 검증
+
+- 로컬: shared 76 / core 116 / local 477(+2 skip) 통과, E2E 15건 통과
+  (신규 `m8-1-reverify.spec.ts` 1건 포함).
+- CI: run `40073225619` (head_sha `161e231`) 7잡 green —
+  build-test 4(inprocess/loopback × ubuntu/windows) + remote-mode 2 + e2e 1.
+- 스크린샷: `docs/ui-shots/m8-1-0-1-token.png` · `m8-1-0-2-rounds.png` ·
+  `m8-1-0-3-round-selected.png`(라운드 클릭 → 의견/실행/재확정 3이벤트) ·
+  `m8-1-0-4-reverify.png`(재검증 배지·안내·필터).
