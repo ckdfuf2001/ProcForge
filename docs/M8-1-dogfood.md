@@ -12,15 +12,18 @@
 
 | 항목 | 값 | 기록 |
 | --- | --- | --- |
-| 별도 저장소 | `$env:PROCFORGE_DIR = "D:\pf-m8-dogfood"` (기존 저장소와 섞이지 않게 **새 폴더**) | |
-| OpenCode 서버 기동 | 기동 명령 예: `opencode serve` — 기동 후 `opencode --version` | 명령: |
-| OpenCode 포트/주소 | `PROCFORGE_OPENCODE_URL = http://127.0.0.1:<포트>` | 포트: |
-| 신호 모드 | `PROCFORGE_OPENCODE_MODE = b` | |
-| 도구 접두어 | `PROCFORGE_OPENCODE_TOOL_PREFIX = procforge` — **OpenCode 의 MCP 등록 키와 같게** | |
+| 별도 저장소 | `PROCFORGE_DIR = D:\pf-m8-dogfood` (기존 저장소와 섞이지 않게 **새 폴더**). opencode.json 과 UI 터미널 **둘 다** 같은 값 | |
+| OpenCode 서버 기동 | `opencode serve --port <N>` (예: `opencode serve --port 4096`) — 기동 후 `opencode --version` | 명령: |
+| OpenCode 주소 | `PROCFORGE_OPENCODE_URL = http://127.0.0.1:<N>` — **`procforge ui` 를 띄우는 터미널**에 설정 | 주소: |
+| 신호 모드 | `PROCFORGE_OPENCODE_MODE = b` — **`procforge ui` 터미널**에 설정 | |
+| 도구 접두어 | `PROCFORGE_OPENCODE_TOOL_PREFIX = procforge` — **`procforge ui` 터미널**에 설정, OpenCode 의 MCP 등록 키와 같게 | |
 
-**opencode.json** (OpenCode가 읽는 설정. `mcp.<키>.environment` 로 **같은
-PROCFORGE_DIR 경로**를 그대로 넘긴다 — 저장소가 어긋나면 모델이 다른
-저장소의 세션을 이어가게 된다):
+**왜 URL/MODE/TOOL_PREFIX 를 opencode.json 에 두지 않나**: 이 값들은 신호를
+보내는 쪽(UI 프로세스) 설정이다. MCP 환경에 넣으면 모델이 도구 호출 중에 이
+설정을 읽고 스스로 신호를 보낼 수 있다(모델 자기 신호 방지).
+
+**opencode.json** (OpenCode가 MCP 서버를 띄울 때 읽는다. 저장소 경로만 고정한다.
+저장소가 어긋나면 모델이 다른 저장소의 세션을 이어가게 된다):
 
 ```json
 {
@@ -29,10 +32,7 @@ PROCFORGE_DIR 경로**를 그대로 넘긴다 — 저장소가 어긋나면 모�
       "type": "local",
       "command": ["node", "<저장소>\\packages\\local\\dist\\main.js"],
       "environment": {
-        "PROCFORGE_DIR": "D:\\pf-m8-dogfood",
-        "PROCFORGE_OPENCODE_URL": "http://127.0.0.1:<OpenCode포트>",
-        "PROCFORGE_OPENCODE_MODE": "b",
-        "PROCFORGE_OPENCODE_TOOL_PREFIX": "procforge"
+        "PROCFORGE_DIR": "D:\\pf-m8-dogfood"
       }
     }
   }
