@@ -814,7 +814,7 @@ describe("M8-1 보정: 신호 판정 + 생존 확인 상한", () => {
     }
   });
 
-  it("첫 pf_next의 입력 sessionId가 다르면 '다른 세션을 이어함' 경고", async () => {
+  it("첫 pf_next의 입력 sessionId가 다르면 '다른 세션을 이어감' 경고", async () => {
     const fake = await startFake("b-offside", { pfIds: ["pf-1"] });
     try {
       const app = stubApp({
@@ -828,7 +828,7 @@ describe("M8-1 보정: 신호 판정 + 생존 확인 상한", () => {
       });
       expect(r.signal.delivered).toBe(true);
       if (r.signal.delivered) {
-        expect(r.signal.warning).toBe("모델이 다른 세션을 이어함(pf-other)");
+        expect(r.signal.warning).toBe("모델이 다른 세션을 이어감(pf-other)");
       }
     } finally {
       await fake.close();

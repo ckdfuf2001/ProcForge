@@ -213,7 +213,7 @@ export function pfInputSessionId(p: unknown): string | undefined {
 /**
  * M8-1 a+a2: 신호 이후 첫 pf_* 호출 분류.
  * pf_start → "새 세션을 시작함". pf_next/pf_report 의 입력 sessionId 가
- * 원래 sid 와 다르면 "다른 세션을 이어함(<id>)". 분류 불가(undefined)는 정상.
+ * 원래 sid 와 다르면 "다른 세션을 이어감(<id>)". 분류 불가(undefined)는 정상.
  */
 export function classifyNewPfCall(
   part: unknown,
@@ -226,7 +226,7 @@ export function classifyNewPfCall(
   if (/pf_(next|report)/.test(tool) && pfSessionId !== undefined) {
     const inSid = pfInputSessionId(part);
     if (inSid !== undefined && inSid !== pfSessionId)
-      return `모델이 다른 세션을 이어함(${inSid})`;
+      return `모델이 다른 세션을 이어감(${inSid})`;
   }
   return undefined;
 }
@@ -392,7 +392,7 @@ export async function sendContinue(opts: {
   /**
    * M8-1 a+a2: 신호 이후 첫 pf_* 호출을 분류한다.
    * pf_start → "새 세션을 시작함". pf_next/pf_report 의 입력 sessionId 가
-   * 원래 PF 세션과 다르면 "다른 세션을 이어함(<id>)". 분류 불가는 정상.
+   * 원래 PF 세션과 다르면 "다른 세션을 이어감(<id>)". 분류 불가는 정상.
    */
   async function paired(part: unknown): Promise<LinkResult> {
     // 짝짓기 갱신 (best-effort).
