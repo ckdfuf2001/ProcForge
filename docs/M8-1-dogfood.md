@@ -58,7 +58,7 @@ PROCFORGE_DIR 경로**를 그대로 넘긴다 — 저장소가 어긋나면 모�
    **"의견 등록 + 계속 신호"**.
    - 신호 결과: `delivered:true`(B) 또는 신호 실패 문구(C 모드).
    - 노란 배지가 뜨면 판정 사유다: "모델이 새 세션을 시작함(pf_start)" 또는
-     "모델이 다른 세션을 이어함(<id>)" — 3절 증거로 남긴다.
+     "모델이 다른 세션을 이어감(<id>)" — 3절 증거로 남긴다.
 4. 모델이 **새로 `pf_start` 를 부르지 않고** 같은 세션의 `pf_next` 로
    이어서 진행하는지 3절 (4)로 확인.
 5. 모델의 재보고·재확정: 대상 leaf가 `needs_reverify` 배지 → 새 attempt로
@@ -70,73 +70,81 @@ PROCFORGE_DIR 경로**를 그대로 넘긴다 — 저장소가 어긋나면 모�
 
 ## 3. 증거 명령 (PowerShell)
 
-`.procforge` 폴더 = `$env:PROCFORGE_DIR` 아래. 먼저 **calls.jsonl 실제 1줄**을
-확인해 필드 이름을 맞춘다(아래는 `at`·`tool` 필드를 쓴다; 다르면 이 단계에서 정정):
+### 저장 위치 (임시 저장소 실측 원문 기준)
+
+`$env:PROCFORGE_DIR` 바로 아래에 `sessions\<sid>\` 가 생긴다.
+
+| 파일 | 내용 | 주요 필드 |
+| --- | --- | --- |
+| `sessions\<sid>\calls.jsonl` | 도구 호출 1건 = 1줄 | `at`(UTC, ms·Z), `tool`(접두어 없음: `pf_start`·`pf_next`·`pf_report`…), `sessionId`, `ok`, `actor`, `clientName`, `clientVersion` |
+| `sessions\<sid>\events.jsonl` | 상태 변경 1건 = 1줄 | `seq`, `revision`, `at`, `actor`, `method`(camelCase: `pfNext`·`pfReport`·`pfResolve`·`pfAdvise`), `nodeIds`, `beforeHash`, `afterHash`, `summary` |
+| `sessions\<sid>\session.json` | 세션 1개 | `id`, `createdAt`, `rootId`, `revision` |
+| `sessions\<sid>\nodes\<nodeId>.json` | 노드 1개 (예: `1.1.json`) | `id`, `status`, `hash`, `attempts`, `retries` |
+| `sessions\<sid>\nodes\<nodeId>\pre-snapshot.json` | 노드 직전 스냅샷 | — |
+
+`pf_start` 는 events 에 기록되지 않는다(calls 에만 남는다). 그래서 신호 이후의
+새 세션 여부는 calls 로 본다((4-a)·(4-b)).
+
+### 명령
 
 ```powershell
-$pf = $env:PROCFORGE_DIR          # 예: D:\pf-m8-dogfood
-Get-ChildItem "$pf\sessions" -Directory | ForEach-Object {
-  $f = Join-Path $_.FullName "calls.jsonl"; if (Test-Path $f) { Get-Content $f -TotalCount 1 }
-} | Select-Object -First 1        # ← 실제 1줄 (필드 이름 확인)
-```
+$pf  = $env:PROCFORGE_DIR                # 저장소 폴더 (아래에 sessions\ 가 있다)
+$sid = "<PF세션 UUID>"                   # calls.jsonl 의 sessionId
+$nid = "<의견을 준 leaf 노드 id>"        # 예: 1.2.1
+$sig = "2026-10-24T21:30:00Z"            # 신호를 보낸 시각 (UTC, Z 형식)
 
-신호를 보낸 시각을 `$sig`(ISO)로 두고:
+$inv   = [Globalization.CultureInfo]::InvariantCulture
+$utc   = [Globalization.DateTimeStyles]::AdjustToUniversal
+$sigAt = [datetime]::Parse($sig, $inv, $utc)
+# calls/events 의 at 은 ConvertFrom-Json 이 날짜로 바꾸므로 원문 줄에서 읽는다
+function Get-AtUtc([string]$line) {
+  if ($line -match '"at":"([^"]+)"') { [datetime]::Parse($Matches[1], $inv, $utc) }
+}
 
-```powershell
-$pf  = $env:PROCFORGE_DIR
-$sid = "<PF세션 UUID>"            # 모델이 pf_start 로 만든 세션
-$nid = "<의견을 준 leaf 노드 id>"  # 예: 1.2.1 (status=leaf 였던 노드)
-$sig = "<신호를 보낸 시각 ISO>"
+# (4-a) 신호 이후 pf_start 호출 수 — 기대 0
+$startCalls = Get-ChildItem "$pf\sessions" -Directory | ForEach-Object {
+  $f = Join-Path $_.FullName "calls.jsonl"
+  if (Test-Path $f) { Get-Content $f | Where-Object { $_ -match '"tool":"pf_start"' } }
+} | Where-Object { (Get-AtUtc $_) -gt $sigAt }
+"(4-a) pf_start 신호 이후: $(@($startCalls).Count)건 (기대 0)"
 
-# (4-a) 저장소 전체 calls.jsonl 의 pf_start = 0 (신호 이후)
-(Get-ChildItem "$pf\sessions" -Directory | ForEach-Object {
-  $f = Join-Path $_.FullName "calls.jsonl"; if (Test-Path $f) { Get-Content $f }
-} | ForEach-Object { try { $_ | ConvertFrom-Json } catch { $null } } |
-  Where-Object { $_ -and $_.at -gt $sig -and $_.tool -match "pf_start" } |
-  Measure-Object).Count                                    # → 0
+# (4-b) 신호 이후 생성된 세션 수 — 기대 0
+$newSessions = Get-ChildItem "$pf\sessions" -Directory | Where-Object {
+  $f = Join-Path $_.FullName "session.json"
+  if (-not (Test-Path $f)) { return $false }
+  $raw = Get-Content $f -Raw
+  if ($raw -notmatch '"createdAt":\s*"([^"]+)"') { return $false }
+  [datetime]::Parse($Matches[1], $inv, $utc) -gt $sigAt
+}
+"(4-b) 신호 이후 생성 세션: $(@($newSessions).Count)개 (기대 0)"
 
-# (4-b) 신호 시각 이후 createdAt 인 세션 수 = 0 (모델이 새 세션을 안 만든다)
-(Get-ChildItem "$pf\sessions" -Directory | ForEach-Object {
-  $f = Join-Path $_.FullName "session.json"; if (Test-Path $f) {
-    $s = Get-Content $f | ConvertFrom-Json; if ($s.createdAt -gt $sig) { $s.id }
-  }
-} | Measure-Object).Count                                  # → 0
+# (4-c) 이 세션의 신호 이후 호출 — 기대: tool 이 pf_next / pf_report 뿐, actor 는 모델 연결
+Get-Content "$pf\sessions\$sid\calls.jsonl" | Where-Object { (Get-AtUtc $_) -gt $sigAt } |
+  ForEach-Object { $o = $_ | ConvertFrom-Json; [pscustomobject]@{ tool = $o.tool; actor = $o.actor; ok = $o.ok } } |
+  Format-Table -AutoSize
 
-# (4-c) 신호 이후 이 세션에서 무엇을 불렀는지
-Get-Content (Join-Path $pf "sessions\$sid\calls.jsonl") |
-  ForEach-Object { $_ | ConvertFrom-Json } |
-  Where-Object { $_.at -gt $sig } |
-  Select-Object at, tool, actor | Format-Table -AutoSize
-#  기대: tool 이 pf_next / pf_report 뿐 (OpenCode 접두어 procforge_ 는
-#  클라이언트 쪽 이름이라 기록에는 붙지 않는다), actor 가 모델 연결(actor "host").
-
-# (5) 순서 판정 — 대상 nodeId 로 거르고 실제 method 이름으로 본다
-Get-Content (Join-Path $pf "sessions\$sid\events.jsonl") |
-  ForEach-Object { $_ | ConvertFrom-Json } |
+# (5) 대상 노드의 순서 — 기대: pfAdvise → pfNext 또는 pfReport → pfReport → pfResolve
+Get-Content "$pf\sessions\$sid\events.jsonl" | ForEach-Object { $_ | ConvertFrom-Json } |
   Where-Object { $_.nodeIds -contains $nid } |
   Select-Object seq, method, summary | Format-Table -AutoSize
 
-# (5-대안) 화면: 분해 라운드 → 라운드 클릭 → "라운드 이후 이벤트"
-#   또는 API: GET http://127.0.0.1:<UI포트>/api/sessions/<sid>/decomposition-history
-#   각 라운드 events 의 kinds = advise → reverify → report → confirm 순서.
-
-# (6) 전후 비교 — 대상 노드 외 변화 0
-function NodeTable {
-  Get-ChildItem (Join-Path $pf "sessions\$sid\nodes") -Filter *.json | ForEach-Object {
-    $n = Get-Content $_.FullName | ConvertFrom-Json
+# (6) 전후 비교 — nodes\<nodeId>.json 의 id / status / hash
+function Get-NodeTable {
+  Get-ChildItem "$pf\sessions\$sid\nodes" -Filter *.json | ForEach-Object {
+    $n = Get-Content $_.FullName -Raw | ConvertFrom-Json
     [pscustomobject]@{ id = $n.id; status = $n.status; hash = $n.hash }
-  } | Sort-Object id | Format-Table -AutoSize
+  } | Sort-Object id
 }
-NodeTable | Export-Csv (Join-Path $env:TEMP "node-before.csv") -NoTypeInformation
-# … (재확정 후 다시)
-NodeTable | Export-Csv (Join-Path $env:TEMP "node-after.csv") -NoTypeInformation
-$diff = Compare-Object (Import-Csv (Join-Path $env:TEMP "node-before.csv")) `
-                       (Import-Csv (Join-Path $env:TEMP "node-after.csv")) `
-                       -Property id, status, hash
-$diff | Format-Table -AutoSize
-#  판정: 바뀐 행은 대상 노드($nid: needs_reverify → leaf 복귀, 새 hash)와
-#  stale가 풀리거나 다시 열린 의존 하류뿐 — 대상 외 다른 노드는 변화 0.
+Get-NodeTable | Export-Csv "$env:TEMP\node-before.csv" -NoTypeInformation
+# ... 재확정 후
+Get-NodeTable | Export-Csv "$env:TEMP\node-after.csv" -NoTypeInformation
+Compare-Object (Import-Csv "$env:TEMP\node-before.csv") (Import-Csv "$env:TEMP\node-after.csv") -Property id, status, hash
+# 기대: 바뀐 행은 $nid 와 그 하류(stale 해제)뿐, 나머지 노드 변화 0
 ```
+
+(5-대안) 화면: 분해 라운드 → 라운드 클릭 → "라운드 이후 이벤트"
+또는 API `GET http://127.0.0.1:<UI포트>/api/sessions/<sid>/decomposition-history`
+(각 라운드 events 의 kinds = advise → reverify → report → confirm 순서).
 
 ## 4. 스크린샷 칸 (4개 — 실측 때 채운다)
 
