@@ -77,7 +77,7 @@
 
 | 파일 | 내용 | 주요 필드 |
 | --- | --- | --- |
-| `sessions\<sid>\calls.jsonl` | 도구 호출 1건 = 1줄 | `at`(UTC, ms·Z), `tool`(접두어 없음: `pf_start`·`pf_next`·`pf_report`…), `sessionId`, `ok`, `actor`, `clientName`, `clientVersion` |
+| `sessions\<sid>\calls.jsonl` | 도구 호출 1건 = 1줄 | `at`(UTC, ms·Z), `tool`(접두어 없음: `pf_start`·`pf_next`·`pf_report`…), `sessionId`, `ok`, `actor`(모델 `host`, UI 의견 등록 `ui`), `clientName`, `clientVersion`. UI 의견 등록은 `tool: pf_advise`, `actor: ui`, `clientName: procforge-ui` 줄로 남는다 |
 | `sessions\<sid>\events.jsonl` | 상태 변경 1건 = 1줄 | `seq`, `revision`, `at`, `actor`, `method`(camelCase: `pfNext`·`pfReport`·`pfResolve`·`pfAdvise`), `nodeIds`, `beforeHash`, `afterHash`, `summary` |
 | `sessions\<sid>\session.json` | 세션 1개 | `id`, `createdAt`, `rootId`, `revision` |
 | `sessions\<sid>\nodes\<nodeId>.json` | 노드 1개 (예: `1.1.json`) | `id`, `status`, `hash`, `attempts`, `retries` |
@@ -92,7 +92,14 @@
 $pf  = $env:PROCFORGE_DIR                # 저장소 폴더 (아래에 sessions\ 가 있다)
 $sid = "<PF세션 UUID>"                   # calls.jsonl 의 sessionId
 $nid = "<의견을 준 leaf 노드 id>"        # 예: 1.2.1
-$sig = "2026-10-24T21:30:00Z"            # 신호를 보낸 시각 (UTC, Z 형식)
+
+# $sig = "의견 등록(UI)" 시각. 손으로 적지 않고 원문 events.jsonl 에서 뽑는다:
+#   nodeIds 에 $nid 가 있고 method 가 pfAdvise, actor 가 ui 인 마지막 줄의 at (UTC, Z)
+$ev = Get-Content "$pf\sessions\$sid\events.jsonl" | Where-Object { $_ -match '"method":"pfAdvise"' } |
+  ForEach-Object { $o = $_ | ConvertFrom-Json; if ($o.actor -eq 'ui' -and $o.nodeIds -contains $nid) { $_ } } |
+  Select-Object -Last 1
+$sig = if ($ev -match '"at":"([^"]+)"') { $Matches[1] }
+"신호 시각: $sig"
 
 $inv   = [Globalization.CultureInfo]::InvariantCulture
 $utc   = [Globalization.DateTimeStyles]::AdjustToUniversal
@@ -119,10 +126,11 @@ $newSessions = Get-ChildItem "$pf\sessions" -Directory | Where-Object {
 }
 "(4-b) 신호 이후 생성 세션: $(@($newSessions).Count)개 (기대 0)"
 
-# (4-c) 이 세션의 신호 이후 호출 — 기대: tool 이 pf_next / pf_report 뿐, actor 는 모델 연결
+# (4-c) 이 세션의 신호 이후 모델 호출 — 기대: tool 이 pf_next / pf_report 뿐
+# (UI 의견 등록 줄 tool=pf_advise, actor=ui 는 제외한다)
 Get-Content "$pf\sessions\$sid\calls.jsonl" | Where-Object { (Get-AtUtc $_) -gt $sigAt } |
   ForEach-Object { $o = $_ | ConvertFrom-Json; [pscustomobject]@{ tool = $o.tool; actor = $o.actor; ok = $o.ok } } |
-  Format-Table -AutoSize
+  Where-Object { $_.actor -ne 'ui' } | Format-Table -AutoSize
 
 # (5) 대상 노드의 순서 — 기대: pfAdvise → pfNext 또는 pfReport → pfReport → pfResolve
 Get-Content "$pf\sessions\$sid\events.jsonl" | ForEach-Object { $_ | ConvertFrom-Json } |
