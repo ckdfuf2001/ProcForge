@@ -1,6 +1,6 @@
-# M8-1 dogfood — "계속" 신호 + 짝 유지 실측 (사장님 수행 대기)
+# M8-1 dogfood — "계속" 신호 + 짝 유지 실측
 
-상태: **양식 완료 · 명령 검증(임시 저장소+가짜 OpenCode) · 실측 대기 (사장님 수행)**
+상태: **실측 완료 (2026-10-27, PF `e167df9c`, OC `ses_e8217…`) · a green 후 [x]**
 사양: docs/M8-1-spec.md · 결정: DECISIONS `[M8-1]`
 
 ## 완료 기준 (실측)
@@ -12,7 +12,7 @@
 
 | 항목 | 값 | 기록 |
 | --- | --- | --- |
-| 별도 저장소 | `PROCFORGE_DIR = D:\pf-m8-dogfood` (기존 저장소와 섞이지 않게 **새 폴더**). opencode.json 과 UI 터미널 **둘 다** 같은 값 | |
+| 별도 저장소 | `PROCFORGE_DIR = D:\pf-m8-dogfood` (기존 저장소와 섞이지 않게 **새 폴더**). opencode.json 과 UI 터미널 **둘 다** 같은 값 | `D:\pf-m8-dogfood` 사용. `D:\pf-m8-dogfood2`를 만들었으나 MCP·UI가 구 폴더로 떠 있어 구 폴더로 진행. `pairings.json`이 구 폴더에 없어 짝 상태는 비어 있었음(새 폴더와 동등) |
 | OpenCode 서버 기동 | `opencode serve --port <N>` (예: `opencode serve --port 4096`) — 기동 후 `opencode --version` | 명령: |
 | OpenCode 주소 | `PROCFORGE_OPENCODE_URL = http://127.0.0.1:<N>` — **`procforge ui` 를 띄우는 터미널**에 설정 | 주소: |
 | 신호 모드 | `PROCFORGE_OPENCODE_MODE = b` — **`procforge ui` 터미널**에 설정 | |
@@ -163,3 +163,25 @@ Compare-Object (Import-Csv "$env:TEMP\node-before.csv") (Import-Csv "$env:TEMP\n
 | 2 | 사유 패널 + 의견 폼 | ![사유](사유-패널-의견.png) |
 | 3 | 신호 결과 (delivered 배지 또는 경고 배지) | ![신호](신호-결과.png) |
 | 4 | 재확정 후 타임라인 (의견→재검증→재확정) | ![재확정](재확정-후-타임라인.png) |
+
+## 5. 실측 기록 (2026-10-27, PF `e167df9c`, OC `ses_e8217…`, 대상 `1.1.2`)
+
+- 어긴 점 3개 (그대로 둔다):
+  1. `D:\pf-m8-dogfood2`를 만들었으나 쓰지 않았다. MCP(편집 전 환경)와 UI
+     터미널이 구 폴더라 구 폴더로 진행했다. `pairings.json`이 구 폴더에 없어
+     짝 상태는 비어 있었다.
+  2. URL/MODE/PREFIX를 `opencode.json`에 잠깐 넣었다가 §1 이유로 원복했다.
+  3. 모델이 32바이트 파일 읽기에서 2번 멈췄다(`bash`·`read` 무한 running).
+     둘 다 abort로 끊고 살렸다.
+- `delivered` 미수신 사유: 의견 등록 HTTP가 120초 타임아웃됐다.
+  `sendContinue`가 POST 턴 종료까지 물고 있어서다(원인 확정).
+  OC가 신호문을 받고 모델이 같은 세션으로 `pf_next`했으므로 true로 추정한다.
+  → M8-1-close a에서 전송 판정-모델 완료를 분리했다.
+- (6) 재판정: before에 leaf는 0개였다. 바뀐 행은 대상 4 leaf뿐이다
+  (`1.1.1` probing→leaf, `1.1.2`·`1.2`·`1.3` open→leaf).
+  `1`·`1.1` hash 불변이다. `1.1.2` before `80568941258e4c92` →
+  after `6c49562359a75bae`, `reverifySince`·`staleSince` 없음(해제됨).
+- 그 외: (4-a) 0, (4-b) 0, (4-c) `pf_next`·`pf_report`뿐(조회 3·실패 1 재시도 성공),
+  (5) `pfAdvise` → `pfNext` → `pfReport` → `pfResolve`,
+  `pairings.json` `source:"discovered"`·재확정 후 유지,
+  `tool:pf_advise`이면서 `actor≠ui`인 줄 0건.
