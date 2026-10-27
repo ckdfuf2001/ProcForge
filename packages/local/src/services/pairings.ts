@@ -4,10 +4,14 @@ import { dirname, join } from "node:path";
 // M7-1: OpenCode 세션 ↔ ProcForge 세션 짝짓기 (latest-wins + 이력).
 // UI가 "이 조언을 어느 대화로 보낼지" 알기 위한 대응표.
 
+/** M8-1-pair: 짝의 출처. 없으면 신호 전달 뒤 관찰(기존) 또는 수동 기록. */
+export type PairingSource = "discovered";
+
 export type Pairing = {
   openCodeSessionId: string;
   pfSessionId: string;
   at: string;
+  source?: PairingSource;
 };
 
 export type Pairings = {
@@ -45,12 +49,14 @@ export function savePairing(
   procforgeDir: string,
   openCodeSessionId: string,
   pfSessionId: string,
+  source?: PairingSource,
 ): Pairings {
   const cur = loadPairings(procforgeDir);
   const entry: Pairing = {
     openCodeSessionId,
     pfSessionId,
     at: new Date().toISOString(),
+    ...(source !== undefined ? { source } : {}),
   };
   const pairs = { ...cur.pairs, [openCodeSessionId]: entry };
   const history = [...cur.history, entry].slice(-HISTORY_CAP);

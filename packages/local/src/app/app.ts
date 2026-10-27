@@ -42,6 +42,7 @@ import {
   type LinkResult,
 } from "../services/opencode-link.js";
 import { savePairing, getPairing, loadPairings, type Pairings } from "../services/pairings.js";
+import { discoverPairing, discoveryDegraded } from "../services/pair-discovery.js";
 import { enrichSessions, type SessionRow } from "../services/session-meta.js";
 import {
   previewArtifact,
@@ -1458,7 +1459,7 @@ export class ProcForgeApp {
   }): Promise<LinkResult> {
     const sid = input.sessionId;
     const cfg = this.signal;
-    const openSid = input.openCodeSessionId ?? this.latestPairingSessionId(sid);
+    let openSid = input.openCodeSessionId ?? this.latestPairingSessionId(sid);
     // M8-1: B(전송)와 C(복사)는 **같은 문구**다.
     const text = signalText({
       sessionId: sid,
@@ -1473,6 +1474,22 @@ export class ProcForgeApp {
       copyText: text,
     });
     if (!cfg.baseUrl) return notSent("OpenCode 주소 미설정");
+    // M8-1-pair: 짝이 없을 때만 첫 짝 찾기 (사양 b2). 복사 전용(c)은 보내지 않으므로 찾지 않는다.
+    // 판정이 막히면 자동 전송하지 않는다 (0개·2개 이상·확인 불가).
+    if (!openSid && cfg.mode !== "c") {
+      const found = await discoverPairing({
+        baseUrl: cfg.baseUrl,
+        pfSessionId: sid,
+        toolPrefix: cfg.toolPrefix,
+        fetchImpl: this.linkFetchImpl,
+      });
+      const degraded = discoveryDegraded(found);
+      if (degraded !== undefined) return notSent(degraded);
+      if (found.status === "found") {
+        openSid = found.openCodeSessionId;
+        savePairing(this.procforgeDir, openSid, sid, "discovered");
+      }
+    }
     if (!openSid) return notSent("OpenCode 세션 짝이 없음");
     // M8-1 ②(로컬 먼저): 역방향 — 그 ocId 의 최신 짝이 다른 PF 세션이면
     // 네트워크 조회 전에 보내지 않는다.
@@ -1505,6 +1522,8 @@ export class ProcForgeApp {
         fetchImpl: this.linkFetchImpl,
         ...http,
         onPairing: (osid, pfSid) => {
+          // M8-1-pair: 같은 짝이면 다시 쓰지 않는다 (찾기로 저장한 source 를 지우지 않는다)
+          if (getPairing(this.procforgeDir, osid)?.pfSessionId === pfSid) return;
           savePairing(this.procforgeDir, osid, pfSid);
         },
       },
