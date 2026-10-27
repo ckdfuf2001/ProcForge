@@ -56,6 +56,53 @@
 문구 우선순위: `미설정 주소 → 짝 없음 → 짝 세션 없음 → 다른 세션과 짝 → 전송 실패`.
 (기존 "전송 실패" 앞쪽에 두 분기를 끼워 넣는다.)
 
+## b2. 첫 짝 찾기 (M8-1-pair)
+
+**배경.** 짝이 없으면 전송하지 않는다(`5ab2128`, M7-ui4-j). 짝은 신호가 전달된
+뒤에만 생기므로(`paired()`), 짝 없는 첫 신호는 영원히 막힌다. 2026-10-27 실측에서
+짝 0건으로 미전송됐다. 이 사양은 **미전송 규칙을 유지한 채** 짝을 찾는 경로를 더한다.
+
+**근거.** OpenCode 세션 메시지의 `<prefix>_pf_start` 도구 파트(completed)의
+`output` JSON `sessionId`. ProcForge 서버(core)가 발급한 값이며 모델이 쓴 값이 아니다.
+`pf_next`/`pf_report` 입력값은 쓰지 않는다(위조 가능).
+
+**실측 형식 (1.18.18, 2026-10-27).**
+- `GET /session` → 배열. 항목 `id`, `time.updated`(ms).
+- `GET /session/:id/message?limit=N` → 배열 `[{info, parts}]`, 오래된 순.
+  다음 페이지는 응답 헤더 `X-Next-Cursor`를 `before=<cursor>`로 넘긴다.
+  헤더가 없으면 끝.
+- 도구 파트 `{type:"tool", tool:"procforge_pf_start", state:{status:"completed", output:"{\"sessionId\":...}"}}`.
+
+**규칙 (순서대로).**
+1. 짝이 이미 있으면 **찾지 않는다**(OpenCode 요청 0).
+2. `mode c`(복사 전용)면 찾지 않는다(전송하지 않으므로).
+3. 후보: `GET /session` 에서 `time.updated` 내림차순 **20개**.
+4. 각 세션 메시지를 `limit`(50) + `X-Next-Cursor` 페이징으로 전부 읽는다.
+   도구 이름 판정: 접두어가 있으면 `<prefix>_pf_start`(대소문자 무시),
+   없으면 `pf_start` 또는 `*_pf_start`. `state.status === "completed"` 이고
+   `output` JSON 의 `sessionId` 가 대상 PF 세션 id 와 같을 때만 "일치".
+   **text 파트는 무시한다**(모델이 글로 적은 id 는 근거가 아니다).
+5. 상한: 요청당 `AbortSignal.timeout(3000)`, 찾기 전체 10초. 넘으면 그 시점에
+   읽지 못한 세션은 "확인 못 함"이다.
+6. 판정 (우선순위 위에서부터):
+   - 확인 못 한 세션 **1개 이상** → 짝 확인 불가(n개)
+   - 일치 0개 → 짝 세션 못 찾음
+   - 일치 2개 이상 → 짝 모호(n개)
+   - 일치 정확히 1개 → `savePairing(…, source:"discovered")` 후 기존 경로
+     (생존 확인 → 역방향 → 전송).
+7. 판정이 막히면 **자동 전송하지 않는다**(delivered:false). 문구는 기존 notSent
+   형식(`<사유>. 전송하지 않음`)이고 copyText 는 기존처럼 준다(수동 붙여넣기 경로 유지).
+
+**위험과 막는 법.**
+- 같은 PF 세션을 두 OpenCode 세션이 봤다(재개·복제) → 모호로 막힌다.
+- 최근 20개 밖에만 있다 → 못 찾음(미전송). 오탐은 없다.
+- 요청 실패·타임아웃·JSON 이 배열이 아님 → "확인 못 함"(0건으로 세지 않는다).
+  M7-0 §3 의 빈 페이지 문제는 `limit` 없는 전체 조회에서 났다. 페이징 중 헤더
+  `X-Next-Cursor` 가 있는데 다음 요청이 실패하면 확인 못 함이다.
+
+**저장.** `pairings.json` 의 엔트리에 `source` 필드(`discovered`)를 붙인다.
+기존 엔트리(source 없음)는 수동/신호 짝이다.
+
 ## c. UI 경고
 
 - 의견 저장 전 `previewEdit` 가 `selfReverify:true` 이고 그 세션에 **확정 절차서**가

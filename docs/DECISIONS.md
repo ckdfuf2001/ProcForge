@@ -1169,4 +1169,17 @@ argv: [...]}` 고정. runner는 run fs에서 직접 실행해 stdout을 golden�
   재확정." 가짜 서버로는 실모델 호출을 대신할 수 없다 — 실측은 사장님 수행
   대기로 남긴다. 근거: docs/M8-1-spec.md.
 
+### M8-1-pair 첫 짝 찾기
+
+- [M8-1-pair-1] **짝 없는 첫 신호는 미전송을 유지한다(5ab2128).** 짝은 신호 전달 뒤에만
+  생기므로(`paired()`) 미전송을 풀면 "어디로 보낼지 모르는 신호"가 생긴다. 2026-10-27
+  실측에서 짝 0건으로 막혔다. 되돌리기 대신 찾기 경로를 더한다. 근거: git show 5ab2128.
+- [M8-1-pair-2] **A 채택: 짝은 OpenCode 세션 메시지의 `pf_start` 서버 출력으로 찾는다.**
+  근거는 서버(core)가 발급한 `sessionId`이고, 모델이 보낸 `pf_next`/`pf_report` 값은
+  쓰지 않는다(위조 가능). 후보 20개, 일치 정확히 1개 + 확인 못 한 세션 0개일 때만
+  저장(source "discovered") 후 전송. 텍스트 파트는 무시한다. 근거: docs/M8-1-spec.md b2.
+- [M8-1-pair-3] **M7 신호 B(delivered:true)는 수동 짝 상태에서 확인했다.** M7-dogfood
+  §8·§7은 수동 `pairings.json` 을 전제로 한다(6.1). 자동 짝 찾기로 통과한 증거가 아니다.
+  근거: docs/M7-dogfood.md:307 (`수동 pairings.json이 필요했고`).
+
 
