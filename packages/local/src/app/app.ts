@@ -1477,10 +1477,20 @@ export class ProcForgeApp {
     // M8-1-pair: 짝이 없을 때만 첫 짝 찾기 (사양 b2). 복사 전용(c)은 보내지 않으므로 찾지 않는다.
     // 판정이 막히면 자동 전송하지 않는다 (0개·2개 이상·확인 불가).
     if (!openSid && cfg.mode !== "c") {
+      // M8-1-pair 보정 b: PF 생성 시각보다 이전에 갱신된 OpenCode 세션은 건너뛴다
+      let pfCreatedAt: number | undefined;
+      try {
+        const s = (await this.core.getSession(sid)) as { createdAt?: unknown };
+        const t = typeof s.createdAt === "string" ? Date.parse(s.createdAt) : NaN;
+        if (!Number.isNaN(t)) pfCreatedAt = t;
+      } catch {
+        // 시각을 모르면 건너뛰기 없이 찾는다 (더 많이 읽는다)
+      }
       const found = await discoverPairing({
         baseUrl: cfg.baseUrl,
         pfSessionId: sid,
         toolPrefix: cfg.toolPrefix,
+        pfCreatedAt,
         fetchImpl: this.linkFetchImpl,
       });
       const degraded = discoveryDegraded(found);

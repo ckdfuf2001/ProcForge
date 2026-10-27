@@ -128,6 +128,7 @@ function setup(oc: Oc) {
   return { app, pfdir };
 }
 
+const S0 = "pf-s0";
 const S1 = "pf-s1";
 const S2 = "pf-s2";
 
@@ -233,5 +234,91 @@ describe("M8-1-pair 첫 짝 찾기", () => {
       fetchImpl: failing,
     });
     expect(r).toEqual({ status: "unknown", count: 0, reason: "세션 목록 조회 실패" });
+  });
+});
+
+describe("M8-1-pair 보정: 최신 pf_start·PF 생성 시각·커서", () => {
+  it("a. X 에 S0→S1 (최신 S1), S0 신호 → 미전송 '짝 대화가 다른 PF 세션 진행 중', pairings 불변", async () => {
+    const oc = fakeOc(
+      { X: { updated: 2000, msgs: msgsOf([[pfStart(S0)], [pfStart(S1)]]) } },
+      { postPfSid: S0 },
+    );
+    const { app, pfdir } = setup(oc);
+    const r = await app.signalOnly({ sessionId: S0, nodeId: "1.1" });
+    expect(r).toMatchObject({
+      delivered: false,
+      degraded: "짝 대화가 다른 PF 세션 진행 중. 전송하지 않음",
+    });
+    expect(oc.posts).toEqual([]);
+    expect(existsSync(join(pfdir, "pairings.json"))).toBe(false);
+  });
+
+  it("b. PF 생성 이전에 갱신된 큰 세션(응답 없음)은 건너뛰어 found", async () => {
+    const T = Date.parse("2026-10-27T12:00:00Z");
+    const oc = fakeOc(
+      {
+        // 오래된 큰 세션: 갱신이 PF 생성 하루 전 → 읽지 않는다 (읽으면 응답 없음)
+        H: { updated: T - 86_400_000, msgs: msgsOf([[pfStart(S0)]]) },
+        X: { updated: T + 3_600_000, msgs: msgsOf([[pfStart(S1)]]) },
+      },
+      { hang: ["H"] },
+    );
+    const r = await discoverPairing({
+      baseUrl: "http://oc.fake",
+      pfSessionId: S1,
+      toolPrefix: "procforge",
+      pfCreatedAt: T,
+      fetchImpl: fetchOf(oc),
+    });
+    expect(r).toEqual({ status: "found", openCodeSessionId: "X" });
+    expect(oc.calls.some((c) => c.startsWith("GET /session/H/"))).toBe(false);
+  });
+
+  it("⑥ PF 생성보다 충분히 오래된 메시지에서는 멈춘다 (그 앞의 pf_start 는 읽지 않음)", async () => {
+    const T = Date.parse("2026-10-27T12:00:00Z");
+    const oldMsg = {
+      info: { id: "msg_old", time: { created: T - 3_600_000 } },
+      parts: [pfStart(S1)],
+    } as never;
+    const newMsg = {
+      info: { id: "msg_new", time: { created: T + 60_000 } },
+      parts: [{ type: "text", text: "..." }],
+    } as never;
+    const oc = fakeOc({ X: { updated: T + 3_600_000, msgs: [oldMsg, newMsg] } });
+    const r = await discoverPairing({
+      baseUrl: "http://oc.fake",
+      pfSessionId: S1,
+      toolPrefix: "procforge",
+      pfCreatedAt: T,
+      fetchImpl: fetchOf(oc),
+    });
+    expect(r).toEqual({ status: "none" });
+  });
+
+  it("c. 같은 커서가 다시 오면 즉시 unknown (before= 로 넘긴다)", async () => {
+    const calls: string[] = [];
+    const f = (async (input: unknown) => {
+      const u = new URL(String(input));
+      calls.push(u.pathname + u.search);
+      if (u.pathname === "/session") {
+        return new Response(JSON.stringify([{ id: "X", time: { updated: 5 } }]), {
+          headers: { "content-type": "application/json" },
+        });
+      }
+      // 항상 같은 커서를 준다 (진행 없음)
+      return new Response(JSON.stringify([{ info: { id: "m" }, parts: [{ type: "text", text: "x" }] }]), {
+        headers: { "content-type": "application/json", "x-next-cursor": "same" },
+      });
+    }) as unknown as typeof fetch;
+    const r = await discoverPairing({
+      baseUrl: "http://oc.fake",
+      pfSessionId: S1,
+      toolPrefix: "procforge",
+      fetchImpl: f,
+    });
+    expect(r).toEqual({ status: "unknown", count: 1 });
+    // 첫 쪽 + before=same 한 쪽 → 두 번째 같은 커서에서 멈춘다
+    expect(calls.filter((c) => c.startsWith("/session/X/message")).length).toBe(2);
+    expect(calls.some((c) => c.includes("before=same"))).toBe(true);
   });
 });
