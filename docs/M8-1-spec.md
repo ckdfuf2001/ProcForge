@@ -66,11 +66,14 @@
 `output` JSON `sessionId`. ProcForge 서버(core)가 발급한 값이며 모델이 쓴 값이 아니다.
 `pf_next`/`pf_report` 입력값은 쓰지 않는다(위조 가능).
 
-**실측 형식 (1.18.18, 2026-10-27).**
+**실측 형식 (1.18.18, 2026-10-27, 세션 `ses_e859…`).**
 - `GET /session` → 배열. 항목 `id`, `time.updated`(ms).
-- `GET /session/:id/message?limit=N` → 배열 `[{info, parts}]`, 오래된 순.
-  다음 페이지는 응답 헤더 `X-Next-Cursor`를 `before=<cursor>`로 넘긴다.
-  헤더가 없으면 끝.
+- `GET /session/:id/message?limit=10` → **최신** 10개. 페이지 안은 **오래된 순**
+  (첫 항목 `msg_17d5d1f4…` created 1793104617295, 끝 `msg_17d5df4c…` created 1793104671941).
+- 다음(더 오래된) 쪽: `before=<X-Next-Cursor>`. 커서는 base64 JSON `{"id","time"}`
+  (첫 쪽 커서 → 둘째 쪽 첫 항목 `msg_17d5c3e8…` created 1793104559748, 끝 `msg_17d5d04d…` created 1793104610514).
+  `cursor=` 매개변수는 **무시된다**(최신 쪽을 다시 준다). 헤더가 없으면 끝.
+- 판정은 **최신부터** 훑는다. 페이지 뒤쪽 항목부터, 파트도 뒤쪽부터 본다.
 - 도구 파트 `{type:"tool", tool:"procforge_pf_start", state:{status:"completed", output:"{\"sessionId\":...}"}}`.
 
 **규칙 (순서대로).**
@@ -84,12 +87,22 @@
    **text 파트는 무시한다**(모델이 글로 적은 id 는 근거가 아니다).
 5. 상한: 요청당 `AbortSignal.timeout(3000)`, 찾기 전체 10초. 넘으면 그 시점에
    읽지 못한 세션은 "확인 못 함"이다.
-6. 판정 (우선순위 위에서부터):
+6. **최신 pf_start 기준(보정 a).** 세션마다 가장 마지막 completed pf_start 출력의
+   sessionId 만 본다. 그것이 대상이면 "일치". 대상이 있으나 최신이 아니면 "대화가
+   다른 PF 세션 진행 중"(busy). 대상이 없으면 "해당 없음".
+7. **PF 생성 시각 범위(보정 b).** PF 세션 `createdAt`(ISO) 보다 `time.updated` 가
+   이른 OpenCode 세션은 건너뛴다. `time` 이 없으면 후보에 남긴다. 메시지는 PF 생성
+   시각 − 10분보다 오래된 것에서 그 세션 읽기를 멈춘다(pf_start 는 실행 전에
+   시작된 메시지에 있을 수 있어 10분 여유를 둔다).
+8. 판정 (우선순위 위에서부터):
    - 확인 못 한 세션 **1개 이상** → 짝 확인 불가(n개)
+   - 대화가 다른 PF 세션 진행 중(busy) 1개 이상 → 짝 대화가 다른 PF 세션 진행 중
    - 일치 0개 → 짝 세션 못 찾음
    - 일치 2개 이상 → 짝 모호(n개)
    - 일치 정확히 1개 → `savePairing(…, source:"discovered")` 후 기존 경로
      (생존 확인 → 역방향 → 전송).
+9. **페이징 종료(보정 c).** 다음 커서가 없으면 끝. **같은 커서가 다시 오면 즉시
+   확인 못 함**(진행 없음).
 7. 판정이 막히면 **자동 전송하지 않는다**(delivered:false). 문구는 기존 notSent
    형식(`<사유>. 전송하지 않음`)이고 copyText 는 기존처럼 준다(수동 붙여넣기 경로 유지).
 
