@@ -155,7 +155,10 @@
 | `0994dd5` | [M8-1-bb] 보정 b: 생존 확인 3초 상한·ocSid 인코딩 |
 | `152482d` | [M8-1-bc] 보정 c: toolPrefix 형식 검증 |
 | `fc285ac` | [M8-1-bd] 보정 d: 짝 확인 순서(②→①)·m74 네트워크 격리 |
-| (이 커밋) | [M8-1-be] 보정 e: dogfood 실측 양식 |
+| `97e5dd6` | [M8-1-pair-a] 첫 짝 찾기 사양(b2) + DECISIONS [M8-1-pair] 3행 |
+| `b682932` | [M8-1-pair-b] 짝 없을 때만 찾기: pf_start 서버 출력 sessionId, 20개·요청 3초/전체 10초, 1개일 때만 저장(source discovered)·전송 |
+| `b891fd8` | [M8-1-pair-c] 테스트 6건(가짜 OpenCode, 네트워크 0) |
+| (이 커밋) | [M8-1-pair-d] M7-dogfood 수동 짝 1줄 + M8 후보 모델 실패 표 |
 
 ## 검증
 

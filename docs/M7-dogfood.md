@@ -306,6 +306,8 @@ Get-Content ".procforge\sessions\$sid\calls.jsonl" |
   환경/도구 제약 기록: (1) 초기 `PROCFORGE_OPENCODE_URL` 미설정 → 신호 B degraded였고 6.1에서 해소,
   (2) 자동 attach/pairing 없이 수동 `pairings.json`이 필요했고, (3) MCP 재개마다 connectionId 신규
   발급(11회, **시간 겹침 없음** — 기준을 "같은 clientName 순차·비중첩"으로 재정의).
+- 주의(M8-1-pair): 신호 B `delivered:true` 는 **수동 `pairings.json` 상태에서 확인**했다.
+  짝 찾기로 통과한 증거가 아니다. 자동 찾기는 `docs/M8-1-spec.md` b2 에 있다.
 - M8 후보(이번 dogfood에서 발견한 것만):
   1. UI `pf_advise`가 만든 `llm_rubric`은 무인 실행에서 unverified → exit 1. 의견 입력 시
      "무인 검증 불가" 경고를 띄우고 결정적 제약(`numeric_match`/`csv_rows`)으로 바꾸도록 제안해야 한다
@@ -322,6 +324,29 @@ Get-Content ".procforge\sessions\$sid\calls.jsonl" |
   7. llm_rubric이 남은 절차서의 finalize는 warning뿐 — `strict`처럼 경고를 실패로 승격하는 옵션 검토.
   8. 신호 B에서 모델이 `pf_start`로 새 세션을 만들어 기존 `d290a93d` 연속성이 끊겼다 → 신호에
      대상 세션 ID/의도를 싣거나 “이어서”용 continue API를 제공해야 한다. 자동 attach/pairing도 필요.
+     (M8-1-pair 로 자동 짝 찾기 추가. 나머지는 M8 후보로 남김.)
+  9. **모델 실패 표 (M8-1 실측 2026-10-27, 세션 `ses_e859…`, 모델 `opencode-go/claude-haiku-5-5`로 기록 — 세션 메타 미확인).**
+     OpenCode 메시지의 tool error 파트 원문 기준. 사용성 후보 기록용이며 코드 결함이 아니다(모델 입력 오류).
+
+     | 도구 | 오류 원문(요약) | 횟수 |
+     |---|---|---|
+     | pf_split | `dep_missing: unknown dependsOn $1` | 1 |
+     | pf_split | `dep_missing: unknown dependsOn 2` | 2 |
+     | pf_split | `dep_missing: unknown dependsOn child:2` | 1 |
+     | pf_split | `split creates dependency cycle` | 1 |
+     | pf_report | `artifact not found: artifacts/1.2.csv` | 2 |
+     | pf_report | `artifact not found: .procforge/sandbox/<sid>/artifacts/1.2.csv` | 1 |
+     | pf_report | `path escapes project root: D:\...\artifacts\1.2.csv` (절대 경로로 씀) | 1 |
+     | pf_report | `unknown tool script/1.1.py` | 1 |
+     | pf_report | `MCP error -32602: Session id must be UUID v4 … Required at nodeId …` | 1 |
+     | pf_next | `MCP error -32602: Session id must be UUID v4 at sessionId` | 1 |
+
+     합계 12건 (split 5 · report 6 · next 1). `bash | Tool execution aborted` 1건은 수동 중단이라 제외.
+
+     M8 사용성 후보:
+     - pf_split 도구 설명에 `dependsOn` 형식 예시(자식 id는 **형제 id 문자열**, `$n`·`child:n` 금지)를 넣는다.
+     - pf_report/pf_next 설명에 `sessionId` 는 **PF 세션 UUID 원문**임을 예시로 넣는다.
+     - artifact 기준 폴더(`artifacts/<노드>.<ext>`, 프로젝트 상대)를 pf_report 설명에 명시하고, 절대 경로는 거절 메시지에 힌트로 준다.
 
 ## 9. 증거 링크
 
