@@ -263,7 +263,8 @@ describe("M7-ui4 UI 쓰기 API", () => {
       };
       // 신호는 실패하지만 저장은 됐다
       expect(body.signal?.delivered).toBe(false);
-      expect(body.signal?.degraded).toMatch(/버전 미확인|전송 실패|미확인|연결 없음|짝이 없음/);
+      // M8-1-pair: 짝이 없으면 찾기(연결 실패 = 확인 불가)로 먼저 간다
+      expect(body.signal?.degraded).toMatch(/버전 미확인|전송 실패|미확인|연결 없음|짝이 없음|짝 확인 불가|짝 세션 못 찾음/);
       const node = await app.readNode(sid, "1.1");
       expect(node.advice.length).toBeGreaterThan(0);
       expect(node.constraints.length).toBeGreaterThan(0);

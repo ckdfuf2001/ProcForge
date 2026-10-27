@@ -66,7 +66,7 @@ async function oneSession(a: ProcForgeApp) {
 }
 
 describe("M7-ui4-j 짝 없음 + openCodeSessionId 없음 → 미전송", () => {
-  it("가짜 서버 요청 0건 + C 문구", async () => {
+  it("M8-1-pair: 짝 없음 → 찾기(목록 1회만) → 못 찾음 → 미전송 + C 문구", async () => {
     const fake = fakeServer();
     // M8-1 d 보정: fetch 를 주입해 실제 네트워크 요청이 나가지 않게 한다.
     const a = await app({ baseUrl: "http://127.0.0.1:1", mode: "b" }, fake.impl);
@@ -75,12 +75,14 @@ describe("M7-ui4-j 짝 없음 + openCodeSessionId 없음 → 미전송", () => {
     const r = await a.signalOnly({ sessionId: sid, nodeId: "1" });
     expect(r.delivered).toBe(false);
     if (!r.delivered) {
-      expect(r.degraded).toBe("OpenCode 세션 짝이 없음. 전송하지 않음");
+      // M8-1-pair: 찾기 목록(GET /session)이 빈 배열 → 짝 세션 못 찾음. 전송은 없다.
+      expect(r.degraded).toBe("짝 세션 못 찾음. 전송하지 않음");
       // M8-1: C 문구는 서버가 만든 신호 문구(세션·노드·pf_start 금지 포함).
       expect(r.copyText).toContain(sid);
       expect(r.copyText).toContain("pf_start 금지");
     }
-    expect(fake.seen).toEqual([]);
+    // 목록 조회 1회만. 메시지 조회·POST 는 없다.
+    expect(fake.seen).toEqual(["/session"]);
   });
 
   it("문구 우선순위: 미설정 주소가 짝보다 먼저", async () => {
