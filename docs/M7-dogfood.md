@@ -343,10 +343,30 @@ Get-Content ".procforge\sessions\$sid\calls.jsonl" |
 
      합계 12건 (split 5 · report 6 · next 1). `bash | Tool execution aborted` 1건은 수동 중단이라 제외.
 
-     M8 사용성 후보:
-     - pf_split 도구 설명에 `dependsOn` 형식 예시(자식 id는 **형제 id 문자열**, `$n`·`child:n` 금지)를 넣는다.
-     - pf_report/pf_next 설명에 `sessionId` 는 **PF 세션 UUID 원문**임을 예시로 넣는다.
-     - artifact 기준 폴더(`artifacts/<노드>.<ext>`, 프로젝트 상대)를 pf_report 설명에 명시하고, 절대 경로는 거절 메시지에 힌트로 준다.
+      M8 사용성 후보:
+      - pf_split 도구 설명에 `dependsOn` 형식 예시(자식 id는 **형제 id 문자열**, `$n`·`child:n` 금지)를 넣는다.
+      - pf_report/pf_next 설명에 `sessionId` 는 **PF 세션 UUID 원문**임을 예시로 넣는다.
+      - artifact 기준 폴더(`artifacts/<노드>.<ext>`, 프로젝트 상대)를 pf_report 설명에 명시하고, 절대 경로는 거절 메시지에 힌트로 준다.
+
+   10. **모델 주장 ① (M8-1-close 실측 2026-10-27, PF `e167df9c`, OC `ses_e8217…`).**
+       `pf_advise` 뒤 노드의 `advice[0]`이 출력 스키마를 깨뜨려 `pf_next` 2건·
+       `pf_confirm_leaf` 1건이 실패했다. 모델은 `pf_get_node`·`pf_tree` 조회로
+       우회했다. 코드 결함 후보(모델 입력 오류가 아니다).
+       원문 3건 동일: `MCP error -32602: Structured content does not match the
+       tool's output schema: data/node/advice/0 must NOT have additional
+       properties`
+   11. **모델 주장 ② (같은 실측).** `pf_report` 2건 실패. 원문:
+       `bad_request: artifact not found: artifacts/1.1.1.json` + hint
+       `입력을 고쳐 재호출하라.` sandbox 상대경로만 받는 규칙과 모델 기대가
+       어긋난다 (9항 3번째 후보와 같은 자리).
+   12. 연속 `pf_start` 후 이전 세션 복귀는 busy로 막힌다 (M8-1-pair 보정 a).
+       안전한 쪽이나, 돌아가는 흐름이 있으면 DECISIONS 한 줄이 필요하다.
+   13. `process-tree` 시간 기준이 부하에 흔들린다 (L3 전수 실행에서 5674ms로
+       5000ms 초과 1건, 단독 재실행 통과). 기준을 8000ms로 올리거나 작업 시간만
+       따로 재는 방식으로 바꾼다.
+   14. App 경로 `pfCreatedAt` 연결이 테스트로 검증되지 않았다. 테스트 세션 id가
+       core에 없어 `getSession`이 실패하고, 시각 없이 전부 읽는 경로로 넘어간다.
+       실제 core 세션 1건으로 추가한다.
 
 ## 9. 증거 링크
 
