@@ -54,6 +54,8 @@ export type UiServer = {
   close: () => Promise<void>;
   /** 테스트용: 현재 구독 수 */
   subscriberCount: (sessionId: string) => number;
+  /** M8-1-close2 b: 신호 감시 결과 배지 (같은 /api/events 스트림) */
+  pushSignal: (sessionId: string, payload: unknown) => void;
 };
 
 /** M7-ui1: 기본 CSP (M7-ui1. 인라인 금지·산출물 렌더 0 → 골격 'self') */
@@ -838,6 +840,8 @@ export async function createUiServer(opts: {
       port,
       instance,
     subscriberCount: (sid) => hub.count(sid),
+    // M8-1-close2 b: 신호 감시 결과 배지 갱신 (같은 /api/events 스트림).
+    pushSignal: (sid: string, payload: unknown) => hub.push(sid, "signal", payload),
     close: () =>
       new Promise<void>((r) => {
         hub.stopAll();

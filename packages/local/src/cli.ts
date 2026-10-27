@@ -271,6 +271,8 @@ async function cmdUi(): Promise<number> {
   try {
     const { app } = createApp({ procforgeDir, projectRoot });
     const srv = await createUiServer({ app, port });
+    // M8-1-close2 b: 신호 감시 결과 → SSE signal 배지.
+    app.setSignalNotifier((sid, payload) => srv.pushSignal(sid, payload));
     const withToken = `${srv.url}#t=${srv.token}`;
     // M7-1: URL+토큰 1회 출력 (토큰은 fragment라 서버 로그·히스토리에 남지 않음).
     console.log(`ui: ${withToken}`);

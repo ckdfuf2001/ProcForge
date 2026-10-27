@@ -96,6 +96,23 @@ export class SessionEventHub {
     }
   }
 
+  /**
+   * M8-1-close2 b: core 이벤트가 아닌 알림(신호 감시 결과)을 구독자에게 민다.
+   * revision 커서는 건드리지 않는다 (이력 폴러와 독립).
+   */
+  push(sid: string, event: string, data: unknown): void {
+    const set = this.subs.get(sid);
+    if (!set || set.size === 0) return;
+    const chunk = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+    for (const s of set) {
+      try {
+        s.write(chunk);
+      } catch {
+        // 끊긴 구독자는 다음 poll 정리에서 제거된다
+      }
+    }
+  }
+
   /** 테스트·종료용: 모든 폴러 정지 */
   stopAll(): void {
     for (const t of this.timers.values()) clearInterval(t);

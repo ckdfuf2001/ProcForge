@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, appendFileSync, mkdirSync } from "node:fs";
 import { randomUUID, createHash } from "node:crypto";
 import { join, resolve, basename } from "node:path";
 import type { CoreClient } from "@procforge/shared/core-client.js";
@@ -43,6 +43,7 @@ import {
 } from "../services/opencode-link.js";
 import { savePairing, getPairing, loadPairings, type Pairings } from "../services/pairings.js";
 import { discoverPairing, discoveryDegraded } from "../services/pair-discovery.js";
+import type { SignalWatchOutcome } from "../services/opencode-link.js";
 import { enrichSessions, type SessionRow } from "../services/session-meta.js";
 import {
   previewArtifact,
@@ -314,6 +315,8 @@ export class ProcForgeApp {
   private readonly signal: SignalTarget;
   /** M7 5-1: 실행 중 절차서 → runId (동시 1개 강제). 취소되면 반납. */
   private activeRuns = new Map<string, string>();
+  /** M8-1-close2 b: 신호 감시 결과 배지 갱신 (UI 서버가 주입. 없으면 기록만) */
+  private signalNotifier: ((sessionId: string, payload: unknown) => void) | undefined;
   /** M7-5-c: 결정 대기(승인·생성값) 중 잠금 유지 중인 run */
   private waitingRuns = new Set<string>();
 
@@ -376,6 +379,46 @@ export class ProcForgeApp {
       timeoutMs: deps.signal?.timeoutMs,
       serverVersion: deps.signal?.serverVersion,
     };
+  }
+
+  /** M8-1-close2 b: 신호 감시 결과 배지 갱신 주입 (cli ui 기동 시 연결) */
+  setSignalNotifier(fn: (sessionId: string, payload: unknown) => void): void {
+    this.signalNotifier = fn;
+  }
+
+  /**
+   * M8-1-close2 b: delivered 뒤 감시 결과를 signals.jsonl에 남기고 SSE로 민다.
+   * 기록 실패는 신호 결과에 영향을 주지 않는다 (best-effort).
+   */
+  recordSignalWatch(
+    sessionId: string,
+    nodeId: string,
+    outcome: SignalWatchOutcome,
+  ): void {
+    const line =
+      JSON.stringify({
+        at: new Date().toISOString(),
+        sessionId,
+        nodeId,
+        openCodeSessionId: outcome.openCodeSessionId,
+        kind: outcome.kind,
+        ...(outcome.text !== undefined ? { text: outcome.text } : {}),
+      }) + "\n";
+    try {
+      const dir = join(this.procforgeDir, "sessions", sessionId);
+      mkdirSync(dir, { recursive: true });
+      appendFileSync(join(dir, "signals.jsonl"), line, "utf8");
+    } catch {
+      // 기록 실패 무시
+    }
+    try {
+      this.signalNotifier?.(sessionId, {
+        ...JSON.parse(line),
+        type: "signal-watch",
+      });
+    } catch {
+      // 배지 갱신 실패 무시
+    }
   }
 
   async start(a: StartInput): Promise<OutputOf<"pf_start">> {
@@ -1536,6 +1579,9 @@ export class ProcForgeApp {
           if (getPairing(this.procforgeDir, osid)?.pfSessionId === pfSid) return;
           savePairing(this.procforgeDir, osid, pfSid);
         },
+        // M8-1-close2 b: 감시 결과 기록·배지 (nodeId는 이 신호 대상).
+        onSignalWatch: (outcome) =>
+          this.recordSignalWatch(sid, input.nodeId, outcome),
       },
     });
   }

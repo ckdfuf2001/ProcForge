@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createServer, type Server } from "node:http";
@@ -28,7 +28,8 @@ type FakeScenario =
   | "no-session"
   | "b-next"
   | "b-offside"
-  | "hang-post";
+  | "hang-post"
+  | "hang-post-late-pf";
 
 function startFake(
   scenario: FakeScenario,
@@ -108,6 +109,12 @@ function startFake(
         // 메시지가 보인다 (실서버 턴 진행 중 상태 재현).
         return;
       }
+      if (scenario === "hang-post-late-pf") {
+        // M8-1-close2 b: POST 무응답 + 300ms 뒤 모델이 pf_start (늦은 첫 호출).
+        const sid = mMsg[1];
+        setTimeout(() => push(sid, toolPart(sid)), 300);
+        return;
+      }
       if (
         scenario === "b-ok" ||
         scenario === "b-next" ||
@@ -125,17 +132,19 @@ function startFake(
       return;
     }
     if (req.method === "GET" && mMsg) {
-      if (scenario === "hang-post") {
+      // M8-1-close2 b: 실서버 형식 [{info:{role},parts}] (기존 {data} 아님).
+      if (scenario === "hang-post" || scenario === "hang-post-late-pf") {
         const first = bodies[0] as {
           parts?: { type: string; text: string }[];
         };
         const text = first?.parts?.[0]?.text ?? "";
         send(200, [
           { info: { role: "user" }, parts: [{ type: "text", text }] },
+          { info: { role: "assistant" }, parts: partsOf(mMsg[1]) },
         ]);
         return;
       }
-      send(200, { data: partsOf(mMsg[1]) });
+      send(200, [{ info: { role: "assistant" }, parts: partsOf(mMsg[1]) }]);
       return;
     }
     // M8-1 ①: 짝 세션 생존 확인 (GET /session/:id). "no-session" 시나리오에서는
@@ -388,6 +397,111 @@ describe("M7-1 opencode-link", () => {
       const elapsed = Date.now() - t0;
       expect(r).toMatchObject({ delivered: true, mode: "b" });
       expect(elapsed).toBeLessThan(30_000);
+    } finally {
+      await fake.close();
+    }
+  }, 60000);
+
+  it("M8-1-close2 b: 늦은 pf_start → warn 분류 + 짝 기록", async () => {
+    const fake = await startFake("hang-post-late-pf");
+    try {
+      const watched: unknown[] = [];
+      const paired: [string, string][] = [];
+      const t0 = Date.now();
+      const r = await sendContinue({
+        baseUrl: fake.baseUrl,
+        openCodeSessionId: "ses-lp",
+        text: "계속",
+        mode: "b",
+        pfSessionId: "pf-here",
+        postTimeoutMs: 400,
+        decisionMs: 1200,
+        timeoutMs: 4000,
+        pollMs: 50,
+        serverVersion: "1.18.18",
+        deps: {
+          ...httpLinkDeps(fake.baseUrl),
+          onPairing: (a, b) => paired.push([a, b]),
+          onSignalWatch: (o) => watched.push(o),
+        },
+      });
+      expect(r).toMatchObject({ delivered: true, mode: "b" });
+      expect(Date.now() - t0).toBeLessThan(30_000);
+      // 백그라운드 감시가 늦은 첫 호출을 잡을 때까지 대기.
+      const until = Date.now() + 6000;
+      while (watched.length === 0 && Date.now() < until) {
+        await new Promise((rr) => setTimeout(rr, 100));
+      }
+      expect(watched).toHaveLength(1);
+      expect(watched[0]).toMatchObject({
+        openCodeSessionId: "ses-lp",
+        kind: "warn",
+      });
+      expect(String((watched[0] as { text?: string }).text ?? "")).toMatch(/새 세션/);
+      expect(paired).toEqual([["ses-lp", "pf-fake-1"]]);
+    } finally {
+      await fake.close();
+    }
+  }, 60000);
+
+  it("M8-1-close2 b: POST 404 즉시 실패 (보임 판정으로 안 넘김)", async () => {
+    const t0 = Date.now();
+    const r = await sendContinue({
+      baseUrl: "http://127.0.0.1:1",
+      openCodeSessionId: "ses-404",
+      text: "계속",
+      mode: "b",
+      serverVersion: "1.18.18",
+      deps: {
+        fetchImpl: (async () => new Response("nope", { status: 404 })) as unknown as typeof fetch,
+        listParts: async () => [],
+        listMessages: async () => [],
+      },
+    });
+    expect(r.delivered).toBe(false);
+    if (!r.delivered) expect(r.degraded).toMatch(/전송 실패/);
+    expect(Date.now() - t0).toBeLessThan(10_000);
+  });
+
+  it("M8-1-close2 b: 감시 결과 signals.jsonl 기록 + 배지 알림", async () => {
+    const fake = await startFake("hang-post");
+    try {
+      const app = stubApp({
+        signal: {
+          baseUrl: fake.baseUrl,
+          mode: "b",
+          serverVersion: "1.18.18",
+          timeoutMs: 2500,
+        },
+      });
+      const notified: unknown[] = [];
+      app.setSignalNotifier((sid, payload) => notified.push([sid, payload]));
+      const r = await app.adviseAndSignal({
+        ...adviseInput,
+        link: { openCodeSessionId: "ses-nr" },
+      });
+      expect(r.signal.delivered).toBe(true);
+      const until = Date.now() + 6000;
+      let lines: string[] = [];
+      while (Date.now() < until) {
+        try {
+          const raw = readFileSync(join(pfdir, "sessions", "pf-sid", "signals.jsonl"), "utf8");
+          lines = raw.trim().split("\n");
+          if (lines.length > 0 && lines[0] !== "") break;
+        } catch {
+          // 아직 기록 전
+        }
+        await new Promise((rr) => setTimeout(rr, 100));
+      }
+      expect(lines.length).toBeGreaterThan(0);
+      const rec = JSON.parse(lines[lines.length - 1]) as Record<string, unknown>;
+      expect(rec).toMatchObject({
+        sessionId: "pf-sid",
+        nodeId: "1.1",
+        openCodeSessionId: "ses-nr",
+        kind: "no-response",
+      });
+      expect(notified.length).toBeGreaterThan(0);
     } finally {
       await fake.close();
     }

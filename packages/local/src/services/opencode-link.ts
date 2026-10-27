@@ -13,6 +13,17 @@ export type LinkResult =
 /** 메시지 1건 (신호 user 메시지 확인용. role 없으면 판정에서 제외) */
 export type SignalMessage = { role?: string; texts: string[] };
 
+/**
+ * M8-1-close2 b: delivered 뒤 백그라운드 감시 결과.
+ * warn = 기존 규칙 경고문, ok = 정상 첫 호출, no-response = watchMs 안에 없음.
+ */
+export type SignalWatchOutcome = {
+  openCodeSessionId: string;
+  kind: "warn" | "ok" | "no-response";
+  /** warn이면 경고문, no-response면 "모델 무응답/plan 모드 의심" */
+  text?: string;
+};
+
 export type LinkDeps = {
   fetchImpl?: typeof fetch;
   /** 세션 part 목록 (신호 전 기준점·신호 후 새 호출 감지용) */
@@ -21,6 +32,8 @@ export type LinkDeps = {
   listMessages?: (openCodeSessionId: string) => Promise<SignalMessage[]>;
   /** 짝짓기 갱신 (주입. savePairing) */
   onPairing?: (openCodeSessionId: string, pfSessionId: string) => void;
+  /** delivered 뒤 백그라운드 감시 결과 (주입. signals 기록·SSE 배지) */
+  onSignalWatch?: (outcome: SignalWatchOutcome) => void;
   /** 실측 버전 목록 (미지정 시 M7-0 실측 1.18.18만 허용) */
   knownVersions?: string[];
 };
@@ -81,7 +94,7 @@ async function postJson(
   url: string,
   body: unknown,
   init?: { signal?: AbortSignal },
-): Promise<{ ok: boolean; json: unknown }> {
+): Promise<{ ok: boolean; status?: number; json: unknown }> {
   let r: Response;
   try {
     r = await doFetch(url, {
@@ -91,13 +104,14 @@ async function postJson(
       ...(init?.signal ? { signal: init.signal } : {}),
     });
   } catch {
+    // 네트워크 오류·abort·타임아웃: 응답 없음 (보임 판정으로 넘긴다).
     return { ok: false, json: undefined };
   }
-  if (!r.ok) return { ok: false, json: undefined };
+  if (!r.ok) return { ok: false, status: r.status, json: undefined };
   try {
-    return { ok: true, json: (await r.json()) as unknown };
+    return { ok: true, status: r.status, json: (await r.json()) as unknown };
   } catch {
-    return { ok: true, json: undefined };
+    return { ok: true, status: r.status, json: undefined };
   }
 }
 
@@ -451,8 +465,9 @@ export async function sendContinue(opts: {
       return undefined;
     }
   };
-  // M8-1-close a: 판정 뒤에도 pf_* 감시는 백그라운드로 계속하고,
-  // 첫 호출이 오면 짝만 갱신한다 (반환값은 바꾸지 않는다).
+  // M8-1-close2 b: 판정 뒤에도 pf_* 감시는 백그라운드로 계속한다.
+  // 첫 호출은 기존 규칙으로 분류하고 onSignalWatch로 알린다 (반환값은 그대로).
+  // watchMs 안에 없으면 "모델 무응답/plan 모드 의심".
   const watchInBackground = (): void => {
     const watch = async (): Promise<void> => {
       const until = Date.now() + Math.max(watchMs - decisionMs, 0);
@@ -473,7 +488,14 @@ export async function sendContinue(opts: {
             await new Promise((r) => setTimeout(r, pollMs));
           }
         })());
-      if (part === undefined) return;
+      if (part === undefined) {
+        opts.deps.onSignalWatch?.({
+          openCodeSessionId: ocSid,
+          kind: "no-response",
+          text: "모델 무응답/plan 모드 의심",
+        });
+        return;
+      }
       try {
         const parts = await opts.deps.listParts(ocSid);
         const pfSid = readLatestPfSessionId(parts);
@@ -481,6 +503,11 @@ export async function sendContinue(opts: {
       } catch {
         // 무시
       }
+      const warning = classifyNewPfCall(part, opts.pfSessionId);
+      opts.deps.onSignalWatch?.({
+        openCodeSessionId: ocSid,
+        ...(warning !== undefined ? { kind: "warn", text: warning } : { kind: "ok" }),
+      });
     };
     void watch().catch(() => {});
   };
@@ -489,26 +516,31 @@ export async function sendContinue(opts: {
     // {"prompt":{...}} 래퍼는 이 경로에서 400 (래퍼는 /api/session/:id/prompt용).
     // M8-1-close a: POST는 턴이 끝날 때까지 물고 있어 짧게 끊는다.
     // (/api/session/:id/prompt는 즉시 200+steer지만 serve에서 모델이 안 움직인다.)
+    // M8-1-close2 b: POST가 4xx/5xx로 즉시 실패하면 바로 전송 실패.
+    // abort/타임아웃(응답 없음)만 보임 판정으로 넘긴다.
+    // POST는 판정과 겹쳐서 둔다 (턴이 길면 abort만 하고 서버는 계속한다).
     let postOk = false;
-    try {
-      const r = await postJson(
-        doFetch,
-        `${base}/session/${ocSid}/message`,
-        { parts: [{ type: "text", text: opts.text }] },
-        { signal: AbortSignal.timeout(postTimeoutMs) },
-      );
-      postOk = r.ok;
-    } catch {
-      postOk = false;
-    }
-    // 신호 직후엔 이미 호출이 반영돼 있을 수 있어 1회 즉시 확인한다 (지연 최소화).
-    const fast = await seenPf();
-    if (fast !== undefined) return paired(fast);
-    if (postOk && (await seenSignalText())) {
-      watchInBackground();
-      return { delivered: true, mode: sigMode, copyText: opts.text };
-    }
+    let postAnswered = false;
+    let postDone = false;
+    void (async () => {
+      try {
+        const r = await postJson(
+          doFetch,
+          `${base}/session/${ocSid}/message`,
+          { parts: [{ type: "text", text: opts.text }] },
+          { signal: AbortSignal.timeout(postTimeoutMs) },
+        );
+        postOk = r.ok;
+        postAnswered = r.status !== undefined;
+      } catch {
+        postOk = false;
+      } finally {
+        postDone = true;
+      }
+    })();
     for (;;) {
+      // 4xx/5xx 응답이 오면 즉시 실패 (보임 판정으로 넘기지 않는다).
+      if (postDone && !postOk && postAnswered) return fail("전송 실패");
       const np = await seenPf();
       if (np !== undefined) return paired(np);
       if (await seenSignalText()) {
@@ -572,6 +604,11 @@ export async function sendContinue(opts: {
       // 무시
     }
     const warning = classifyNewPfCall(part, opts.pfSessionId);
+    // M8-1-close2 b: 판정 시점에 본 첫 호출도 signals 기록에 남긴다.
+    opts.deps.onSignalWatch?.({
+      openCodeSessionId: ocSid,
+      ...(warning !== undefined ? { kind: "warn", text: warning } : { kind: "ok" }),
+    });
     return {
       delivered: true,
       mode: sigMode,
