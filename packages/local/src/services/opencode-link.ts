@@ -10,10 +10,15 @@ export type LinkResult =
   | { delivered: true; mode: "b" | "a"; copyText?: string; warning?: string }
   | { delivered: false; degraded: string; copyText: string };
 
+/** 메시지 1건 (신호 user 메시지 확인용. role 없으면 판정에서 제외) */
+export type SignalMessage = { role?: string; texts: string[] };
+
 export type LinkDeps = {
   fetchImpl?: typeof fetch;
   /** 세션 part 목록 (신호 전 기준점·신호 후 새 호출 감지용) */
   listParts: (openCodeSessionId: string) => Promise<unknown[]>;
+  /** 세션 메시지 목록 (신호 user 메시지 보임 확인용. 없으면 pf_*만 본다) */
+  listMessages?: (openCodeSessionId: string) => Promise<SignalMessage[]>;
   /** 짝짓기 갱신 (주입. savePairing) */
   onPairing?: (openCodeSessionId: string, pfSessionId: string) => void;
   /** 실측 버전 목록 (미지정 시 M7-0 실측 1.18.18만 허용) */
@@ -75,6 +80,7 @@ async function postJson(
   doFetch: typeof fetch,
   url: string,
   body: unknown,
+  init?: { signal?: AbortSignal },
 ): Promise<{ ok: boolean; json: unknown }> {
   let r: Response;
   try {
@@ -82,6 +88,7 @@ async function postJson(
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
+      ...(init?.signal ? { signal: init.signal } : {}),
     });
   } catch {
     return { ok: false, json: undefined };
@@ -151,19 +158,79 @@ function extractParts(payload: unknown): unknown[] {
 export function httpLinkDeps(
   baseUrl: string,
   fetchImpl?: typeof fetch,
-): Pick<LinkDeps, "listParts"> {
+): Pick<LinkDeps, "listParts" | "listMessages"> {
   const doFetch = fetchImpl ?? fetch;
   const base = baseUrl.replace(/\/$/, "");
-  return {
-    listParts: async (sid) => {
-      const r = await doFetch(
-        `${base}/session/${encodeURIComponent(sid)}/message`,
-        { headers: { accept: "application/json" } },
-      );
-      if (!r.ok) return [];
-      return extractParts((await r.json()) as unknown);
-    },
+  const getJson = async (sid: string): Promise<unknown> => {
+    const r = await doFetch(
+      `${base}/session/${encodeURIComponent(sid)}/message`,
+      { headers: { accept: "application/json" } },
+    );
+    if (!r.ok) return undefined;
+    try {
+      return (await r.json()) as unknown;
+    } catch {
+      return undefined;
+    }
   };
+  return {
+    listParts: async (sid) => extractParts(await getJson(sid)),
+    listMessages: async (sid) => extractMessages(await getJson(sid)),
+  };
+}
+
+/**
+ * M8-1-close a: 메시지 목록에서 role·텍스트만 뽑는다.
+ * 실서버 `[{info:{role}, parts}]`, 구형 `{data: parts[]}`(role 없음).
+ */
+export function extractMessages(payload: unknown): SignalMessage[] {
+  const msgs: SignalMessage[] = [];
+  const push = (role: unknown, parts: unknown): void => {
+    const texts: string[] = [];
+    if (Array.isArray(parts)) {
+      for (const p of parts) {
+        if (
+          p !== null &&
+          typeof p === "object" &&
+          (p as Record<string, unknown>)["type"] === "text" &&
+          typeof (p as Record<string, unknown>)["text"] === "string"
+        ) {
+          texts.push((p as Record<string, unknown>)["text"] as string);
+        }
+      }
+    }
+    msgs.push({
+      ...(typeof role === "string" ? { role } : {}),
+      texts,
+    });
+  };
+  if (Array.isArray(payload)) {
+    for (const item of payload) {
+      if (item === null || typeof item !== "object") continue;
+      const rec = item as Record<string, unknown>;
+      const info = rec["info"];
+      push(
+        info !== null && typeof info === "object"
+          ? (info as Record<string, unknown>)["role"]
+          : undefined,
+        rec["parts"],
+      );
+    }
+    return msgs;
+  }
+  if (payload !== null && typeof payload === "object") {
+    const rec = payload as Record<string, unknown>;
+    const arr = rec["data"];
+    if (Array.isArray(arr)) {
+      for (const p of arr) push(undefined, [p]);
+      return msgs;
+    }
+    if (Array.isArray(rec["parts"])) {
+      push(undefined, rec["parts"]);
+      return msgs;
+    }
+  }
+  return msgs;
 }
 
 /** pf_ tool part 판정 */
@@ -300,6 +367,11 @@ async function sseNewPfCall(o: {
  * 미확인 버전이면 전송 없이 C. 신호 후 timeoutMs 안에 pf_* 출현이
  * 없으면 degraded("모델 무응답/plan 모드 의심")+C 문구.
  */
+/** M8-1-close a: 전송 판정 상한 (30초 이하). 모델 완료를 기다리지 않는다. */
+export const SIGNAL_DECISION_CAP_MS = 30_000;
+/** M8-1-close a: POST 대기 상한. 턴이 길면 끊고 보임으로 판정한다. */
+export const SIGNAL_POST_TIMEOUT_MS = 10_000;
+
 export async function sendContinue(opts: {
   baseUrl: string;
   openCodeSessionId?: string;
@@ -311,6 +383,10 @@ export async function sendContinue(opts: {
   serverVersion?: string;
   /** M8-1 a2: 신호 대상 PF 세션 id — pf_next/pf_report 입력 sessionId 비교용 */
   pfSessionId?: string;
+  /** M8-1-close a: 전송 판정 상한 (기본 30초, timeoutMs보다 클 수 없다) */
+  decisionMs?: number;
+  /** M8-1-close a: POST 대기 상한 (기본 10초, decisionMs보다 클 수 없다) */
+  postTimeoutMs?: number;
   deps: LinkDeps;
 }): Promise<LinkResult> {
   const sid = opts.openCodeSessionId;
@@ -342,24 +418,116 @@ export async function sendContinue(opts: {
   } catch {
     before = new Set();
   }
+  // M8-1-close a: 전송 판정은 30초 이하로 끝낸다 (모델 완료 대기 금지).
+  // timeoutMs는 판정 뒤 백그라운드 감시 기한으로만 쓴다.
+  const watchMs = clampTimeoutMs(opts.timeoutMs);
+  const decisionMs = Math.min(
+    opts.decisionMs ?? SIGNAL_DECISION_CAP_MS,
+    SIGNAL_DECISION_CAP_MS,
+    watchMs,
+  );
+  const decisionDeadline = Date.now() + decisionMs;
+  const postTimeoutMs = Math.min(
+    opts.postTimeoutMs ?? SIGNAL_POST_TIMEOUT_MS,
+    decisionMs,
+  );
+  const pollMs = opts.pollMs ?? 1000;
+  // M8-1-close a: 신호 user 메시지가 목록에 보이는지 (POST 응답과 무관하게).
+  const seenSignalText = async (): Promise<boolean> => {
+    if (!opts.deps.listMessages) return false;
+    try {
+      const msgs = await opts.deps.listMessages(ocSid);
+      return msgs.some(
+        (m) => m.role === "user" && m.texts.some((t) => t.includes(opts.text)),
+      );
+    } catch {
+      return false;
+    }
+  };
+  const seenPf = async (): Promise<unknown | undefined> => {
+    try {
+      return firstNewPfPart(await opts.deps.listParts(ocSid), before);
+    } catch {
+      return undefined;
+    }
+  };
+  // M8-1-close a: 판정 뒤에도 pf_* 감시는 백그라운드로 계속하고,
+  // 첫 호출이 오면 짝만 갱신한다 (반환값은 바꾸지 않는다).
+  const watchInBackground = (): void => {
+    const watch = async (): Promise<void> => {
+      const until = Date.now() + Math.max(watchMs - decisionMs, 0);
+      const first = await sseNewPfCall({
+        baseUrl: base,
+        sid: ocSid,
+        before,
+        until,
+        fetchImpl: doFetch,
+      });
+      const part =
+        first ??
+        (await (async () => {
+          for (;;) {
+            const np = await seenPf();
+            if (np !== undefined) return np;
+            if (Date.now() >= until) return undefined;
+            await new Promise((r) => setTimeout(r, pollMs));
+          }
+        })());
+      if (part === undefined) return;
+      try {
+        const parts = await opts.deps.listParts(ocSid);
+        const pfSid = readLatestPfSessionId(parts);
+        if (pfSid) opts.deps.onPairing?.(ocSid, pfSid);
+      } catch {
+        // 무시
+      }
+    };
+    void watch().catch(() => {});
+  };
   if (sigMode === "b") {
     // M7-1.1 실서버 확인 (1.18.18): POST /session/:id/message + {parts} → 200.
     // {"prompt":{...}} 래퍼는 이 경로에서 400 (래퍼는 /api/session/:id/prompt용).
-    const r = await postJson(doFetch, `${base}/session/${ocSid}/message`, {
-      parts: [{ type: "text", text: opts.text }],
-    });
-    if (!r.ok) return fail("전송 실패");
-  } else {
-    const ap = await postJson(doFetch, `${base}/tui/append-prompt`, {
-      text: opts.text,
-    });
-    if (!ap.ok || ap.json !== true) return fail("append 실패");
-    const sp = await postJson(doFetch, `${base}/tui/submit-prompt`, {});
-    if (!sp.ok || sp.json !== true) return fail("submit 실패");
+    // M8-1-close a: POST는 턴이 끝날 때까지 물고 있어 짧게 끊는다.
+    // (/api/session/:id/prompt는 즉시 200+steer지만 serve에서 모델이 안 움직인다.)
+    let postOk = false;
+    try {
+      const r = await postJson(
+        doFetch,
+        `${base}/session/${ocSid}/message`,
+        { parts: [{ type: "text", text: opts.text }] },
+        { signal: AbortSignal.timeout(postTimeoutMs) },
+      );
+      postOk = r.ok;
+    } catch {
+      postOk = false;
+    }
+    // 신호 직후엔 이미 호출이 반영돼 있을 수 있어 1회 즉시 확인한다 (지연 최소화).
+    const fast = await seenPf();
+    if (fast !== undefined) return paired(fast);
+    if (postOk && (await seenSignalText())) {
+      watchInBackground();
+      return { delivered: true, mode: sigMode, copyText: opts.text };
+    }
+    for (;;) {
+      const np = await seenPf();
+      if (np !== undefined) return paired(np);
+      if (await seenSignalText()) {
+        watchInBackground();
+        return { delivered: true, mode: sigMode, copyText: opts.text };
+      }
+      if (Date.now() >= decisionDeadline) {
+        return fail(postOk ? "모델 무응답/plan 모드 의심" : "전송 미확인");
+      }
+      await new Promise((r) => setTimeout(r, pollMs));
+    }
   }
-  const timeoutMs = clampTimeoutMs(opts.timeoutMs);
-  const pollMs = opts.pollMs ?? 1000;
-  const deadline = Date.now() + timeoutMs;
+  const ap = await postJson(doFetch, `${base}/tui/append-prompt`, {
+    text: opts.text,
+  });
+  if (!ap.ok || ap.json !== true) return fail("append 실패");
+  const sp = await postJson(doFetch, `${base}/tui/submit-prompt`, {});
+  if (!sp.ok || sp.json !== true) return fail("submit 실패");
+  const deadline = Date.now() + watchMs;
   // M7-ui1.1-6: SSE 1순위, messages 폴링은 폴백 (대용량 세션 빈 페이지 오탐 회피).
   // 신호 직후엔 이미 호출이 반영돼 있을 수 있어 1회 즉시 확인한다 (지연 최소화).
   try {

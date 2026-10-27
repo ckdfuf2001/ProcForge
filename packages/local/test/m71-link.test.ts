@@ -21,7 +21,14 @@ import { ProcForgeApp, type SignalTarget } from "../src/app/app.js";
 // GET /event SSE.
 
 type Part = Record<string, unknown>;
-type FakeScenario = "b-ok" | "plan" | "a-ok" | "no-session" | "b-next" | "b-offside";
+type FakeScenario =
+  | "b-ok"
+  | "plan"
+  | "a-ok"
+  | "no-session"
+  | "b-next"
+  | "b-offside"
+  | "hang-post";
 
 function startFake(
   scenario: FakeScenario,
@@ -96,6 +103,11 @@ function startFake(
         send(400, { error: "parts required" });
         return;
       }
+      if (scenario === "hang-post") {
+        // M8-1-close a: POST는 절대 응답하지 않는다. GET에는 신호 user
+        // 메시지가 보인다 (실서버 턴 진행 중 상태 재현).
+        return;
+      }
       if (
         scenario === "b-ok" ||
         scenario === "b-next" ||
@@ -113,6 +125,16 @@ function startFake(
       return;
     }
     if (req.method === "GET" && mMsg) {
+      if (scenario === "hang-post") {
+        const first = bodies[0] as {
+          parts?: { type: string; text: string }[];
+        };
+        const text = first?.parts?.[0]?.text ?? "";
+        send(200, [
+          { info: { role: "user" }, parts: [{ type: "text", text }] },
+        ]);
+        return;
+      }
       send(200, { data: partsOf(mMsg[1]) });
       return;
     }
@@ -348,6 +370,28 @@ describe("M7-1 opencode-link", () => {
       await fake.close();
     }
   });
+
+  it("M8-1-close a: POST 무응답에도 user 메시지 보이면 30초 안에 delivered:true", async () => {
+    const fake = await startFake("hang-post");
+    try {
+      const t0 = Date.now();
+      // 기본값 그대로 (decisionMs 30초·postTimeoutMs 10초). POST는 절대
+      // 끝나지 않지만 user 메시지가 보여 10초대에 판정된다.
+      const r = await sendContinue({
+        baseUrl: fake.baseUrl,
+        openCodeSessionId: "ses-hp",
+        text: "계속",
+        mode: "b",
+        serverVersion: "1.18.18",
+        deps: { ...httpLinkDeps(fake.baseUrl) },
+      });
+      const elapsed = Date.now() - t0;
+      expect(r).toMatchObject({ delivered: true, mode: "b" });
+      expect(elapsed).toBeLessThan(30_000);
+    } finally {
+      await fake.close();
+    }
+  }, 60000);
 
   it("버전 미지정 → 미확인 C (default-deny)", async () => {
     const fake = await startFake("b-ok");
