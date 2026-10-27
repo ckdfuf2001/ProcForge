@@ -57,7 +57,9 @@ export const NodeSummarySchema = z.object({
   depth: z.number(),
   dependsOn: z.array(z.string()),
   constraints: z.array(ConstraintSummarySchema),
-  advice: z.array(z.object({ at: z.string(), text: z.string() })),
+  // M8-1-close2 a: 공유 NodeSchema 와 한 벌로 쓴다 (M8-ui-1이 id·revision을
+  // 넣었는데 요약 스키마만 옛날({at,text})이라 MCP -32602가 났다).
+  advice: NodeSchema.shape.advice,
   lastAttempt: AttemptSummarySchema.nullable(),
   retriesLeft: z.number(),
 });
@@ -241,6 +243,8 @@ export const PfTestOutputSchema = z.object({
   unverified: z.number(),
   skipped: z.number(),
   blocked: z.number(),
+  /** M8-1-0: 재검증 대기 노드 수 (실행 안 함) */
+  needsReverify: z.number(),
   reportPath: z.string(),
   junitPath: z.string(),
   sessionId: z.string().optional(),
