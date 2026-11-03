@@ -594,7 +594,7 @@ c·d·j는 하네스 과제로 DECISIONS에 기록만.
 | M8-5 | 설치/전역 명령 | [ ] | | | 설치·전역 실행 명령 정리 |
 | M8-6 | core-server 분리·고객 PC | [ ] | | | 원격 core와 고객 PC 설치·연결 테스트 |
 | M8-7 | job object·dependsOn 누락 경고 | [ ] | | | job 객체 도입, 사후 `dependsOn` 누락 경고 |
-| M9-1 | 이름 변경 사양 (Proof) | [ ] | | | [사양](M9-1-spec.md). 구현 착수 조건: M8-1 `[x]`. 구현 커밋 4개는 M8-1 닫힌 뒤 |
+| M9-1 | 이름 변경 사양 (Proof) | [x] | `996b80b` | https://github.com/ckdfuf2001/ProcForge/actions/runs/41699625201 | [사양](M9-1-spec.md). 구현 착수 조건: M8-1 `[x]`. 구현 커밋 4개는 M8-1 닫힌 뒤 |
 
 > M8은 dogfood(`docs/M7-dogfood.md`) 결과를 반영해 정의했다. 완료 기준은 각 항목 비고에 따른다.
 
