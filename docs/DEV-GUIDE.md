@@ -594,6 +594,7 @@ c·d·j는 하네스 과제로 DECISIONS에 기록만.
 | M8-5 | 설치/전역 명령 | [ ] | | | 설치·전역 실행 명령 정리 |
 | M8-6 | core-server 분리·고객 PC | [ ] | | | 원격 core와 고객 PC 설치·연결 테스트 |
 | M8-7 | job object·dependsOn 누락 경고 | [ ] | | | job 객체 도입, 사후 `dependsOn` 누락 경고 |
+| M9-1 | 이름 변경 사양 (Proof) | [ ] | | | [사양](M9-1-spec.md). 구현 착수 조건: M8-1 `[x]`. 구현 커밋 4개는 M8-1 닫힌 뒤 |
 
 > M8은 dogfood(`docs/M7-dogfood.md`) 결과를 반영해 정의했다. 완료 기준은 각 항목 비고에 따른다.
 
@@ -751,3 +752,4 @@ c·d·j는 하네스 과제로 DECISIONS에 기록만.
 | 2026-10-17 | 8 | M7 3번 보정 a~d (산출물 attemptId/index 라우트·realpath 검증·읽기 무쓰기·digest 캐시·최근 200 이력·UTF-8 파일명) + M7 4번 (previewEdit 읽기 전용 미리보기 + UI 쓰기 POST/JSON·expectedRevision 필수·409·actor "ui" + EditPanel) | 원격 TTL 만료가 원격에서 아예 동작 안하던 것 발견해 함께 수정(기준 없으면 createdAt, 연장은 쓰기만). loopback에서만 드러난 500(경로 파라미터 검증 모드별 불일치)도 400으로 통일. CodeMirror 6은 5번 화면 때 도입. `6c40682` run 38996797824 loopback 실패 → `f447283` run 38997874775 success(3 client 모드 372/372) |
 | 2026-10-19 | 8 | M7 5~6 마감: 5-3 CodeMirror 6(`5eaef3d`·`7ce12a7`) · 5-4 실행 결과 서버 계약+UI(`4163792`·`68dd42c`) · 5-6 Playwright E2E(`b25c688`) — 세션 SSE `event: change` 폴백(구독 payload 유실 수정)·초안 보존+dirty/baseRevision 409 흐름·ubuntu 전용 e2e 잡 | 1~6 [x]. L3 green, run 39264793696(5-4)·39271527969(5-6, e2e 포함 7잡) success. 남음: REVIEW-M7.md·사람 실사용 dogfood |
 | 2026-10-19 | 8 | M7 마감 전 보정 close-a~e: (a) 실행 E2E (e)+실행 승인/취소·SSE 결함 수정(`uiRunApprove`·SSE 종료 조건·`markCancelled`/`runStatus`), (b) 인코딩 위생+`.editorconfig`, (c) 초안 보존("초안 복사"), (d) `docs/M7-dogfood.md` 양식, (e) §8 M7 표기·M8 정의 유예 | E2E가 실사용 결함 3건을 잡음(실행 승인 409·suspended에서 스트림 종료·취소 후 cancelling 고착). L3 green, run 39295325570(head `0604023`, e2e 포함 7잡) success. 남음: 사람 dogfood(M5.8(a) 통합) |
+| 2026-11-03 | 6, 8 | [M9-1] 이름 변경 사양 (`docs/M9-1-spec.md`). 세 차례 보고 + 보완 4·5·4건 정리 | docs만. 구현 착수 조건: M8-1 `[x]`. 구현 커밋 4개는 M8-1 닫힌 뒤 |
