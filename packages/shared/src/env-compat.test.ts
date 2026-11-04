@@ -3,6 +3,8 @@ import {
   readEnvPair,
   resetEnvCompatWarnings,
   warnOnceEnv,
+  stripProofEnvVars,
+  bothNames,
 } from "./env-compat.js";
 
 // M9-1-1-a: PROOF_* 우선 + PROCFORGE_* 대체 (경고 1회).
@@ -120,5 +122,32 @@ describe("warnOnceEnv", () => {
     resetEnvCompatWarnings();
     warnOnceEnv("k", "m3", c.warn);
     expect(c.msgs).toEqual(["m1", "m3"]);
+  });
+});
+
+describe("stripProofEnvVars/bothNames", () => {
+  it("두 접두어를 모두 지우고 확정값은 두 이름으로", () => {
+    const env = stripProofEnvVars({
+      PATH: "/bin",
+      PROOF_DIR: "/evil",
+      PROCFORGE_DIR: "/old",
+      PROOF_READ_ONLY: "1",
+      OTHER: "x",
+    });
+    expect(env).toEqual({ PATH: "/bin", OTHER: "x" });
+    expect(bothNames("DIR", "/pf")).toEqual({
+      PROOF_DIR: "/pf",
+      PROCFORGE_DIR: "/pf",
+    });
+    const merged = { ...env, ...bothNames("DIR", "/pf") };
+    expect(merged.PROOF_DIR).toBe("/pf");
+    expect(merged.PROCFORGE_DIR).toBe("/pf");
+    // 주입된 두 이름은 경고 없이 PROOF 값을 쓴다
+    resetEnvCompatWarnings();
+    const c = collector();
+    expect(
+      readEnvPair(merged, "PROOF_DIR", "PROCFORGE_DIR", { warn: c.warn }),
+    ).toBe("/pf");
+    expect(c.msgs).toEqual([]);
   });
 });

@@ -7,6 +7,7 @@ import { randomUUID } from "node:crypto";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { FileStore } from "./filestore.js";
 import * as fsutil from "./fsutil.js";
+import { stripProofEnvVars, bothNames } from "./env-compat.js";
 import type { Node, Session } from "@procforge/shared/schema.js";
 import type { EventEntry } from "@procforge/shared/dto.js";
 
@@ -395,11 +396,16 @@ describe("M4.2-3-0 pending 정리 (낡은 revision)", () => {
       expect((e as Error).message).toMatch(/repair 필요/);
     }
     // CLI repair로만 해제 (local cli, M6-2 이동 후 경로)
-    const cli = resolve(__dirname, "..", "..", "local", "dist", "cli.js");
-    const r = spawnSync(process.execPath, [cli, "repair", sid, "--discard", "5"], {
-      env: { ...process.env, PROCFORGE_DIR: dir, PROCFORGE_PROJECT_ROOT: dir },
-      encoding: "utf8",
-    });
+      const cli = resolve(__dirname, "..", "..", "local", "dist", "cli.js");
+      // M9-1-1: 상속 env에서 두 접두어를 지운 뒤 확정값을 두 이름으로 주입.
+      const r = spawnSync(process.execPath, [cli, "repair", sid, "--discard", "5"], {
+        env: {
+          ...stripProofEnvVars(process.env),
+          ...bothNames("DIR", dir),
+          ...bothNames("PROJECT_ROOT", dir),
+        },
+        encoding: "utf8",
+      });
     expect(r.status).toBe(0);
     // 커밋 성공 + human 이벤트 기록
     store.commitChange(sid, { session: sess(5), nodes: [], events: [] });

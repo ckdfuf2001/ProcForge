@@ -54,7 +54,10 @@ function ensureRemoteServer(sessionTtlMs?: number): Promise<string> {
     // M6.1-3: 대기는 healthz 1회가 아니라 listen 전제. 할당 포트면 수신 가능.
     // createLocalStack 직접 사용자(MCP 등)도 같은 서버를 보게 환경 전파.
     // resolve 전에 설정해야 레이스가 없다.
+    // M9-1-1: 확정값을 두 이름으로 주입한다 (하네스 규칙).
+    process.env.PROOF_CORE_URL = base;
     process.env.PROCFORGE_CORE_URL = base;
+    process.env.PROOF_CORE_API_KEY = REMOTE_KEY;
     process.env.PROCFORGE_CORE_API_KEY = REMOTE_KEY;
     return base;
   })();

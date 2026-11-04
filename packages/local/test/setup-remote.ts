@@ -4,6 +4,9 @@ import { drainSentRequests } from "./client-mode.js";
 
 // M6.1-2: 워커 재사용 시 이전 파일 서버 env가 새 파일 CLI·createLocalStack을
 // 오염시키므로 파일 시작 시점에 초기화한다 (setupFiles는 파일별 실행).
+// M9-1-1: 두 접두어 모두 지운다.
+delete process.env.PROOF_CORE_URL;
+delete process.env.PROOF_CORE_API_KEY;
 delete process.env.PROCFORGE_CORE_URL;
 delete process.env.PROCFORGE_CORE_API_KEY;
 

@@ -27,6 +27,23 @@ export function resetEnvCompatWarnings(): void {
   warned.clear();
 }
 
+/** PROOF_/PROCFORGE_ 두 접두어를 모두 지운다 (자식 프로세스 env 준비용). */
+export function stripProofEnvVars(
+  env: Record<string, string | undefined>,
+): Record<string, string | undefined> {
+  const out: Record<string, string | undefined> = {};
+  for (const [k, v] of Object.entries(env)) {
+    if (k.startsWith("PROOF_") || k.startsWith("PROCFORGE_")) continue;
+    out[k] = v;
+  }
+  return out;
+}
+
+/** 확정값을 두 이름으로 주입한다 (자식 프로세스 env 준비용). */
+export function bothNames(suffix: string, value: string): Record<string, string> {
+  return { [`PROOF_${suffix}`]: value, [`PROCFORGE_${suffix}`]: value };
+}
+
 /** 같은 seen 집합을 쓰는 1회 경고 (DEV_AUTH 별도 경고 등 호출 측 경고용). */
 export function warnOnceEnv(key: string, msg: string, warn?: EnvWarn): void {
   if (warned.has(key)) return;
