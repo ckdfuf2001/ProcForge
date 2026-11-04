@@ -31,7 +31,8 @@ import { FileStore } from "../src/filestore.js";
 import { loadProcedureDoc } from "../src/runner/procedure-run.js";
 import { startRunHeartbeat } from "../src/runner/run.js";
 import { runTestSession as runSession } from "./client-mode.js";
-import { makeTmp, useTmpCleanup } from "@proof/shared/tmp.js";
+import { makeTmp } from "@proof/shared/tmp.js";
+import { useTmpCleanup } from "./tmp-hooks.js";
 
 // M9-tmp: tmp 정리는 등록 역순으로 가장 나중에 돈다.
 useTmpCleanup();

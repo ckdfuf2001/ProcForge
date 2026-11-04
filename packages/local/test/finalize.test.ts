@@ -18,7 +18,8 @@ import {
 import { runTestSession as runSession } from "./client-mode.js";
 import { FileStore } from "../src/filestore.js";
 import type { CoreClient } from "@proof/shared/core-client.js";
-import { makeTmp, useTmpCleanup } from "@proof/shared/tmp.js";
+import { makeTmp } from "@proof/shared/tmp.js";
+import { useTmpCleanup } from "./tmp-hooks.js";
 
 // M9-tmp: tmp 정리는 등록 역순으로 가장 나중에 돈다.
 useTmpCleanup();

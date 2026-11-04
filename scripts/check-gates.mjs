@@ -157,6 +157,37 @@ function check(name, hits, targets) {
   check("isApproved removed", hits, targets);
 }
 
+// 5. no vitest in product src (M9-tmp-fix: vitest는 devDependency라 제품
+// 코드에서 import하면 런타임에 깨진다. 테스트 파일은 제외).
+{
+  const re = /from\s+["']vitest["']/;
+  const roots = ["core", "core-server", "local", "shared", "ui"].map((p) =>
+    join(ROOT, "packages", p, "src"),
+  );
+  const hits = [];
+  let targets = 0;
+  for (const d of roots) {
+    let entries;
+    try {
+      entries = walk(d);
+    } catch {
+      continue;
+    }
+    for (const f of entries) {
+      if (!f.endsWith(".ts") && !f.endsWith(".tsx")) continue;
+      if (f.endsWith(".test.ts")) continue;
+      targets++;
+      read(f)
+        .split("\n")
+        .forEach((line, i) => {
+          if (re.test(line)) hits.push(`${f}:${i + 1}: ${line.trim().slice(0, 120)}`);
+        });
+    }
+  }
+  violations.push(...hits.map((h) => "vitest-import: " + h));
+  check("no vitest in product src", hits, targets);
+}
+
 if (violations.length > 0) {
   console.error(`check-gates: FAIL (${violations.length}건)`);
   process.exit(1);

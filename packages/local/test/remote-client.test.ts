@@ -4,7 +4,8 @@ import { startServer, parseApiKeys } from "../../core-server/dist/server.js";
 import { createRemoteCoreClient } from "../src/remote-client.js";
 import { ProcForgeApp } from "../src/app/app.js";
 import { testStack } from "./client-mode.js";
-import { makeTmp, useTmpCleanup } from "@proof/shared/tmp.js";
+import { makeTmp } from "@proof/shared/tmp.js";
+import { useTmpCleanup } from "./tmp-hooks.js";
 
 // M9-tmp: tmp 정리는 등록 역순으로 가장 나중에 돈다 (서버 close 다음).
 useTmpCleanup();

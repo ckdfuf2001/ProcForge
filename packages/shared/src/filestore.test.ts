@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, vi, afterAll } from "vitest";
 import { writeFileSync, existsSync, readFileSync, mkdirSync, readdirSync } from "node:fs";
 import { join, dirname, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -9,7 +9,14 @@ import * as fsutil from "./fsutil.js";
 import { stripProofEnvVars, bothNames, harnessedSpawnEnv } from "./env-compat.js";
 import type { Node, Session } from "@proof/shared/schema.js";
 import type { EventEntry } from "@proof/shared/dto.js";
-import { makeTmp, useTmpCleanup } from "./tmp.js";
+import { makeTmp, cleanRegisteredTmp } from "./tmp.js";
+
+// M9-tmp-fix: useTmpCleanup 3줄 (vitest는 테스트 파일에서만 import).
+function useTmpCleanup(): void {
+  afterAll(() => {
+    cleanRegisteredTmp();
+  });
+}
 
 // M9-tmp: tmp 정리는 등록 역순으로 가장 나중에 돈다.
 useTmpCleanup();

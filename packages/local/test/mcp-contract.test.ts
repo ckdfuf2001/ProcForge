@@ -7,7 +7,8 @@ import { ProcForgeApp } from "../src/app/app.js";
 import { OUTPUT_SCHEMAS } from "../src/views.js";
 import { parseErrorText, ERROR_CODE_LIST } from "@proof/shared/errors.js";
 import { testStack } from "./client-mode.js";
-import { makeTmp, useTmpCleanup } from "@proof/shared/tmp.js";
+import { makeTmp } from "@proof/shared/tmp.js";
+import { useTmpCleanup } from "./tmp-hooks.js";
 
 // M9-tmp: tmp 정리는 등록 역순으로 가장 나중에 돈다.
 useTmpCleanup();

@@ -6,7 +6,8 @@ import { runScript, describeRunError, outsideChanges } from "./script-run.js";
 import { diffSnapshot, snapshotProject } from "./script-run.js";
 import { ArgSpecSchema } from "@proof/shared/schema.js";
 import { resolveArgs } from "./resolve.js";
-import { makeTmp, useTmpCleanup } from "@proof/shared/tmp.js";
+import { makeTmp } from "@proof/shared/tmp.js";
+import { useTmpCleanup } from "../../test/tmp-hooks.js";
 
 // M9-tmp: tmp 정리는 등록 역순으로 가장 나중에 돈다.
 useTmpCleanup();

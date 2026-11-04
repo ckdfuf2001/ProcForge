@@ -1,6 +1,13 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterAll } from "vitest";
 import { existsSync, rmSync } from "node:fs";
-import { makeTmp, cleanRegisteredTmp, useTmpCleanup } from "./tmp.js";
+import { makeTmp, cleanRegisteredTmp } from "./tmp.js";
+
+// M9-tmp-fix: useTmpCleanup 3줄 (vitest는 테스트 파일에서만 import).
+function useTmpCleanup(): void {
+  afterAll(() => {
+    cleanRegisteredTmp();
+  });
+}
 
 // M9-tmp: 헬퍼 단위 테스트 (생성→정리 후 없음, KEEP이면 남음).
 

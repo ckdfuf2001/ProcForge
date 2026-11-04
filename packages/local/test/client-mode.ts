@@ -12,7 +12,8 @@ import type { ProcedureDoc } from "@proof/shared/procedure.js";
 import { importProcedure, copyImportFiles } from "../src/procedure.js";
 import { runSession } from "../src/runner/run.js";
 import type { RunOptions, RunReport } from "../src/runner/types.js";
-import { makeTmp, useTmpCleanup } from "@proof/shared/tmp.js";
+import { makeTmp } from "@proof/shared/tmp.js";
+import { useTmpCleanup } from "./tmp-hooks.js";
 
 // M9-tmp: 이 모듈을 import하는 테스트 파일의 수집 시점에 등록된다.
 // 파일의 다른 afterAll보다 먼저 등록되므로 tmp 정리가 가장 나중에 돈다.
