@@ -8,15 +8,21 @@ import { cliErrorExit, parseRetryOptions, resolveAllowUnverified, runErrorExit, 
 // (check-deps: app/ 외 local 내부·node:fs import 금지).
 
 // M9-1-2: 모르는 옵션은 스택 없이 한 줄 오류로 받는다 (main에서 stderr + exit 2).
+// M9-gates: 인수 파싱은 main(argv) 안에서 한다. 모듈 import는 부수효과가 없고,
+// main()은 같은 프로세스에서 다시 부를 수 있다 (호출마다 다시 파싱한다).
 let values: CliValues;
 let positionals: string[];
 let parseError: string | undefined;
-try {
-  ({ values, positionals } = parseCliArgs(process.argv.slice(2)));
-} catch (e) {
-  parseError = e instanceof Error ? e.message : String(e);
-  values = {} as CliValues;
-  positionals = [];
+
+function parse(argv: string[]): void {
+  try {
+    ({ values, positionals } = parseCliArgs(argv));
+    parseError = undefined;
+  } catch (e) {
+    parseError = e instanceof Error ? e.message : String(e);
+    values = {} as CliValues;
+    positionals = [];
+  }
 }
 
 // M9-1-2: --help/--version. 화면 문구 변경은 M9-1-3에서 다룬다.
@@ -305,8 +311,9 @@ async function cmdUi(): Promise<number> {
   }
 }
 
-export async function main(): Promise<number> {
+export async function main(argv: string[] = process.argv.slice(2)): Promise<number> {
   // M9-1-2: 모르는 옵션은 스택 없이 한 줄 오류 + exit 2.
+  parse(argv);
   if (parseError !== undefined) {
     console.error(`error: ${parseError}`);
     return 2;
