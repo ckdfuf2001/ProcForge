@@ -96,17 +96,32 @@ async function runChild(
 describe.skipIf(WIN_ONLY)("M9-1-exit 종료 크래시", () => {
   it("remote 자식 CLI 10회 연속: 3221226505 0건", async () => {
     const pfdir = mkdtempSync(join(tmpdir(), "pf-m9exit-cli-"));
+    const failures: string[] = [];
     for (let i = 0; i < 10; i++) {
       const r = await runChild(
         [join(DIST, "cli.js"), "test", sid, "--mode", "replay"],
         childEnv(pfdir),
         30000,
       );
+      if (r.timedOut || ![0, 1].includes(r.status as number) || r.status === 3221226505) {
+        failures.push(
+          `run ${i}: status=${r.status} timedOut=${r.timedOut} stderr=${r.stderr.slice(0, 500)}`,
+        );
+      }
       expect(r.timedOut, `run ${i}: timeout. stderr=${r.stderr.slice(0, 300)}`).toBe(false);
       expect([0, 1], `run ${i}: status=${r.status} stderr=${r.stderr.slice(0, 300)}`).toContain(
         r.status,
       );
       expect(r.status).not.toBe(3221226505);
+    }
+    if (failures.length > 0) {
+      try {
+        writeFileSync(
+          join(tmpdir(), "m9exit-failures.log"),
+          `${new Date().toISOString()} 10x failures (${failures.length}):\n${failures.join("\n")}\n`,
+          { flag: "a" },
+        );
+      } catch { /* 로그 기록 실패는 무시 (단언이 실패를 보고함) */ }
     }
   }, 400000);
 });
