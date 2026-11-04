@@ -823,7 +823,7 @@ describe("M3 runner", () => {
     // 존재하는 세션 → replay 실행 (녹화 없어 1.1 fail + 하류 blocked, 세션 경로로 동작)
     const r2 = await spawnCli(cli, ["test", sid, "--mode", "replay"], env);
     expect(r2.status).toBe(1);
-    expect(r2.stdout).toMatch(/run .*fail=1/);
+    expect(r2.stdout, `stderr was: ${r2.stderr}`).toMatch(/run .*fail=1/);
   }, 60000);
 });
 
