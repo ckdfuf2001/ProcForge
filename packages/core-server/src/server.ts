@@ -8,6 +8,7 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import { join } from "node:path";
 import { CoreService } from "@procforge/core";
 import { FileStore } from "@procforge/shared/filestore.js";
+import { readEnvPair, warnOnceEnv } from "@procforge/shared/env-compat.js";
 import { baseEvaluate } from "@procforge/shared/check.js";
 import {
   WireMethods,
@@ -57,8 +58,20 @@ export function parseApiKeys(raw: string | undefined): TenantKeys {
 
 /**
  * Bearer 키 → 테넌트. 해시 비교는 timingSafeEqual.
- * default 테넌트(bare 키 포함)는 PROCFORGE_DEV_AUTH=1에서만 허용.
+ * default 테넌트(bare 키 포함)는 DEV_AUTH=1에서만 허용 (M9-1-1: PROOF 우선).
  */
+export function isDefaultTenantAllowed(env: NodeJS.ProcessEnv = process.env): boolean {
+  const v = readEnvPair(env as Record<string, string | undefined>, "PROOF_DEV_AUTH", "PROCFORGE_DEV_AUTH", {
+    secret: true,
+    onConflict: "fail",
+  });
+  // M9-1-1: 옛 이름으로 켜지면 이름 변경 경고와 별도로 "인증 우회 켜짐" 경고를 낸다.
+  if (env.PROCFORGE_DEV_AUTH === "1") {
+    warnOnceEnv("dev-auth-legacy", "인증 우회 켜짐: PROCFORGE_DEV_AUTH=1 (PROOF_DEV_AUTH 사용을 권장)");
+  }
+  return v === "1";
+}
+
 export function findTenant(
   keys: TenantKeys,
   presented: string,
@@ -67,8 +80,7 @@ export function findTenant(
   for (const e of keys) {
     if (e.hash.length !== h.length) continue;
     if (!timingSafeEqual(e.hash, h)) continue;
-    if (e.tid === "default" && process.env.PROCFORGE_DEV_AUTH !== "1")
-      return undefined;
+    if (e.tid === "default" && !isDefaultTenantAllowed()) return undefined;
     return e.tid;
   }
   return undefined;
