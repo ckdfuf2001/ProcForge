@@ -235,3 +235,35 @@ if (escapeViolations.length > 0) {
 } else {
   console.log("check-deps: OK (ui escaping)");
 }
+
+// M9-1-exit: 프로덕션 코드는 process.exit() 금지 (exitCode + 자연 종료).
+// Windows Node 24에서 fetch 후 process.exit() 호출 시 libuv 종료 assertion으로
+// 3221226505 크래시가 난다. 어댑터·서버·러너·스크립트 모두 해당. 테스트는 제외
+// (자식 프로세스 종료 코드 검증이 목적).
+const EXIT_BANNED_RES = [/process\.exit\s*\(/];
+const exitFiles = [
+  ...listFiles(join(dirname(fileURLToPath(import.meta.url)), "..", "packages", "local", "src")),
+  ...listFiles(join(dirname(fileURLToPath(import.meta.url)), "..", "packages", "core", "src")),
+  ...listFiles(join(dirname(fileURLToPath(import.meta.url)), "..", "packages", "core-server", "src")),
+  ...listFiles(join(dirname(fileURLToPath(import.meta.url)), "..", "packages", "shared", "src")),
+];
+const exitViolations = [];
+for (const f of exitFiles) {
+  if (f.endsWith(".test.ts")) continue;
+  const lines = readFileSync(f, "utf8").split("\n");
+  lines.forEach((line, i) => {
+    const stripped = line.trim();
+    if (stripped.startsWith("//") || stripped.startsWith("*")) return;
+    if (EXIT_BANNED_RES.some((re) => re.test(stripped))) {
+      exitViolations.push(`${f}:${i + 1}: ${stripped}`);
+    }
+  });
+}
+
+if (exitViolations.length > 0) {
+  console.error("DEP VIOLATION (M9-1-exit): no process.exit() in packages/*/src (use exitCode + natural exit).");
+  for (const v of exitViolations) console.error("  " + v);
+  process.exit(1);
+} else {
+  console.log("check-deps: OK (no process.exit)");
+}
