@@ -93,6 +93,8 @@ const ADAPTER_RES = [/[/\\]server\.ts$/, /[/\\]cli\.ts$/, /[/\\]ui[/\\]/];
 const ADAPTER_ALLOW_RES = [
   /from\s+["']\.\/app\/[^"']*["']/,
   /from\s+["']\.\.\/app\/[^"']*["']/,
+  // M9-1-2-fix: cli.ts(진입점)는 본체 cli-main.js만 import한다.
+  /from\s+["']\.\/cli-main\.js["']/,
   /from\s+["']@proof\/shared\/(schema|dto|errors)\.js["']/,
   /from\s+["']\.\/logger\.js["']/,
   /from\s+["']\.\.\/logger\.js["']/,

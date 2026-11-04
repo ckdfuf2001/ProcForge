@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
+import { readFileSync, mkdtempSync, symlinkSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { tmpdir } from "node:os";
 import { spawn } from "node:child_process";
 
 // M9-1-2: 새 bin `proof`(dist/cli.js) + 옛 bin 별칭 `procforge`(dist/cli-legacy.js).
@@ -12,6 +13,16 @@ const DIST = resolve(__dirname, "..", "dist");
 const CLI = join(DIST, "cli.js");
 const LEGACY = join(DIST, "cli-legacy.js");
 const WARNING = "warning: 'procforge' 명령은 옛 이름이다.";
+
+// 모듈 평가 시점에 링크를 만든다 (skipIf는 수집 시점에 값이 확정되어야 한다).
+let LINK: string | undefined;
+try {
+  const dir = mkdtempSync(join(tmpdir(), "pf-binlink-"));
+  LINK = join(dir, "proof");
+  symlinkSync(CLI, LINK);
+} catch {
+  LINK = undefined;
+}
 
 function runChild(file: string, args: string[], ms: number): Promise<{
   status: number | null;
@@ -85,6 +96,7 @@ describe("M9-1-2 bin 별칭", () => {
     expect(b.status).toBe(0);
     expect(a.stderr).toBe("");
     expect(b.stdout).toBe(a.stdout);
+    expect(b.stderr.trim().split("\n")).toHaveLength(1);
     expect(b.stderr).toContain(WARNING);
   }, 30000);
 
@@ -92,4 +104,14 @@ describe("M9-1-2 bin 별칭", () => {
     const mainJs = readFileSync(join(DIST, "main.js"), "utf8");
     expect(mainJs).not.toContain(WARNING);
   });
+
+  // M9-1-2-fix: Unix 전역 설치(npm -g/npx)는 bin 심볼릭 링크로 깔린다.
+  // 링크 경로로 실행해도 main이 동작해야 한다 (argv 경로 판단 방식의 결함 회귀 방지).
+  // Windows는 링크 생성 권한이 없으면 건너뛴다 (ubuntu CI에서 실행됨).
+  it.skipIf(!LINK)("심볼릭 링크 이름(proof)으로 --version 실행: exit 0, stdout 비어 있지 않음", async () => {
+    const r = await runChild(LINK as string, ["--version"], 15000);
+    expect(r.timedOut).toBe(false);
+    expect(r.status).toBe(0);
+    expect(r.stdout.trim()).not.toBe("");
+  }, 30000);
 });

@@ -12,6 +12,19 @@ import { ERROR_CODE_LIST } from "../src/errors.js";
 const PACKAGES = ["shared", "core", "local", "core-server"];
 const CODE_RE = /(?:pfError|err)\(\s*["']([^"']+)["']|code:\s*["']([^"']+)["']/;
 
+// M9-1-2-fix: 내부 마커 허용 목록 (파일명 → 코드 집합).
+// 가드를 우회하지 않고 여기에 파일·사유를 명시한다.
+// - UNKNOWN_OPTION (cli-args.ts): CLI 인자 파싱 실패 마커. cli-main.ts에서
+//   exit 2로만 쓰고 외부(wire·JSON)로 나가지 않으므로 ERROR_CODE_LIST에 등록하지 않는다.
+const ALLOWED_INTERNAL = new Map<string, Set<string>>([
+  ["cli-args.ts", new Set(["UNKNOWN_OPTION"])],
+]);
+
+function isAllowed(file: string, code: string): boolean {
+  const base = file.split(/[/\\]/).pop() ?? file;
+  return ALLOWED_INTERNAL.get(base)?.has(code) ?? false;
+}
+
 function* walk(dir: string): Generator<string> {
   for (const e of readdirSync(dir, { withFileTypes: true })) {
     const p = join(dir, e.name);
@@ -43,10 +56,11 @@ describe("error codes", () => {
           // 식별자 일부(throws/throwable) 제외
           if (/[A-Za-z0-9_$]/.test(src[t + 5] ?? "")) continue;
           throws++;
-          const m = CODE_RE.exec(src.slice(t, t + 400));
-          if (m && !(ERROR_CODE_LIST as readonly string[]).includes(m[1] ?? m[2])) {
-            bad.push(`${f}: ${m[1] ?? m[2]}`);
-          }
+        const m = CODE_RE.exec(src.slice(t, t + 400));
+        const code = m?.[1] ?? m?.[2];
+        if (code && !(ERROR_CODE_LIST as readonly string[]).includes(code) && !isAllowed(f, code)) {
+          bad.push(`${f}: ${code}`);
+        }
         }
       }
     }

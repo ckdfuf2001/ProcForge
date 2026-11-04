@@ -83,12 +83,10 @@ export function parseCliArgs(argv: string[]): {
     return { values: values as CliValues, positionals };
   } catch (e) {
     // M9-1-2: 모르는 옵션은 스택 없이 한 줄 오류로 바꾼다 (cli.ts에서 stderr + exit 2).
-    // code 마커는 대입으로 붙인다 (error-codes 테스트가 `code: "..."` 리터럴을
-    // wire 코드로 판정하므로 리터럴을 쓰지 않는다. 내부 마커일 뿐 wire 코드가 아님).
+    // "UNKNOWN_OPTION"은 내부 마커로, error-codes 테스트의 명시적 허용 목록에 둔다
+    // (wire 코드가 아니라 ERROR_CODE_LIST에 등록하지 않는다).
     const msg = e instanceof Error ? e.message.split("\n")[0] : String(e);
-    const err = new Error(msg);
-    (err as unknown as { code: string }).code = "UNKNOWN_OPTION";
-    throw err;
+    throw Object.assign(new Error(msg), { code: "UNKNOWN_OPTION" });
   }
 }
 
