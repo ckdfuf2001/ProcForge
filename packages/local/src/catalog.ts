@@ -198,8 +198,11 @@ async function listServerTools(
   let lastError: unknown;
   for (let attempt = 0; attempt < 2; attempt++) {
     const client = new Client({ name: "procforge-catalog", version: "0.0.0" });
+    // M9-1-exit: 타임아웃 타이머는 반드시 정리한다. 정리하지 않으면 성공 후에도
+    // timeoutMs(기본 15s)까지 이벤트 루프를 붙잡아 CLI 종료를 늦춘다.
+    let timer: ReturnType<typeof setTimeout> | undefined;
     const timeout = new Promise<never>((_, reject) => {
-      setTimeout(() => reject(new Error("timeout")), timeoutMs);
+      timer = setTimeout(() => reject(new Error("timeout")), timeoutMs);
     });
     // 연결은 connectMcpServer로 일원화하되 타임아웃 경쟁을 위해 transport 직접 구성
     const transport = new StdioClientTransport({
@@ -231,6 +234,7 @@ async function listServerTools(
     } catch (e) {
       lastError = e;
     } finally {
+      if (timer !== undefined) clearTimeout(timer);
       try {
         await client.close();
       } catch {

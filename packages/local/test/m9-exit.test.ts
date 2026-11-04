@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { spawn } from "node:child_process";
@@ -142,4 +142,32 @@ describe("M9-1 exit hang 방지 (명령별)", () => {
     expect([0, 1, 2]).toContain(r.status);
     expect(r.status).not.toBe(3221226505);
   }, 60000);
+});
+
+// M9-1-exit: 카탈로그 수집 타이머 정리 회귀 테스트.
+// listServerTools의 timeout 타이머를 clear하지 않으면, MCP 설정이 있는 CLI가
+// 성공 후에도 timeoutMs(기본 15s)까지 종료하지 않는다. 즉시 응답하는 가짜 MCP를
+// 두고 3초 안에 끝나야 한다.
+describe("M9-1-exit 카탈로그 타이머 정리", () => {
+  it("가짜 MCP 카탈로그 수집 후 CLI가 3초 안에 끝난다", async () => {
+    const pfdir = mkdtempSync(join(tmpdir(), "pf-m9exit-cat-"));
+    const root = mkdtempSync(join(tmpdir(), "pf-m9exit-catroot-"));
+    const serverMjs = resolve(__dirname, "fixtures", "fake-ppt-mcp", "server.mjs");
+    writeFileSync(
+      join(root, "opencode.json"),
+      JSON.stringify({ mcp: { "fake-cat": { type: "local", command: ["node", serverMjs] } } }),
+    );
+    const env = harnessedSpawnEnv({
+      ...bothNames("DIR", pfdir),
+      ...bothNames("PROJECT_ROOT", root),
+    });
+    const started = Date.now();
+    const r = await runChild(
+      [join(DIST, "cli.js"), "test", "123e4567-e89b-42d3-a456-426614174000", "--mode", "replay"],
+      env as NodeJS.ProcessEnv,
+      30000,
+    );
+    expect(r.timedOut).toBe(false);
+    expect(Date.now() - started).toBeLessThan(3000);
+  }, 30000);
 });
