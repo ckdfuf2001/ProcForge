@@ -48,8 +48,19 @@ async function main() {
   const jobs = await fetchJson(
     `https://api.github.com/repos/${REPO}/actions/runs/${runId}/jobs?per_page=30`,
   );
+  // M9-gates-fix: 잡 이름 중복이 있거나 고유 잡 수가 7이 아니면 exit 1.
+  // 하나를 놓치고 "7잡 success"처럼 보이는 것을 방지한다.
+  const names = (jobs.jobs ?? []).map((j) => j.name);
+  const uniq = new Set(names);
   for (const j of jobs.jobs ?? []) {
     console.log(`${j.name} ${j.conclusion}`);
+  }
+  if (uniq.size !== names.length) {
+    console.error(`error: 중복 잡 이름 있음 (${names.length}건 중 고유 ${uniq.size}건)`);
+    process.exitCode = 1;
+  } else if (uniq.size !== 7) {
+    console.error(`error: 고유 잡 수 ${uniq.size}건 (기대 7건)`);
+    process.exitCode = 1;
   }
 }
 

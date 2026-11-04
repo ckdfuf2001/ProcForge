@@ -158,3 +158,13 @@
 - 커밋 5 (`ci-jobs.mjs`): 보고 전용 (`<run-id> | --sha` 입력, 잡 이름 +
   conclusion 출력). L3 게이트가 아니다 (dev-verify는 네트워크에 의존하지 않는다).
 - 사용법 문구의 `procforge` 표기는 M9-1-3 화면 문구에서 다룬다 (바이트 동일 조건 유지).
+
+## 10. M9-gates-fix 기록 (2026-11-05)
+
+- `ci-jobs.mjs` 출력 이상은 보고서 옮겨 적기 오류 (스크립트 재실행 시 고유 7잡 정상).
+  잡 이름 중복 또는 고유 잡 수 != 7이면 exit 1 가드를 넣었다.
+- `check-gates.mjs`: 경로는 cwd가 아니라 스크립트 위치 기준, 검사마다 대상 파일 수 출력, 0개면 FAIL.
+- isApproved 원본 패턴 `"\<isApproved>(`은 BRE에서 `>`가 리터럴이라 `isApproved>(`만 찾아
+  항상 통과하는 무효 검사였음. 이번에 `isApproved(`로 바로잡았다 (위반 0건).
+- `procedureWriter.ts:356` "ProcForge 확정 절차"는 생성물(SKILL.md) 문구로 절차서 hash·승인 hash·golden 비교
+  어디에도 들어가지 않는다. M9-1-3에서 변경 가능.
