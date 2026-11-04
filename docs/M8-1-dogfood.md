@@ -190,3 +190,74 @@ Compare-Object (Import-Csv "$env:TEMP\node-before.csv") (Import-Csv "$env:TEMP\n
   (5) `pfAdvise` → `pfNext` → `pfReport` → `pfResolve`,
   `pairings.json` `source:"discovered"`·재확정 후 유지,
   `tool:pf_advise`이면서 `actor≠ui`인 줄 0건.
+
+## 6. 실측 2회차 (2026-11-04, PF `83b5f092-…`, OC `ses_e5adaa13…`, 대상 `1.1`)
+
+모델이 끝까지 간 재확정 흐름을 실서버에서 처음 봄(close2-(2) 해소). 판정은 통과.
+
+### 환경
+
+| 항목 | 값 |
+|---|---|
+| 빌드 | `pnpm -r build` green (repo `c227b78` + M9-1 docs 3건) |
+| OpenCode 서버 | 작업 폴더 `F:\pf-m8-work`의 opencode.json, `opencode serve --port 4096`, 버전 1.18.18 |
+| MCP 키 | `procforge` (도구명 `procforge_pf_start`…), `PROCFORGE_DIR=F:\pf-m8-dogfood` |
+| UI | `node dist/cli.js ui --port 52207`, env `PROCFORGE_DIR`·`URL=http://127.0.0.1:4096`·`MODE=b`·`TOOL_PREFIX=procforge` |
+| 모델 | `opencode-go/muse-spark-1.3-contributor`, agent `build` |
+| 비용 | $0.028 |
+
+### 편차 (D: 사용 불가로 F: 사용, 구 세션 소실로 처음부터)
+
+1. 저장소가 `F:\pf-m8-dogfood`다. D: 드라이브에 파일시스템이 없어(`Test-Path` False, 쓰기 시 "인식할 수 없는 파일 시스템") 폴더 생성 불가.
+2. 구 세션(`e167df9c`)이 D:와 함께 소실 → 새 세션에서 처음부터 분해.
+3. serve 기본 모델(big-pickle)이 15분 무응답 → PONG 검증 후 명시 모델로 전환. 기본 모델 무응답은 M8 후보에 올림.
+4. 의견문 영문 (UI `advise-and-signal` API로 등록, `expectedRevision: 20`).
+
+### 통과 기준 4개
+
+| # | 기준 | 결과 |
+|---|---|---|
+| 1 | 모델 도구 오류 -32602 0건 | ✅ OC 메시지 60개 전수 0건 |
+| 2 | 신호 이후 `pf_start` 0건 | ✅ (4-a) 0건, (4-b) 신규 세션 0개. 신호 이후 21건 전부 같은 sessionId·connectionId·actor |
+| 3 | 같은 PF 세션으로 `pf_next` 호출 | ✅ 첫 호출 1회 `ok=false` 후 `pf_tree`·`pf_get_node`로 자가 복구 (원인: 아래 별도) |
+| 4 | 대상 leaf needs_reverify→leaf, 他 hash 그대로 | ✅ 이벤트 `21 pfAdvise(ui)`→`22 pfNext`→`23 pfReport(fail)`→`24 pfResolve(retry)`→`25 pfReport(pass)`→`26 pfResolve(leaf)`. hash 변경=1.1+하류, 루트 `1` 불변. advise 응답 `changedNodeIds` 선언과 일치 |
+
+### before/after (status 포함)
+
+| id | before status | before hash | after status | after hash |
+|---|---|---|---|---|
+| 1.1 | leaf | 78572a7da6f2 | leaf | 28d58f940c63 |
+| 1.2.1 | leaf | e093174b1e5f | leaf | fdd0ad53828c |
+| 1.2.2 | leaf | b209e8248536 | leaf | 589bdbe5fbc6 |
+| 1.2 | split | 723d46771c4c | split | 060735b0263f |
+| 1.3 | leaf | 7e4b897e245a | leaf | ef8a48462d87 |
+| 1 | split | cf93912079df | split | cf93912079df (불변) |
+
+### 21번 이벤트 (`pfAdvise`, actor `ui`)
+
+- `1.1`: `needs_reverify`, `reverifySince: {revision: 21, causeNodeId: "1.1", cause: "advise"}`.
+- `1.2.1`·`1.2.2`·`1.3`: `open` + `staleSince: {revision: 21, causeNodeId: "1.1"}` (leaf→stale 전이 확인).
+- `1.2`(split)는 hash만 갱신, `1`은 불변.
+
+### 첫 `pf_next` 실패 원문 (신호 직후, M9-1-3 문구와 무관)
+
+`conflict: revision mismatch: expected 20, actual 21` + hint `pf_tree…`.
+의견 등록(`expectedRevision: 20` → rev 21)이 모델의 `pf_next(expectedRevision: 20)`와 경합한 것으로,
+R6 conflict가 설계대로 동작해 모델이 재조회 후 계속했다. 신호 문구(`procforge_pf_next…`)와 무관.
+
+### 신호·짝
+
+- `advise-and-signal` 응답: `delivered:true`, mode `b`,
+  copyText `…procforge_pf_next({sessionId:"83b5f092-…"})…` (접두어 정상 반영).
+- `signals.jsonl` 1건 `kind:"ok"`, `pairings.json` `source:"discovered"` (짝: OC 세션↔PF 세션).
+- UI 배지: 화면 미확인 (신호 배지는 촬영 시점에 이미 사라짐). 화면 확인은 M8 후보로 둔다.
+
+### 스크린샷
+
+- ![라운드](ui-shots/m8-1-close3-1-rounds.png) — 분해 라운드 rev2/rev9 + 전체 트리 (rev35).
+- ![노드 1.1](ui-shots/m8-1-close3-2-node11.png) — 의견·3회 attempt(fail→pass)·GOLDEN·이력 rev2→rev26 (의견→재검증→재확정 한 화면).
+
+### 그 외 메모 (판정 외)
+
+- 모델이 정직하게 1회 fail: `hc-mw1qmhah-0` 미충족 → 스크립트에 `request_date=today` 추가 후 pass (`rubricReasons` 기재).
+- `pf_test replay`: failed 1 / blocked 3 (live API 비결정성) — 재현성 문제로 M8 후보에 올림.

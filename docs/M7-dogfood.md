@@ -341,7 +341,11 @@ Get-Content ".procforge\sessions\$sid\calls.jsonl" |
      | pf_report | `MCP error -32602: Session id must be UUID v4 … Required at nodeId …` | 1 |
      | pf_next | `MCP error -32602: Session id must be UUID v4 at sessionId` | 1 |
 
-     합계 12건 (split 5 · report 6 · next 1). `bash | Tool execution aborted` 1건은 수동 중단이라 제외.
+      합계 12건 (split 5 · report 6 · next 1). `bash | Tool execution aborted` 1건은 수동 중단이라 제외.
+   10. UI 신호 배지 화면 미확인 (M8-1 실측 2026-11-04: `signals.jsonl kind:"ok"`는 API 증거로 채택,
+       화면 배지는 촬영 시점에 사라짐). 타임라인 화면(`m8-1-close3-*.png`)은 확보.
+   11. `pf_test replay` failed 1 / blocked 3 (M8-1 실측, live API 비결정성) — 재현성 문제.
+   12. serve 기본 모델 무응답 (M8-1 실측: big-pickle 15분 무응답으로 명시 모델 전환) — 기본 모델 health 확인 수단 필요.
 
       M8 사용성 후보:
       - pf_split 도구 설명에 `dependsOn` 형식 예시(자식 id는 **형제 id 문자열**, `$n`·`child:n` 금지)를 넣는다.
