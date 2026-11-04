@@ -101,7 +101,10 @@ const step = (n, msg) => console.log(`\n[dev-verify ${n}] ${msg}`);
 
 async function main() {
   const from = parseFrom(process.argv.slice(2));
+  // M9-1-1: env/하네스 변경 시 remote 모드 포함 (CI remote 잡과 동일 조건).
+  const withRemote = process.argv.slice(2).includes("--remote");
   if (from > 1) console.log(`[dev-verify] --from ${from}: 앞 단계 생략 (산출물 재사용)`);
+  if (withRemote) console.log("[dev-verify] --remote: remote 모드 전체 스위트 추가");
   step(1, "작업 트리 clean 확인");
   if (out("git", ["status", "--porcelain"]) !== "") {
     throw new Error("커밋되지 않은 변경이 있다 (git status --porcelain 비어 있어야 함)");
@@ -122,11 +125,14 @@ async function main() {
   }
 
   if (from <= 3) {
-    step(3, "전체 테스트 양 모드 (재시도 없음)");
+    step(3, withRemote ? "전체 테스트 3모드 (재시도 없음)" : "전체 테스트 양 모드 (재시도 없음)");
     const log = logPath("3-test");
     const testArgs = ["-r", "run", "test", "--", "--run", "--testTimeout=20000", "--hookTimeout=20000"];
     run("pnpm", testArgs, { env: {}, log });
     run("pnpm", testArgs, { env: { PROCFORGE_CLIENT: "loopback" }, log });
+    if (withRemote) {
+      run("pnpm", testArgs, { env: { PROCFORGE_CLIENT: "remote" }, log });
+    }
   } else {
     step(3, "생략 (--from)");
   }
