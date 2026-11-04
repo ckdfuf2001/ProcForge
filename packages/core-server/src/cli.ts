@@ -20,19 +20,23 @@ const keysRaw = arg("--api-keys") ?? readEnvPair(env, "PROOF_API_KEYS", "PROCFOR
 // DEV_AUTH는 server.ts 요청 시점에 읽지만, 불일치는 기동 시점에 먼저 거른다.
 void readEnvPair(env, "PROOF_DEV_AUTH", "PROCFORGE_DEV_AUTH", { secret: true, onConflict: "fail" });
 
+// M9-1-exit: process.exit() 금지, exitCode + 자연 종료.
+let code = 0;
 try {
   const apiKeys = parseApiKeys(keysRaw);
   if (apiKeys.length === 0) {
     console.error(
       'API 키 없음: --api-keys "tid:key,..." 또는 PROOF_API_KEYS (대체 PROCFORGE_API_KEYS) 필요',
     );
-    process.exit(2);
+    code = 2;
+  } else {
+    const { port: bound } = await startServer({ dataDir, apiKeys, port });
+    console.error(
+      `procforge core-server listening on 127.0.0.1:${bound} (data ${dataDir})`,
+    );
   }
-  const { port: bound } = await startServer({ dataDir, apiKeys, port });
-  console.error(
-    `procforge core-server listening on 127.0.0.1:${bound} (data ${dataDir})`,
-  );
 } catch (e) {
   console.error(e instanceof Error ? e.message : String(e));
-  process.exit(1);
+  code = 1;
 }
+process.exitCode = code;
