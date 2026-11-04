@@ -1,5 +1,6 @@
 import { parseArgs } from "node:util";
 import { resolve } from "node:path";
+import { readEnvPair } from "@procforge/shared/env-compat.js";
 import { resolveStoreDir } from "./store-dir.js";
 
 // CLI 인자 파싱 (M4.2-4-1). 어댑터는 node:util 직접 import 없이 이 모듈을 쓴다.
@@ -80,9 +81,11 @@ export function resolveDirs(
   env: NodeJS.ProcessEnv,
 ): { projectRoot: string; procforgeDir: string } {
   const projectRoot = resolve(
-    values["project-root"] ?? env.PROCFORGE_PROJECT_ROOT ?? process.cwd(),
+    // M9-1-1: PROOF_PROJECT_ROOT 우선, PROCFORGE_PROJECT_ROOT 대체.
+    values["project-root"] ?? readEnvPair(env as Record<string, string | undefined>, "PROOF_PROJECT_ROOT", "PROCFORGE_PROJECT_ROOT") ?? process.cwd(),
   );
   // M7-1-6: PROCFORGE_DIR 우선 (opencode.json MCP env로 저장소 고정).
+  // M9-1-1: PROOF_DIR 우선 (store-dir.ts에서 처리).
   const procforgeDir = resolveStoreDir({
     flag: values["procforge-dir"],
     env,

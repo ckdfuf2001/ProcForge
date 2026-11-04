@@ -1,14 +1,15 @@
 import { existsSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
+import { readEnvPair } from "@procforge/shared/env-compat.js";
 
 // M7-1-6: 저장소 위치 단일화. MCP 서버가 실행 위치(cwd) 기준으로
 // `.procforge/`를 찾아 TUI와 webui가 서로 다른 저장소에 쓰는 사고가 났다.
-// PROCFORGE_DIR(opencode.json MCP env)으로 저장소를 한 곳에 고정한다.
+// PROOF_DIR(대체 PROCFORGE_DIR, opencode.json MCP env)으로 저장소를 한 곳에 고정한다.
 
 /**
  * procforgeDir 결정. 우선순위:
- * 명시 플래그 > PROCFORGE_DIR(저장소 직접 지정) > <cwd>/.procforge (기본값 규칙 1개).
+ * 명시 플래그 > PROOF_DIR(대체 PROCFORGE_DIR, 저장소 직접 지정) > <cwd>/.procforge (기본값 규칙 1개).
  */
 export function resolveStoreDir(opts: {
   flag?: string;
@@ -18,7 +19,13 @@ export function resolveStoreDir(opts: {
   const env = opts.env ?? process.env;
   const cwd = opts.cwd ?? process.cwd();
   if (opts.flag) return resolve(opts.flag);
-  if (env.PROCFORGE_DIR) return resolve(env.PROCFORGE_DIR);
+  // M9-1-1: PROOF_DIR 우선, PROCFORGE_DIR 대체. 충돌 경고에는 실제 사용 경로를 적는다.
+  const raw = readEnvPair(env as Record<string, string | undefined>, "PROOF_DIR", "PROCFORGE_DIR", {
+    displayValue: env.PROOF_DIR !== undefined && env.PROCFORGE_DIR !== undefined && env.PROOF_DIR !== env.PROCFORGE_DIR
+      ? resolve(env.PROOF_DIR)
+      : undefined,
+  });
+  if (raw) return resolve(raw);
   return resolve(join(cwd, ".procforge"));
 }
 
@@ -52,6 +59,6 @@ export function detectDuplicateStores(
   if (!hasSessions(def)) return null;
   return (
     `저장소가 2곳에 있음: 사용 중=${resolved}, 기존=${def}. ` +
-    `PROCFORGE_DIR로 한 곳으로 고정하라. 기존 세션은 ${def}에 있다.`
+    `PROOF_DIR(또는 PROCFORGE_DIR)로 한 곳으로 고정하라. 기존 세션은 ${def}에 있다.`
   );
 }

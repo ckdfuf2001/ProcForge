@@ -4,6 +4,7 @@ import { join, resolve, basename } from "node:path";
 import type { CoreClient } from "@procforge/shared/core-client.js";
 import type { Actor } from "@procforge/shared/dto.js";
 import { pfError } from "@procforge/shared/errors.js";
+import { readEnvPair } from "@procforge/shared/env-compat.js";
 import { collectCatalog } from "../catalog.js";
 import { FileStore } from "../filestore.js";
 import { constraintSummary, nodeSummary, retriesLeft } from "../views.js";
@@ -358,8 +359,9 @@ export class ProcForgeApp {
     this.linkFetchImpl = deps.linkFetchImpl;
     this.onWaitingPersisted = deps.onWaitingPersisted;
     // M7-ui4-b: 신호 대상은 여기서 한 번만 정한다.
+    // M9-1-1: PROOF_OPENCODE_* 우선, PROCFORGE_OPENCODE_* 대체.
     const toolPrefix =
-      deps.signal?.toolPrefix ?? process.env.PROCFORGE_OPENCODE_TOOL_PREFIX;
+      deps.signal?.toolPrefix ?? readEnvPair(process.env as Record<string, string | undefined>, "PROOF_OPENCODE_TOOL_PREFIX", "PROCFORGE_OPENCODE_TOOL_PREFIX");
     // M8-1 c: 형식 검증 — 위반이면 무시 + 경고 (기동은 계속한다).
     const validPrefix =
       toolPrefix !== undefined && TOOL_PREFIX_RE.test(toolPrefix)
@@ -371,9 +373,9 @@ export class ProcForgeApp {
       });
     }
     this.signal = {
-      baseUrl: deps.signal?.baseUrl ?? process.env.PROCFORGE_OPENCODE_URL ?? "",
+      baseUrl: deps.signal?.baseUrl ?? readEnvPair(process.env as Record<string, string | undefined>, "PROOF_OPENCODE_URL", "PROCFORGE_OPENCODE_URL") ?? "",
       mode: (deps.signal?.mode ??
-        (process.env.PROCFORGE_OPENCODE_MODE as LinkMode | undefined) ??
+        (readEnvPair(process.env as Record<string, string | undefined>, "PROOF_OPENCODE_MODE", "PROCFORGE_OPENCODE_MODE") as LinkMode | undefined) ??
         "b") as LinkMode,
       toolPrefix: validPrefix,
       timeoutMs: deps.signal?.timeoutMs,
