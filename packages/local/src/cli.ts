@@ -301,4 +301,9 @@ async function main(): Promise<number> {
   return 2;
 }
 
-process.exit(await main());
+// M9-1-exit: process.exit() 대신 exitCode + 자연 종료.
+// Windows Node 24에서 fetch 후 process.exit() 호출 시 libuv 종료 assertion
+// (src/win/async.c)으로 3221226505 크래시가 난다. 직접 연 연결은 이미 닫힘
+// (카탈로그 MCP client.close, runner pool.close, heartbeat stop, 파일락 release).
+// remote 클라이언트는 전역 fetch만 쓰므로 닫을 커스텀 dispatcher가 없다.
+process.exitCode = await main();
