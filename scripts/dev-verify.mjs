@@ -152,11 +152,18 @@ async function main() {
   if (from <= 4) {
     step(4, "클린 클론 (NODE_ENV 미설정)");
     const log = logPath("4-clone");
-    const remote = out("git", ["config", "--get", "remote.origin.url"]);
+    // M9-tmp-fix: origin이 아니라 로컬 저장소에서 클론하고 작업 HEAD를 체크아웃한다.
+    // origin/master를 클론하면 푸시 전 코드를 테스트하는 구멍이 생긴다.
     const dir = mkdtempSync(join(tmpdir(), "pf-verify-"));
     await retry("git clone", () => {
-      execSync(`git clone ${remote} "${dir}"`, { cwd: tmpdir(), env: baseEnv(), stdio: "inherit" });
+      execSync(`git clone "${ROOT}" "${dir}"`, { cwd: tmpdir(), env: baseEnv(), stdio: "inherit" });
     });
+    execSync(`git -C "${dir}" checkout "${head}"`, { cwd: tmpdir(), env: baseEnv(), stdio: "inherit" });
+    const cloneHead = out("git", ["-C", dir, "rev-parse", "HEAD"]);
+    console.log(`[dev-verify] 클론 sha=${cloneHead} (작업 HEAD=${head})`);
+    if (cloneHead !== head) {
+      throw new Error(`클린 클론 sha 불일치: ${cloneHead} != ${head}`);
+    }
     const cenv = baseEnv();
     const crun = (bin, args) => {
       const r = spawnSync(bin, args, { cwd: dir, env: cenv, stdio: "pipe", shell: true });
