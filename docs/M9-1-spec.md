@@ -115,14 +115,14 @@
 - **바꿈**: `README.md`(제품명·`@proof`·`core-server` 누락), `SKILL.md`·`command.md` 템플릿
   (`monthly/SKILL.md:16-17` `procforge test/run`), `scheduling.md` env 표기,
   `M2-manual.md:12,28,44`, 이후 작성 절차서. `M8-1-dogfood.md:36-47` MCP 키 예시는 절차이므로 `proof`로 갱신 허용.
+- 이름 변경 관련 문서 편집 시 CJK 혼입 검사는 히라가나/가타카나+한자 범위 대상으로 하되,
+  결과 보고만 하고 실패 처리하지 않는다 (한국어 문서에 한자가 정상 포함될 수 있어 사람이 판단).
 
 ## 8. 커밋 4개와 예상 파괴
 
 순서: env → bin/패키지 → 화면 문구 → 문서. MCP 표면(도구·서버·프롬프트·format)은 M9에서 바꾸지 않는다(§1).
 
 1. `M9-1-1 env 호환` (§2+§3): 예상 파괴 0 (§2.3). 하네스 `bothNames()` + 셸 오염 테스트 포함.
-   이름 변경 관련 문서 편집 시 CJK 혼입 검사는 히라가나/가타카나+한자 범위 대상으로 하되,
-   결과 보고만 하고 실패 처리하지 않는다 (한국어 문서에 한자가 정상 포함될 수 있어 사람이 판단).
 2. `M9-1-2 bin·패키지`: scope `@proof/*` + bin 신명 추가·구명 유지 +
    `check-deps.mjs:40-96`(`@procforge/*` 문자열)·`ci.yml:96-133`(`@procforge/` filter 4곳) 동시 수정 + lockfile 재생성.
    예상 파괴: `check-deps` CI (허용목록 누락 시), workspace 해석 실패 시 전 스위트.

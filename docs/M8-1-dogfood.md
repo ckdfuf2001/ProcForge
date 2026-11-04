@@ -220,7 +220,7 @@ Compare-Object (Import-Csv "$env:TEMP\node-before.csv") (Import-Csv "$env:TEMP\n
 | 1 | 모델 도구 오류 -32602 0건 | ✅ OC 메시지 60개 전수 0건 |
 | 2 | 신호 이후 `pf_start` 0건 | ✅ (4-a) 0건, (4-b) 신규 세션 0개. 신호 이후 21건 전부 같은 sessionId·connectionId·actor |
 | 3 | 같은 PF 세션으로 `pf_next` 호출 | ✅ 첫 호출 1회 `ok=false` 후 `pf_tree`·`pf_get_node`로 자가 복구 (원인: 아래 별도) |
-| 4 | 대상 leaf needs_reverify→leaf, 他 hash 그대로 | ✅ 이벤트 `21 pfAdvise(ui)`→`22 pfNext`→`23 pfReport(fail)`→`24 pfResolve(retry)`→`25 pfReport(pass)`→`26 pfResolve(leaf)`. hash 변경=1.1+하류, 루트 `1` 불변. advise 응답 `changedNodeIds` 선언과 일치 |
+| 4 | 대상 leaf needs_reverify→leaf, 다른 노드 hash 그대로 | ✅ 이벤트 `21 pfAdvise(ui)`→`22 pfNext`→`23 pfReport(fail)`→`24 pfResolve(retry)`→`25 pfReport(pass)`→`26 pfResolve(leaf)`. hash 변경=1.1+하류, 루트 `1` 불변. advise 응답 `changedNodeIds` 선언과 일치 |
 
 ### before/after (status 포함)
 
@@ -238,6 +238,11 @@ Compare-Object (Import-Csv "$env:TEMP\node-before.csv") (Import-Csv "$env:TEMP\n
 - `1.1`: `needs_reverify`, `reverifySince: {revision: 21, causeNodeId: "1.1", cause: "advise"}`.
 - `1.2.1`·`1.2.2`·`1.3`: `open` + `staleSince: {revision: 21, causeNodeId: "1.1"}` (leaf→stale 전이 확인).
 - `1.2`(split)는 hash만 갱신, `1`은 불변.
+
+### 27~35번 이벤트 (하류 재확정, actor 전부 `host`)
+
+`27 pfNext(1.2.1)`→`28 pfReport`→`29 pfResolve(leaf)` → `30 pfNext(1.2.2)`→`31`→`32` →
+`33 pfNext(1.3)`→`34`→`35 pfResolve(leaf)`. after 표는 rev35 시점이다.
 
 ### 첫 `pf_next` 실패 원문 (신호 직후, M9-1-3 문구와 무관)
 
