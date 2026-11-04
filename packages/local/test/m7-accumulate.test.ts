@@ -22,7 +22,7 @@ import {
   writeBackAccumulate,
 } from "../src/services/accumulate.js";
 import { readRunLog } from "../src/services/run-log.js";
-import { computeNodeHash } from "@procforge/shared/schema.js";
+import { computeNodeHash } from "@proof/shared/schema.js";
 
 // M7-close-i: accumulate(B) — run 사이 누적 보존/실패 시 불변/충돌/테스트 모드.
 

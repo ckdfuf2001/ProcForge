@@ -6,8 +6,8 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, join } from "node:path";
-import type { Session } from "@procforge/shared/schema.js";
-import { EventEntrySchema, type EventEntry } from "@procforge/shared/dto.js";
+import type { Session } from "@proof/shared/schema.js";
+import { EventEntrySchema, type EventEntry } from "@proof/shared/dto.js";
 import { FileStore } from "./filestore.js";
 
 // pf_* 호출 기록 + 세션 추적 (M3.5 dogfood 측정 지원).

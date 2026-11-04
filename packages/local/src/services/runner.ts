@@ -1,6 +1,6 @@
 import { copyFileSync, existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
-import { pfError } from "@procforge/shared/errors.js";
+import { pfError } from "@proof/shared/errors.js";
 import { assertProjectPath } from "../artifacts.js";
 import { toJUnit, type RunReport } from "../runner/index.js";
 

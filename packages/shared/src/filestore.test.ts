@@ -8,8 +8,8 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { FileStore } from "./filestore.js";
 import * as fsutil from "./fsutil.js";
 import { stripProofEnvVars, bothNames, harnessedSpawnEnv } from "./env-compat.js";
-import type { Node, Session } from "@procforge/shared/schema.js";
-import type { EventEntry } from "@procforge/shared/dto.js";
+import type { Node, Session } from "@proof/shared/schema.js";
+import type { EventEntry } from "@proof/shared/dto.js";
 
 let dir: string;
 let store: FileStore;

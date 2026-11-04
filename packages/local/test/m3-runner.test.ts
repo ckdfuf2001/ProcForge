@@ -17,8 +17,8 @@ import { exportSession, listZip, readZipEntry } from "../src/export.js";
 import { toJUnit } from "../src/runner/index.js";
 import { runTestSession as runSession } from "./client-mode.js";
 import { FileStore } from "../src/filestore.js";
-import type { CoreClient } from "@procforge/shared/core-client.js";
-import { harnessedSpawnEnv, bothNames } from "@procforge/shared/env-compat.js";
+import type { CoreClient } from "@proof/shared/core-client.js";
+import { harnessedSpawnEnv, bothNames } from "@proof/shared/env-compat.js";
 
 let root: string;
 let pfdir: string;
@@ -1656,7 +1656,7 @@ describe("M3.4.1 runner", () => {
   }, 30000);
 
   it("빈 펼침 의존은 blocked (자식 id 부재) + isResolved 일치", async () => {
-    const { isResolved } = await import("@procforge/shared/deps.js");
+    const { isResolved } = await import("@proof/shared/deps.js");
     const started = await client.pfStart({
       request: "빈펼침",
       toolCatalog: (await collectCatalog(root)).entries,

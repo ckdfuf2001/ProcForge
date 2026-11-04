@@ -1,7 +1,7 @@
 import { FileStore } from "../filestore.js";
 import { loadPairings } from "./pairings.js";
 import { readEvents } from "../trace.js";
-import type { SessionSummary as CoreSummary } from "@procforge/shared/schema.js";
+import type { SessionSummary as CoreSummary } from "@proof/shared/schema.js";
 
 // M7-ui1: 로컬 부가정보 합성 (pairings·connectionIds·lastUsedAt).
 // 세션 원천은 core.getSessions (원격 모드에서 서버 저장소). App은 합성만.

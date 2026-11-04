@@ -1,2 +1,2 @@
 // M6-2: 구현은 shared로 이동. 기존 import 경로 유지용 re-export.
-export * from "@procforge/shared/fsutil.js";
+export * from "@proof/shared/fsutil.js";

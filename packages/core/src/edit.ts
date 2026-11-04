@@ -4,8 +4,8 @@ import {
   type Node,
   type ArgSpec,
   type ToolCatalogEntry,
-} from "@procforge/shared/schema.js";
-import { checkFixedAgainstInputSchema } from "@procforge/shared/validator.js";
+} from "@proof/shared/schema.js";
+import { checkFixedAgainstInputSchema } from "@proof/shared/validator.js";
 
 // M7-ui4-f: 편집 = **순수 함수**. 검증과 적용을 한 곳에 둔다.
 // previewEdit(읽기 미리보기)와 pfEditNode(실제 저장)이 같은 함수를 쓰므로

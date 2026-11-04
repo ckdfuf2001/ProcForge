@@ -6,7 +6,7 @@ import { spawn } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { CoreService, createMemoryStore } from "@procforge/core";
+import { CoreService, createMemoryStore } from "@proof/core";
 import { FileStore } from "../src/filestore.js";
 import { buildServer } from "../src/server.js";
 import { ProcForgeApp } from "../src/app/app.js";

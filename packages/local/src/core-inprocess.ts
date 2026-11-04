@@ -1,6 +1,6 @@
-import { CoreService } from "@procforge/core";
-import type { CoreClient } from "@procforge/shared/core-client.js";
-import { readEnvPair } from "@procforge/shared/env-compat.js";
+import { CoreService } from "@proof/core";
+import type { CoreClient } from "@proof/shared/core-client.js";
+import { readEnvPair } from "@proof/shared/env-compat.js";
 import { checkerEvaluate } from "./checker.js";
 import { FileStore } from "./filestore.js";
 import { createRemoteCoreClient } from "./remote-client.js";

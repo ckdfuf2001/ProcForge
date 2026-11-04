@@ -1,4 +1,4 @@
-import { pfError } from "@procforge/shared/errors.js";
+import { pfError } from "@proof/shared/errors.js";
 
 // M6.1-1 (R8): core행 요청 전송 감사. RemoteCoreClient가 송신 전 한 곳에서 검사한다.
 // - 구조 위반(차단): 어떤 메서드의 resultJson 실데이터도 원격 전송 금지

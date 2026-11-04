@@ -1,5 +1,5 @@
 {
-  "name": "@procforge/core-server",
+  "name": "@proof/core-server",
   "version": "0.0.0",
   "type": "module",
   "main": "./dist/index.js",
@@ -14,8 +14,8 @@
     "start": "node ./dist/cli.js"
   },
   "dependencies": {
-    "@procforge/core": "workspace:^",
-    "@procforge/shared": "workspace:*"
+    "@proof/core": "workspace:^",
+    "@proof/shared": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^26.6.4",

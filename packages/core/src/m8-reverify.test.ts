@@ -2,8 +2,8 @@ import { describe, it, expect, afterEach } from "vitest";
 import { assertAllTrackedReplays, trackReplay } from "../test/replay-invariant.js";
 import { CoreService } from "../src/service.js";
 import { createMemoryStore } from "../src/store.js";
-import type { Store } from "@procforge/shared/store.js";
-import type { Session } from "@procforge/shared/schema.js";
+import type { Store } from "@proof/shared/store.js";
+import type { Session } from "@proof/shared/schema.js";
 
 // M8-1-0: 확정 leaf의 자기 재검증 (needs_reverify).
 

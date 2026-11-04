@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { inflateRawSync } from "node:zlib";
-import type { ArgSpec, Node } from "@procforge/shared/schema.js";
+import type { ArgSpec, Node } from "@proof/shared/schema.js";
 import { findDateSample, recordedNumbers } from "./finalize-audit.js";
 
 // finalize 감사 확장 (M5.3-1): 절차서에 박히는 파일 내용 검사.

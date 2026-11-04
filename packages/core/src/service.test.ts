@@ -4,11 +4,11 @@ import {
   assertAllTrackedReplays,
   trackReplay,
 } from "../test/replay-invariant.js";
-import { compareNodeIds } from "@procforge/shared/ids.js";
+import { compareNodeIds } from "@proof/shared/ids.js";
 import { createMemoryStore } from "../src/store.js";
-import type { Store } from "@procforge/shared/store.js";
-import type { EventEntry } from "@procforge/shared/dto.js";
-import type { Node, Session } from "@procforge/shared/schema.js";
+import type { Store } from "@proof/shared/store.js";
+import type { EventEntry } from "@proof/shared/dto.js";
+import type { Node, Session } from "@proof/shared/schema.js";
 
 const catalog: Session["toolCatalog"] = [
   { server: "fs", name: "read", inputSchema: {}, schemaHash: "h1" },

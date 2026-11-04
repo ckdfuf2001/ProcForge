@@ -1,5 +1,5 @@
 import { createLocalStack } from "../core-inprocess.js";
-import type { CoreClient } from "@procforge/shared/core-client.js";
+import type { CoreClient } from "@proof/shared/core-client.js";
 import { ProcForgeApp, DEFAULT_SESSION_TTL_MS } from "./app.js";
 
 // 진입점 조립 (M4.2-4-1). 어댑터(server/cli 진입)는 App 합성을 이 모듈로만 한다.

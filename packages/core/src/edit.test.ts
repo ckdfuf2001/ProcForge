@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import type { Node, Constraint } from "@procforge/shared/schema.js";
+import type { Node, Constraint } from "@proof/shared/schema.js";
 import { applyEdit, GOAL_MAX_LEN } from "./edit.js";
 
 // M7-ui4-f: applyEdit는 **순수 함수**다.

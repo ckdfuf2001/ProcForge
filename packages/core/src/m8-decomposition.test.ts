@@ -10,9 +10,9 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { CoreService } from "../src/service.js";
 import { createMemoryStore } from "../src/store.js";
-import { FileStore } from "@procforge/shared/filestore.js";
-import type { Store } from "@procforge/shared/store.js";
-import type { Session } from "@procforge/shared/schema.js";
+import { FileStore } from "@proof/shared/filestore.js";
+import type { Store } from "@proof/shared/store.js";
+import type { Session } from "@proof/shared/schema.js";
 
 // M8-ui2: 분해 사유·이벤트 상세·읽기 API(history/tree) 계약.
 //

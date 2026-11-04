@@ -1,1 +1,1 @@
-export { compareNodeIds } from "@procforge/shared/ids.js";
+export { compareNodeIds } from "@proof/shared/ids.js";

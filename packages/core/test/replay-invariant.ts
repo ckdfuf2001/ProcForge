@@ -1,5 +1,5 @@
 import type { CoreService } from "../src/service.js";
-import type { HistoryNode } from "@procforge/shared/dto.js";
+import type { HistoryNode } from "@proof/shared/dto.js";
 
 /**
  * M8-ui2-c: 재생 불변식.

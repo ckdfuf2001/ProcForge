@@ -3,7 +3,7 @@ import { mkdtempSync } from "node:fs";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { CoreService, createMemoryStore } from "@procforge/core";
+import { CoreService, createMemoryStore } from "@proof/core";
 import { FileStore } from "../src/filestore.js";
 import { testStack } from "./client-mode.js";
 import { ProcForgeApp } from "../src/app/app.js";

@@ -5,7 +5,7 @@ import {
   NodeIdSchema,
   SessionIdSchema,
   ConstraintSchema,
-} from "@procforge/shared/schema.js";
+} from "@proof/shared/schema.js";
 import {
   AdviseInputSchema,
   ApproveInputSchema,
@@ -28,8 +28,8 @@ import {
   StartInputSchema,
   TestInputSchema,
   TreeInputSchema,
-} from "@procforge/shared/dto.js";
-import { errorCodeOf } from "@procforge/shared/errors.js";
+} from "@proof/shared/dto.js";
+import { errorCodeOf } from "@proof/shared/errors.js";
 import { logger } from "./logger.js";
 import { detectDuplicateStores, newConnectionId } from "./app/store-dir.js";
 import { OUTPUT_SCHEMAS } from "./app/surface.js";

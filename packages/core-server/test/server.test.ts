@@ -6,7 +6,7 @@ import { startServer, parseApiKeys } from "../src/server.js";
 import {
   PROTOCOL_VERSION_HEADER,
   PROTOCOL_VERSION,
-} from "@procforge/shared/wire.js";
+} from "@proof/shared/wire.js";
 
 // M6-2: 인증·테넌트 격리·버전·E2E 흐름.
 

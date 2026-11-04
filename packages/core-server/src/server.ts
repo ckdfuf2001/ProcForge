@@ -6,10 +6,10 @@ import {
 } from "node:http";
 import { createHash, timingSafeEqual } from "node:crypto";
 import { join } from "node:path";
-import { CoreService } from "@procforge/core";
-import { FileStore } from "@procforge/shared/filestore.js";
-import { readEnvPair, warnOnceEnv } from "@procforge/shared/env-compat.js";
-import { baseEvaluate } from "@procforge/shared/check.js";
+import { CoreService } from "@proof/core";
+import { FileStore } from "@proof/shared/filestore.js";
+import { readEnvPair, warnOnceEnv } from "@proof/shared/env-compat.js";
+import { baseEvaluate } from "@proof/shared/check.js";
 import {
   WireMethods,
   PROTOCOL_VERSION,
@@ -17,7 +17,7 @@ import {
   checkProtocolVersion,
   toWireError,
   type WireMethodName,
-} from "@procforge/shared/wire.js";
+} from "@proof/shared/wire.js";
 
 // M6-2: 원격 core HTTP 서버. CoreClient 1:1 엔드포인트 (shared/wire.ts 계약).
 // 테넌트별 FileStore (dataDir/tenants/<tid>), Bearer API 키, 버전 헤더 검사.

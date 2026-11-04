@@ -7,7 +7,7 @@ import {
   realpathSync,
 } from "node:fs";
 import { createHash } from "node:crypto";
-import { pfError } from "@procforge/shared/errors.js";
+import { pfError } from "@proof/shared/errors.js";
 import { join, resolve, sep } from "node:path";
 
 // M7-5-e/g: 승인한 스크립트 **스냅샷** + 안전한 읽기.

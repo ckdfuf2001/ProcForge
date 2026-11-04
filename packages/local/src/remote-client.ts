@@ -1,4 +1,4 @@
-import type { CoreClient } from "@procforge/shared/core-client.js";
+import type { CoreClient } from "@proof/shared/core-client.js";
 import {
   WireMethods,
   PROTOCOL_VERSION,
@@ -6,7 +6,7 @@ import {
   throwWireError,
   type WireMethodName,
   type WireError,
-} from "@procforge/shared/wire.js";
+} from "@proof/shared/wire.js";
 import { guardEgress } from "./services/egress.js";
 import { convertReportForRemote } from "./report-convert.js";
 
@@ -72,7 +72,7 @@ export function createRemoteCoreClient(opts: RemoteCoreClientOpts): CoreClient {
           sessionId: sid,
           nodeId: nid,
         })) as {
-          constraints?: import("@procforge/shared/schema.js").Constraint[];
+          constraints?: import("@proof/shared/schema.js").Constraint[];
         };
         return got;
       });

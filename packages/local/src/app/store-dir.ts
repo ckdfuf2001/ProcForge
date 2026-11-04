@@ -1,7 +1,7 @@
 import { existsSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
-import { readEnvPair } from "@procforge/shared/env-compat.js";
+import { readEnvPair } from "@proof/shared/env-compat.js";
 
 // M7-1-6: 저장소 위치 단일화. MCP 서버가 실행 위치(cwd) 기준으로
 // `.procforge/`를 찾아 TUI와 webui가 서로 다른 저장소에 쓰는 사고가 났다.

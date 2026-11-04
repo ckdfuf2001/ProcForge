@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import type { ArgSpec, Attempt } from "@procforge/shared/schema.js";
+import type { ArgSpec, Attempt } from "@proof/shared/schema.js";
 
 // 인자 해석 (M3): fixed 그대로, var는 params+이전 출력, generated는 replay 기록값/live 에러.
 // M5: supplied 값이 있으면 우선 사용.

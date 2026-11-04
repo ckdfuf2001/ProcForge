@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { ProcedureDocSchema, type ProcedureDoc } from "@procforge/shared/procedure.js";
+import { ProcedureDocSchema, type ProcedureDoc } from "@proof/shared/procedure.js";
 import { importProcedure } from "../procedure.js";
 import { runSession } from "./run.js";
 import { resolveDateParams } from "../services/date-params.js";

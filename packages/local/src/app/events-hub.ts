@@ -1,4 +1,4 @@
-import { EventEntrySchema } from "@procforge/shared/dto.js";
+import { EventEntrySchema } from "@proof/shared/dto.js";
 import { z } from "zod";
 
 // M7-ui2: UI 서버 SSE (App.getEventsPage 폴러 1개를 구독자들에 나눠 준다).

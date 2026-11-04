@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { buildServer, TOOL_NAMES } from "../src/server.js";
-import { parseErrorText } from "@procforge/shared/errors.js";
+import { parseErrorText } from "@proof/shared/errors.js";
 import { ProcForgeApp } from "../src/app/app.js";
 import { testStack } from "./client-mode.js";
 

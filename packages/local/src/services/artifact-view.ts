@@ -7,7 +7,7 @@ import {
   statSync,
 } from "node:fs";
 import { basename, extname, resolve, sep } from "node:path";
-import { pfError } from "@procforge/shared/errors.js";
+import { pfError } from "@proof/shared/errors.js";
 
 // M7-ui3: 산출물 원문 미리보기·전문 보기 (로컬 전용).
 // R8: 원문은 요청 시 로컬에서만 읽는다 (원격 core 모드에서도 전송 0).

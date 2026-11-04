@@ -13,7 +13,7 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { buildServer } from "../src/server.js";
 import { ProcForgeApp } from "../src/app/app.js";
 import { testStack, metaStore, serverSessionDir } from "./client-mode.js";
-import { validateTree } from "@procforge/shared/validator.js";
+import { validateTree } from "@proof/shared/validator.js";
 import { FileStore } from "../src/filestore.js";
 
 let root: string;

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, renameSync } from "node:fs";
 import { join } from "node:path";
-import { compareNormalized, maskParamsValues, restoreParamsPlaceholders, type NormalizedDiff } from "@procforge/shared/normalize.js";
+import { compareNormalized, maskParamsValues, restoreParamsPlaceholders, type NormalizedDiff } from "@proof/shared/normalize.js";
 import { relativizeRunPath } from "./workdir.js";
 import { replacePathForms } from "./pathnorm.js";
 import { logger } from "../logger.js";

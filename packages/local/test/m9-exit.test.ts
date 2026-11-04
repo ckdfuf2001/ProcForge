@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { spawn } from "node:child_process";
 import { startServer, parseApiKeys } from "../../core-server/dist/server.js";
 import { createRemoteCoreClient } from "../src/remote-client.js";
-import { harnessedSpawnEnv, bothNames } from "@procforge/shared/env-compat.js";
+import { harnessedSpawnEnv, bothNames } from "@proof/shared/env-compat.js";
 
 // M9-1-exit: Windows Node 24 종료 크래시 (libuv async.c assertion, 3221226505) 회귀 방지.
 // remote 자식 CLI가 fetch 후 종료하는 경로를 반복 실행한다.

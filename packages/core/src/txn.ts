@@ -1,7 +1,7 @@
-import type { Store } from "@procforge/shared/store.js";
-import type { CommitChange } from "@procforge/shared/store.js";
-import type { EventEntry } from "@procforge/shared/dto.js";
-import type { Node, Session } from "@procforge/shared/schema.js";
+import type { Store } from "@proof/shared/store.js";
+import type { CommitChange } from "@proof/shared/store.js";
+import type { EventEntry } from "@proof/shared/dto.js";
+import type { Node, Session } from "@proof/shared/schema.js";
 
 // R6 트랜잭션 오버레이 (M4.2-0.5). 메서드 호출 동안 쓰기를 버퍼링하고
 // commit 시에만 base에 반영한다. 순서는 appendEvents → 상태 저장.

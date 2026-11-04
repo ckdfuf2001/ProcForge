@@ -7,7 +7,7 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { buildServer, TOOL_NAMES, READ_ONLY_TOOLS, PROMPT_TEXT, HINTS } from "../src/server.js";
 import { ProcForgeApp } from "../src/app/app.js";
 import { OUTPUT_SCHEMAS } from "../src/views.js";
-import { parseErrorText, ERROR_CODE_LIST } from "@procforge/shared/errors.js";
+import { parseErrorText, ERROR_CODE_LIST } from "@proof/shared/errors.js";
 import { testStack } from "./client-mode.js";
 
 let root: string;

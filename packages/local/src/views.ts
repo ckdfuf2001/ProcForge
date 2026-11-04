@@ -4,7 +4,7 @@ import {
   type Constraint,
   type Node,
   type Session,
-} from "@procforge/shared/schema.js";
+} from "@proof/shared/schema.js";
 
 // 응답 크기 축소용 요약 뷰 (M2.5-5). full 노드는 pf_get_node에서만.
 

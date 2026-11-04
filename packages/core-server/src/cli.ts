@@ -1,5 +1,5 @@
 import { startServer, parseApiKeys } from "./server.js";
-import { readEnvPair } from "@procforge/shared/env-compat.js";
+import { readEnvPair } from "@proof/shared/env-compat.js";
 
 // procforge-core-server --port <n> --data-dir <dir> --api-keys "tid:key,..."
 // env: PROOF_CORE_PORT / PROOF_CORE_DATA_DIR / PROOF_API_KEYS (대체 PROCFORGE_*).

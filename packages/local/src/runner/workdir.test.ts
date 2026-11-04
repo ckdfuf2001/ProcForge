@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { seedBoundInputs } from "./workdir.js";
-import type { Node } from "@procforge/shared/schema.js";
+import type { Node } from "@proof/shared/schema.js";
 
 // M5.2-1: 입력 바인딩 시딩 단위 테스트.
 

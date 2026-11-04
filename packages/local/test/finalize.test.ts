@@ -11,7 +11,7 @@ import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { collectCatalog } from "../src/catalog.js";
 import { testStack, importProc, metaStore } from "./client-mode.js";
-import { ProcedureDocSchema } from "@procforge/shared/procedure.js";
+import { ProcedureDocSchema } from "@proof/shared/procedure.js";
 import { ProcForgeApp } from "../src/app/app.js";
 import {
   runProcedureTest,
@@ -19,7 +19,7 @@ import {
 } from "../src/runner/procedure-run.js";
 import { runTestSession as runSession } from "./client-mode.js";
 import { FileStore } from "../src/filestore.js";
-import type { CoreClient } from "@procforge/shared/core-client.js";
+import type { CoreClient } from "@proof/shared/core-client.js";
 
 let root: string;
 let pfdir: string;

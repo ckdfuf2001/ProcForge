@@ -1,9 +1,9 @@
-import type { Constraint } from "@procforge/shared/schema.js";
+import type { Constraint } from "@proof/shared/schema.js";
 import {
   autoConstraints,
   decideReportVerdict,
   resultJsonMetaOf,
-} from "@procforge/shared/report.js";
+} from "@proof/shared/report.js";
 import { checkerEvaluate } from "./checker.js";
 import { isMetaShape } from "./services/egress.js";
 

@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { CoreService } from "@procforge/core";
+import { CoreService } from "@proof/core";
 import { FileStore } from "../src/filestore.js";
 import { createLocalStack } from "../src/core-inprocess.js";
 import { clientMode } from "./client-mode.js";

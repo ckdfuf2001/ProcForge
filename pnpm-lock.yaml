@@ -17,7 +17,7 @@ importers:
 
   packages/core:
     dependencies:
-      '@procforge/shared':
+      '@proof/shared':
         specifier: workspace:*
         version: link:../shared
     devDependencies:
@@ -33,10 +33,10 @@ importers:
 
   packages/core-server:
     dependencies:
-      '@procforge/core':
+      '@proof/core':
         specifier: workspace:^
         version: link:../core
-      '@procforge/shared':
+      '@proof/shared':
         specifier: workspace:*
         version: link:../shared
     devDependencies:
@@ -55,10 +55,10 @@ importers:
       '@modelcontextprotocol/sdk':
         specifier: ^1.0.0
         version: 1.32.1(zod@3.25.76)
-      '@procforge/core':
+      '@proof/core':
         specifier: workspace:^
         version: link:../core
-      '@procforge/shared':
+      '@proof/shared':
         specifier: workspace:*
         version: link:../shared
       zod:

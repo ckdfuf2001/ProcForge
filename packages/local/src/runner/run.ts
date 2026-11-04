@@ -1,13 +1,13 @@
 import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
-import { compareNodeIds } from "@procforge/shared/ids.js";
+import { compareNodeIds } from "@proof/shared/ids.js";
 import {
   effectiveDeps,
   expandDepLeafs,
   rawDepSources,
-} from "@procforge/shared/deps.js";
-import type { Node } from "@procforge/shared/schema.js";
+} from "@proof/shared/deps.js";
+import type { Node } from "@proof/shared/schema.js";
 import { FileStore } from "../filestore.js";
 import { evaluateAll } from "../checker.js";
 import { logger } from "../logger.js";
@@ -56,7 +56,7 @@ import {
   writeBackAccumulate,
   type AccumulateState,
 } from "../services/accumulate.js";
-import type { AccumulateSpec } from "@procforge/shared/procedure.js";
+import type { AccumulateSpec } from "@proof/shared/procedure.js";
 import { runScript, describeRunError } from "./script-run.js";
 import {
   inferPathRole,
@@ -1543,11 +1543,11 @@ async function execMap(
   }
   const templateArgs = (template.args ?? {}) as Record<
     string,
-    import("@procforge/shared/schema.js").ArgSpec
+    import("@proof/shared/schema.js").ArgSpec
   >;
   const templateConstraints = (
     Array.isArray(template.constraints) ? template.constraints : []
-  ) as import("@procforge/shared/schema.js").Constraint[];
+  ) as import("@proof/shared/schema.js").Constraint[];
   // live generated 게이트: 템플릿 generated는 map 단위 supplied로 해결 (항목별 공급 미지원)
   if (mode === "live") {
     const supplied = opts.supplied?.[n.id] ?? {};
@@ -1600,7 +1600,7 @@ async function execMap(
       // generated는 map 단위 supplied로 고정 (항목별 공급 미지원)
       const fixedGen: Record<
         string,
-        import("@procforge/shared/schema.js").ArgSpec
+        import("@proof/shared/schema.js").ArgSpec
       > = {};
       for (const [k, s] of Object.entries(normed)) {
         if ((s as { kind?: string }).kind === "generated") {
@@ -1815,17 +1815,17 @@ async function execUntil(
   }
   const templateArgs = (template.args ?? {}) as Record<
     string,
-    import("@procforge/shared/schema.js").ArgSpec
+    import("@proof/shared/schema.js").ArgSpec
   >;
   const templateConstraints = (
     Array.isArray(template.constraints) ? template.constraints : []
-  ) as import("@procforge/shared/schema.js").Constraint[];
+  ) as import("@proof/shared/schema.js").Constraint[];
   const carryPath =
     typeof spec.carry === "string" && spec.carry.startsWith("$self.")
       ? spec.carry.slice("$self.".length)
       : null;
   const untilConstraint = spec.until as
-    import("@procforge/shared/schema.js").Constraint | undefined;
+    import("@proof/shared/schema.js").Constraint | undefined;
   const supplied: Record<string, unknown> = (opts.supplied?.[n.id] ??
     {}) as Record<string, unknown>;
   // live generated 게이트: 템플릿 generated는 until 단위 supplied로 해결
@@ -1874,7 +1874,7 @@ async function execUntil(
       }).specs;
       const fixedGen: Record<
         string,
-        import("@procforge/shared/schema.js").ArgSpec
+        import("@proof/shared/schema.js").ArgSpec
       > = {};
       for (const [k, s] of Object.entries(normed)) {
         if ((s as { kind?: string }).kind === "generated") {

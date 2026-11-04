@@ -10,7 +10,7 @@ import {
   type Node,
   type Session,
   type SessionSummary,
-} from "@procforge/shared/schema.js";
+} from "@proof/shared/schema.js";
 import type {
   BlockedEntry,
   BlockedReason,
@@ -38,13 +38,13 @@ import type {
   PfImportProcedureOutput,
   PfWriteGoldenInput,
   ChangeMeta,
-} from "@procforge/shared/core-client.js";
+} from "@proof/shared/core-client.js";
 import { createMemoryStore } from "./store.js";
-import type { Store } from "@procforge/shared/store.js";
+import type { Store } from "@proof/shared/store.js";
 import { TxStore } from "./txn.js";
 import { defaultEvaluate } from "./evaluate.js";
 import { adviceToConstraints, suggestsNumericRef } from "./advice.js";
-import { compareNodeIds } from "@procforge/shared/ids.js";
+import { compareNodeIds } from "@proof/shared/ids.js";
 
 /** M7-ui4: 목표 상한 (UI 입력도 core와 같은 상한으로 검증한다). */
 // M7-ui4-f: goal 상한은 순수 편집 함수가 정의한다 (preview=실제 편집 동일).
@@ -53,7 +53,7 @@ import {
   autoConstraints,
   decideReportVerdict,
   resultJsonMetaOf,
-} from "@procforge/shared/report.js";
+} from "@proof/shared/report.js";
 export { autoConstraints, resultJsonMetaOf };
 
 function newAttemptId(): string {
@@ -70,17 +70,17 @@ import {
   selfAndAncestors,
   similarKey,
   varRefNodeId,
-} from "@procforge/shared/args-schema.js";
-import { checkFixedAgainstInputSchema } from "@procforge/shared/validator.js";
+} from "@proof/shared/args-schema.js";
+import { checkFixedAgainstInputSchema } from "@proof/shared/validator.js";
 import { applyEdit, type EditChange } from "./edit.js";
 
 import {
   PROCEDURE_NAME_RE,
   buildImportSession,
   type ProcedureDoc,
-} from "@procforge/shared/procedure.js";
-import { validateTree } from "@procforge/shared/validator.js";
-import { combineHashes } from "@procforge/shared/hash.js";
+} from "@proof/shared/procedure.js";
+import { validateTree } from "@proof/shared/validator.js";
+import { combineHashes } from "@proof/shared/hash.js";
 import type {
   Actor,
   EventDetail,
@@ -88,12 +88,12 @@ import type {
   HistoryNode,
   DecompositionEvent,
   DecompositionHistoryEntry,
-} from "@procforge/shared/dto.js";
+} from "@proof/shared/dto.js";
 import {
   pfError,
   type ErrorCode,
   type ProcForgeError,
-} from "@procforge/shared/errors.js";
+} from "@proof/shared/errors.js";
 export { similarKey };
 
 /**
@@ -113,14 +113,14 @@ export function consumeRetry(
 /**
  * dependsOn 충족 조건 (M1.5-5, M3.3-6 shared 공용).
  */
-import { isResolved } from "@procforge/shared/deps.js";
+import { isResolved } from "@proof/shared/deps.js";
 export { isResolved };
 import {
   effectiveDeps,
   expandDepLeafs,
   hasCycle,
   hasLineageDep,
-} from "@procforge/shared/deps.js";
+} from "@proof/shared/deps.js";
 
 /**
  * 교착 판정 순수 함수 (M3.4.3-1, M3.4.4-2, 테스트용 export).

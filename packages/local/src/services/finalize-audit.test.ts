@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { auditFixedValues, recordedNumbers } from "./finalize-audit.js";
-import type { Node } from "@procforge/shared/schema.js";
+import type { Node } from "@proof/shared/schema.js";
 
 // M5.1-B1: 고정값 감사 단위 테스트.
 

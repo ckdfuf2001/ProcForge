@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { resolve } from "node:path";
-import { readEnvPair } from "@procforge/shared/env-compat.js";
+import { readEnvPair } from "@proof/shared/env-compat.js";
 import { createApp, DEFAULT_SESSION_TTL_MS } from "./app/bootstrap.js";
 import { runStdio } from "./server.js";
 import { resolveStoreDir } from "./app/store-dir.js";

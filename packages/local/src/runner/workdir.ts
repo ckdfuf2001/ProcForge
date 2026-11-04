@@ -1,6 +1,6 @@
 import { copyFileSync, existsSync, mkdirSync, readdirSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
-import type { Node } from "@procforge/shared/schema.js";
+import type { Node } from "@proof/shared/schema.js";
 import { FileStore } from "../filestore.js";
 import { isEscapeRel, readManifest } from "../artifacts.js";
 import { resolveVar } from "./resolve.js";

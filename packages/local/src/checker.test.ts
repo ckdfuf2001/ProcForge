@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { deflateRawSync } from "node:zlib";
 import { evaluateConstraint, evaluateAll } from "../src/checker.js";
-import type { Constraint } from "@procforge/shared/schema.js";
+import type { Constraint } from "@proof/shared/schema.js";
 
 describe("checker kinds", () => {
   it("file_exists pass/fail", () => {

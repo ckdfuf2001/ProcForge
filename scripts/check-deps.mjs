@@ -3,8 +3,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 // CI: local 패키지가 core 서버 전용 로직을 직접 import하지 못하도록 검사.
-// 허용: @procforge/shared, 상대경로, 외부 라이브러리.
-// 금지: "@procforge/core", "packages/core" 문자열 포함 import.
+// 허용: @proof/shared, 상대경로, 외부 라이브러리.
+// 금지: "@proof/core", "packages/core" 문자열 포함 import.
 // 예외(M0-6 개정, M1.5): 합성 루트 packages/local/src/core-inprocess.ts 1파일만 허용.
 // M6에서 이 파일만 HTTP CoreClient로 교체한다.
 
@@ -37,10 +37,10 @@ for (const f of files) {
     const stripped = line.trim();
     if (stripped.startsWith("//")) return;
     if (
-      stripped.includes("@procforge/core") ||
+      stripped.includes("@proof/core") ||
       stripped.includes("packages/core") ||
       stripped.includes("packages/core-server") ||
-      stripped.includes("@procforge/core-server")
+      stripped.includes("@proof/core-server")
     ) {
       violations.push(`${f}:${i + 1}: ${stripped}`);
     }
@@ -49,7 +49,7 @@ for (const f of files) {
 
 if (violations.length > 0) {
   console.error("DEP VIOLATION: packages/local must not import core server logic directly.");
-  console.error("Use CoreClient interface (@procforge/shared/core-client) only.");
+  console.error("Use CoreClient interface (@proof/shared/core-client) only.");
   for (const v of violations) console.error("  " + v);
   process.exit(1);
 } else {
@@ -67,7 +67,7 @@ for (const f of csFiles) {
     const stripped = line.trim();
     if (stripped.startsWith("//")) return;
     if (
-      stripped.includes("@procforge/local") ||
+      stripped.includes("@proof/local") ||
       stripped.includes("packages/local") ||
       stripped.includes("../local/") ||
       stripped.includes("../../local/")
@@ -79,7 +79,7 @@ for (const f of csFiles) {
 
 if (csViolations.length > 0) {
   console.error("DEP VIOLATION (M6-5): packages/core-server must not import local.");
-  console.error("Use @procforge/shared and @procforge/core only.");
+  console.error("Use @proof/shared and @proof/core only.");
   for (const v of csViolations) console.error("  " + v);
   process.exit(1);
 } else {
@@ -93,7 +93,7 @@ const ADAPTER_RES = [/[/\\]server\.ts$/, /[/\\]cli\.ts$/, /[/\\]ui[/\\]/];
 const ADAPTER_ALLOW_RES = [
   /from\s+["']\.\/app\/[^"']*["']/,
   /from\s+["']\.\.\/app\/[^"']*["']/,
-  /from\s+["']@procforge\/shared\/(schema|dto|errors)\.js["']/,
+  /from\s+["']@proof\/shared\/(schema|dto|errors)\.js["']/,
   /from\s+["']\.\/logger\.js["']/,
   /from\s+["']\.\.\/logger\.js["']/,
   /from\s+["']@modelcontextprotocol\/[^"']*["']/,

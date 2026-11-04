@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync } from 
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { collectScripts, rewriteAutoFileExists } from "./procedureWriter.js";
-import type { ProcedureDoc } from "@procforge/shared/procedure.js";
+import type { ProcedureDoc } from "@proof/shared/procedure.js";
 
 // M5.2-2: collectScripts 단위 테스트.
 

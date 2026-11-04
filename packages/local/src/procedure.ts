@@ -4,11 +4,11 @@ import {
   ProcedureDocSchema,
   buildImportSession,
   type ProcedureDoc,
-} from "@procforge/shared/procedure.js";
+} from "@proof/shared/procedure.js";
 import { FileStore } from "./filestore.js";
 
 export { ProcedureDocSchema, type ProcedureDoc };
-export { PROCEDURE_NAME_RE } from "@procforge/shared/procedure.js";
+export { PROCEDURE_NAME_RE } from "@proof/shared/procedure.js";
 
 // 확정 트리 → 절차서 import (M4). procedure.json이 재실행 입력의 단일 원천.
 // 세션·노드 조립은 shared buildImportSession (core pfImportProcedure와 공유).

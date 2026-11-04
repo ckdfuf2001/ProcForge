@@ -1,9 +1,9 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
-import { pfError } from "@procforge/shared/errors.js";
-import { computeNodeHash, type ArgSpec, type Constraint } from "@procforge/shared/schema.js";
-import type { AccumulateSpec } from "@procforge/shared/procedure.js";
+import { pfError } from "@proof/shared/errors.js";
+import { computeNodeHash, type ArgSpec, type Constraint } from "@proof/shared/schema.js";
+import type { AccumulateSpec } from "@proof/shared/procedure.js";
 import { writeAtomicFile } from "../fsutil.js";
 import { logger } from "../logger.js";
 import { collectRefNodeIds } from "../runner/resolve.js";

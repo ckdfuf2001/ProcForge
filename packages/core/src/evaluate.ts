@@ -1,4 +1,4 @@
-import type { EvaluateFn } from "@procforge/shared/core-client.js";
+import type { EvaluateFn } from "@proof/shared/core-client.js";
 
 export type { EvaluateFn };
 

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { validateTree } from "../src/validator.js";
-import type { Node, Session } from "@procforge/shared/schema.js";
+import type { Node, Session } from "@proof/shared/schema.js";
 
 function baseSession(over: Partial<Session> = {}): Session {
   return {

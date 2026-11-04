@@ -4,8 +4,8 @@ import { basename, dirname, extname, isAbsolute, join, relative, resolve } from 
 import { isEscapeRel, appendManifestEntries, ingestArtifacts } from "../artifacts.js";
 import { inferPathRole, looksLikePath } from "../runner/paths.js";
 import { readCaptureRecord, readPreCopy, readSeedOriginal, toBaseRel, writeCaptureRecord } from "./snapshot.js";
-import type { ArgSpec, Node, PathRole, ToolCatalogEntry } from "@procforge/shared/schema.js";
-import { pfError } from "@procforge/shared/errors.js";
+import type { ArgSpec, Node, PathRole, ToolCatalogEntry } from "@proof/shared/schema.js";
+import { pfError } from "@proof/shared/errors.js";
 
 // 산출물 수집·ingest orchestration (M3.6-2/3 입력·출력 자동 캡처, M4.1-7 판정).
 // App 경유, 어댑터 직접 호출 금지. 존재하는 파일만, baseDir 밖 제외 (best-effort).

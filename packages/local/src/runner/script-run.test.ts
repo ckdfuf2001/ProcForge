@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
 import { runScript, describeRunError, outsideChanges } from "./script-run.js";
 import { diffSnapshot, snapshotProject } from "./script-run.js";
-import { ArgSpecSchema } from "@procforge/shared/schema.js";
+import { ArgSpecSchema } from "@proof/shared/schema.js";
 import { resolveArgs } from "./resolve.js";
 
 // M5.2-2: 스크립트 실행 단위 + 계약 테스트.

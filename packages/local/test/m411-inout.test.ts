@@ -21,7 +21,7 @@ import {
   classifyReportPaths,
   resolveOriginal,
 } from "../src/services/artifacts.js";
-import type { Node } from "@procforge/shared/schema.js";
+import type { Node } from "@proof/shared/schema.js";
 
 const serverMjs = resolve(__dirname, "fixtures/fake-ppt-mcp/server.mjs");
 

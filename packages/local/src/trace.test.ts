@@ -18,7 +18,7 @@ import {
   readZipEntry,
   writeZip,
 } from "../src/export.js";
-import type { CoreClient } from "@procforge/shared/core-client.js";
+import type { CoreClient } from "@proof/shared/core-client.js";
 
 let pfdir: string;
 let client: CoreClient;

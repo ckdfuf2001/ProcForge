@@ -4,7 +4,7 @@ import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { spawn } from "node:child_process";
-import { CoreService } from "@procforge/core";
+import { CoreService } from "@proof/core";
 import { FileStore, resetLockStats, lockStats } from "../src/filestore.js";
 import { checkerEvaluate } from "../src/checker.js";
 import { wrapClient } from "./client-mode.js";

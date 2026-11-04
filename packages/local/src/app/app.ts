@@ -1,10 +1,10 @@
 import { existsSync, readFileSync, readdirSync, appendFileSync, mkdirSync } from "node:fs";
 import { randomUUID, createHash } from "node:crypto";
 import { join, resolve, basename } from "node:path";
-import type { CoreClient } from "@procforge/shared/core-client.js";
-import type { Actor } from "@procforge/shared/dto.js";
-import { pfError } from "@procforge/shared/errors.js";
-import { readEnvPair } from "@procforge/shared/env-compat.js";
+import type { CoreClient } from "@proof/shared/core-client.js";
+import type { Actor } from "@proof/shared/dto.js";
+import { pfError } from "@proof/shared/errors.js";
+import { readEnvPair } from "@proof/shared/env-compat.js";
 import { collectCatalog } from "../catalog.js";
 import { FileStore } from "../filestore.js";
 import { constraintSummary, nodeSummary, retriesLeft } from "../views.js";
@@ -28,7 +28,7 @@ import type {
   StartInput,
   TestInput,
   TreeInput,
-} from "@procforge/shared/dto.js";
+} from "@proof/shared/dto.js";
 
 type OutputOf<K extends keyof typeof OUTPUT_SCHEMAS> = import("zod").infer<
   (typeof OUTPUT_SCHEMAS)[K]
@@ -119,9 +119,9 @@ import {
   type RefNodeInfo,
   type RefVerdict,
 } from "../services/ref-check.js";
-import { varRefNodeIds } from "@procforge/shared/deps.js";
-import { varRefNodeId } from "@procforge/shared/args-schema.js";
-import { resolveRefValue } from "@procforge/shared/validator.js";
+import { varRefNodeIds } from "@proof/shared/deps.js";
+import { varRefNodeId } from "@proof/shared/args-schema.js";
+import { resolveRefValue } from "@proof/shared/validator.js";
 import {
   readRunState,
   readRunStateBySession,
@@ -212,7 +212,7 @@ export type NodeDetail = {
   map: unknown;
   until: unknown;
   dependsOn: string[];
-  constraints: import("@procforge/shared/schema.js").Constraint[];
+  constraints: import("@proof/shared/schema.js").Constraint[];
   advice: { at: string; text: string }[];
   golden: { fixtures: string[]; output: string; attemptId?: string; ignore: string[] } | null;
   approval: { at: string; note?: string } | null;
@@ -625,7 +625,7 @@ export class ProcForgeApp {
       }
     }
     const relOfReport = (p: string) => toBaseRel(baseDir, p);
-    let treeCache: import("@procforge/shared/schema.js").Node[] | undefined;
+    let treeCache: import("@proof/shared/schema.js").Node[] | undefined;
     const getTreeNodes = async () =>
       (treeCache ??= (await this.core.pfTree(sid)).nodes);
     const manifestNow = readManifest(this.procforgeDir, sid);
@@ -832,7 +832,7 @@ export class ProcForgeApp {
     const norm = normalizeArgSpecs(
       a.argSpecs as Record<
         string,
-        import("@procforge/shared/schema.js").ArgSpec
+        import("@proof/shared/schema.js").ArgSpec
       >,
       {
         sandboxDir: join(this.procforgeDir, "sandbox", sid),
@@ -901,7 +901,7 @@ export class ProcForgeApp {
         roles: ["in", "inout"],
       }).filter((p) => !covered.has(relOf(p)));
       // M4.1.1-1: fresh 중 수정분은 inout → 원본 해결 (없으면 bad_request)
-      let treeCacheC: import("@procforge/shared/schema.js").Node[] | undefined;
+      let treeCacheC: import("@proof/shared/schema.js").Node[] | undefined;
       const getTreeC = async () =>
         (treeCacheC ??= (await this.core.pfTree(sid)).nodes);
       const resolveC = (rel: string) =>
@@ -1307,14 +1307,14 @@ export class ProcForgeApp {
     nodeId?: string;
     /** M7-ui4-g: true면 **최신** limit건 (노드 이력). false면 오래된 것부터 (SSE 증분) */
     tail?: boolean;
-  }): Promise<{ events: import("@procforge/shared/dto.js").EventEntry[]; lastRevision: number }> {
+  }): Promise<{ events: import("@proof/shared/dto.js").EventEntry[]; lastRevision: number }> {
     return this.core.getEventsPage(input);
   }
 
   /** M8-ui2: 분해 라운드 이력 (읽기 전용. touch 없음) */
   async getDecompositionHistory(input: {
     sessionId: string;
-  }): Promise<import("@procforge/shared/dto.js").DecompositionHistoryEntry[]> {
+  }): Promise<import("@proof/shared/dto.js").DecompositionHistoryEntry[]> {
     return this.core.getDecompositionHistory(input);
   }
 
@@ -1322,7 +1322,7 @@ export class ProcForgeApp {
   async getTreeAt(input: {
     sessionId: string;
     revision: number;
-  }): Promise<import("@procforge/shared/dto.js").TreeAtOutput> {
+  }): Promise<import("@proof/shared/dto.js").TreeAtOutput> {
     return this.core.getTreeAt(input);
   }
 
@@ -1467,7 +1467,7 @@ export class ProcForgeApp {
 
   /** M7-ui2: blocked·needs_human (읽기 전용) */
   async getBlocked(input: { sessionId: string }): Promise<{
-    blocked: import("@procforge/shared/core-client.js").BlockedEntry[];
+    blocked: import("@proof/shared/core-client.js").BlockedEntry[];
     needsHuman: string[];
     revision: number;
   }> {
@@ -1948,7 +1948,7 @@ export class ProcForgeApp {
       nodeId: a.nodeId as string,
       patch: {
         set: a.patch?.set as
-          | Record<string, import("@procforge/shared/schema.js").ArgSpec>
+          | Record<string, import("@proof/shared/schema.js").ArgSpec>
           | undefined,
         remove: a.patch?.remove as string[] | undefined,
       },
@@ -1971,7 +1971,7 @@ export class ProcForgeApp {
       nodeId: a.nodeId as string,
       goal: a.goal as string | undefined,
       addConstraints: a.addConstraints as
-        import("@procforge/shared/schema.js").Constraint[] | undefined,
+        import("@proof/shared/schema.js").Constraint[] | undefined,
       removeConstraintIds: a.removeConstraintIds as string[] | undefined,
       dependsOn: a.dependsOn as string[] | undefined,
       expectedRevision: a.expectedRevision as number | undefined,

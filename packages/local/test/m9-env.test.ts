@@ -10,7 +10,7 @@ import {
   resetEnvCompatWarnings,
   harnessedSpawnEnv,
   bothNames,
-} from "@procforge/shared/env-compat.js";
+} from "@proof/shared/env-compat.js";
 import { isDefaultTenantAllowed } from "../../core-server/dist/server.js";
 
 // M9-1-1-d: §2.3 신규 테스트 전부 (기존 파괴 기대 0).

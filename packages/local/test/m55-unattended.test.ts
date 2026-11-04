@@ -28,7 +28,7 @@ import {
   runErrorExit,
 } from "../src/app/run-exit.js";
 import { testStack, importProc } from "./client-mode.js";
-import { computeNodeHash } from "@procforge/shared/schema.js";
+import { computeNodeHash } from "@proof/shared/schema.js";
 import { FileStore } from "../src/filestore.js";
 import { loadProcedureDoc } from "../src/runner/procedure-run.js";
 import { startRunHeartbeat } from "../src/runner/run.js";

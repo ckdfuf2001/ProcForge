@@ -1,9 +1,9 @@
 import { mkdirSync, copyFileSync, existsSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
-import { compareNodeIds } from "@procforge/shared/ids.js";
-import type { ArgSpec, Constraint } from "@procforge/shared/schema.js";
-import type { ProcedureDoc } from "@procforge/shared/procedure.js";
+import { compareNodeIds } from "@proof/shared/ids.js";
+import type { ArgSpec, Constraint } from "@proof/shared/schema.js";
+import type { ProcedureDoc } from "@proof/shared/procedure.js";
 import { constraintSummary } from "../views.js";
 
 // 절차서 파일 기록 (M4.2-1, finalize에서 이동). App 경유, 어댑터 직접 호출 금지.

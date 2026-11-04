@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { join, resolve, relative, basename, dirname, sep, isAbsolute, extname } from "node:path";
-import type { ArgSpec } from "@procforge/shared/schema.js";
+import type { ArgSpec } from "@proof/shared/schema.js";
 import { writeAtomicFile } from "./fsutil.js";
 
 // 호스트는 경로만 제출, 실제 읽기·복사는 local이 수행 (M2).

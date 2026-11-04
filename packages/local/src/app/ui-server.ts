@@ -9,7 +9,7 @@ import { spawn } from "node:child_process";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, normalize, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { pfError } from "@procforge/shared/errors.js";
+import { pfError } from "@proof/shared/errors.js";
 import type { ProcForgeApp } from "./app.js";
 import { NODE_HISTORY_MAX } from "./app.js";
 import { SessionEventHub, MAX_SUBS_PER_SESSION } from "./events-hub.js";

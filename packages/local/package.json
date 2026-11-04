@@ -1,5 +1,5 @@
 {
-  "name": "@procforge/local",
+  "name": "@proof/local",
   "version": "0.0.0",
   "type": "module",
   "main": "./dist/index.js",
@@ -18,8 +18,8 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
-    "@procforge/core": "workspace:^",
-    "@procforge/shared": "workspace:*",
+    "@proof/core": "workspace:^",
+    "@proof/shared": "workspace:*",
     "zod": "^3.23.8"
   },
   "devDependencies": {

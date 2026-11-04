@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { TOOL_NAMES } from "../src/server.js";
 import { APP_METHODS } from "../src/app/tools.js";
 import { ProcForgeApp } from "../src/app/app.js";
-import * as dto from "@procforge/shared/dto.js";
+import * as dto from "@proof/shared/dto.js";
 
 // M4.2-4-6: 도구 설명·핸들러(App 메서드)에서 쓰는 인자는 inputSchema에 있어야 한다.
 // server 소스를 정적으로 파싱해 도구↔inputSchema 대응을 구한다 (드리프트 방지).

@@ -1,5 +1,5 @@
-import type { Constraint } from "@procforge/shared/schema.js";
-import type { EvaluateFn } from "@procforge/shared/core-client.js";
+import type { Constraint } from "@proof/shared/schema.js";
+import type { EvaluateFn } from "@proof/shared/core-client.js";
 import { existsSync, readFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { isEscapeRel } from "./artifacts.js";
@@ -12,7 +12,7 @@ import {
   type CheckContext,
   type CheckResult,
   type Verdict,
-} from "@procforge/shared/check.js";
+} from "@proof/shared/check.js";
 
 // M6-2: fs 없는 판정은 shared로 이동. 여기서는 fs 필요 2종(pptx_table_sum,
 // csv_rows)만 직접 실행하고 나머지는 shared에 위임한다.
@@ -26,7 +26,7 @@ export {
   resolveParamsRef,
   resolveNumericExpected,
   resolvePath,
-} from "@procforge/shared/check.js";
+} from "@proof/shared/check.js";
 
 function evaluateFsConstraint(c: Constraint, ctx: CheckContext): CheckResult {
   if (c.kind === "pptx_table_sum") {

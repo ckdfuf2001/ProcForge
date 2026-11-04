@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { writeAtomicFile } from "./fsutil.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import type { ToolCatalogEntry } from "@procforge/shared/schema.js";
+import type { ToolCatalogEntry } from "@proof/shared/schema.js";
 
 function stableStringify(v: unknown): string {
   if (Array.isArray(v)) return `[${v.map(stableStringify).join(",")}]`;

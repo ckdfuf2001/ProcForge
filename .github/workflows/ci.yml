@@ -93,9 +93,9 @@ jobs:
       - run: pnpm build
       - run: pnpm check:deps
       - name: core-server tests
-        run: pnpm --filter @procforge/core-server exec vitest run --testTimeout=20000
+        run: pnpm --filter @proof/core-server exec vitest run --testTimeout=20000
       - name: full suite in remote mode
-        run: pnpm --filter @procforge/local exec vitest run --run --testTimeout=20000 --hookTimeout=20000
+        run: pnpm --filter @proof/local exec vitest run --run --testTimeout=20000 --hookTimeout=20000
         env:
           PROCFORGE_CLIENT: remote
   e2e:
@@ -126,11 +126,11 @@ jobs:
       - run: pip install openpyxl python-pptx
       - run: pnpm install --frozen-lockfile
       - name: playwright browsers (chromium)
-        run: pnpm --filter @procforge/local exec playwright install --with-deps chromium
+        run: pnpm --filter @proof/local exec playwright install --with-deps chromium
       - name: build (시나리오는 dist만 import)
         run: pnpm build
       - name: playwright e2e
-        run: pnpm --filter @procforge/local exec playwright test -c playwright.config.ts
+        run: pnpm --filter @proof/local exec playwright test -c playwright.config.ts
       - name: e2e artifacts (실패 시에만)
         if: failure()
         uses: actions/upload-artifact@v4

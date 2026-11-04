@@ -1,5 +1,5 @@
 {
-  "name": "@procforge/core",
+  "name": "@proof/core",
   "version": "0.0.0",
   "type": "module",
   "main": "./dist/index.js",
@@ -10,7 +10,7 @@
     "lint": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@procforge/shared": "workspace:*"
+    "@proof/shared": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^26.6.4",

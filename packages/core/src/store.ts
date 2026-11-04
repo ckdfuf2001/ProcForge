@@ -1,7 +1,7 @@
-import type { Store } from "@procforge/shared/store.js";
-import type { Node, Session } from "@procforge/shared/schema.js";
-import type { CommitChange } from "@procforge/shared/store.js";
-import type { EventEntry } from "@procforge/shared/dto.js";
+import type { Store } from "@proof/shared/store.js";
+import type { Node, Session } from "@proof/shared/schema.js";
+import type { CommitChange } from "@proof/shared/store.js";
+import type { EventEntry } from "@proof/shared/dto.js";
 
 export type { Store };
 

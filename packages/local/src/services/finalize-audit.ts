@@ -1,4 +1,4 @@
-import type { ArgSpec, Constraint, Node } from "@procforge/shared/schema.js";
+import type { ArgSpec, Constraint, Node } from "@proof/shared/schema.js";
 
 // finalize 고정값 감사 (M5.1-B1). 확정 시점에 박힌 값 중 params·날짜·녹화 수치를 검출.
 // - fixed 인자의 params 부분 일치는 core 경고가 담당 (중복 방지: 여기서는 제외).

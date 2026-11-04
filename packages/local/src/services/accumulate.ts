@@ -11,11 +11,11 @@ import {
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { z } from "zod";
-import { pfError } from "@procforge/shared/errors.js";
+import { pfError } from "@proof/shared/errors.js";
 import {
   AccumulateSpecSchema,
   type AccumulateSpec,
-} from "@procforge/shared/procedure.js";
+} from "@proof/shared/procedure.js";
 import { writeAtomicFile } from "../fsutil.js";
 import { appendRunLog, runDir } from "./run-log.js";
 

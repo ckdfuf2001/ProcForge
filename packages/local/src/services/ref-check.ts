@@ -1,6 +1,6 @@
-import { resolveRefValue } from "@procforge/shared/validator.js";
-import { stableStringify } from "@procforge/shared/stable.js";
-import { varRefNodeId } from "@procforge/shared/args-schema.js";
+import { resolveRefValue } from "@proof/shared/validator.js";
+import { stableStringify } from "@proof/shared/stable.js";
+import { varRefNodeId } from "@proof/shared/args-schema.js";
 
 // M5.8.2 후속: ref 대조 계산 (R2: 상태 변경 없이 계산만, 판정은 core).
 // 상류 출력 = golden attempt resultJson, 없으면 마지막 pass attempt.

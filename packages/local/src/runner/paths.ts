@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { isEscapeRel } from "../artifacts.js";
 import { logger } from "../logger.js";
-import type { PathRole } from "@procforge/shared/schema.js";
+import type { PathRole } from "@proof/shared/schema.js";
 
 export type { PathRole };
 

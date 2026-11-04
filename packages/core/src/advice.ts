@@ -1,4 +1,4 @@
-import type { Constraint } from "@procforge/shared/schema.js";
+import type { Constraint } from "@proof/shared/schema.js";
 
 // 사람 조언 → constraint 변환 (core 비공개 로직. local 번들에 포함 금지)
 let seq = 0;
