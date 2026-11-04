@@ -2,12 +2,12 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
-import { runScript, describeRunError, outsideChanges } from "./script-run.js";
-import { diffSnapshot, snapshotProject } from "./script-run.js";
+import { runScript, describeRunError, outsideChanges } from "../src/runner/script-run.js";
+import { diffSnapshot, snapshotProject } from "../src/runner/script-run.js";
 import { ArgSpecSchema } from "@proof/shared/schema.js";
-import { resolveArgs } from "./resolve.js";
+import { resolveArgs } from "../src/runner/resolve.js";
 import { makeTmp } from "@proof/shared/tmp.js";
-import { useTmpCleanup } from "../../test/tmp-hooks.js";
+import { useTmpCleanup } from "./tmp-hooks.js";
 
 // M9-tmp: tmp 정리는 등록 역순으로 가장 나중에 돈다.
 useTmpCleanup();

@@ -159,6 +159,7 @@ function check(name, hits, targets) {
 
 // 5. no vitest in product src (M9-tmp-fix: vitest는 devDependency라 제품
 // 코드에서 import하면 런타임에 깨진다. 테스트 파일은 제외).
+// M9-tmp-fix2: 존재하는 루트에서 대상 파일이 0개면 FAIL (없는 패키지는 목록에서 뺄 것).
 {
   const re = /from\s+["']vitest["']/;
   const roots = ["core", "core-server", "local", "shared", "ui"].map((p) =>
@@ -166,14 +167,39 @@ function check(name, hits, targets) {
   );
   const hits = [];
   let targets = 0;
+  const perRoot = [];
   for (const d of roots) {
-    let entries;
-    try {
-      entries = walk(d);
-    } catch {
-      continue;
+    if (!existsSync(d)) continue;
+    let n = 0;
+    for (const f of walk(d)) {
+      if (!f.endsWith(".ts") && !f.endsWith(".tsx")) continue;
+      if (f.endsWith(".test.ts")) continue;
+      n++;
+      targets++;
+      read(f)
+        .split("\n")
+        .forEach((line, i) => {
+          if (re.test(line)) hits.push(`${f}:${i + 1}: ${line.trim().slice(0, 120)}`);
+        });
     }
-    for (const f of entries) {
+    perRoot.push(`${d.split(/[\\/]/).slice(-2).join("/")}: ${n}파일`);
+    if (n === 0) hits.push(`${d}: 대상 파일 0개`);
+  }
+  console.log(`check-gates: (no vitest 루트별: ${perRoot.join(", ")})`);
+  violations.push(...hits.map((h) => "vitest-import: " + h));
+  check("no vitest in product src", hits, targets);
+}
+
+// 6. no test-dir imports from product src (M9-tmp-fix2: src가 test/ 경로를
+// import하면 제품-테스트 경계가 깨진다).
+{
+  const re = /from\s+["'][^"']*\/test\//;
+  const hits = [];
+  let targets = 0;
+  for (const p of ["core", "core-server", "local", "shared", "ui"]) {
+    const d = join(ROOT, "packages", p, "src");
+    if (!existsSync(d)) continue;
+    for (const f of walk(d)) {
       if (!f.endsWith(".ts") && !f.endsWith(".tsx")) continue;
       if (f.endsWith(".test.ts")) continue;
       targets++;
@@ -184,8 +210,8 @@ function check(name, hits, targets) {
         });
     }
   }
-  violations.push(...hits.map((h) => "vitest-import: " + h));
-  check("no vitest in product src", hits, targets);
+  violations.push(...hits.map((h) => "test-import: " + h));
+  check("no test-dir imports from product src", hits, targets);
 }
 
 if (violations.length > 0) {

@@ -1,13 +1,15 @@
 import { describe, it, expect } from "vitest";
-import { readFileSync, mkdtempSync, symlinkSync } from "node:fs";
+import { readFileSync, symlinkSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { tmpdir } from "node:os";
 import { spawn } from "node:child_process";
+import { makeTmp } from "@proof/shared/tmp.js";
+import { useTmpCleanup } from "./tmp-hooks.js";
 
 // M9-1-2: 새 bin `proof`(dist/cli.js) + 옛 bin 별칭 `procforge`(dist/cli-legacy.js).
 // legacy는 stderr 경고 1회 후 같은 본체 main()을 호출하므로 stdout은 바이트 단위로 같다.
 // procforge-local(MCP stdio)에는 경고를 넣지 않는다 (stdout이 JSON-RPC 채널).
 // 자식 실행은 반드시 비동기 spawn (m9-exit 규칙).
+// M9-tmp-fix2: 링크용 임시폴더도 등록한다.
 
 const DIST = resolve(__dirname, "..", "dist");
 const CLI = join(DIST, "cli.js");
@@ -15,9 +17,10 @@ const LEGACY = join(DIST, "cli-legacy.js");
 const WARNING = "warning: 'procforge' 명령은 옛 이름이다.";
 
 // 모듈 평가 시점에 링크를 만든다 (skipIf는 수집 시점에 값이 확정되어야 한다).
+useTmpCleanup();
 let LINK: string | undefined;
 try {
-  const dir = mkdtempSync(join(tmpdir(), "pf-binlink-"));
+  const dir = makeTmp("pf-binlink-");
   LINK = join(dir, "proof");
   symlinkSync(CLI, LINK);
 } catch {
