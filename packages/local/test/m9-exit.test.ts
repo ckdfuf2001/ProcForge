@@ -124,3 +124,22 @@ describe("M9-1-exit hang 방지", () => {
     expect([0, 1]).toContain(r.status);
   }, 30000);
 });
+
+// M9-1-fix: 종료 대기는 명령 공통 경로라 run/repair/trace/export도 같은 가드로 확인한다.
+// finalize는 CLI 명령이 없고 (App API만 존재), adviseAndSignal 호출은 상주 UI 서버 전담이라
+// 한 번 실행 후 끝나는 CLI의 hang 범위가 아니다. 둘 다 제외 사유를 여기에 남긴다.
+// procforge ui 역시 상주 서버라 제외한다.
+describe("M9-1 exit hang 방지 (명령별)", () => {
+  it.each([
+    ["run", ["run", "__m9-missing-proc__"]],
+    ["repair", ["repair", "123e4567-e89b-42d3-a456-426614174000", "--discard", "5"]],
+    ["trace", ["trace", "123e4567-e89b-42d3-a456-426614174000"]],
+    ["export", ["export", "123e4567-e89b-42d3-a456-426614174000", "--out", "m9-out"]],
+  ])("hang 방지: %s", async (_name, args) => {
+    const pfdir = mkdtempSync(join(tmpdir(), "pf-m9exit-hang-"));
+    const r = await runChild([join(DIST, "cli.js"), ...args], childEnv(pfdir), 5000);
+    expect(r.timedOut, `stderr=${r.stderr.slice(0, 300)}`).toBe(false);
+    expect([0, 1, 2]).toContain(r.status);
+    expect(r.status).not.toBe(3221226505);
+  }, 60000);
+});

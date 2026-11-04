@@ -104,7 +104,7 @@ describe("M9-1-1 env 호환 (통합)", () => {
     expect(err).not.toContain("세션 없음");
   });
 
-  it("DEV_AUTH 옛 이름 점화 → 인증 우회 경고가 이름 변경 경고와 별도", () => {
+  it("DEV_AUTH 옛 이름으로 켜짐 → 인증 우회 경고가 이름 변경 경고와 별도", () => {
     const cap = captureStderr();
     try {
       expect(isDefaultTenantAllowed({ PROCFORGE_DEV_AUTH: "1" } as NodeJS.ProcessEnv)).toBe(true);
@@ -170,11 +170,10 @@ describe("M9-1-1 env 호환 (통합)", () => {
     }
   }, 30000);
 
-  it("하네스 env 메커니즘: spawn 자식은 부모 CORE_URL을 그대로 쓴다 (CLIENT 유지)", async () => {
-    // §3 지시 2: remote 포함 전 모드에서 도는 메커니즘 테스트 (CI matrix가 remote 커버).
-    // 셸 오염을 가정: PROOF_DIR=evil + PROOF_CORE_URL=X1/PROCFORGE_CORE_URL=X2 + CLIENT.
+  it("하네스 env 메커니즘: spawn 자식은 부모 값을 두 이름으로 받는다", async () => {
+    // §2.3 메커니즘 테스트 (전 모드 공통, CI matrix가 remote 커버).
     const saved: Record<string, string | undefined> = {};
-    for (const k of ["PROOF_DIR", "PROCFORGE_DIR", "PROOF_CORE_URL", "PROCFORGE_CORE_URL", "PROCFORGE_CLIENT"]) {
+    for (const k of ["PROOF_DIR", "PROCFORGE_DIR", "PROOF_CORE_URL", "PROCFORGE_CORE_URL", "PROCFORGE_CLIENT", "PROOF_CORE_API_KEY", "PROOF_BOGUS"]) {
       saved[k] = process.env[k];
     }
     process.env.PROOF_DIR = mkdtempSync(join(tmpdir(), "pf-m9-evil-"));
@@ -182,6 +181,8 @@ describe("M9-1-1 env 호환 (통합)", () => {
     process.env.PROOF_CORE_URL = "http://127.0.0.1:9";
     process.env.PROCFORGE_CORE_URL = "http://127.0.0.1:8";
     process.env.PROCFORGE_CLIENT = "remote";
+    process.env.PROOF_CORE_API_KEY = "K-m9test-dummy";
+    process.env.PROOF_BOGUS = "1";
     try {
       const pfdir = mkdtempSync(join(tmpdir(), "pf-m9-harness-"));
       const env = harnessedSpawnEnv({
@@ -191,7 +192,7 @@ describe("M9-1-1 env 호환 (통합)", () => {
       const out = await new Promise<string>((resolveP, reject) => {
         const child = spawn(
           process.execPath,
-          ["-e", "console.log(JSON.stringify({d:process.env.PROOF_DIR,p:process.env.PROCFORGE_DIR,c:process.env.PROOF_CORE_URL,k:process.env.PROCFORGE_CORE_KEY,client:process.env.PROCFORGE_CLIENT,e:process.env.PROOF_EVIIII}))"],
+          ["-e", "console.log(JSON.stringify({d:process.env.PROOF_DIR,p:process.env.PROCFORGE_DIR,c:process.env.PROOF_CORE_URL,ak:process.env.PROOF_CORE_API_KEY,ak2:process.env.PROCFORGE_CORE_API_KEY,client:process.env.PROCFORGE_CLIENT,bogus:process.env.PROOF_BOGUS}))"],
           { env: env as NodeJS.ProcessEnv, stdio: ["ignore", "pipe", "pipe"] },
         );
         let stdout = "";
@@ -209,12 +210,14 @@ describe("M9-1-1 env 호환 (통합)", () => {
         child.on("error", reject);
       });
       const got = JSON.parse(out) as Record<string, string | undefined>;
-      // 확정값(DIR)은 주입값, 스냅샷값(CORE_URL)은 proof 값, CLIENT는 유지, 오염 제거
+      // 확정값(DIR)은 주입값, 스냅샷값(CORE_URL/CORE_API_KEY)은 proof 값, CLIENT는 유지, 오염 제거
       expect(got.d).toBe(pfdir);
       expect(got.p).toBe(pfdir);
       expect(got.c).toBe("http://127.0.0.1:9");
+      expect(got.ak).toBe("K-m9test-dummy");
+      expect(got.ak2).toBe("K-m9test-dummy");
       expect(got.client).toBe("remote");
-      expect(got.e).toBeUndefined();
+      expect(got.bogus).toBeUndefined();
     } finally {
       for (const [k, v] of Object.entries(saved)) {
         if (v === undefined) delete process.env[k];
