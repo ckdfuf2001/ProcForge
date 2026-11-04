@@ -6,7 +6,8 @@
   "types": "./dist/index.d.ts",
   "bin": {
     "procforge-local": "./dist/main.js",
-    "procforge": "./dist/cli.js"
+    "procforge": "./dist/cli-legacy.js",
+    "proof": "./dist/cli.js"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",

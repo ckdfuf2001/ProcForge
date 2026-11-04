@@ -306,7 +306,7 @@ async function cmdUi(): Promise<number> {
   }
 }
 
-async function main(): Promise<number> {
+export async function main(): Promise<number> {
   // M9-1-2: 모르는 옵션은 스택 없이 한 줄 오류 + exit 2.
   if (parseError !== undefined) {
     console.error(`error: ${parseError}`);
@@ -340,4 +340,9 @@ async function main(): Promise<number> {
 // (src/win/async.c)으로 3221226505 크래시가 난다. 직접 연 연결은 이미 닫힘
 // (카탈로그 MCP client.close, runner pool.close, heartbeat stop, 파일락 release).
 // remote 클라이언트는 전역 fetch만 쓰므로 닫을 커스텀 dispatcher가 없다.
-process.exitCode = await main();
+// M9-1-2: dist/cli.js 직접 실행 때만 자동 실행. cli-legacy.js에서 import될
+// 때는 legacy가 경고를 먼저 낸 뒤 main()을 호출한다 (argv가 아닌 파일로 구분).
+const entryFile = (process.argv[1] ?? "").replace(/\\/g, "/");
+if (entryFile.endsWith("/cli.js") || entryFile === "cli.js") {
+  process.exitCode = await main();
+}
