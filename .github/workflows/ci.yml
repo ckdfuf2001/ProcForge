@@ -45,19 +45,8 @@ jobs:
       - run: pnpm check:deps
       - name: runner replay (M3, no LLM, junit)
         run: node scripts/m3-ci-replay.mjs
-      - name: no policy strings in local bundle
-        run: |
-          ! grep -ri --exclude='*.test.ts' "분해 정책\|멈춤 판단\|argSpec 분류 휴리스틱" packages/local/src || (echo "policy leak in local" && exit 1)
-      - name: no policy strings in MCP surface (descriptions/prompts)
-        run: |
-          ! grep -n "부가세\|llm_rubric\|numeric_match\|json_path_exists\|file_exists\|auto constraint\|휴리스틱" packages/local/src/server.ts || (echo "policy leak in MCP surface" && exit 1)
-      - name: no console.log in local src (stderr logger only, cli.ts/cli-main.ts excepted)
-        run: |
-          ! grep -rn --exclude='*.test.ts' "console\.log" packages/local/src --exclude=cli.ts --exclude=cli-main.ts || (echo "console.log forbidden, use logger" && exit 1)
-      - name: no direct approval matching outside approvals service (M5.5-4.3-4)
-        run: |
-          ! grep -rn --include='*.ts' --exclude='*.test.ts' "matchApproval" packages/local/src | grep -v "services/approvals.ts" | grep -q . || (echo "direct matchApproval forbidden, use checkApproval" && exit 1)
-          ! grep -rn --include='*.ts' "\<isApproved>(" packages/local/src packages/local/test packages/shared/src packages/core/src || (echo "isApproved removed, use checkApproval" && exit 1)
+      - name: repo gates (policy/console/approval, M9-gates)
+        run: pnpm check:gates
   remote-mode:
     # M6.1-2: inprocess와 같은 스위트를 remote로 돈다 (파일당 서버 1대,
     # 송신 수집 + 스위트 끝 egress 위반 단언. 병렬은 vitest.config가 4로 제한).

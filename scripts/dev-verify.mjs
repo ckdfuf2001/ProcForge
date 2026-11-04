@@ -113,13 +113,15 @@ async function main() {
   console.log(`HEAD=${head}`);
 
   if (from <= 2) {
-    step(2, "dist 삭제 + 클린 빌드 + check:env");
+    step(2, "dist 삭제 + 클린 빌드 + check:env + check:gates");
     const log = logPath("2-build");
     for (const p of ["shared", "core", "local"]) {
       rmSync(join(ROOT, "packages", p, "dist"), { recursive: true, force: true });
     }
     run("pnpm", ["-r", "run", "build"], { log });
     run("pnpm", ["check:env"], { log });
+    // M9-gates: CI와 같은 게이트 스크립트 (L3에서 CI grep 실패를 사전에 잡는다).
+    run("pnpm", ["check:gates"], { log });
   } else {
     step(2, "생략 (--from)");
   }
