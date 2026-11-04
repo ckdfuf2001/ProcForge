@@ -101,6 +101,11 @@ const step = (n, msg) => console.log(`\n[dev-verify ${n}] ${msg}`);
 
 async function main() {
   const from = parseFrom(process.argv.slice(2));
+  // M9-gates: NODE_ENV=production이면 pnpm이 devDependencies를 스킵한다.
+  // 경고만 내고 계속한다 (L3 실패 사유가 아님. 자식 환경은 baseEnv가 해제함).
+  if (process.env.NODE_ENV === "production") {
+    console.error("[dev-verify] 경고: NODE_ENV=production — devDependencies 스킵 가능. 해제 권장.");
+  }
   // M9-1-1: env/하네스 변경 시 remote 모드 포함 (CI remote 잡과 동일 조건).
   const withRemote = process.argv.slice(2).includes("--remote");
   if (from > 1) console.log(`[dev-verify] --from ${from}: 앞 단계 생략 (산출물 재사용)`);

@@ -41,6 +41,7 @@
 
 환경
 - 클린 클론 검증은 `NODE_ENV`를 설정하지 않은 상태로 한다. (`production`이면 devDependencies가 빠져서 tsc/vitest가 없다.)
+- 셸에 `NODE_ENV=production`이 있으면 `pnpm install`이 devDependencies를 스킵해서 tsc/vitest가 없다. 빌드·테스트 전 해제한다.
 - 로컬 vitest는 패키지 간 import를 dist로 해결한다. 그래서 core/shared 변경은 빌드 없이 검증되지 않는다. 푸시 전 `pnpm -r build`는 필수다.
 - `pnpm check:env`로 로컬 @types/node가 lockfile과 같은지 확인한다. (vitest는 타입체크를 하지 않아서, tsc 실패는 빌드에서만 잡힌다.)
 - `dev-verify.mjs`: NODE_ENV 해제, `--dns-result-order=ipv4first`. 재시도는 git push/clone만(3회 백오프) 하고, 테스트 재시도는 금지한다.
