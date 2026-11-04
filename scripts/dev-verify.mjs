@@ -127,7 +127,12 @@ async function main() {
   if (from <= 3) {
     step(3, withRemote ? "전체 테스트 3모드 (재시도 없음)" : "전체 테스트 양 모드 (재시도 없음)");
     const log = logPath("3-test");
-    const testArgs = ["-r", "run", "test", "--", "--run", "--testTimeout=20000", "--hookTimeout=20000"];
+    // M9-1-exit: Windows에서는 vitest 워커를 제한한다 (기본 병렬에서 메모리
+    // 압박 시 자식 프로세스가 0xC0000409/0xC000012D로 죽는 것을 확인).
+    // --minWorkers 병행 지정이 필요 (vitest 2.1 forks 풀 min/max 충돌 회피).
+    const workerArgs = process.platform === "win32" ? ["--maxWorkers=2", "--minWorkers=1"] : [];
+    if (workerArgs.length > 0) console.log(`[dev-verify] Windows 워커 제한: ${workerArgs.join(" ")}`);
+    const testArgs = ["-r", "run", "test", "--", "--run", "--testTimeout=20000", "--hookTimeout=20000", ...workerArgs];
     run("pnpm", testArgs, { env: {}, log });
     run("pnpm", testArgs, { env: { PROCFORGE_CLIENT: "loopback" }, log });
     if (withRemote) {
@@ -155,7 +160,7 @@ async function main() {
     };
     crun("pnpm", ["install", "--frozen-lockfile"]);
     crun("pnpm", ["-r", "run", "build"]);
-    crun("pnpm", ["-r", "run", "test", "--", "--run", "--testTimeout=20000", "--hookTimeout=20000"]);
+    crun("pnpm", ["-r", "run", "test", "--", "--run", "--testTimeout=20000", "--hookTimeout=20000", ...(process.platform === "win32" ? ["--maxWorkers=2", "--minWorkers=1"] : [])]);
   } else {
     step(4, "생략 (--from)");
   }
