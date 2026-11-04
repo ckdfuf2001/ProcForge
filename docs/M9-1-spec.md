@@ -133,3 +133,28 @@
    (`m76-ui-e2e.spec.ts:33,55`·`m8-1-reverify.spec.ts:23`·`m8-1-signal.spec.ts:16`·`m8-ui4-token.spec.ts:25`).
    모델 가시 문구 변경이므로 DECISIONS 기록 + 다음 실측에서 재확인 (M8-1 실측값은 구 문구 기준).
 4. `M9-1-4 문서` (§7): 예상 파괴 없음 (문서만으로 테스트가 깨질 수 없음).
+
+## 9. M9-1-2 실행 기록 (2026-11-05)
+
+- 커밋 1 (로그 게이트 + `NOT_WINDOWS` 개명): 10회 반복 안에서는 단언하지 않고
+  결과를 모은 뒤 로그를 먼저 쓰고 마지막에 단언한다.
+  `WIN_ONLY` → `NOT_WINDOWS` (단언 의미가 같아 개명 허용).
+- 커밋 2 (`--help`/`--version` + 테스트): 둘 다 stdout 출력 + exit 0.
+  버전은 `packages/local/package.json`에서 읽는다.
+  모르는 옵션은 스택 없이 한 줄 오류를 stderr에 내고 exit 2로 끝난다.
+  미지 옵션에 exit 1을 단언하는 기존 테스트는 없다 (보고).
+  구현 중 `error-codes` 테스트가 내부 마커 `code: "UNKNOWN_OPTION"` 리터럴을
+  wire 코드로 판정해 실패했다. 대입식으로 붙여 해결했다 (wire 코드가 아니라 등록하지 않음).
+- 커밋 3 (`@proof` scope 일괄 전환): 88파일 + lockfile 재생성.
+  check-deps·ci.yml filter 4곳·root fast 스크립트·root명(`"private": true` 확인)을
+  한 커밋에 함께 수정했다. 전환 후 `packages`·`scripts`·`.github`에서
+  `"@procforge/"` 검색 0건 (docs·이력·불변 목록은 제외).
+  `scheduling.md`는 `procforge` 명령만 쓰므로 별칭으로 계속 동작한다. M9-1-4로 넘긴다.
+- 커밋 4 (`proof` bin + `cli-legacy` 경고 + 테스트): `proof` → `dist/cli.js`,
+  `procforge` → `dist/cli-legacy.js`. legacy는 stderr에 경고를 1회 출력한 뒤
+  같은 본체 `main()`을 호출하므로 stdout이 바이트 단위로 같다.
+  `procforge-local`(MCP stdio)에는 경고를 넣지 않는다.
+  이유: stdout이 JSON-RPC 프로토콜 채널이라 경고 한 줄이 섞이면 프로토콜이 깨진다.
+- 커밋 5 (`ci-jobs.mjs`): 보고 전용 (`<run-id> | --sha` 입력, 잡 이름 +
+  conclusion 출력). L3 게이트가 아니다 (dev-verify는 네트워크에 의존하지 않는다).
+- 사용법 문구의 `procforge` 표기는 M9-1-3 화면 문구에서 다룬다 (바이트 동일 조건 유지).
