@@ -1182,4 +1182,12 @@ argv: [...]}` 고정. runner는 run fs에서 직접 실행해 stdout을 golden�
   §8·§7은 수동 `pairings.json` 을 전제로 한다(6.1). 자동 짝 찾기로 통과한 증거가 아니다.
   근거: docs/M7-dogfood.md:307 (`수동 pairings.json이 필요했고`).
 
+## M9
+
+- [M9-1-exit] **CLI는 `process.exit()` 금지, `exitCode`와 자연 종료를 쓴다.**
+  남는 핸들은 각 명령이 정리한다 (MCP 자식·heartbeat·파일락은 finally, 원격은 전역 fetch만 사용).
+  이유: Windows Node 24에서 fetch 후 `process.exit()` 호출 시 libuv 종료 assertion
+  (`src/win/async.c`)으로 3221226505 크래시가 난다. 근거: M8-1 실측 후 로컬 재현
+  (master에서도 같은 crash, inprocess·loopback은 정상).
+
 

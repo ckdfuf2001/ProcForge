@@ -595,7 +595,8 @@ c·d·j는 하네스 과제로 DECISIONS에 기록만.
 | M8-6 | core-server 분리·고객 PC | [ ] | | | 원격 core와 고객 PC 설치·연결 테스트 |
 | M8-7 | job object·dependsOn 누락 경고 | [ ] | | | job 객체 도입, 사후 `dependsOn` 누락 경고 |
 | M9-1 사양 | 이름 변경 사양 (Proof) | [x] | `996b80b` | https://github.com/ckdfuf2001/ProcForge/actions/runs/41699625201 | [사양](M9-1-spec.md). 구현 착수 조건: M8-1 `[x]` |
-| M9-1-1~4 | 이름 변경 구현 4개 | [ ] | | | 착수 조건: M8-1 `[x]`. 순서: env → bin/패키지 → 화면 문구 → 문서 |
+| M9-1-1 | env 호환 (PROOF_* 우선 + PROCFORGE_* 대체, 보안 5종 불일치 시 기동 오류) | [x] | `93620d0` | https://github.com/ckdfuf2001/ProcForge/actions/runs/41831024508 | 구현 범위 fdb548d..93620d0, M9-1-spec.md §2·§8-1 |
+| M9-1-2~4 | 이름 변경 구현 3개 | [ ] | | | 착수 조건: M9-1-1 리뷰. 순서: bin/패키지 → 화면 문구 → 문서 |
 
 > M8은 dogfood(`docs/M7-dogfood.md`) 결과를 반영해 정의했다. 완료 기준은 각 항목 비고에 따른다.
 
@@ -754,3 +755,4 @@ c·d·j는 하네스 과제로 DECISIONS에 기록만.
 | 2026-10-19 | 8 | M7 5~6 마감: 5-3 CodeMirror 6(`5eaef3d`·`7ce12a7`) · 5-4 실행 결과 서버 계약+UI(`4163792`·`68dd42c`) · 5-6 Playwright E2E(`b25c688`) — 세션 SSE `event: change` 폴백(구독 payload 유실 수정)·초안 보존+dirty/baseRevision 409 흐름·ubuntu 전용 e2e 잡 | 1~6 [x]. L3 green, run 39264793696(5-4)·39271527969(5-6, e2e 포함 7잡) success. 남음: REVIEW-M7.md·사람 실사용 dogfood |
 | 2026-10-19 | 8 | M7 마감 전 보정 close-a~e: (a) 실행 E2E (e)+실행 승인/취소·SSE 결함 수정(`uiRunApprove`·SSE 종료 조건·`markCancelled`/`runStatus`), (b) 인코딩 위생+`.editorconfig`, (c) 초안 보존("초안 복사"), (d) `docs/M7-dogfood.md` 양식, (e) §8 M7 표기·M8 정의 유예 | E2E가 실사용 결함 3건을 잡음(실행 승인 409·suspended에서 스트림 종료·취소 후 cancelling 고착). L3 green, run 39295325570(head `0604023`, e2e 포함 7잡) success. 남음: 사람 dogfood(M5.8(a) 통합) |
 | 2026-11-03 | 6, 8 | [M9-1] 이름 변경 사양 (`docs/M9-1-spec.md`). 세 차례 보고 + 보완 4·5·4건 정리 | docs만. 구현 착수 조건: M8-1 `[x]`. 구현 커밋 4개는 M8-1 닫힌 뒤 |
+| 2026-11-04 | 6, 8, 9 | M9-1-1 완료 + M9-1-exit 도입: PROOF_* 우선·대체 + 보안 5종 불일치 시 기동 오류, CLI process.exitCode 전환 | L3 green (3모드) + CI 7잡 success 후 8절 [x]. Windows Node 24 종료 크래시는 master에도 있어 별도 대응 |
