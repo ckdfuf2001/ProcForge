@@ -34,6 +34,8 @@
     "./stable.js": "./dist/stable.js",
     "./logger": "./dist/logger.js",
     "./logger.js": "./dist/logger.js",
+    "./env-compat": "./dist/env-compat.js",
+    "./env-compat.js": "./dist/env-compat.js",
     "./fsutil": "./dist/fsutil.js",
     "./fsutil.js": "./dist/fsutil.js",
     "./filestore": "./dist/filestore.js",
