@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-import { parseCliArgs, resolveDirs, normalizeCliPath } from "./app/cli-args.js";
+import { parseCliArgs, readLocalVersion, resolveDirs, normalizeCliPath } from "./app/cli-args.js";
+import type { CliValues } from "./app/cli-args.js";
 import { createApp } from "./app/bootstrap.js";
 import { createUiServer, openUrl } from "./app/ui-server.js";
 import { cliErrorExit, parseRetryOptions, resolveAllowUnverified, runErrorExit, runExitCode } from "./app/run-exit.js";
@@ -7,7 +8,27 @@ import { cliErrorExit, parseRetryOptions, resolveAllowUnverified, runErrorExit, 
 // CLI 어댑터 (M4.2-4-1). 파일·저장소 작업은 App 메서드로만 수행한다
 // (check-deps: app/ 외 local 내부·node:fs import 금지).
 
-const { values, positionals } = parseCliArgs(process.argv.slice(2));
+// M9-1-2: 모르는 옵션은 스택 없이 한 줄 오류로 받는다 (main에서 stderr + exit 2).
+let values: CliValues;
+let positionals: string[];
+let parseError: string | undefined;
+try {
+  ({ values, positionals } = parseCliArgs(process.argv.slice(2)));
+} catch (e) {
+  parseError = e instanceof Error ? e.message : String(e);
+  values = {} as CliValues;
+  positionals = [];
+}
+
+// M9-1-2: --help/--version. 화면 문구 변경은 M9-1-3에서 다룬다.
+const HELP_TEXT = `usage: procforge <test|trace|export|repair|run|approve|ui> [--help] [--version]
+  test <procedure|session> [--mode record|replay|passthrough|live] [--param k=v ...]
+  trace <sessionId>
+  export <sessionId> [--out <file>] [--redact]
+  repair <sessionId> --discard <rev>
+  run <procedure> [--param k=v ...] [--out <dir>] [--unattended]
+  approve <runId> <nodeId> | approve <procedure> --node <id>
+  ui [--port <n>] [--open]`;
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -286,6 +307,19 @@ async function cmdUi(): Promise<number> {
 }
 
 async function main(): Promise<number> {
+  // M9-1-2: 모르는 옵션은 스택 없이 한 줄 오류 + exit 2.
+  if (parseError !== undefined) {
+    console.error(`error: ${parseError}`);
+    return 2;
+  }
+  if (values.help) {
+    console.log(HELP_TEXT);
+    return 0;
+  }
+  if (values.version) {
+    console.log(readLocalVersion());
+    return 0;
+  }
   const [cmd] = positionals;
   if (cmd === "test") return cmdTest();
   if (cmd === "trace") return cmdTrace();

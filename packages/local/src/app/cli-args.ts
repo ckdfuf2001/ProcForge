@@ -1,4 +1,5 @@
 import { parseArgs } from "node:util";
+import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { readEnvPair } from "@procforge/shared/env-compat.js";
 import { resolveStoreDir } from "./store-dir.js";
@@ -34,46 +35,75 @@ export type CliValues = {
   /** M5.7.1: 제거 예정 (경고 후 무시). --allow-unverified로 단일화. */
   "fail-on-unverified"?: boolean;
   "allow-unverified"?: boolean;
+  /** M9-1-2: --help/-h, --version. */
+  help?: boolean;
+  version?: boolean;
 };
 
 export function parseCliArgs(argv: string[]): {
   values: CliValues;
   positionals: string[];
 } {
-  const { values, positionals } = parseArgs({
-    args: argv,
-    options: {
-      session: { type: "string" },
-      procedure: { type: "string" },
-      node: { type: "string" },
-      mode: { type: "string", default: "replay" },
-      junit: { type: "string" },
-      "update-golden": { type: "boolean", default: false },
-      "allow-bash": { type: "boolean", default: false },
-      "allow-project-read": { type: "boolean", default: false },
-      changed: { type: "boolean", default: false },
-      "procforge-dir": { type: "string" },
-      "project-root": { type: "string" },
-      redact: { type: "boolean", default: false },
-      "include-originals": { type: "boolean", default: false },
-      out: { type: "string" },
-      state: { type: "string" },
-      param: { type: "string", multiple: true },
-      discard: { type: "string" },
-      force: { type: "boolean", default: false },
-      unattended: { type: "boolean", default: false },
-      port: { type: "string" },
-      open: { type: "boolean", default: false },
-      "allow-wildcard": { type: "string", multiple: true },
-      "retry-attempts": { type: "string" },
-      "retry-base-ms": { type: "string" },
-      // M5.7.1: 기본값 제거 — 전달 여부로 제거 경고를 판단한다 (기본 동작은 fail-on on).
-      "fail-on-unverified": { type: "boolean" },
-      "allow-unverified": { type: "boolean", default: false },
-    },
-    allowPositionals: true,
-  });
-  return { values: values as CliValues, positionals };
+  try {
+    const { values, positionals } = parseArgs({
+      args: argv,
+      options: {
+        session: { type: "string" },
+        procedure: { type: "string" },
+        node: { type: "string" },
+        mode: { type: "string", default: "replay" },
+        junit: { type: "string" },
+        "update-golden": { type: "boolean", default: false },
+        "allow-bash": { type: "boolean", default: false },
+        "allow-project-read": { type: "boolean", default: false },
+        changed: { type: "boolean", default: false },
+        "procforge-dir": { type: "string" },
+        "project-root": { type: "string" },
+        redact: { type: "boolean", default: false },
+        "include-originals": { type: "boolean", default: false },
+        out: { type: "string" },
+        state: { type: "string" },
+        param: { type: "string", multiple: true },
+        discard: { type: "string" },
+        force: { type: "boolean", default: false },
+        unattended: { type: "boolean", default: false },
+        port: { type: "string" },
+        open: { type: "boolean", default: false },
+        "allow-wildcard": { type: "string", multiple: true },
+        "retry-attempts": { type: "string" },
+        "retry-base-ms": { type: "string" },
+        // M5.7.1: 기본값 제거 — 전달 여부로 제거 경고를 판단한다 (기본 동작은 fail-on on).
+        "fail-on-unverified": { type: "boolean" },
+        "allow-unverified": { type: "boolean", default: false },
+        "help": { type: "boolean", short: "h" },
+        "version": { type: "boolean" },
+      },
+      allowPositionals: true,
+    });
+    return { values: values as CliValues, positionals };
+  } catch (e) {
+    // M9-1-2: 모르는 옵션은 스택 없이 한 줄 오류로 바꾼다 (cli.ts에서 stderr + exit 2).
+    // code 마커는 대입으로 붙인다 (error-codes 테스트가 `code: "..."` 리터럴을
+    // wire 코드로 판정하므로 리터럴을 쓰지 않는다. 내부 마커일 뿐 wire 코드가 아님).
+    const msg = e instanceof Error ? e.message.split("\n")[0] : String(e);
+    const err = new Error(msg);
+    (err as unknown as { code: string }).code = "UNKNOWN_OPTION";
+    throw err;
+  }
+}
+
+// M9-1-2: --version 출력용. cli.ts(어댑터)는 node:fs 직접 사용 금지라
+// 여기서 읽는다. src 실행 시에는 packages/local/package.json을 못 찾을 수
+// 있어 "unknown"으로 떨어진다 (dist에서만 정상 동작).
+export function readLocalVersion(): string {
+  try {
+    const pkg = JSON.parse(
+      readFileSync(new URL("../../package.json", import.meta.url), "utf8"),
+    ) as { version?: string };
+    return typeof pkg.version === "string" ? pkg.version : "unknown";
+  } catch {
+    return "unknown";
+  }
 }
 
 export function resolveDirs(
