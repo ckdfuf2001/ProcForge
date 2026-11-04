@@ -14,7 +14,8 @@ import { harnessedSpawnEnv, bothNames } from "@procforge/shared/env-compat.js";
 
 const DIST = resolve(__dirname, "..", "dist");
 const KEY = "m9exit-key";
-const WIN_ONLY = process.platform !== "win32";
+// Windows에서만 실행 (이름 주의: true면 스킵. M9-1-2에서 WIN_ONLY → NOT_WINDOWS 개명).
+const NOT_WINDOWS = process.platform !== "win32";
 
 let dir: string;
 let base: string;
@@ -93,9 +94,11 @@ async function runChild(
   });
 }
 
-describe.skipIf(WIN_ONLY)("M9-1-exit 종료 크래시", () => {
+describe.skipIf(NOT_WINDOWS)("M9-1-exit 종료 크래시", () => {
   it("remote 자식 CLI 10회 연속: 3221226505 0건", async () => {
     const pfdir = mkdtempSync(join(tmpdir(), "pf-m9exit-cli-"));
+    // M9-1-2: 반복 안에서는 결과만 모으고, 로그를 먼저 쓴 뒤 마지막에 단언한다.
+    // (이전 구조는 expect가 루프 안에서 던져져 실패 시 로그가 절대 기록되지 않았음)
     const failures: string[] = [];
     for (let i = 0; i < 10; i++) {
       const r = await runChild(
@@ -103,16 +106,13 @@ describe.skipIf(WIN_ONLY)("M9-1-exit 종료 크래시", () => {
         childEnv(pfdir),
         30000,
       );
-      if (r.timedOut || ![0, 1].includes(r.status as number) || r.status === 3221226505) {
-        failures.push(
-          `run ${i}: status=${r.status} timedOut=${r.timedOut} stderr=${r.stderr.slice(0, 500)}`,
-        );
+      if (r.timedOut) {
+        failures.push(`run ${i}: timeout. stderr=${r.stderr.slice(0, 300)}`);
+      } else if (r.status === 3221226505) {
+        failures.push(`run ${i}: crash 3221226505. stderr=${r.stderr.slice(0, 300)}`);
+      } else if (![0, 1].includes(r.status as number)) {
+        failures.push(`run ${i}: status=${r.status} stderr=${r.stderr.slice(0, 300)}`);
       }
-      expect(r.timedOut, `run ${i}: timeout. stderr=${r.stderr.slice(0, 300)}`).toBe(false);
-      expect([0, 1], `run ${i}: status=${r.status} stderr=${r.stderr.slice(0, 300)}`).toContain(
-        r.status,
-      );
-      expect(r.status).not.toBe(3221226505);
     }
     if (failures.length > 0) {
       try {
@@ -123,6 +123,7 @@ describe.skipIf(WIN_ONLY)("M9-1-exit 종료 크래시", () => {
         );
       } catch { /* 로그 기록 실패는 무시 (단언이 실패를 보고함) */ }
     }
+    expect(failures, failures.join("\n")).toEqual([]);
   }, 400000);
 });
 
