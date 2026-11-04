@@ -1,12 +1,15 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { tmpdir } from "node:os";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { buildServer } from "../src/server.js";
 import { ProcForgeApp } from "../src/app/app.js";
 import { testStack } from "./client-mode.js";
+import { makeTmp, useTmpCleanup } from "@proof/shared/tmp.js";
+
+// M9-tmp: tmp 정리는 등록 역순으로 가장 나중에 돈다.
+useTmpCleanup();
 
 let root: string;
 let pfdir: string;
@@ -17,9 +20,9 @@ let oldProfile: string | undefined;
 const serverMjs = resolve(__dirname, "fixtures/fake-ppt-mcp/server.mjs");
 
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), "pf-mcpfin-"));
+  root = makeTmp("pf-mcpfin-");
   pfdir = join(root, ".procforge");
-  home = mkdtempSync(join(tmpdir(), "pf-mcpfinhome-"));
+  home = makeTmp("pf-mcpfinhome-");
   oldHome = process.env.HOME;
   oldProfile = process.env.USERPROFILE;
   process.env.HOME = home;

@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import {
-  mkdtempSync,
   writeFileSync,
   existsSync,
   readFileSync,
@@ -8,7 +7,6 @@ import {
   mkdirSync,
 } from "node:fs";
 import { join, resolve } from "node:path";
-import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 import { collectCatalog } from "../src/catalog.js";
 import { testStack, metaStore, spawnCli } from "./client-mode.js";
@@ -19,6 +17,10 @@ import { runTestSession as runSession } from "./client-mode.js";
 import { FileStore } from "../src/filestore.js";
 import type { CoreClient } from "@proof/shared/core-client.js";
 import { harnessedSpawnEnv, bothNames } from "@proof/shared/env-compat.js";
+import { makeTmp, useTmpCleanup } from "@proof/shared/tmp.js";
+
+// M9-tmp: tmp 정리는 등록 역순으로 가장 나중에 돈다.
+useTmpCleanup();
 
 let root: string;
 let pfdir: string;
@@ -31,9 +33,9 @@ const serverMjs = resolve(__dirname, "fixtures/fake-ppt-mcp/server.mjs");
 const BROKEN_CMD = ["nonexistent-procforge-tool-xyz"];
 
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), "pf-m3-"));
+  root = makeTmp("pf-m3-");
   pfdir = join(root, ".procforge");
-  home = mkdtempSync(join(tmpdir(), "pf-m3home-"));
+  home = makeTmp("pf-m3home-");
   oldHome = process.env.HOME;
   oldProfile = process.env.USERPROFILE;
   process.env.HOME = home;

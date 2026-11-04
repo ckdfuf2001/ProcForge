@@ -45,7 +45,9 @@
     "./wire": "./dist/wire.js",
     "./wire.js": "./dist/wire.js",
     "./report": "./dist/report.js",
-    "./report.js": "./dist/report.js"
+    "./report.js": "./dist/report.js",
+    "./tmp": "./dist/tmp.js",
+    "./tmp.js": "./dist/tmp.js"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",

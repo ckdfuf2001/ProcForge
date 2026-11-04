@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import {
-  mkdtempSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -8,7 +7,6 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join, resolve } from "node:path";
-import { tmpdir } from "node:os";
 import { collectCatalog } from "../src/catalog.js";
 import { testStack, importProc, metaStore } from "./client-mode.js";
 import { ProcedureDocSchema } from "@proof/shared/procedure.js";
@@ -20,6 +18,10 @@ import {
 import { runTestSession as runSession } from "./client-mode.js";
 import { FileStore } from "../src/filestore.js";
 import type { CoreClient } from "@proof/shared/core-client.js";
+import { makeTmp, useTmpCleanup } from "@proof/shared/tmp.js";
+
+// M9-tmp: tmp 정리는 등록 역순으로 가장 나중에 돈다.
+useTmpCleanup();
 
 let root: string;
 let pfdir: string;
@@ -31,9 +33,9 @@ let client: CoreClient;
 const serverMjs = resolve(__dirname, "fixtures/fake-ppt-mcp/server.mjs");
 
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), "pf-fin-"));
+  root = makeTmp("pf-fin-");
   pfdir = join(root, ".procforge");
-  home = mkdtempSync(join(tmpdir(), "pf-finhome-"));
+  home = makeTmp("pf-finhome-");
   oldHome = process.env.HOME;
   oldProfile = process.env.USERPROFILE;
   process.env.HOME = home;

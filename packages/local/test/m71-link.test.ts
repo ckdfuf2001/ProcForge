@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { createServer, type Server } from "node:http";
 import {
   sendContinue,
@@ -14,6 +13,10 @@ import {
   loadPairings,
 } from "../src/services/pairings.js";
 import { ProcForgeApp, type SignalTarget } from "../src/app/app.js";
+import { makeTmp, useTmpCleanup } from "@proof/shared/tmp.js";
+
+// M9-tmp: tmp 정리는 등록 역순으로 가장 나중에 돈다.
+useTmpCleanup();
 
 // M7-1: UI→OpenCode 연결 B/A/C + plan 모드 E2E (가짜 opencode 서버).
 // M7-1.1 실서버 확인 재현: POST /session/:id/message + {parts} → 200
@@ -221,7 +224,7 @@ function startFake(
 
 let pfdir: string;
 beforeEach(() => {
-  pfdir = join(mkdtempSync(join(tmpdir(), "pf-m71l-")), ".procforge");
+  pfdir = join(makeTmp("pf-m71l-"), ".procforge");
 });
 
 /** 이미 짝지어진 세션 재현용 pf_start part */

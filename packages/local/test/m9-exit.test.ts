@@ -1,11 +1,15 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { writeFileSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { spawn } from "node:child_process";
 import { startServer, parseApiKeys } from "../../core-server/dist/server.js";
 import { createRemoteCoreClient } from "../src/remote-client.js";
 import { harnessedSpawnEnv, bothNames } from "@proof/shared/env-compat.js";
+import { makeTmp, useTmpCleanup } from "@proof/shared/tmp.js";
+
+// M9-tmp: tmp 정리는 등록 역순으로 가장 나중에 돈다 (서버 close 다음).
+useTmpCleanup();
 
 // M9-1-exit: Windows Node 24 종료 크래시 (libuv async.c assertion, 3221226505) 회귀 방지.
 // remote 자식 CLI가 fetch 후 종료하는 경로를 반복 실행한다.
@@ -23,7 +27,7 @@ let close: (() => Promise<void>) | undefined;
 let sid: string;
 
 beforeAll(async () => {
-  dir = mkdtempSync(join(tmpdir(), "pf-m9exit-"));
+  dir = makeTmp("pf-m9exit-");
   const s = await startServer({
     dataDir: dir,
     apiKeys: parseApiKeys(`t1:${KEY}`),
@@ -48,7 +52,7 @@ afterAll(async () => {
 
 function childEnv(pfdir: string): NodeJS.ProcessEnv {
   // 카탈로그 격리: tmp root에 빈 opencode.json을 두어 전역 MCP 스폰을 막는다.
-  const root = mkdtempSync(join(tmpdir(), "pf-m9exit-root-"));
+  const root = makeTmp("pf-m9exit-root-");
   writeFileSync(join(root, "opencode.json"), "{}");
   return harnessedSpawnEnv({
     ...bothNames("DIR", pfdir),
@@ -96,7 +100,7 @@ async function runChild(
 
 describe.skipIf(NOT_WINDOWS)("M9-1-exit 종료 크래시", () => {
   it("remote 자식 CLI 10회 연속: 3221226505 0건", async () => {
-    const pfdir = mkdtempSync(join(tmpdir(), "pf-m9exit-cli-"));
+    const pfdir = makeTmp("pf-m9exit-cli-");
     // M9-1-2: 반복 안에서는 결과만 모으고, 로그를 먼저 쓴 뒤 마지막에 단언한다.
     // (이전 구조는 expect가 루프 안에서 던져져 실패 시 로그가 절대 기록되지 않았음)
     const failures: string[] = [];
@@ -129,7 +133,7 @@ describe.skipIf(NOT_WINDOWS)("M9-1-exit 종료 크래시", () => {
 
 describe("M9-1-exit hang 방지", () => {
   it("CLI가 5초 안에 끝난다", async () => {
-    const pfdir = mkdtempSync(join(tmpdir(), "pf-m9exit-hang-"));
+    const pfdir = makeTmp("pf-m9exit-hang-");
     const r = await runChild(
       [join(DIST, "cli.js"), "test", sid, "--mode", "replay"],
       childEnv(pfdir),
@@ -152,7 +156,7 @@ describe("M9-1 exit hang 방지 (명령별)", () => {
     ["trace", ["trace", "123e4567-e89b-42d3-a456-426614174000"]],
     ["export", ["export", "123e4567-e89b-42d3-a456-426614174000", "--out", "m9-out"]],
   ])("hang 방지: %s", async (_name, args) => {
-    const pfdir = mkdtempSync(join(tmpdir(), "pf-m9exit-hang-"));
+    const pfdir = makeTmp("pf-m9exit-hang-");
     const r = await runChild([join(DIST, "cli.js"), ...args], childEnv(pfdir), 5000);
     expect(r.timedOut, `stderr=${r.stderr.slice(0, 300)}`).toBe(false);
     expect([0, 1, 2]).toContain(r.status);
@@ -166,8 +170,8 @@ describe("M9-1 exit hang 방지 (명령별)", () => {
 // 두고 3초 안에 끝나야 한다.
 describe("M9-1-exit 카탈로그 타이머 정리", () => {
   it("가짜 MCP 카탈로그 수집 후 CLI가 3초 안에 끝난다", async () => {
-    const pfdir = mkdtempSync(join(tmpdir(), "pf-m9exit-cat-"));
-    const root = mkdtempSync(join(tmpdir(), "pf-m9exit-catroot-"));
+    const pfdir = makeTmp("pf-m9exit-cat-");
+    const root = makeTmp("pf-m9exit-catroot-");
     const serverMjs = resolve(__dirname, "fixtures", "fake-ppt-mcp", "server.mjs");
     writeFileSync(
       join(root, "opencode.json"),

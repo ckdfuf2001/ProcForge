@@ -1,18 +1,20 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { mkdtempSync } from "node:fs";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { testStack, clientMode } from "./client-mode.js";
 import { ProcForgeApp } from "../src/app/app.js";
 import { savePairing } from "../src/services/pairings.js";
+import { makeTmp, useTmpCleanup } from "@proof/shared/tmp.js";
+
+// M9-tmp: tmp 정리는 등록 역순으로 가장 나중에 돈다.
+useTmpCleanup();
 
 // M7-ui1: core.getSessions (테넌트 저장소 기준) + App 합성 (로컬 부가).
 // inprocess/loopback/remote 전 모드에서 동일 파일이 돈다 (CI remote 잡 포함).
 
 let pfdir: string;
 beforeEach(() => {
-  pfdir = join(mkdtempSync(join(tmpdir(), "pf-m71ls-")), ".procforge");
+  pfdir = join(makeTmp("pf-m71ls-"), ".procforge");
 });
 
 describe("M7-ui1 listSessions", () => {

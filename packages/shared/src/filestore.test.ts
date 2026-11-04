@@ -1,8 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { mkdtempSync, writeFileSync, existsSync, readFileSync, mkdirSync, readdirSync } from "node:fs";
+import { writeFileSync, existsSync, readFileSync, mkdirSync, readdirSync } from "node:fs";
 import { join, dirname, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
-import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { FileStore } from "./filestore.js";
@@ -10,12 +9,16 @@ import * as fsutil from "./fsutil.js";
 import { stripProofEnvVars, bothNames, harnessedSpawnEnv } from "./env-compat.js";
 import type { Node, Session } from "@proof/shared/schema.js";
 import type { EventEntry } from "@proof/shared/dto.js";
+import { makeTmp, useTmpCleanup } from "./tmp.js";
+
+// M9-tmp: tmp 정리는 등록 역순으로 가장 나중에 돈다.
+useTmpCleanup();
 
 let dir: string;
 let store: FileStore;
 let sid: string;
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), "pf-fs-"));
+  dir = makeTmp("pf-fs-");
   store = new FileStore(dir);
   sid = randomUUID();
 });

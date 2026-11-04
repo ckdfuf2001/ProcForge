@@ -1,12 +1,15 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
 import { runScript, describeRunError, outsideChanges } from "./script-run.js";
 import { diffSnapshot, snapshotProject } from "./script-run.js";
 import { ArgSpecSchema } from "@proof/shared/schema.js";
 import { resolveArgs } from "./resolve.js";
+import { makeTmp, useTmpCleanup } from "@proof/shared/tmp.js";
+
+// M9-tmp: tmp 정리는 등록 역순으로 가장 나중에 돈다.
+useTmpCleanup();
 
 // M5.2-2: 스크립트 실행 단위 + 계약 테스트.
 
@@ -23,7 +26,7 @@ function havePython(): boolean {
 }
 
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), "pf-script-"));
+  root = makeTmp("pf-script-");
   fsDir = join(root, "fs");
   mkdirSync(fsDir, { recursive: true });
 });
@@ -106,7 +109,7 @@ describe("M5.3-3 실행 제한", () => {
 
   it("M7-5 보정3-a: 파일 수 상한을 넘으면 skipped=true 이고 walk 가 멈춘다", async () => {
     // 상한은 10만이라 실제로 꽉 채우지는 않는다 — **상한을 낮춘 사본**으로 규칙을 검증한다.
-    const many = mkdtempSync(join(tmpdir(), "pf-cap-"));
+    const many = makeTmp("pf-cap-");
     const n = 25;
     for (let i = 0; i < n; i++) writeFileSync(join(many, `f${i}.txt`), "x", "utf8");
     const capSnapshot = snapshotProject(many, { fileCap: n - 1 });
@@ -118,7 +121,7 @@ describe("M5.3-3 실행 제한", () => {
 
   it("M7-5 보정3-a: 해시 총량 예산을 넘으면 hashPartial=true", async () => {
     // 1MB 파일 4개, 총량 예산 3MB 로 제한 → 뒤쪽은 stat 만 기록된다
-    const big = mkdtempSync(join(tmpdir(), "pf-hash-"));
+    const big = makeTmp("pf-hash-");
     const blob = "y".repeat(1024 * 1024);
     for (let i = 0; i < 4; i++) writeFileSync(join(big, `b${i}.bin`), blob, "utf8");
     const s = snapshotProject(big, { hashTotalBytes: 3 * 1024 * 1024 });
@@ -131,7 +134,7 @@ describe("M5.3-3 실행 제한", () => {
   });
 
   it("M7-5 보정3-a: 해시 예산 초과는 변경이 있을 때만 경고한다 (거부 아님)", () => {
-    const big = mkdtempSync(join(tmpdir(), "pf-hash2-"));
+    const big = makeTmp("pf-hash2-");
     const blob = "y".repeat(1024 * 1024);
     for (let i = 0; i < 4; i++) writeFileSync(join(big, `b${i}.bin`), blob, "utf8");
     const limits = { hashTotalBytes: 3 * 1024 * 1024 };

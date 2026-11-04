@@ -1,6 +1,4 @@
-import { mkdtempSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import { createLocalStack } from "../src/core-inprocess.js";
@@ -14,6 +12,11 @@ import type { ProcedureDoc } from "@proof/shared/procedure.js";
 import { importProcedure, copyImportFiles } from "../src/procedure.js";
 import { runSession } from "../src/runner/run.js";
 import type { RunOptions, RunReport } from "../src/runner/types.js";
+import { makeTmp, useTmpCleanup } from "@proof/shared/tmp.js";
+
+// M9-tmp: 이 모듈을 import하는 테스트 파일의 수집 시점에 등록된다.
+// 파일의 다른 afterAll보다 먼저 등록되므로 tmp 정리가 가장 나중에 돈다.
+useTmpCleanup();
 
 // 테스트 클라이언트 모드 (M4.2-4-4).
 // PROCFORGE_CLIENT=inprocess (기본) | loopback (JSON 왕복+zod 검증)
@@ -37,7 +40,7 @@ export function wrapClient(client: CoreClient): CoreClient {
 // dataDir·tenant·키는 동기 확정, listen만 비동기라 client 호출이 대기한다.
 const REMOTE_TID = "t1";
 const REMOTE_KEY = randomUUID().replace(/-/g, "");
-const REMOTE_DATA_DIR = mkdtempSync(join(tmpdir(), "pf-remote-suite-"));
+const REMOTE_DATA_DIR = makeTmp("pf-remote-suite-");
 const remoteReadyMap = new Map<number | undefined, Promise<string>>();
 
 function ensureRemoteServer(sessionTtlMs?: number): Promise<string> {

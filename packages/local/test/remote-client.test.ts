@@ -1,11 +1,13 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { mkdtempSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { startServer, parseApiKeys } from "../../core-server/dist/server.js";
 import { createRemoteCoreClient } from "../src/remote-client.js";
 import { ProcForgeApp } from "../src/app/app.js";
 import { testStack } from "./client-mode.js";
+import { makeTmp, useTmpCleanup } from "@proof/shared/tmp.js";
+
+// M9-tmp: tmp 정리는 등록 역순으로 가장 나중에 돈다 (서버 close 다음).
+useTmpCleanup();
 
 // M6-3: RemoteCoreClient 선택·재시도·degraded.
 
@@ -18,7 +20,7 @@ let oldKey: string | undefined;
 
 // 소켓 고갈(EACCES) 방지: 파일당 서버 1개 공유.
 beforeAll(async () => {
-  dir = mkdtempSync(join(tmpdir(), "pf-remote-"));
+  dir = makeTmp("pf-remote-");
   oldUrl = process.env.PROCFORGE_CORE_URL;
   oldKey = process.env.PROCFORGE_CORE_API_KEY;
   delete process.env.PROCFORGE_CORE_URL;
@@ -57,7 +59,7 @@ describe("remote-client", () => {
       decision: "split",
       children: [{ goal: "a" }],
     });
-    const root = mkdtempSync(join(tmpdir(), "pf-remoter-"));
+    const root = makeTmp("pf-remoter-");
     const app = new ProcForgeApp({
       core: client,
       procforgeDir: join(root, ".procforge"),

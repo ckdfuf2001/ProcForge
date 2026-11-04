@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import {
-  mkdtempSync,
   writeFileSync,
   rmSync,
   readFileSync,
@@ -8,7 +7,6 @@ import {
   utimesSync,
 } from "node:fs";
 import { join, resolve } from "node:path";
-import { tmpdir } from "node:os";
 import { ProcForgeApp } from "../src/app/app.js";
 import { runProcedureTest } from "../src/runner/procedure-run.js";
 import {
@@ -33,6 +31,10 @@ import { FileStore } from "../src/filestore.js";
 import { loadProcedureDoc } from "../src/runner/procedure-run.js";
 import { startRunHeartbeat } from "../src/runner/run.js";
 import { runTestSession as runSession } from "./client-mode.js";
+import { makeTmp, useTmpCleanup } from "@proof/shared/tmp.js";
+
+// M9-tmp: tmp 정리는 등록 역순으로 가장 나중에 돈다.
+useTmpCleanup();
 
 // M5.5-4 무인 실행 + approvals.json + 종료 코드 E2E (fake echo, external 노드).
 
@@ -51,9 +53,9 @@ const SAVE_CAT = [
 ] as never;
 
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), "pf-m554-"));
+  root = makeTmp("pf-m554-");
   pfdir = join(root, ".procforge");
-  home = mkdtempSync(join(tmpdir(), "pf-m554home-"));
+  home = makeTmp("pf-m554home-");
   oldHome = process.env.HOME;
   oldProfile = process.env.USERPROFILE;
   process.env.HOME = home;
@@ -398,7 +400,7 @@ describe("M5.5-4 approvals 매칭", () => {
       "https://a.com/public/?x=1",
       "https://a.com/public/#frag",
     ]) {
-      const d = mkdtempSync(join(tmpdir(), "pf-m544q-"));
+      const d = makeTmp("pf-m544q-");
       writeFileSync(
         join(d, "approvals.json"),
         JSON.stringify({
@@ -415,7 +417,7 @@ describe("M5.5-4 approvals 매칭", () => {
       expect(() => loadApprovals(d)).toThrow(/형식 오류/);
     }
     // origin 뒤 "/" 없는 패턴은 로드 거부.
-    const d = mkdtempSync(join(tmpdir(), "pf-m543u-"));
+      const d = makeTmp("pf-m543u-");
     writeFileSync(
       join(d, "approvals.json"),
       JSON.stringify({
@@ -446,7 +448,7 @@ describe("M5.5-4 approvals 매칭", () => {
       n: 1,
     });
     // v1 파일 로드 → 변환 적용.
-    const d = mkdtempSync(join(tmpdir(), "pf-m543v1-"));
+      const d = makeTmp("pf-m543v1-");
     writeFileSync(
       join(d, "approvals.json"),
       JSON.stringify([
@@ -465,7 +467,7 @@ describe("M5.5-4 approvals 매칭", () => {
       },
     ]);
     // node pin 없는 v1 → bad_request.
-    const d2 = mkdtempSync(join(tmpdir(), "pf-m543v1b-"));
+      const d2 = makeTmp("pf-m543v1b-");
     writeFileSync(
       join(d2, "approvals.json"),
       JSON.stringify([{ tool: { server: "s", name: "t" } }]),
