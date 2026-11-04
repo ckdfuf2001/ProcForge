@@ -5,6 +5,9 @@ import {
   warnOnceEnv,
   stripProofEnvVars,
   bothNames,
+  resolveProofEnv,
+  expandBothNames,
+  harnessedSpawnEnv,
 } from "./env-compat.js";
 
 // M9-1-1-a: PROOF_* 우선 + PROCFORGE_* 대체 (경고 1회).
@@ -122,6 +125,51 @@ describe("warnOnceEnv", () => {
     resetEnvCompatWarnings();
     warnOnceEnv("k", "m3", c.warn);
     expect(c.msgs).toEqual(["m1", "m3"]);
+  });
+});
+
+describe("resolveProofEnv/harnessedSpawnEnv", () => {
+  it("값이 있는 사용자용 변수만 스냅샷, CLIENT는 스냅샷 밖", () => {
+    resetEnvCompatWarnings();
+    const snap = resolveProofEnv({
+      PROOF_DIR: "/pf",
+      PROCFORGE_PROJECT_ROOT: "/root",
+      PROCFORGE_CLIENT: "remote",
+      OTHER: "x",
+    });
+    expect(snap).toEqual({ DIR: "/pf", PROJECT_ROOT: "/root" });
+    expect(snap).not.toHaveProperty("CLIENT");
+  });
+
+  it("보안 5종 불일치는 스냅샷에서 기동 오류", () => {
+    resetEnvCompatWarnings();
+    expect(() =>
+      resolveProofEnv({ PROOF_READ_ONLY: "1", PROCFORGE_READ_ONLY: "0" }),
+    ).toThrow(/PROOF_READ_ONLY.*PROCFORGE_READ_ONLY/);
+  });
+
+  it("하네스 env: 두 접두어 정리 + 확정값 재주입 + CLIENT 유지", () => {
+    resetEnvCompatWarnings();
+    const env = harnessedSpawnEnv(
+      { ...bothNames("DIR", "/pf") },
+      {
+        PATH: "/bin",
+        PROOF_DIR: "/evil",
+        PROCFORGE_DIR: "/old",
+        PROOF_CORE_URL: "http://x1",
+        PROCFORGE_CORE_URL: "http://x2",
+        PROCFORGE_CLIENT: "remote",
+      },
+    );
+    expect(env.PROOF_DIR).toBe("/pf");
+    expect(env.PROCFORGE_DIR).toBe("/pf");
+    // 스냅샷이 값이 있는 변수를 전부 살린다 (CORE_URL은 proof 값)
+    expect(env.PROOF_CORE_URL).toBe("http://x1");
+    expect(env.PROCFORGE_CORE_URL).toBe("http://x1");
+    // 내부용 CLIENT는 지우지 않고 그대로 넘긴다
+    expect(env.PROCFORGE_CLIENT).toBe("remote");
+    expect(env.PATH).toBe("/bin");
+    expect(env).not.toHaveProperty("PROOF_FOO");
   });
 });
 

@@ -8,7 +8,7 @@ import { resolveStoreDir } from "../src/app/store-dir.js";
 import {
   readEnvPair,
   resetEnvCompatWarnings,
-  stripProofEnvVars,
+  harnessedSpawnEnv,
   bothNames,
 } from "@procforge/shared/env-compat.js";
 import { isDefaultTenantAllowed } from "../../core-server/dist/server.js";
@@ -89,12 +89,11 @@ describe("M9-1-1 env 호환 (통합)", () => {
       process.execPath,
       [join(DIST, "main.js"), root],
       {
-        env: {
-          ...stripProofEnvVars(process.env),
+        env: harnessedSpawnEnv({
           ...bothNames("DIR", root),
           PROOF_READ_ONLY: "1",
           PROCFORGE_READ_ONLY: "0",
-        } as NodeJS.ProcessEnv,
+        }) as NodeJS.ProcessEnv,
         encoding: "utf8",
       },
     );
@@ -134,10 +133,9 @@ describe("M9-1-1 env 호환 (통합)", () => {
     const old = process.env.PROOF_DIR;
     process.env.PROOF_DIR = evil;
     try {
-      const env = {
-        ...stripProofEnvVars(process.env),
+      const env = harnessedSpawnEnv({
         ...bothNames("DIR", pfdir),
-      };
+      });
       expect(env.PROOF_DIR).toBe(pfdir);
       expect(env.PROCFORGE_DIR).toBe(pfdir);
       // 자식에서 해결해도 확정값이 나온다 (쉘 오염 제거됨)
@@ -172,14 +170,71 @@ describe("M9-1-1 env 호환 (통합)", () => {
     }
   }, 30000);
 
+  it("하네스 env 메커니즘: spawn 자식은 부모 CORE_URL을 그대로 쓴다 (CLIENT 유지)", async () => {
+    // §3 지시 2: remote 포함 전 모드에서 도는 메커니즘 테스트 (CI matrix가 remote 커버).
+    // 셸 오염을 가정: PROOF_DIR=evil + PROOF_CORE_URL=X1/PROCFORGE_CORE_URL=X2 + CLIENT.
+    const saved: Record<string, string | undefined> = {};
+    for (const k of ["PROOF_DIR", "PROCFORGE_DIR", "PROOF_CORE_URL", "PROCFORGE_CORE_URL", "PROCFORGE_CLIENT"]) {
+      saved[k] = process.env[k];
+    }
+    process.env.PROOF_DIR = mkdtempSync(join(tmpdir(), "pf-m9-evil-"));
+    process.env.PROCFORGE_DIR = mkdtempSync(join(tmpdir(), "pf-m9-old-"));
+    process.env.PROOF_CORE_URL = "http://127.0.0.1:9";
+    process.env.PROCFORGE_CORE_URL = "http://127.0.0.1:8";
+    process.env.PROCFORGE_CLIENT = "remote";
+    try {
+      const pfdir = mkdtempSync(join(tmpdir(), "pf-m9-harness-"));
+      const env = harnessedSpawnEnv({
+        ...bothNames("DIR", pfdir),
+        ...bothNames("PROJECT_ROOT", pfdir),
+      });
+      const out = await new Promise<string>((resolveP, reject) => {
+        const child = spawn(
+          process.execPath,
+          ["-e", "console.log(JSON.stringify({d:process.env.PROOF_DIR,p:process.env.PROCFORGE_DIR,c:process.env.PROOF_CORE_URL,k:process.env.PROCFORGE_CORE_KEY,client:process.env.PROCFORGE_CLIENT,e:process.env.PROOF_EVIIII}))"],
+          { env: env as NodeJS.ProcessEnv, stdio: ["ignore", "pipe", "pipe"] },
+        );
+        let stdout = "";
+        const timer = setTimeout(() => {
+          child.kill("SIGKILL");
+          reject(new Error("자식 응답 없음"));
+        }, 15000);
+        child.stdout.on("data", (d: Buffer) => {
+          stdout += d.toString("utf8");
+        });
+        child.on("close", () => {
+          clearTimeout(timer);
+          resolveP(stdout.trim());
+        });
+        child.on("error", reject);
+      });
+      const got = JSON.parse(out) as Record<string, string | undefined>;
+      // 확정값(DIR)은 주입값, 스냅샷값(CORE_URL)은 proof 값, CLIENT는 유지, 오염 제거
+      expect(got.d).toBe(pfdir);
+      expect(got.p).toBe(pfdir);
+      expect(got.c).toBe("http://127.0.0.1:9");
+      expect(got.client).toBe("remote");
+      expect(got.e).toBeUndefined();
+    } finally {
+      for (const [k, v] of Object.entries(saved)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+    }
+  }, 30000);
+
   it("stdio 순수성: stdout JSON-RPC + stderr 경고 1회", async () => {
     const pfdir = mkdtempSync(join(tmpdir(), "pf-m9-stdio-"));
     const root = mkdtempSync(join(tmpdir(), "pf-m9-stdio-root-"));
+    // 셸 오염과 무관하게 legacy-only로 고정 (결정적 1회 경고).
+    const clean: Record<string, string | undefined> = {};
+    for (const [k, v] of Object.entries(process.env)) {
+      if (k.startsWith("PROOF_") || k.startsWith("PROCFORGE_")) continue;
+      clean[k] = v;
+    }
+    clean.PROCFORGE_DIR = pfdir;
     const child = spawn(process.execPath, [join(DIST, "main.js"), root], {
-      env: {
-        ...stripProofEnvVars(process.env),
-        PROCFORGE_DIR: pfdir,
-      } as NodeJS.ProcessEnv,
+      env: clean as NodeJS.ProcessEnv,
       stdio: ["pipe", "pipe", "pipe"],
     });
     try {

@@ -18,7 +18,7 @@ import { toJUnit } from "../src/runner/index.js";
 import { runTestSession as runSession } from "./client-mode.js";
 import { FileStore } from "../src/filestore.js";
 import type { CoreClient } from "@procforge/shared/core-client.js";
-import { stripProofEnvVars, bothNames } from "@procforge/shared/env-compat.js";
+import { harnessedSpawnEnv, bothNames } from "@procforge/shared/env-compat.js";
 
 let root: string;
 let pfdir: string;
@@ -795,12 +795,11 @@ describe("M3 runner", () => {
     const r = await spawnCli(
       cli,
       ["test", "--session", sid, "--mode", "replay", "--update-golden"],
-      // M9-1-1: 상속 env에서 두 접두어를 지운 뒤 확정값을 두 이름으로 주입.
-      {
-        ...stripProofEnvVars(process.env),
+      // M9-1-1: 하네스 env (두 접두어 정리 + 확정값 재주입, CLIENT 유지).
+      harnessedSpawnEnv({
         ...bothNames("DIR", pfdir),
         ...bothNames("PROJECT_ROOT", root),
-      },
+      }),
     );
     expect(r.status).toBe(2);
   }, 30000);
@@ -808,12 +807,11 @@ describe("M3 runner", () => {
   it("CLI positional UUID는 세션으로 해석", async () => {
     const sid = await scriptedSession();
     const cli = resolve(__dirname, "..", "dist", "cli.js");
-    // M9-1-1: 상속 env에서 두 접두어를 지운 뒤 확정값을 두 이름으로 주입.
-    const env = {
-      ...stripProofEnvVars(process.env),
+    // M9-1-1: 하네스 env (두 접두어 정리 + 확정값 재주입, CLIENT 유지).
+    const env = harnessedSpawnEnv({
       ...bothNames("DIR", pfdir),
       ...bothNames("PROJECT_ROOT", root),
-    };
+    });
     // 존재하지 않는 UUID → 세션 경로로 실행되어 session_not_found (절차서 경로 아님)
     const r = await spawnCli(
       cli,
