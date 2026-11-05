@@ -1,8 +1,10 @@
 import { get } from "node:https";
+import { createHash } from "node:crypto";
 
 // 보고 전용: CI 잡별 결과 출력 (L3 게이트가 아님. dev-verify는 네트워크에 의존하지 않는다).
 // 사용: node scripts/ci-jobs.mjs <run-id> | --sha <head-sha>
-// 출력: 잡 이름 + conclusion, 마지막에 head_sha/run/conclusion 1줄.
+// 출력: 잡 이름 + conclusion (이름순 정렬), 마지막에 요약 줄 1줄.
+// 보고에는 요약 줄 1줄만 복사한다 (잡 목록을 손으로 옮겨 적지 않는다).
 // 공개 저장소는 토큰 없이 잡 목록 조회 가능. GITHUB_TOKEN이 있으면 로그용으로 함께 보낸다.
 
 const REPO = "ckdfuf2001/ProcForge";
@@ -56,18 +58,27 @@ async function main() {
   // M9-gates-fix: 잡 이름 중복이 있거나 고유 잡 수가 기대와 다르면 exit 1.
   // 하나를 놓치고 "7잡 success"처럼 보이는 것을 방지한다.
   // M9-tmp: success가 아닌 잡이 하나라도 있으면 exit 1 (출력만 보고 넘기지 않음).
-  const names = (jobs.jobs ?? []).map((j) => j.name);
-  const uniq = new Set(names);
-  for (const j of jobs.jobs ?? []) {
-    console.log(`${j.name} ${j.conclusion}`);
-  }
+  // M9-ci-out: 잡 줄을 이름순으로 출력한다. 옮겨 적다가 틀리면 바로 눈에 띈다.
+  // 요약 줄의 digest는 정렬한 "이름 conclusion" 줄들을 \n으로 이은 문자열의 sha256 앞 12자리다.
+  const rows = (jobs.jobs ?? []).map((j) => `${j.name} ${j.conclusion}`).sort();
+  for (const r of rows) console.log(r);
   if (wantedSha !== undefined) {
-    const got = (jobs.jobs ?? [])[0]?.head_sha;
-    if (typeof got !== "string" || !got.startsWith(wantedSha)) {
-      console.error(`error: head_sha 불일치 (입력 ${wantedSha}, 결과 ${got ?? "없음"})`);
+    // 모든 잡의 head_sha가 입력 sha로 시작하는지 단언한다.
+    const mismatched = (jobs.jobs ?? []).filter(
+      (j) => typeof j.head_sha !== "string" || !j.head_sha.startsWith(wantedSha),
+    );
+    if (mismatched.length > 0) {
+      console.error(
+        `error: head_sha 불일치 ${mismatched.length}건 (입력 ${wantedSha}): ${mismatched.map((j) => `${j.name}=${j.head_sha ?? "없음"}`).join(", ")}`,
+      );
       process.exitCode = 1;
     }
   }
+  const names = rows.map((r) => r.slice(0, r.lastIndexOf(" ")));
+  const uniq = new Set(names);
+  const okCount = (jobs.jobs ?? []).filter((j) => j.conclusion === "success").length;
+  const digest = createHash("sha256").update(rows.join("\n")).digest("hex").slice(0, 12);
+  console.log(`jobs=${names.length} unique=${uniq.size} success=${okCount} digest=${digest}`);
   if (uniq.size !== names.length) {
     console.error(`error: 중복 잡 이름 있음 (${names.length}건 중 고유 ${uniq.size}건)`);
     process.exitCode = 1;
