@@ -292,9 +292,9 @@ export function signalText(input: {
   const prefix = (input.toolPrefix ?? "").trim().replace(/_+$/, "");
   const toolRef = prefix
     ? `${prefix}_pf_next({sessionId:"${sid}"})`
-    : "ProcForge의 pf_next 도구";
+    : "Proof의 pf_next 도구";
   const text =
-    `ProcForge 세션 ${sid}의 노드 ${nid}에 사람 의견이 추가됐습니다. ` +
+    `Proof 세션 ${sid}의 노드 ${nid}에 사람 의견이 추가됐습니다. ` +
     `새 세션을 만들지 말고(pf_start 금지) ${toolRef}로 이어서 진행하세요.`;
   return text.length > SIGNAL_TEXT_MAX
     ? text.slice(0, SIGNAL_TEXT_MAX)

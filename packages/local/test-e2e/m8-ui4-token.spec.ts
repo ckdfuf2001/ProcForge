@@ -22,7 +22,7 @@ async function connect(page: Page, value: string): Promise<void> {
 }
 
 async function expectList(page: Page, sid: string): Promise<void> {
-  await expect(page.getByRole("heading", { name: "ProcForge", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Proof", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: sid.slice(0, 8), exact: true })).toBeVisible();
 }
 

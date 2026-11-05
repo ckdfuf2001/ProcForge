@@ -30,7 +30,7 @@ async function openSession(page: Page, sid: string): Promise<void> {
     });
   });
   await page.goto(`${h.ui.url}/#t=${h.ui.token}`);
-  await expect(page.getByRole("heading", { name: "ProcForge" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Proof" })).toBeVisible();
   await page.getByRole("button", { name: sid.slice(0, 8), exact: true }).click();
   await expect(page.getByText(/실시간:/)).toBeVisible();
 }
@@ -52,7 +52,7 @@ async function visitRunTab(page: Page): Promise<void> {
     });
   });
   await page.goto(`${h.ui.url}/#t=${h.ui.token}`);
-  await expect(page.getByRole("heading", { name: "ProcForge" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Proof" })).toBeVisible();
   await page.locator("nav").getByRole("button", { name: "실행", exact: true }).click();
   await expect(page.getByRole("heading", { name: "실행", exact: true })).toBeVisible();
 }

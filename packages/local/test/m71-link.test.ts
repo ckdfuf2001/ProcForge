@@ -838,7 +838,7 @@ describe("M8-1 신호 문구 + 짝 유효성", () => {
         text: "x",
         link: { openCodeSessionId: "ses-g" },
       });
-      expect(r2.signal.copyText).toContain("ProcForge의 pf_next 도구");
+      expect(r2.signal.copyText).toContain("Proof의 pf_next 도구");
       expect(r2.signal.copyText).not.toContain("pf_next({sessionId");
     } finally {
       await fake.close();

@@ -25,7 +25,7 @@ export function TokenGate(props: {
 
   return (
     <main className="app-shell auth-shell">
-      <h1>ProcForge</h1>
+      <h1>Proof</h1>
       <section className="panel token-panel" aria-labelledby="token-title">
         <h2 id="token-title">토큰 입력</h2>
         {props.notice === "restarted" && (

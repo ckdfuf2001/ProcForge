@@ -151,7 +151,7 @@ export function App() {
   if (error) {
     return (
       <main className="app-shell auth-shell">
-        <h1>ProcForge</h1>
+        <h1>Proof</h1>
         <p role="alert">오류: {error.message}</p>
       </main>
     );
@@ -170,7 +170,7 @@ export function App() {
         <div className="brand">
           <span className="brand-mark" aria-hidden="true">PF</span>
           <div>
-            <h1>ProcForge</h1>
+            <h1>Proof</h1>
             <p className="brand-sub">절차 실행·검토 콘솔</p>
           </div>
         </div>

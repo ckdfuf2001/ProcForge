@@ -86,8 +86,8 @@ function cspOf(res: ServerResponse): string {
 
 /** M7-ui2: 빌드 산출물이 없을 때 (안내만. 스크립트 0 유지) */
 const NO_BUILD_HTML = `<!doctype html>
-<html lang="ko"><head><meta charset="utf-8"><title>ProcForge</title></head>
-<body><main><h1>ProcForge</h1>
+<html lang="ko"><head><meta charset="utf-8"><title>Proof</title></head>
+<body><main><h1>Proof</h1>
 <p role="alert">화면 빌드가 없습니다. 저장소에서 <code>pnpm -r build</code> 를 실행한 뒤 다시 열어 주세요.</p>
 </main></body></html>`;
 
