@@ -3,8 +3,9 @@ import { createHash } from "node:crypto";
 
 // 보고 전용: CI 잡별 결과 출력 (L3 게이트가 아님. dev-verify는 네트워크에 의존하지 않는다).
 // 사용: node scripts/ci-jobs.mjs <run-id> | --sha <head-sha>
-// 출력: 잡 이름 + conclusion (이름순 정렬), 마지막에 요약 줄 1줄.
-// 보고에는 요약 줄 1줄만 복사한다 (잡 목록을 손으로 옮겨 적지 않는다).
+// 출력: 잡 이름 + conclusion (이름순 정렬), 마지막에 요약 줄 1줄
+// (`run=<id> head=<앞 12자리> jobs= unique= success= digest=`).
+// 보고에는 요약 줄 1줄만 복사한다 (셸 출력 그대로, 타이핑 금지).
 // 공개 저장소는 토큰 없이 잡 목록 조회 가능. GITHUB_TOKEN이 있으면 로그용으로 함께 보낸다.
 
 const REPO = "ckdfuf2001/ProcForge";
@@ -74,11 +75,18 @@ async function main() {
       process.exitCode = 1;
     }
   }
+  // M9-tmp-2: 요약 줄에 run과 head를 넣는다. digest 입력 맨 앞에
+  // `run=<id>\nhead=<전체 sha>\n`을 붙인 뒤 정렬한 잡 줄을 잇는다.
+  // 이렇게 하면 run마다 digest가 달라진다 (이전 digest는 run 구분이 안 됐음).
   const names = rows.map((r) => r.slice(0, r.lastIndexOf(" ")));
   const uniq = new Set(names);
   const okCount = (jobs.jobs ?? []).filter((j) => j.conclusion === "success").length;
-  const digest = createHash("sha256").update(rows.join("\n")).digest("hex").slice(0, 12);
-  console.log(`jobs=${names.length} unique=${uniq.size} success=${okCount} digest=${digest}`);
+  const headFull = String((jobs.jobs ?? [])[0]?.head_sha ?? "");
+  const digest = createHash("sha256")
+    .update(`run=${runId}\nhead=${headFull}\n` + rows.join("\n"))
+    .digest("hex")
+    .slice(0, 12);
+  console.log(`run=${runId} head=${headFull.slice(0, 12)} jobs=${names.length} unique=${uniq.size} success=${okCount} digest=${digest}`);
   if (uniq.size !== names.length) {
     console.error(`error: 중복 잡 이름 있음 (${names.length}건 중 고유 ${uniq.size}건)`);
     process.exitCode = 1;
