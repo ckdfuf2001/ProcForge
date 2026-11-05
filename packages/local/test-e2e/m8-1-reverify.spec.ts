@@ -1,5 +1,11 @@
 import { test, expect, type Page } from "@playwright/test";
 import { setup, seedTwoLeaves, simulateReport, pair, OC_SID, type Harness } from "./harness.js";
+import { cleanRegisteredTmp } from "@proof/shared/tmp.js";
+
+// M9-tmp2: E2E 임시폴더 정리 (vitest afterAll이 아니라 Playwright test.afterAll).
+test.afterAll(() => {
+  cleanRegisteredTmp();
+});
 
 // M8-1-0: leaf 자기 재검증(needs_reverify) E2E.
 // 시나리오: 확정 leaf에 의견 등록 → 재검증 배지 → 가짜 모델의 새 report·confirm

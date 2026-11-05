@@ -1,5 +1,11 @@
 import { test, expect, type Page } from "@playwright/test";
 import { setup, seedTwoLeaves, restartUi, type Harness } from "./harness.js";
+import { cleanRegisteredTmp } from "@proof/shared/tmp.js";
+
+// M9-tmp2: E2E 임시폴더 정리 (vitest afterAll이 아니라 Playwright test.afterAll).
+test.afterAll(() => {
+  cleanRegisteredTmp();
+});
 
 // M8-ui4: 토큰 입력 화면 E2E (실제 chromium + 실제 UI dist + 실제 local 서버).
 

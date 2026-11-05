@@ -9,6 +9,12 @@ import {
   OC_SID,
   type Harness,
 } from "./harness.js";
+import { cleanRegisteredTmp } from "@proof/shared/tmp.js";
+
+// M9-tmp2: E2E 임시폴더 정리 (vitest afterAll이 아니라 Playwright test.afterAll).
+test.afterAll(() => {
+  cleanRegisteredTmp();
+});
 
 // M7-5-6: Playwright E2E (실제 chromium + 실제 UI dist + 실제 local 서버).
 // 시나리오: (a) 월간보고서 (b) 크롤링 args 수정 (c) conflict (d) plan/버전 미확인

@@ -2,6 +2,12 @@ import { test, expect, type Page } from "@playwright/test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { setup, seedTwoLeaves, pair, OC_SID, type Harness } from "./harness.js";
+import { cleanRegisteredTmp } from "@proof/shared/tmp.js";
+
+// M9-tmp2: E2E 임시폴더 정리 (vitest afterAll이 아니라 Playwright test.afterAll).
+test.afterAll(() => {
+  cleanRegisteredTmp();
+});
 
 // M8-1 c: 확정 절차서에 든 leaf에 의견을 저장하려면 확인창이 뜬다.
 

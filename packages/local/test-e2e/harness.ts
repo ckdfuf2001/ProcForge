@@ -1,12 +1,14 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { createServer, type Server } from "node:http";
 import { createLocalStack } from "../dist/core-inprocess.js";
 import { ProcForgeApp } from "../dist/app/app.js";
 import { createUiServer } from "../dist/app/ui-server.js";
 import { savePairing } from "../dist/services/pairings.js";
+import { makeTmp } from "@proof/shared/tmp.js";
+// M9-tmp2: 정리는 각 spec 파일의 test.afterAll(cleanRegisteredTmp)이 담당한다.
+// (vitest afterAll과 달리 Playwright 훅은 spec 파일에서 건다.)
 
 // M7-5-6: E2E 하네스 — 임시 저장소 + 가짜 OpenCode + UI 서버(실제 dist).
 // 런타임은 **빌드 산출물(dist)** 을 쓴다 (pretest:e2e 가 먼저 빌드).
@@ -163,7 +165,7 @@ export async function restartUi(h: Harness): Promise<void> {
 }
 
 export async function setup(opts: { fakeMode?: FakeMode } = {}): Promise<Harness> {
-  const root = mkdtempSync(join(tmpdir(), "pf-e2e-"));
+  const root = makeTmp("pf-e2e-");
   const pfdir = join(root, ".procforge");
   mkdirSync(pfdir, { recursive: true });
   // 러너가 MCP 도구를 실제로 실행할 수 있게 가짜 ppt 서버를 등록한다.
