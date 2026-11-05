@@ -1,12 +1,19 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { mkdtempSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { startServer, parseApiKeys } from "../src/server.js";
 import {
   PROTOCOL_VERSION_HEADER,
   PROTOCOL_VERSION,
 } from "@proof/shared/wire.js";
+import { makeTmp, cleanRegisteredTmp } from "@proof/shared/tmp.js";
+
+// M9-tmp2: useTmpCleanup 3줄 (vitest는 테스트 파일에서만 import).
+function useTmpCleanup(): void {
+  afterAll(() => {
+    cleanRegisteredTmp();
+  });
+}
+useTmpCleanup();
 
 // M6-2: 인증·테넌트 격리·버전·E2E 흐름.
 
@@ -46,7 +53,7 @@ async function post(
 
 // 소켓 고갈(EACCES) 방지: 파일당 서버 1개 공유 (세션 id는 uuid라 충돌 없음).
 beforeAll(async () => {
-  dir = mkdtempSync(join(tmpdir(), "pf-core-srv-"));
+  dir = makeTmp("pf-core-srv-");
   const keys = parseApiKeys(`t1:${KEY1},t2:${KEY2}`);
   const s = await startServer({ dataDir: dir, apiKeys: keys, port: 0 });
   base = `http://127.0.0.1:${s.port}`;
@@ -68,7 +75,7 @@ describe("core-server", () => {
   });
 
   it("M6.1-4: dev 플래그 없으면 bare 키 401, 있으면 통과", async () => {
-    const dir2 = mkdtempSync(join(tmpdir(), "pf-core-srv-bare-"));
+    const dir2 = makeTmp("pf-core-srv-bare-");
     const s = await startServer({
       dataDir: dir2,
       apiKeys: parseApiKeys("barekey"),
