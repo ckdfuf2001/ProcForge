@@ -1,12 +1,17 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { buildServer } from "../src/server.js";
 import { ProcForgeApp } from "../src/app/app.js";
 import { testStack } from "./client-mode.js";
+import { makeTmp } from "@proof/shared/tmp.js";
+import { useTmpCleanup } from "./tmp-hooks.js";
+
+// M9-tmp2: tmp 정리는 등록 역순으로 가장 나중에 돈다.
+useTmpCleanup();
+
 
 // M5.8.1-6: 호출 주체 기록. InMemoryTransport clientInfo가
 // calls.jsonl 각 행(actor 포함)과 세션 meta에 기록된다.
@@ -18,9 +23,9 @@ let oldHome: string | undefined;
 let oldProfile: string | undefined;
 
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), "pf-m581c-"));
+  root = makeTmp("pf-m581c-");
   pfdir = join(root, ".procforge");
-  home = mkdtempSync(join(tmpdir(), "pf-m581chome-"));
+  home = makeTmp("pf-m581chome-");
   oldHome = process.env.HOME;
   oldProfile = process.env.USERPROFILE;
   process.env.HOME = home;

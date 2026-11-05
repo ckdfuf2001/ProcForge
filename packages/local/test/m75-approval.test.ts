@@ -1,17 +1,22 @@
 import { describe, it, expect, beforeEach, afterAll } from "vitest";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { ProcForgeApp } from "../src/app/app.js";
 import { createUiServer } from "../src/app/ui-server.js";
 import { testStack } from "./client-mode.js";
 import { unifiedDiff } from "../src/services/diff.js";
+import { makeTmp } from "@proof/shared/tmp.js";
+import { useTmpCleanup } from "./tmp-hooks.js";
+
+// M9-tmp2: tmp 정리는 등록 역순으로 가장 나중에 돈다.
+useTmpCleanup();
+
 
 // M7 5-2: 승인 화면 — 스크립트 sha + diff + approvalHash 필수(불일치 409).
 
 let pfdir: string;
 beforeEach(() => {
-  pfdir = join(mkdtempSync(join(tmpdir(), "pf-approval-")), ".procforge");
+  pfdir = join(makeTmp("pf-approval-"), ".procforge");
 });
 
 const scriptRel = "scripts/step.py";

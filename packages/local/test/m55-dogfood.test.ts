@@ -1,12 +1,17 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, writeFileSync, readFileSync, mkdirSync, existsSync } from "node:fs";
+import { writeFileSync, readFileSync, mkdirSync, existsSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
 import { ProcForgeApp } from "../src/app/app.js";
 import { runProcedureTest } from "../src/runner/procedure-run.js";
 import { runExitCode, runErrorExit } from "../src/app/run-exit.js";
 import { testStack } from "./client-mode.js";
+import { makeTmp } from "@proof/shared/tmp.js";
+import { useTmpCleanup } from "./tmp-hooks.js";
+
+// M9-tmp2: tmp 정리는 등록 역순으로 가장 나중에 돈다.
+useTmpCleanup();
+
 
 // M5.5-5 dogfood: 목록(3페이지) → 상세(map·threshold) → 신규만 CSV 누적.
 // fake board(day별 목록) + detail(x3 실패). run1(d1): x1,x2 / run2(d2): x4 신규.
@@ -53,9 +58,9 @@ const P3EMPTY = { items: [], nextCursor: null };
 const P3X4 = { items: [{ id: "x4" }], nextCursor: null };
 
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), "pf-m555-"));
+  root = makeTmp("pf-m555-");
   pfdir = join(root, ".procforge");
-  home = mkdtempSync(join(tmpdir(), "pf-m555home-"));
+  home = makeTmp("pf-m555home-");
   oldHome = process.env.HOME;
   oldProfile = process.env.USERPROFILE;
   process.env.HOME = home;

@@ -1,11 +1,16 @@
 import { describe, it, expect, beforeEach, afterAll } from "vitest";
-import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readFileSync, readdirSync } from "node:fs";
+import { mkdirSync, writeFileSync, existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { ProcForgeApp } from "../src/app/app.js";
 import { createUiServer } from "../src/app/ui-server.js";
 import { testStack } from "./client-mode.js";
 import { unifiedDiff, diffStat, DIFF_SKIPPED } from "../src/services/diff.js";
+import { makeTmp } from "@proof/shared/tmp.js";
+import { useTmpCleanup } from "./tmp-hooks.js";
+
+// M9-tmp2: tmp 정리는 등록 역순으로 가장 나중에 돈다.
+useTmpCleanup();
+
 
 // M7-5-e/f/g/h/i: 승인이 실제로 통하는지.
 // e diff 는 **스냅샷** 대 현재본 / f 해시 없는 이력은 미승인 /
@@ -13,7 +18,7 @@ import { unifiedDiff, diffStat, DIFF_SKIPPED } from "../src/services/diff.js";
 
 let pfdir: string;
 beforeEach(() => {
-  pfdir = join(mkdtempSync(join(tmpdir(), "pf-apv2-")), ".procforge");
+  pfdir = join(makeTmp("pf-apv2-"), ".procforge");
 });
 
 const catalog = [

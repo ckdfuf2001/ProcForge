@@ -1,9 +1,14 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, existsSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 import { testStack } from "./client-mode.js";
+import { makeTmp } from "@proof/shared/tmp.js";
+import { useTmpCleanup } from "./tmp-hooks.js";
+
+// M9-tmp2: tmp 정리는 등록 역순으로 가장 나중에 돈다.
+useTmpCleanup();
+
 
 // M5.3-0-2: BC 실사용 세션(05017105, 1.2 가짜 leaf) 회귀.
 // redacted export(export-bc.zip)를 fixture로 보관하고, 동일 형상
@@ -19,9 +24,9 @@ let oldHome: string | undefined;
 let oldProfile: string | undefined;
 
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), "pf-m530-"));
+  root = makeTmp("pf-m530-");
   pfdir = join(root, ".procforge");
-  home = mkdtempSync(join(tmpdir(), "pf-m530home-"));
+  home = makeTmp("pf-m530home-");
   oldHome = process.env.HOME;
   oldProfile = process.env.USERPROFILE;
   process.env.HOME = home;

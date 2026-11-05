@@ -1,17 +1,22 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { mkdtempSync, writeFileSync, mkdirSync } from "node:fs";
+import { writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { ProcForgeApp } from "../src/app/app.js";
 import { runTestSession as runSession } from "./client-mode.js";
 import { testStack } from "./client-mode.js";
+import { makeTmp } from "@proof/shared/tmp.js";
+import { useTmpCleanup } from "./tmp-hooks.js";
+
+// M9-tmp2: tmp 정리는 등록 역순으로 가장 나중에 돈다.
+useTmpCleanup();
+
 
 // M3.5.1-3: resultJson 키를 녹화 응답과 대조. 날조 키는 경고 + auto 미생성.
 
 let root: string;
 let pfdir: string;
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), "pf-m351c-"));
+  root = makeTmp("pf-m351c-");
   pfdir = join(root, ".procforge");
 });
 

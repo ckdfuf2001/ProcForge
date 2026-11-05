@@ -1,12 +1,17 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { mkdirSync, mkdtempSync, writeFileSync, existsSync } from "node:fs";
+import { mkdirSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { ProcForgeApp } from "../src/app/app.js";
 import { createUiServer } from "../src/app/ui-server.js";
 import { testStack } from "./client-mode.js";
 import { runDir, spawnTrackedChild, isAlive } from "../src/app/run-control.js";
 import { readRunState } from "../src/services/run-state.js";
+import { makeTmp } from "@proof/shared/tmp.js";
+import { useTmpCleanup } from "./tmp-hooks.js";
+
+// M9-tmp2: tmp 정리는 등록 역순으로 가장 나중에 돈다.
+useTmpCleanup();
+
 
 // M7 5-1: UI 실행 — 등록 절차서·선언 param만, 동시 1개(409), 취소=프로세스 트리,
 // 기록은 runs/<runId> (세션 TTL과 무관).
@@ -15,7 +20,7 @@ const catalog = [{ server: "t", name: "read", inputSchema: { type: "object" }, s
 
 let pfdir: string;
 beforeEach(() => {
-  pfdir = join(mkdtempSync(join(tmpdir(), "pf-run-")), ".procforge");
+  pfdir = join(makeTmp("pf-run-"), ".procforge");
 });
 
 /** 최소 등록 절차서 (param 1개 선언) */

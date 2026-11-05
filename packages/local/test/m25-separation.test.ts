@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, writeFileSync, existsSync } from "node:fs";
+import { writeFileSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
-import { tmpdir } from "node:os";
 import { spawn } from "node:child_process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -12,6 +11,12 @@ import { buildServer } from "../src/server.js";
 import { ProcForgeApp } from "../src/app/app.js";
 import { wrapClient } from "./client-mode.js";
 import { checkerEvaluate } from "../src/checker.js";
+import { makeTmp } from "@proof/shared/tmp.js";
+import { useTmpCleanup } from "./tmp-hooks.js";
+
+// M9-tmp2: tmp 정리는 등록 역순으로 가장 나중에 돈다.
+useTmpCleanup();
+
 
 // M4.2-2.5 완료 기준: FileStore 없는 별도 MemoryStore core로 MCP 계약 흐름 통과.
 // App의 로컬 파일 작업(sandbox/fixtures/절차서)은 별도 임시 폴더.
@@ -27,9 +32,9 @@ let oldProfile: string | undefined;
 const READ = { server: "opencode", name: "read", inputSchema: {}, schemaHash: "h" };
 
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), "pf-m25-"));
+  root = makeTmp("pf-m25-");
   pfdir = join(root, ".procforge");
-  home = mkdtempSync(join(tmpdir(), "pf-m25home-"));
+  home = makeTmp("pf-m25home-");
   oldHome = process.env.HOME;
   oldProfile = process.env.USERPROFILE;
   process.env.HOME = home;

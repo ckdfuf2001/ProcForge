@@ -1,12 +1,17 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
+import { mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { createUiServer } from "../src/app/ui-server.js";
 import { savePairing, loadPairings } from "../src/services/pairings.js";
 import { detectDuplicateStores } from "../src/app/store-dir.js";
 import { createApp } from "../src/app/bootstrap.js";
 import type { ProcForgeApp } from "../src/app/app.js";
+import { makeTmp } from "@proof/shared/tmp.js";
+import { useTmpCleanup } from "./tmp-hooks.js";
+
+// M9-tmp2: tmp 정리는 등록 역순으로 가장 나중에 돈다.
+useTmpCleanup();
+
 
 // M7-1/ui2: ui 서버 — 보안 3종·세션 목록 계약·pairings·저장소 경고·정적 서빙·
 // SSE(순서·재개·heartbeat·구독 정리·상한 429·쿼리 토큰 401)·React 빌드 XSS.
@@ -15,9 +20,9 @@ let root: string;
 let pfdir: string;
 let emptyDir: string;
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), "pf-m71ui-"));
-  pfdir = join(mkdtempSync(join(tmpdir(), "pf-m71uip-")), ".procforge");
-  emptyDir = mkdtempSync(join(tmpdir(), "pf-m71uie-"));
+  root = makeTmp("pf-m71ui-");
+  pfdir = join(makeTmp("pf-m71uip-"), ".procforge");
+  emptyDir = makeTmp("pf-m71uie-");
 });
 
 /** 인라인 골격 강제 (실제 packages/ui/dist 무시) */
@@ -432,7 +437,7 @@ describe("M7-1 정적 서빙 (React 빌드)", () => {
     } catch {
       // 미빌드 → 모사
     }
-    const d = mkdtempSync(join(tmpdir(), "pf-m71uid2-"));
+    const d = makeTmp("pf-m71uid2-");
     mkdirSync(join(d, "assets"), { recursive: true });
     writeFileSync(join(d, "index.html"), "<html><body><div id=root></div></body></html>");
     writeFileSync(join(d, "assets", "index-abc.js"), 'console.log("built")');

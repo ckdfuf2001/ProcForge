@@ -1,12 +1,17 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import path, { resolve, join } from "node:path";
-import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { ProcForgeApp } from "../src/app/app.js";
 import { createUiServer } from "../src/app/ui-server.js";
 import { testStack } from "./client-mode.js";
 import { readRunState } from "../src/services/run-state.js";
+import { makeTmp } from "@proof/shared/tmp.js";
+import { useTmpCleanup } from "./tmp-hooks.js";
+
+// M9-tmp2: tmp 정리는 등록 역순으로 가장 나중에 돈다.
+useTmpCleanup();
+
 
 // M7-5-4: 실행 결과 화면 계약 — 절차서 목록 / 노드별 결과(그대로) / wildcard 명시 선택.
 
@@ -18,7 +23,7 @@ const ECHO_CAT = [
 let root: string;
 let pfdir: string;
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), "pf-runinfo-"));
+  root = makeTmp("pf-runinfo-");
   pfdir = join(root, ".procforge");
   mkdirSync(pfdir, { recursive: true });
   const serverMjs = resolve(__dirname, "fixtures/fake-ppt-mcp/server.mjs");

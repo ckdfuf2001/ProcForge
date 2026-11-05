@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, writeFileSync, readFileSync, mkdirSync } from "node:fs";
+import { writeFileSync, readFileSync, mkdirSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { tmpdir } from "node:os";
 import { ProcForgeApp } from "../src/app/app.js";
 import { runProcedureTest } from "../src/runner/procedure-run.js";
 import {
@@ -14,6 +13,12 @@ import {
 } from "../src/runner/run.js";
 import { parseRetryOptions } from "../src/app/run-exit.js";
 import { testStack, serverSessionDir } from "./client-mode.js";
+import { makeTmp } from "@proof/shared/tmp.js";
+import { useTmpCleanup } from "./tmp-hooks.js";
+
+// M9-tmp2: tmp 정리는 등록 역순으로 가장 나중에 돈다.
+useTmpCleanup();
+
 
 // M5.6-f: readOnly 도구 호출만 재시도 (지수 백오프, 설정화). external 재시도 금지.
 
@@ -41,9 +46,9 @@ let oldHome: string | undefined;
 let oldProfile: string | undefined;
 
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), "pf-m56f-"));
+  root = makeTmp("pf-m56f-");
   pfdir = join(root, ".procforge");
-  home = mkdtempSync(join(tmpdir(), "pf-m56fhome-"));
+  home = makeTmp("pf-m56fhome-");
   oldHome = process.env.HOME;
   oldProfile = process.env.USERPROFILE;
   process.env.HOME = home;

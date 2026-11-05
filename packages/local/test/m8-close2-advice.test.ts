@@ -1,7 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { z } from "zod";
@@ -9,6 +7,12 @@ import { buildServer } from "../src/server.js";
 import { ProcForgeApp } from "../src/app/app.js";
 import { OUTPUT_SCHEMAS } from "../src/views.js";
 import { testStack } from "./client-mode.js";
+import { makeTmp } from "@proof/shared/tmp.js";
+import { useTmpCleanup } from "./tmp-hooks.js";
+
+// M9-tmp2: tmp 정리는 등록 역순으로 가장 나중에 돈다.
+useTmpCleanup();
+
 
 // M8-1-close2 a: advice(id·revision 포함) 있는 노드를 돌려주는 모든 도구가
 // MCP 출력 스키마(-32602)를 통과하는지 실제 SDK Client로 확인한다.
@@ -21,9 +25,9 @@ let oldHome: string | undefined;
 let oldProfile: string | undefined;
 
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), "pf-m8c2-"));
+  root = makeTmp("pf-m8c2-");
   pfdir = join(root, ".procforge");
-  home = mkdtempSync(join(tmpdir(), "pf-m8c2home-"));
+  home = makeTmp("pf-m8c2home-");
   oldHome = process.env.HOME;
   oldProfile = process.env.USERPROFILE;
   process.env.HOME = home;

@@ -1,13 +1,18 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { tmpdir } from "node:os";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { buildServer, TOOL_NAMES } from "../src/server.js";
 import { parseErrorText } from "@proof/shared/errors.js";
 import { ProcForgeApp } from "../src/app/app.js";
 import { testStack } from "./client-mode.js";
+import { makeTmp } from "@proof/shared/tmp.js";
+import { useTmpCleanup } from "./tmp-hooks.js";
+
+// M9-tmp2: tmp 정리는 등록 역순으로 가장 나중에 돈다.
+useTmpCleanup();
+
 
 const MENTIONS = /pf_[a-z_]+/g;
 
@@ -18,9 +23,9 @@ let oldHome: string | undefined;
 let oldProfile: string | undefined;
 
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), "pf-follow-"));
+  root = makeTmp("pf-follow-");
   pfdir = join(root, ".procforge");
-  home = mkdtempSync(join(tmpdir(), "pf-followhome-"));
+  home = makeTmp("pf-followhome-");
   oldHome = process.env.HOME;
   oldProfile = process.env.USERPROFILE;
   process.env.HOME = home;

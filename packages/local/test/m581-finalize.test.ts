@@ -1,8 +1,13 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { swapDir, writeProcedure } from "../src/services/procedureWriter.js";
+import { makeTmp } from "@proof/shared/tmp.js";
+import { useTmpCleanup } from "./tmp-hooks.js";
+
+// M9-tmp2: tmp 정리는 등록 역순으로 가장 나중에 돈다.
+useTmpCleanup();
+
 
 // M5.8.1-3: finalize/export 경로 무명 예외 금지.
 // E2E 4회 internal 원인 확정: 보고 경로가 fixtures-manifest.json을 만들고
@@ -11,7 +16,7 @@ import { swapDir, writeProcedure } from "../src/services/procedureWriter.js";
 let root: string;
 
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), "pf-m581f-"));
+  root = makeTmp("pf-m581f-");
 });
 
 function minDoc(name: string) {

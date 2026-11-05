@@ -1,11 +1,16 @@
 import { describe, it, expect } from "vitest";
-import { mkdtempSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { CoreService } from "@proof/core";
 import { FileStore } from "../src/filestore.js";
 import { createLocalStack } from "../src/core-inprocess.js";
 import { clientMode } from "./client-mode.js";
+import { makeTmp } from "@proof/shared/tmp.js";
+import { useTmpCleanup } from "./tmp-hooks.js";
+
+// M9-tmp2: tmp 정리는 등록 역순으로 가장 나중에 돈다.
+useTmpCleanup();
+
 
 // M7-ui4-h: TTL 판정 기준은 core가 커밋 세션에 심는 `lastWriteAt ?? createdAt`다.
 // 가짜 시계로 확인한다 (실제 sleep 없음) — CI 슬로우/플레키를 원천 차단.
@@ -16,7 +21,7 @@ const passEval = async () => ({ ok: true, score: 1, detail: {} }) as never;
 
 const TTL = 1_000;
 function dir(): string {
-  return join(mkdtempSync(join(tmpdir(), "pf-ttl2-")), ".procforge");
+  return join(makeTmp("pf-ttl2-"), ".procforge");
 }
 function clock(start = 1_700_000_000_000) {
   let t = start;

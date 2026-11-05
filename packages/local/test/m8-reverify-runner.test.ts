@@ -1,11 +1,16 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { ProcForgeApp } from "../src/app/app.js";
 import { testStack } from "./client-mode.js";
 import { runTestSession as runSession } from "./client-mode.js";
 import { runExitCode } from "../src/app/run-exit.js";
+import { makeTmp } from "@proof/shared/tmp.js";
+import { useTmpCleanup } from "./tmp-hooks.js";
+
+// M9-tmp2: tmp 정리는 등록 역순으로 가장 나중에 돈다.
+useTmpCleanup();
+
 
 // M8-1-0 보정: 재검증 대기(needs_reverify) 노드는 러너가 실행하지 않는다.
 // + finalize 이 approvals.json(무인 실행이 실제로 쓰는 승인 목록) 불일치를 안내한다.
@@ -17,7 +22,7 @@ let root: string;
 let pfdir: string;
 
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), "pf-m8rv-run-"));
+  root = makeTmp("pf-m8rv-run-");
   pfdir = join(root, ".procforge");
 });
 

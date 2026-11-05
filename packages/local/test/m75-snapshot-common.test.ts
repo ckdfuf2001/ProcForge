@@ -1,11 +1,16 @@
 import { describe, it, expect, beforeEach, afterAll } from "vitest";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { ProcForgeApp } from "../src/app/app.js";
 import { testStack } from "./client-mode.js";
 import { readApprovedSnapshot } from "../src/services/approval-scripts.js";
 import { loadApprovals } from "../src/services/approvals.js";
+import { makeTmp } from "@proof/shared/tmp.js";
+import { useTmpCleanup } from "./tmp-hooks.js";
+
+// M9-tmp2: tmp 정리는 등록 역순으로 가장 나중에 돈다.
+useTmpCleanup();
+
 
 // M7-5-e: 승인 스냅샷은 **공통 승인 경로**에서 저장된다.
 // 이전엔 uiApprove 안에서만 저장해서 MCP(pf_approve)·CLI 로 승인한 스크립트는
@@ -15,7 +20,7 @@ const catalog = [{ server: "fs", name: "read", inputSchema: { type: "object" }, 
 
 let pfdir: string;
 beforeEach(() => {
-  pfdir = join(mkdtempSync(join(tmpdir(), "pf-snap-")), ".procforge");
+  pfdir = join(makeTmp("pf-snap-"), ".procforge");
   mkdirSync(pfdir, { recursive: true });
 });
 afterAll(() => {

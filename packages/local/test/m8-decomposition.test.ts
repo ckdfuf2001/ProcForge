@@ -1,9 +1,12 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { mkdtempSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { ProcForgeApp } from "../src/app/app.js";
 import { testStack } from "./client-mode.js";
+import { makeTmp } from "@proof/shared/tmp.js";
+import { useTmpCleanup } from "./tmp-hooks.js";
+
+// M9-tmp2: tmp 정리는 등록 역순으로 가장 나중에 돈다.
+useTmpCleanup();
 
 // M8-ui2: 사용자 경로 계약.
 // - pf_split은 사유(reason)를 요구한다 (없으면 bad_request + 힌트).
@@ -18,7 +21,7 @@ const REASON = "한 번에 처리하기 어려워 두 단계로 나눈다.";
 
 let pfdir: string;
 beforeEach(() => {
-  pfdir = join(mkdtempSync(join(tmpdir(), "pf-m8-")), ".procforge");
+  pfdir = join(makeTmp("pf-m8-"), ".procforge");
 });
 
 async function started() {

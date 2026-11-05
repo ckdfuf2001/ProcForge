@@ -1,13 +1,18 @@
 import { describe, it, expect } from "vitest";
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { execSync } from "node:child_process";
 import { ProcForgeApp } from "../src/app/app.js";
 import { createUiServer } from "../src/app/ui-server.js";
 import { testStack } from "./client-mode.js";
 import { isAlive, listChildren } from "../src/app/run-control.js";
 import { readRunState } from "../src/services/run-state.js";
+import { makeTmp } from "@proof/shared/tmp.js";
+import { useTmpCleanup } from "./tmp-hooks.js";
+
+// M9-tmp2: tmp 정리는 등록 역순으로 가장 나중에 돈다.
+useTmpCleanup();
+
 
 // M7-5-a/b: 취소가 **실제 runner가 띄운 자식**을 멈추는지.
 // 헬퍼 프로세스가 아니라 (1) 세션 → leaf 확정 → 절차서 → uiRun → runStep 실제 경로로
@@ -27,7 +32,7 @@ const SCRIPT = [
 ].join("\n");
 
 async function running() {
-  const pfdir = join(mkdtempSync(join(tmpdir(), "pf-cancel-e2e-")), ".procforge");
+  const pfdir = join(makeTmp("pf-cancel-e2e-"), ".procforge");
   // remote 모드에서는 로컬 pfdir 이 아직 없다 (core 는 별도 dataDir)
   mkdirSync(pfdir, { recursive: true });
   const { client } = testStack(pfdir);

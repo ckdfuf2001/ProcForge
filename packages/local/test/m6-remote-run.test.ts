@@ -7,13 +7,18 @@ import {
   beforeAll,
   afterAll,
 } from "vitest";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { tmpdir } from "node:os";
 import { startServer, parseApiKeys } from "../../core-server/dist/server.js";
 import { createRemoteCoreClient } from "../src/remote-client.js";
 import { ProcForgeApp } from "../src/app/app.js";
 import { runTestSession as runSession } from "./client-mode.js";
+import { makeTmp } from "@proof/shared/tmp.js";
+import { useTmpCleanup } from "./tmp-hooks.js";
+
+// M9-tmp2: tmp 정리는 등록 역순으로 가장 나중에 돈다.
+useTmpCleanup();
+
 
 // M6-5: remote core 분해 세션을 로컬 runner로 live 실행.
 
@@ -34,7 +39,7 @@ let baseUrl = "";
 
 // 소켓 고갈(EACCES) 방지: 파일당 서버 1개 공유 (세션 id는 uuid라 충돌 없음).
 beforeAll(async () => {
-  const dataDir = mkdtempSync(join(tmpdir(), "pf-m6rsrv-"));
+  const dataDir = makeTmp("pf-m6rsrv-");
   srv = await startServer({
     dataDir,
     apiKeys: parseApiKeys(`t1:${KEY}`),
@@ -48,9 +53,9 @@ afterAll(async () => {
 });
 
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), "pf-m6r-"));
+  root = makeTmp("pf-m6r-");
   pfdir = join(root, ".procforge");
-  home = mkdtempSync(join(tmpdir(), "pf-m6rhome-"));
+  home = makeTmp("pf-m6rhome-");
   oldHome = process.env.HOME;
   oldProfile = process.env.USERPROFILE;
   process.env.HOME = home;

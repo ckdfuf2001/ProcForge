@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, writeFileSync, mkdirSync, readFileSync } from "node:fs";
+import { writeFileSync, mkdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { tmpdir } from "node:os";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { buildServer } from "../src/server.js";
@@ -10,6 +9,12 @@ import { testStack, metaStore } from "./client-mode.js";
 import { FileStore } from "../src/filestore.js";
 import { fixtureFileExists } from "../src/artifacts.js";
 import { runTestSession as runSession } from "./client-mode.js";
+import { makeTmp } from "@proof/shared/tmp.js";
+import { useTmpCleanup } from "./tmp-hooks.js";
+
+// M9-tmp2: tmp 정리는 등록 역순으로 가장 나중에 돈다.
+useTmpCleanup();
+
 
 let root: string;
 let pfdir: string;
@@ -20,9 +25,9 @@ let oldProfile: string | undefined;
 const serverMjs = resolve(__dirname, "fixtures/fake-ppt-mcp/server.mjs");
 
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), "pf-m36-"));
+  root = makeTmp("pf-m36-");
   pfdir = join(root, ".procforge");
-  home = mkdtempSync(join(tmpdir(), "pf-m36home-"));
+  home = makeTmp("pf-m36home-");
   oldHome = process.env.HOME;
   oldProfile = process.env.USERPROFILE;
   process.env.HOME = home;
@@ -369,7 +374,7 @@ describe("M3.6-3 출력 자동 캡처", () => {
   });
 
   it("fixtureFileExists: 바이너리는 존재+크기>0", () => {
-    const dir = mkdtempSync(join(tmpdir(), "pf-m36fx-"));
+    const dir = makeTmp("pf-m36fx-");
     writeFileSync(join(dir, "a.pptx"), "x");
     writeFileSync(join(dir, "empty.pptx"), "");
     writeFileSync(join(dir, "empty.txt"), "");

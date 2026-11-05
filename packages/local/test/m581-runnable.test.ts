@@ -1,13 +1,18 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
+import { mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { join, dirname } from "node:path";
-import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { ProcForgeApp } from "../src/app/app.js";
 import { FileStore } from "../src/filestore.js";
 import { runProcedureTest } from "../src/runner/procedure-run.js";
 import { testStack } from "./client-mode.js";
+import { makeTmp } from "@proof/shared/tmp.js";
+import { useTmpCleanup } from "./tmp-hooks.js";
+
+// M9-tmp2: tmp 정리는 등록 역순으로 가장 나중에 돈다.
+useTmpCleanup();
+
 
 // M5.8.1-1: 실행 불가 leaf 확정 거부 + script 대안 run 통과.
 // E2E redacted fixture(세션 77c17c91 1.1 형태)로 확정 단계 거부 회귀.
@@ -36,9 +41,9 @@ let oldHome: string | undefined;
 let oldProfile: string | undefined;
 
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), "pf-m581r-"));
+  root = makeTmp("pf-m581r-");
   pfdir = join(root, ".procforge");
-  home = mkdtempSync(join(tmpdir(), "pf-m581rhome-"));
+  home = makeTmp("pf-m581rhome-");
   oldHome = process.env.HOME;
   oldProfile = process.env.USERPROFILE;
   process.env.HOME = home;

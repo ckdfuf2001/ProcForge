@@ -1,9 +1,14 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { mkdtempSync, writeFileSync, mkdirSync } from "node:fs";
+import { writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { ProcForgeApp } from "../src/app/app.js";
 import { testStack } from "./client-mode.js";
+import { makeTmp } from "@proof/shared/tmp.js";
+import { useTmpCleanup } from "./tmp-hooks.js";
+
+// M9-tmp2: tmp 정리는 등록 역순으로 가장 나중에 돈다.
+useTmpCleanup();
+
 
 // M3.5.1-1: reopen·retry·edit_args 후 재보고가 file_exists pin 없이 통과.
 // (관찰 6의 3사례)
@@ -13,7 +18,7 @@ const CATALOG = [{ server: "opencode", name: "read", inputSchema: {}, schemaHash
 let root: string;
 let pfdir: string;
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), "pf-m351-"));
+  root = makeTmp("pf-m351-");
   pfdir = join(root, ".procforge");
 });
 

@@ -1,16 +1,20 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import {
-  mkdtempSync,
   mkdirSync,
   writeFileSync,
   readFileSync,
   existsSync,
 } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { ProcForgeApp } from "../src/app/app.js";
 import { FileStore } from "../src/filestore.js";
 import { testStack, metaStore, serverSessionDir } from "./client-mode.js";
+import { makeTmp } from "@proof/shared/tmp.js";
+import { useTmpCleanup } from "./tmp-hooks.js";
+
+// M9-tmp2: tmp 정리는 등록 역순으로 가장 나중에 돈다.
+useTmpCleanup();
+
 
 // M5.8.2 후속: R8 분리 (core 메타 + 로컬 파일 + 마이그레이션) + finalize bad_ref_field.
 
@@ -34,9 +38,9 @@ let oldHome: string | undefined;
 let oldProfile: string | undefined;
 
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), "pf-m582r-"));
+  root = makeTmp("pf-m582r-");
   pfdir = join(root, ".procforge");
-  home = mkdtempSync(join(tmpdir(), "pf-m582rhome-"));
+  home = makeTmp("pf-m582rhome-");
   oldHome = process.env.HOME;
   oldProfile = process.env.USERPROFILE;
   process.env.HOME = home;

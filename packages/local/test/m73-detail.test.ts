@@ -1,10 +1,15 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { createUiServer } from "../src/app/ui-server.js";
 import { ProcForgeApp } from "../src/app/app.js";
 import { testStack } from "./client-mode.js";
+import { makeTmp } from "@proof/shared/tmp.js";
+import { useTmpCleanup } from "./tmp-hooks.js";
+
+// M9-tmp2: tmp 정리는 등록 역순으로 가장 나중에 돈다.
+useTmpCleanup();
+
 
 // M7-ui3: 노드 상세 DTO·이벤트 필터·산출물(헤더 3종·경로 탈출·egress 0).
 
@@ -14,7 +19,7 @@ const catalog = [
 
 let pfdir: string;
 beforeEach(() => {
-  pfdir = join(mkdtempSync(join(tmpdir(), "pf-ui3-")), ".procforge");
+  pfdir = join(makeTmp("pf-ui3-"), ".procforge");
 });
 
 async function started() {

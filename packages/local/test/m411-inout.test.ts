@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import {
-  mkdtempSync,
   writeFileSync,
   mkdirSync,
   readFileSync,
@@ -8,7 +7,6 @@ import {
   readdirSync,
 } from "node:fs";
 import { join, resolve } from "node:path";
-import { tmpdir } from "node:os";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { buildServer } from "../src/server.js";
@@ -22,6 +20,12 @@ import {
   resolveOriginal,
 } from "../src/services/artifacts.js";
 import type { Node } from "@proof/shared/schema.js";
+import { makeTmp } from "@proof/shared/tmp.js";
+import { useTmpCleanup } from "./tmp-hooks.js";
+
+// M9-tmp2: tmp 정리는 등록 역순으로 가장 나중에 돈다.
+useTmpCleanup();
+
 
 const serverMjs = resolve(__dirname, "fixtures/fake-ppt-mcp/server.mjs");
 
@@ -31,7 +35,7 @@ describe("M4.1.1-1 inout 원본 탐색 단위", () => {
   const sessDir = () => join(pfdir, "sessions", sid);
 
   beforeEach(() => {
-    pfdir = mkdtempSync(join(tmpdir(), "pf-311u-"));
+    pfdir = makeTmp("pf-311u-");
     mkdirSync(sessDir(), { recursive: true });
   });
 
@@ -89,7 +93,7 @@ describe("M4.1.1-1 inout 원본 탐색 단위", () => {
   });
 
   it("classify: 생성→out, 수정→inout, 그 외→in", () => {
-    const dir = mkdtempSync(join(tmpdir(), "pf-311c-"));
+    const dir = makeTmp("pf-311c-");
     writeFileSync(join(dir, "new.txt"), "n");
     writeFileSync(join(dir, "mod.txt"), "m");
     writeFileSync(join(dir, "same.txt"), "s");
@@ -117,9 +121,9 @@ describe("M4.1.1-1 수정 노드 확정·replay (E2E)", () => {
   let oldProfile: string | undefined;
 
   beforeEach(() => {
-    root = mkdtempSync(join(tmpdir(), "pf-311-"));
+    root = makeTmp("pf-311-");
     pfdir = join(root, ".procforge");
-    home = mkdtempSync(join(tmpdir(), "pf-311home-"));
+    home = makeTmp("pf-311home-");
     oldHome = process.env.HOME;
     oldProfile = process.env.USERPROFILE;
     process.env.HOME = home;

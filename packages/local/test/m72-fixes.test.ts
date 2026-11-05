@@ -1,12 +1,16 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { mkdtempSync } from "node:fs";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { CoreService, createMemoryStore } from "@proof/core";
 import { FileStore } from "../src/filestore.js";
 import { testStack } from "./client-mode.js";
 import { ProcForgeApp } from "../src/app/app.js";
+import { makeTmp } from "@proof/shared/tmp.js";
+import { useTmpCleanup } from "./tmp-hooks.js";
+
+// M9-tmp2: tmp 정리는 등록 역순으로 가장 나중에 돈다.
+useTmpCleanup();
+
 
 // M7-ui2 보정 a~f: split stale·읽기 무쓰기·폴러 오류·revision 정합·시작점·dist 강제.
 
@@ -16,7 +20,7 @@ const catalog = [
 
 let pfdir: string;
 beforeEach(() => {
-  pfdir = join(mkdtempSync(join(tmpdir(), "pf-ui2b-")), ".procforge");
+  pfdir = join(makeTmp("pf-ui2b-"), ".procforge");
 });
 
 async function splitSession(dep?: { nodeId: string; dependsOn: string[] }) {

@@ -1,10 +1,15 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { tmpdir } from "node:os";
 import { ProcForgeApp } from "../src/app/app.js";
 import { runProcedureTest } from "../src/runner/procedure-run.js";
 import { testStack } from "./client-mode.js";
+import { makeTmp } from "@proof/shared/tmp.js";
+import { useTmpCleanup } from "./tmp-hooks.js";
+
+// M9-tmp2: tmp 정리는 등록 역순으로 가장 나중에 돈다.
+useTmpCleanup();
+
 
 // M5.5-2 until 노드 E2E (fake page: "" → [a,b]/p2 → [c]/null).
 // 2: until(본문 2.1 page, cursor var $self) + count 집계.
@@ -19,9 +24,9 @@ const serverMjs = resolve(__dirname, "fixtures/fake-ppt-mcp/server.mjs");
 const PAGE_CAT = [{ server: "fake-ppt", name: "page", inputSchema: {}, schemaHash: "h" }] as never;
 
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), "pf-m552-"));
+  root = makeTmp("pf-m552-");
   pfdir = join(root, ".procforge");
-  home = mkdtempSync(join(tmpdir(), "pf-m552home-"));
+  home = makeTmp("pf-m552home-");
   oldHome = process.env.HOME;
   oldProfile = process.env.USERPROFILE;
   process.env.HOME = home;

@@ -1,15 +1,20 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import path, { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { ProcForgeApp, type AppDeps } from "../src/app/app.js";
 import { testStack } from "./client-mode.js";
 import { readRunState } from "../src/services/run-state.js";
 import { readEvents } from "../src/trace.js";
+import { makeTmp } from "@proof/shared/tmp.js";
+import { useTmpCleanup } from "./tmp-hooks.js";
+
+// M9-tmp2: tmp 정리는 등록 역순으로 가장 나중에 돈다.
+useTmpCleanup();
+
 
 // M7-5-b: 승인/생성값 **대기**는 디스크(run-state.waiting)에 적힌다.
 //   1) 승인 → 계속 → done
@@ -26,7 +31,7 @@ const ECHO_CAT = [
 let root: string;
 let pfdir: string;
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), "pf-wait-"));
+  root = makeTmp("pf-wait-");
   pfdir = join(root, ".procforge");
   mkdirSync(pfdir, { recursive: true });
   // uiRun 은 실제 러너로 돌리므로 MCP 서버가 등록돼 있어야 한다

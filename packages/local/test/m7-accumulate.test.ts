@@ -1,13 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import {
   existsSync,
-  mkdtempSync,
   mkdirSync,
   readFileSync,
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { runProcedureTest } from "../src/runner/procedure-run.js";
 import {
   approvalPins,
@@ -23,6 +21,12 @@ import {
 } from "../src/services/accumulate.js";
 import { readRunLog } from "../src/services/run-log.js";
 import { computeNodeHash } from "@proof/shared/schema.js";
+import { makeTmp } from "@proof/shared/tmp.js";
+import { useTmpCleanup } from "./tmp-hooks.js";
+
+// M9-tmp2: tmp 정리는 등록 역순으로 가장 나중에 돈다.
+useTmpCleanup();
+
 
 // M7-close-i: accumulate(B) — run 사이 누적 보존/실패 시 불변/충돌/테스트 모드.
 
@@ -135,7 +139,7 @@ function rows(path: string): string[] {
 }
 
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), "pf-m7acc-"));
+  root = makeTmp("pf-m7acc-");
   pfdir = join(root, ".procforge");
   stateRoot = join(root, "state");
   writeProcedure();

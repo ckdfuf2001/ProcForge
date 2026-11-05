@@ -1,13 +1,18 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import { join, dirname } from "node:path";
-import { tmpdir } from "node:os";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { spawn } from "node:child_process";
 import { CoreService } from "@proof/core";
 import { FileStore, resetLockStats, lockStats } from "../src/filestore.js";
 import { checkerEvaluate } from "../src/checker.js";
 import { wrapClient } from "./client-mode.js";
+import { makeTmp } from "@proof/shared/tmp.js";
+import { useTmpCleanup } from "./tmp-hooks.js";
+
+// M9-tmp2: tmp 정리는 등록 역순으로 가장 나중에 돈다.
+useTmpCleanup();
+
 
 // M3.5.2-2: 8 자식 프로세스 × 50회 동시 커밋.
 // events seq 중복 0, revision 연속, 실패는 conflict만.
@@ -16,7 +21,7 @@ let root: string;
 let pfdir: string;
 
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), "pf-lockstress-"));
+  root = makeTmp("pf-lockstress-");
   pfdir = join(root, ".procforge");
 });
 

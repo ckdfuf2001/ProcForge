@@ -1,13 +1,18 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, copyFileSync, existsSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync, copyFileSync, existsSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { ProcForgeApp } from "../src/app/app.js";
 import { ingestArtifacts } from "../src/artifacts.js";
 import { runProcedureTest } from "../src/runner/procedure-run.js";
 import { testStack } from "./client-mode.js";
+import { makeTmp } from "@proof/shared/tmp.js";
+import { useTmpCleanup } from "./tmp-hooks.js";
+
+// M9-tmp2: tmp 정리는 등록 역순으로 가장 나중에 돈다.
+useTmpCleanup();
+
 
 // M5.3-2 수락 테스트 CI E2E (a~d). 절차서 "monthly" (기간 없음).
 // - 1.1 script agg.py: sales-${params.month}.xlsx 집계 → {rows, total, period}.
@@ -124,9 +129,9 @@ function requirePyLibs(): void {
 }
 
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), "pf-m53-"));
+  root = makeTmp("pf-m53-");
   pfdir = join(root, ".procforge");
-  home = mkdtempSync(join(tmpdir(), "pf-m53home-"));
+  home = makeTmp("pf-m53home-");
   oldHome = process.env.HOME;
   oldProfile = process.env.USERPROFILE;
   process.env.HOME = home;

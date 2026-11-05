@@ -1,12 +1,17 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, writeFileSync, readFileSync } from "node:fs";
+import { writeFileSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 import { ProcForgeApp } from "../src/app/app.js";
 import { ingestArtifacts } from "../src/artifacts.js";
 import { runProcedureTest } from "../src/runner/procedure-run.js";
 import { testStack } from "./client-mode.js";
+import { makeTmp } from "@proof/shared/tmp.js";
+import { useTmpCleanup } from "./tmp-hooks.js";
+
+// M9-tmp2: tmp 정리는 등록 역순으로 가장 나중에 돈다.
+useTmpCleanup();
+
 
 // M5.1-C4: C2·C3의 CI E2E(fake 서버). dogfood(monthly-2026-10) 축소 미러.
 // - 9월 params로 확정(strict 감사 0) → 10월 params live 실행 → var 치환 검증.
@@ -21,9 +26,9 @@ let oldProfile: string | undefined;
 const serverMjs = resolve(__dirname, "fixtures/fake-ppt-mcp/server.mjs");
 
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), "pf-m51c4-"));
+  root = makeTmp("pf-m51c4-");
   pfdir = join(root, ".procforge");
-  home = mkdtempSync(join(tmpdir(), "pf-m51c4home-"));
+  home = makeTmp("pf-m51c4home-");
   oldHome = process.env.HOME;
   oldProfile = process.env.USERPROFILE;
   process.env.HOME = home;

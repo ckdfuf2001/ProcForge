@@ -7,13 +7,18 @@ import {
   beforeEach,
   afterEach,
 } from "vitest";
-import { mkdtempSync, readFileSync, readdirSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 import { startServer, parseApiKeys } from "../../core-server/dist/server.js";
 import { createRemoteCoreClient } from "../src/remote-client.js";
 import { ProcForgeApp } from "../src/app/app.js";
+import { makeTmp } from "@proof/shared/tmp.js";
+import { useTmpCleanup } from "./tmp-hooks.js";
+
+// M9-tmp2: tmp 정리는 등록 역순으로 가장 나중에 돈다.
+useTmpCleanup();
+
 
 // M6.1-1 (R8): 10KB 크롤링 본문을 report → 서버 수신 본문에 원문 0바이트.
 // 메타+판정만 전송, 평가는 local, 원문은 로컬 attempt 파일에만.
@@ -27,7 +32,7 @@ let srv: { port: number; close: () => Promise<void> } | undefined;
 let baseUrl = "";
 
 beforeAll(async () => {
-  const dataDir = mkdtempSync(join(tmpdir(), "pf-m61srv-"));
+  const dataDir = makeTmp("pf-m61srv-");
   srv = await startServer({
     dataDir,
     apiKeys: parseApiKeys(`t1:${KEY}`),
@@ -47,9 +52,9 @@ let oldHome: string | undefined;
 let oldProfile: string | undefined;
 
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), "pf-m61-"));
+  root = makeTmp("pf-m61-");
   pfdir = join(root, ".procforge");
-  home = mkdtempSync(join(tmpdir(), "pf-m61home-"));
+  home = makeTmp("pf-m61home-");
   oldHome = process.env.HOME;
   oldProfile = process.env.USERPROFILE;
   process.env.HOME = home;

@@ -1,13 +1,17 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { mkdtempSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { ProcForgeApp } from "../src/app/app.js";
 import { createUiServer } from "../src/app/ui-server.js";
 import { testStack } from "./client-mode.js";
 import { readEvents } from "../src/trace.js";
 import { savePairing, getPairing } from "../src/services/pairings.js";
 import { clampTimeoutMs, SIGNAL_TIMEOUT_CAP_MS, fetchServerVersion } from "../src/services/opencode-link.js";
+import { makeTmp } from "@proof/shared/tmp.js";
+import { useTmpCleanup } from "./tmp-hooks.js";
+
+// M9-tmp2: tmp 정리는 등록 역순으로 가장 나중에 돈다.
+useTmpCleanup();
+
 
 // M7-ui4-i/j: 신호 대상·버전·타임아웃은 서버 설정/조회값만. 짝이 없으면 미전송.
 
@@ -15,7 +19,7 @@ const catalog = [{ server: "t", name: "read", inputSchema: { type: "object" }, s
 
 let pfdir: string;
 beforeEach(() => {
-  pfdir = join(mkdtempSync(join(tmpdir(), "pf-link2-")), ".procforge");
+  pfdir = join(makeTmp("pf-link2-"), ".procforge");
 });
 
 /** 요청을 전부 기록하는 가짜 OpenCode */

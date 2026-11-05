@@ -1,13 +1,11 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import {
-  mkdtempSync,
   cpSync,
   readFileSync,
   readdirSync,
   existsSync,
 } from "node:fs";
 import { join, resolve } from "node:path";
-import { tmpdir } from "node:os";
 import { FileStore } from "../src/filestore.js";
 import { loadProcedureDoc } from "../src/runner/procedure-run.js";
 import {
@@ -21,6 +19,12 @@ import {
   toHashable,
   toHashableMap,
 } from "../src/services/approvals.js";
+import { makeTmp } from "@proof/shared/tmp.js";
+import { useTmpCleanup } from "./tmp-hooks.js";
+
+// M9-tmp2: tmp 정리는 등록 역순으로 가장 나중에 돈다.
+useTmpCleanup();
+
 
 // M5.5-4.4-5: toHashable 단일 변환. examples/procedures/* 전 노드에서
 // doc approvalHash == 세션 approvalHash (캐스팅 없이 동일 공식).
@@ -30,7 +34,7 @@ const EXAMPLES = resolve(__dirname, "..", "..", "..", "examples", "procedures");
 let pfdir: string;
 
 beforeEach(() => {
-  pfdir = join(mkdtempSync(join(tmpdir(), "pf-m544h-")), ".procforge");
+  pfdir = join(makeTmp("pf-m544h-"), ".procforge");
 });
 
 function exampleNames(): string[] {

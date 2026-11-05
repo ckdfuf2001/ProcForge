@@ -1,10 +1,14 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { startServer, parseApiKeys } from "../../core-server/dist/server.js";
 import { createRemoteCoreClient } from "../src/remote-client.js";
 import { ProcForgeApp } from "../src/app/app.js";
+import { makeTmp } from "@proof/shared/tmp.js";
+import { useTmpCleanup } from "./tmp-hooks.js";
+
+// M9-tmp2: tmp 정리는 등록 역순으로 가장 나중에 돈다.
+useTmpCleanup();
+
 
 // M6-4 계약: 전체 E2E를 remote 모드로 돌리면서 송신 바이트를 수집해
 // 구조 위반(resultJson 실데이터·절대경로) 0건 단언.
@@ -21,9 +25,9 @@ let oldHome: string | undefined;
 let oldProfile: string | undefined;
 
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), "pf-m6e-"));
+  root = makeTmp("pf-m6e-");
   pfdir = join(root, ".procforge");
-  home = mkdtempSync(join(tmpdir(), "pf-m6ehome-"));
+  home = makeTmp("pf-m6ehome-");
   oldHome = process.env.HOME;
   oldProfile = process.env.USERPROFILE;
   process.env.HOME = home;
@@ -39,7 +43,7 @@ afterEach(() => {
 
 describe("M6-4 egress 계약", () => {
   it("remote E2E 송신 위반 0건", async () => {
-    const dataDir = mkdtempSync(join(tmpdir(), "pf-m6esrv-"));
+    const dataDir = makeTmp("pf-m6esrv-");
     const srv = await startServer({
       dataDir,
       apiKeys: parseApiKeys(`t1:${KEY}`),

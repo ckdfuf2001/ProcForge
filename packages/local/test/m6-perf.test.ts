@@ -1,9 +1,13 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { startServer, parseApiKeys } from "../../core-server/dist/server.js";
 import { createRemoteCoreClient } from "../src/remote-client.js";
+import { makeTmp } from "@proof/shared/tmp.js";
+import { useTmpCleanup } from "./tmp-hooks.js";
+
+// M9-tmp2: tmp 정리는 등록 역순으로 가장 나중에 돈다.
+useTmpCleanup();
+
 
 // M6-6: pf_* 왕복 p95 측정 (remote 모드 E2E). 목표값은 측정 후 DECISIONS.
 
@@ -16,7 +20,7 @@ function pct(samples: number[], p: number): number {
 
 describe("M6-6 remote p95", () => {
   it("왕복 측정·기록", async () => {
-    const dataDir = mkdtempSync(join(tmpdir(), "pf-m6p-"));
+    const dataDir = makeTmp("pf-m6p-");
     const srv = await startServer({
       dataDir,
       apiKeys: parseApiKeys(`t1:${KEY}`),

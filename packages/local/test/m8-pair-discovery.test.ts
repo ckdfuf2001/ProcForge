@@ -1,13 +1,18 @@
 import { describe, it, expect } from "vitest";
-import { mkdtempSync, existsSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { ProcForgeApp } from "../src/app/app.js";
 import { loadPairings, savePairing } from "../src/services/pairings.js";
 import {
   discoverPairing,
   pfStartOutputSessionId,
 } from "../src/services/pair-discovery.js";
+import { makeTmp } from "@proof/shared/tmp.js";
+import { useTmpCleanup } from "./tmp-hooks.js";
+
+// M9-tmp2: tmp 정리는 등록 역순으로 가장 나중에 돈다.
+useTmpCleanup();
+
 
 // M8-1-pair: 첫 짝 찾기 (docs/M8-1-spec.md b2). 실제 네트워크 0 —
 // OpenCode 서버를 메모리 fetch 로 흉내 낸다. 페이징은 실측 형식(?limit, X-Next-Cursor).
@@ -111,7 +116,7 @@ function fetchOf(oc: Oc): typeof fetch {
 }
 
 function setup(oc: Oc) {
-  const pfdir = join(mkdtempSync(join(tmpdir(), "pf-disc-")), ".procforge");
+  const pfdir = join(makeTmp("pf-disc-"), ".procforge");
   const app = new ProcForgeApp({
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     core: {} as any,

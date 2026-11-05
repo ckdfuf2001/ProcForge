@@ -1,6 +1,12 @@
 import { describe, it, expect } from "vitest";
+import { join } from "node:path";
 import { ProcForgeApp } from "../src/app/app.js";
 import { testStack } from "./client-mode.js";
+import { makeTmp } from "@proof/shared/tmp.js";
+import { useTmpCleanup } from "./tmp-hooks.js";
+
+// M9-tmp2: tmp 정리는 등록 역순으로 가장 나중에 돈다.
+useTmpCleanup();
 
 // M7-ui4-f: **미리보기와 실제 저장이 같은 결과를 내는지**.
 // previewEdit.wouldStale == 편집 저장 후 staleSince 가 박힌 노드.
@@ -185,9 +191,5 @@ describe("M7-ui4-f previewEdit ↔ 실제 편집 동치", () => {
 });
 
 function mk(): string {
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  const { mkdtempSync } = require("node:fs") as typeof import("node:fs");
-  const { join } = require("node:path") as typeof import("node:path");
-  const { tmpdir } = require("node:os") as typeof import("node:os");
-  return join(mkdtempSync(join(tmpdir(), "pf-eq-")), ".procforge");
+  return join(makeTmp("pf-eq-"), ".procforge");
 }

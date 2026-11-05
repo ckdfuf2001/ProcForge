@@ -1,13 +1,18 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
+import { mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { ProcForgeApp } from "../src/app/app.js";
 import { ingestArtifacts } from "../src/artifacts.js";
 import { runProcedureTest } from "../src/runner/procedure-run.js";
 import { testStack } from "./client-mode.js";
+import { makeTmp } from "@proof/shared/tmp.js";
+import { useTmpCleanup } from "./tmp-hooks.js";
+
+// M9-tmp2: tmp 정리는 등록 역순으로 가장 나중에 돈다.
+useTmpCleanup();
+
 
 // M5.5-3 실행 간 state E2E.
 // feed.json(workspace 실파일, read_json 절대경로) → 1.2 script가 since 이후만 처리.
@@ -46,9 +51,9 @@ function writeFeed(ids: string[]): void {
 }
 
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), "pf-m553-"));
+  root = makeTmp("pf-m553-");
   pfdir = join(root, ".procforge");
-  home = mkdtempSync(join(tmpdir(), "pf-m553home-"));
+  home = makeTmp("pf-m553home-");
   oldHome = process.env.HOME;
   oldProfile = process.env.USERPROFILE;
   process.env.HOME = home;

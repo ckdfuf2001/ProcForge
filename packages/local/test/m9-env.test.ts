@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, existsSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { spawn, spawnSync } from "node:child_process";
@@ -12,6 +12,12 @@ import {
   bothNames,
 } from "@proof/shared/env-compat.js";
 import { isDefaultTenantAllowed } from "../../core-server/dist/server.js";
+import { makeTmp } from "@proof/shared/tmp.js";
+import { useTmpCleanup } from "./tmp-hooks.js";
+
+// M9-tmp2: tmp 정리는 등록 역순으로 가장 나중에 돈다.
+useTmpCleanup();
+
 
 // M9-1-1-d: §2.3 신규 테스트 전부 (기존 파괴 기대 0).
 
@@ -36,7 +42,7 @@ describe("M9-1-1 env 호환 (통합)", () => {
   it("PROOF_*만 설정 → 신 값, 경고 없음", () => {
     const cap = captureStderr();
     try {
-      const dir = mkdtempSync(join(tmpdir(), "pf-m9-proof-"));
+      const dir = makeTmp("pf-m9-proof-");
       const got = resolveStoreDir({
         cwd: tmpdir(),
         env: { PROOF_DIR: dir } as NodeJS.ProcessEnv,
@@ -52,7 +58,7 @@ describe("M9-1-1 env 호환 (통합)", () => {
   it("PROCFORGE_*만 설정 → 옛 값 + stderr 경고 1회", () => {
     const cap = captureStderr();
     try {
-      const dir = mkdtempSync(join(tmpdir(), "pf-m9-legacy-"));
+      const dir = makeTmp("pf-m9-legacy-");
       const got = resolveStoreDir({
         cwd: tmpdir(),
         env: { PROCFORGE_DIR: dir } as NodeJS.ProcessEnv,
@@ -69,7 +75,7 @@ describe("M9-1-1 env 호환 (통합)", () => {
   it("둘 다 다르면 PROOF_* + 충돌 경고에 절대경로", () => {
     const cap = captureStderr();
     try {
-      const dir = mkdtempSync(join(tmpdir(), "pf-m9-both-"));
+      const dir = makeTmp("pf-m9-both-");
       const got = resolveStoreDir({
         cwd: tmpdir(),
         env: { PROOF_DIR: dir, PROCFORGE_DIR: join(tmpdir(), "other") } as NodeJS.ProcessEnv,
@@ -84,7 +90,7 @@ describe("M9-1-1 env 호환 (통합)", () => {
   });
 
   it("보안 5종 불일치 → 기동 오류 종료 (READ_ONLY, 값 미포함)", () => {
-    const root = mkdtempSync(join(tmpdir(), "pf-m9-sec-"));
+    const root = makeTmp("pf-m9-sec-");
     const r = spawnSync(
       process.execPath,
       [join(DIST, "main.js"), root],
@@ -128,8 +134,8 @@ describe("M9-1-1 env 호환 (통합)", () => {
   });
 
   it("셸 오염: PROOF_DIR=<다른 폴더>여도 그리로 기록 안 됨", async () => {
-    const evil = mkdtempSync(join(tmpdir(), "pf-m9-evil-"));
-    const pfdir = mkdtempSync(join(tmpdir(), "pf-m9-clean-"));
+    const evil = makeTmp("pf-m9-evil-");
+    const pfdir = makeTmp("pf-m9-clean-");
     const old = process.env.PROOF_DIR;
     process.env.PROOF_DIR = evil;
     try {
@@ -176,15 +182,15 @@ describe("M9-1-1 env 호환 (통합)", () => {
     for (const k of ["PROOF_DIR", "PROCFORGE_DIR", "PROOF_CORE_URL", "PROCFORGE_CORE_URL", "PROCFORGE_CLIENT", "PROOF_CORE_API_KEY", "PROOF_BOGUS"]) {
       saved[k] = process.env[k];
     }
-    process.env.PROOF_DIR = mkdtempSync(join(tmpdir(), "pf-m9-evil-"));
-    process.env.PROCFORGE_DIR = mkdtempSync(join(tmpdir(), "pf-m9-old-"));
+    process.env.PROOF_DIR = makeTmp("pf-m9-evil-");
+    process.env.PROCFORGE_DIR = makeTmp("pf-m9-old-");
     process.env.PROOF_CORE_URL = "http://127.0.0.1:9";
     process.env.PROCFORGE_CORE_URL = "http://127.0.0.1:8";
     process.env.PROCFORGE_CLIENT = "remote";
     process.env.PROOF_CORE_API_KEY = "K-m9test-dummy";
     process.env.PROOF_BOGUS = "1";
     try {
-      const pfdir = mkdtempSync(join(tmpdir(), "pf-m9-harness-"));
+      const pfdir = makeTmp("pf-m9-harness-");
       const env = harnessedSpawnEnv({
         ...bothNames("DIR", pfdir),
         ...bothNames("PROJECT_ROOT", pfdir),
@@ -227,8 +233,8 @@ describe("M9-1-1 env 호환 (통합)", () => {
   }, 30000);
 
   it("stdio 순수성: stdout JSON-RPC + stderr 경고 1회", async () => {
-    const pfdir = mkdtempSync(join(tmpdir(), "pf-m9-stdio-"));
-    const root = mkdtempSync(join(tmpdir(), "pf-m9-stdio-root-"));
+    const pfdir = makeTmp("pf-m9-stdio-");
+    const root = makeTmp("pf-m9-stdio-root-");
     // 셸 오염과 무관하게 legacy-only로 고정 (결정적 1회 경고).
     const clean: Record<string, string | undefined> = {};
     for (const [k, v] of Object.entries(process.env)) {
