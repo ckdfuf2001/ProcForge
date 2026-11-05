@@ -1,4 +1,4 @@
-# ProcForge
+# Proof
 
 [![ci](https://github.com/ckdfuf2001/ProcForge/actions/workflows/ci.yml/badge.svg)](https://github.com/ckdfuf2001/ProcForge/actions/workflows/ci.yml)
 

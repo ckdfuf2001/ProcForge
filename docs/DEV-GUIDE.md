@@ -1,6 +1,6 @@
-# ProcForge 개발 가이드 v2
+# Proof 개발 가이드 v2
 
-> 이 문서는 ProcForge 개발의 단일 기준 문서다. 작업 전에 반드시 전체를 읽는다.
+> 이 문서는 Proof 개발의 단일 기준 문서다. 작업 전에 반드시 전체를 읽는다.
 > 최종 갱신: 2026-10-09 / 기준 커밋: `ac97ac6` (M4.1-8, CI run 20 green)
 
 ---
@@ -63,7 +63,7 @@
 - UI는 M7 전까지 착수하지 않는다.
 - 새 기능은 CoreClient → App → 어댑터 순서로 만든다. server.ts/cli.ts에는 판단 로직, 파일 접근, store 접근을 넣지 않는다 (R1~R4).
 - 테스트가 무한 대기하면 자식 프로세스·연결 정리 누락부터 의심한다.
-- 실사용(dogfood) 세션에 테스트 advise/run을 섞지 않는다. 테스트는 별도 PF 세션(또는 별도 `PROCFORGE_DIR`)에서 수행한다. 같은 세션에 추가하면 revision·events·approval 증거가 오염된다.
+- 실사용(dogfood) 세션에 테스트 advise/run을 섞지 않는다. 테스트는 별도 PF 세션(또는 별도 `PROOF_DIR`)에서 수행한다. 같은 세션에 추가하면 revision·events·approval 증거가 오염된다.
 
 ---
 
@@ -227,7 +227,7 @@ server.registerTool("pf_report", spec, async (a) => {
    재반영은 첫 실패·손상에서 중단하고 손상도 실패로 처리 (새 커밋 거부).
    손상 파일은 `.corrupt-<rev>-<ts>.json`으로 이동 (삭제 금지).
    `.corrupt-*`가 남아 있으면 새 커밋을 거부하고, 해제는 CLI
-   `procforge repair <sid> --discard <rev>`로만 한다 (human 이벤트 기록, MCP 도구 없음).
+    `proof repair <sid> --discard <rev>`로만 한다 (human 이벤트 기록, MCP 도구 없음).
    session.json이 없고 적용 가능한 pending이 있으면 읽기(getSession/getNodes)가
    pending 뷰를 반환한다.
    테스트: 두 번째 노드 저장 실패 주입 → 재로드 시 전부 반영 또는 전부 미반영.
@@ -385,7 +385,7 @@ C4 CI E2E에도 C2·C3를 fake 서버로 추가. M5-dogfood.md 3절을 실제 �
 3. 실행 간 상태: procedures/<name>/state.json. 노드 출력의 일부를 run 성공 종료 시에만 원자 저장
    (spec: stateWrites [{key, from:"$1.3.lastId"}]). 참조 ${state.key}, 첫 실행은 state 부재 → params.stateDefaults 또는 bad_request.
    실패 run은 state 불변. 테스트: 2회 연속 run에서 두 번째가 첫 번째 이후 데이터만 처리.
-4. 무인 실행: `procforge run --unattended`. external 노드는 procedures/<name>/approvals.json에 사전 승인된
+4. 무인 실행: `proof run --unattended`. external 노드는 procedures/<name>/approvals.json에 사전 승인된
    (tool, 인자 패턴) 일치 시에만 실행, 아니면 run 실패(exit 3). exit code 표 문서화(0 성공/1 검사 실패/2 입력 오류/3 승인 필요).
    docs/scheduling.md에 Windows 작업 스케줄러·cron 예시. 스케줄러 내장 금지.
 5. dogfood 시나리오 (CI E2E, fake 서버): "목록 페이지 → 상세 N개 → 신규만 CSV 누적".
@@ -400,7 +400,7 @@ C4 CI E2E에도 C2·C3를 fake 서버로 추가. M5-dogfood.md 3절을 실제 �
    scheduling.md 표와 테스트로 일치 고정.
 2. approvals 매칭: 패턴에 args가 있으면 키 집합 정확히 일치 (추가 키 → 거부).
 3. approvals 항목에 nodeId + nodeHash 필수. 해시 불일치 → 거부(exit 3) + "승인 갱신 필요".
-   CLI `procforge approve procedures/<name> --node <id>`로 현재 해시 기준 항목 생성 (MCP 도구 추가 금지).
+    CLI `proof approve procedures/<name> --node <id>`로 현재 해시 기준 항목 생성 (MCP 도구 추가 금지).
 4. --unattended에서 generated 인자 노드가 있으면 실행 전 bad_request(exit 2).
 5. 절차서 단위 run 잠금 (procedures/<name>/.run.lock, 기존 lockfile 재사용).
    겹치면 conflict (exit 1 또는 별도 코드 4, 문서화).
@@ -485,8 +485,8 @@ c·d·j는 하네스 과제로 DECISIONS에 기록만.
    일시 오류 재시도, 기본은 미재시도. M5.6-f 판별·상한 재사용. 테스트 포함.
 
 ### M5 검증과 실행 분리
-- `procforge test <proc>`: replay 전용, drift 검출만.
-- `procforge run <procedure> --param k=v ... [--out <dir>]`: live 실행 전용.
+- `proof test <proc>`: replay 전용, drift 검출만.
+- `proof run <procedure> --param k=v ... [--out <dir>]`: live 실행 전용.
   출력은 `.procforge/runs/<runId>/fs`, `--out` 지정 시에만 완료 후 프로젝트 안으로
   복사 (기존 파일은 `--force` 없으면 거부).
 - 인자 해석: fixed 그대로, var는 params/의존 출력, generated는 runner가 만들지 않음.
@@ -510,7 +510,7 @@ c·d·j는 하네스 과제로 DECISIONS에 기록만.
 - external 노드는 run 모드에서 `--allow-external` 없으면 dry-run. 멱등성 키.
 
 ### 크롤링 테스트 (사람 진행)
-- "웹사이트 일일 크롤링" 요청으로 절차서 생성 → Windows 작업 스케줄러에 `procforge run` 등록.
+- "웹사이트 일일 크롤링" 요청으로 절차서 생성 → Windows 작업 스케줄러에 `proof run` 등록.
 - 선택자 변경 시 실패 감지 → `pf_edit_args` 수정 → 해당 노드만 재실행 확인.
 
 ### M6 core 분리
@@ -519,7 +519,7 @@ c·d·j는 하네스 과제로 DECISIONS에 기록만.
 - 서버 전송 데이터에 redaction 적용.
 
 ### M7 UI
-- `procforge ui`: 127.0.0.1 + 무작위 토큰만 허용, CDN 없이 오프라인 동작.
+- `proof ui`: 127.0.0.1 + 무작위 토큰만 허용, CDN 없이 오프라인 동작.
 - 화면 기능은 전부 기존 App 메서드 사용: 트리=`getTree`, 상세=`getNode`/`listAttempts`, 조언=`advise`, 인자 수정=`editArgs`, 잠금·재open, 서브트리 test, 히스토리=`getEvents`.
 - UI 서버 API에서 새 로직 금지. 필요하면 CoreClient → App 순서로 먼저 추가.
 
@@ -620,9 +620,9 @@ c·d·j는 하네스 과제로 DECISIONS에 기록만.
 - 크기: 트리는 pf_tree 페이지네이션 그대로, attempt 원문은 요청 시 로컬에서만 로드(R8 — 원격 core 모드에서도 원문 송신 0).
 - 문서: 항목마다 8절 체크·9절 이력, 가정은 DECISIONS `[M7-n]`. 끝에 `docs/REVIEW-M7.md`.
 
-### 1. `procforge ui` 서버 + SPA 골격 + 세션 목록
-- `procforge ui [--port 0] [--open]`: 포트 0 기본(OS 할당), 시작 시 URL+토큰 1회 출력.
-- 세션 목록: 저장소(PROCFORGE_DIR) 경로 표시, 세션별 요청문·상태 요약·revision·최근 변경 시각,
+### 1. `proof ui` 서버 + SPA 골격 + 세션 목록
+- `proof ui [--port 0] [--open]`: 포트 0 기본(OS 할당), 시작 시 URL+토큰 1회 출력.
+- 세션 목록: 저장소(PROOF_DIR) 경로 표시, 세션별 요청문·상태 요약·revision·최근 변경 시각,
   **pairings 배선**(짝지어진 OpenCode 세션 id, 연결 모드 B/A/C 표시, 이력 보기).
   한 세션에 connectionId 2개 이상이면 경고 배지.
 - 저장소 2개 감지 경고(M7-0.1의 6번 결과)를 상단에 표시.
