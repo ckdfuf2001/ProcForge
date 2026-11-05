@@ -253,7 +253,7 @@ async function cmdApprove(): Promise<number> {
       return 0;
     }
     if (!target || !nodeId) {
-    console.error("usage: proof approve <runId> <nodeId> | proof approve procedures/<name> --node <id>");
+      console.error("usage: proof approve <runId> <nodeId> | proof approve procedures/<name> --node <id>");
       return 2;
     }
     const r = await app.runApprove({ runId: target, nodeId });
