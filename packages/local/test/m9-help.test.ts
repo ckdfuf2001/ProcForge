@@ -84,11 +84,11 @@ describe("M9-1-2 --help/--version", () => {
     expect(r.stderr).not.toContain("node:internal");
   }, 30000);
 
-  it("M9-1-3: proof --help stdout에 ProcForge 0건 (옛 bin 경고 문구는 stderr라 예외)", async () => {
+  it("M9-1-3: proof --help stdout에 procforge 0건 (대소문자 무시. 옛 bin 경고는 stderr라 예외)", async () => {
     const r = await runChild([CLI, "--help"], 15000);
     expect(r.timedOut).toBe(false);
     expect(r.status).toBe(0);
-    expect(r.stdout).not.toContain("ProcForge");
-    expect(r.stdout).toContain("proof");
+    expect(r.stdout).not.toMatch(/procforge/i);
+    expect(r.stdout).toMatch(/^usage: proof /m);
   }, 30000);
 });

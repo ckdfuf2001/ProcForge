@@ -30,6 +30,7 @@ async function openSession(page: Page, sid: string): Promise<void> {
     });
   });
   await page.goto(`${h.ui.url}/#t=${h.ui.token}`);
+  await expect(page).toHaveTitle("Proof");
   await expect(page.getByRole("heading", { name: "Proof" })).toBeVisible();
   await page.getByRole("button", { name: sid.slice(0, 8), exact: true }).click();
   await expect(page.getByText(/실시간:/)).toBeVisible();

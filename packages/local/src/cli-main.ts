@@ -107,7 +107,7 @@ async function cmdTest(): Promise<number> {
 async function cmdTrace(): Promise<number> {
   const [sid] = positionals.slice(1);
   if (!sid) {
-      console.error("usage: proof trace <sessionId>");
+    console.error("usage: proof trace <sessionId>");
     return 2;
   }
   const { projectRoot, procforgeDir } = resolveDirs(values, process.env);
@@ -124,7 +124,7 @@ async function cmdTrace(): Promise<number> {
 async function cmdExport(): Promise<number> {
   const [sid] = positionals.slice(1);
   if (!sid) {
-      console.error("usage: proof export <sessionId> [--redact] [--include-originals] [--out path]");
+    console.error("usage: proof export <sessionId> [--redact] [--include-originals] [--out path]");
     return 2;
   }
   const { projectRoot, procforgeDir } = resolveDirs(values, process.env);
@@ -232,7 +232,7 @@ async function cmdApprove(): Promise<number> {
   const target = normalizeCliPath(positionals[1]);
   const nodeId = positionals[2];
   if (!target) {
-      console.error("usage: proof approve <runId> <nodeId> | proof approve <procedure> --node <id> [--allow-wildcard <key> ...]");
+    console.error("usage: proof approve <runId> <nodeId> | proof approve <procedure> --node <id> [--allow-wildcard <key> ...]");
     return 2;
   }
   const { projectRoot, procforgeDir } = resolveDirs(values, process.env);
@@ -253,7 +253,7 @@ async function cmdApprove(): Promise<number> {
       return 0;
     }
     if (!target || !nodeId) {
-      console.error("usage: proof approve <runId> <nodeId> | proof approve procedures/<name> --node <id>");
+    console.error("usage: proof approve <runId> <nodeId> | proof approve procedures/<name> --node <id>");
       return 2;
     }
     const r = await app.runApprove({ runId: target, nodeId });
