@@ -26,7 +26,7 @@ function parse(argv: string[]): void {
 }
 
 // M9-1-2: --help/--version. 화면 문구 변경은 M9-1-3에서 다룬다.
-const HELP_TEXT = `usage: procforge <test|trace|export|repair|run|approve|ui> [--help] [--version]
+const HELP_TEXT = `usage: proof <test|trace|export|repair|run|approve|ui> [--help] [--version]
   test <procedure|session> [--mode record|replay|passthrough|live] [--param k=v ...]
   trace <sessionId>
   export <sessionId> [--out <file>] [--redact]
@@ -39,7 +39,7 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 async function cmdTest(): Promise<number> {
   if (values.procedure && !values.session && !positionals[1]) {
-    console.error("procedure 실행: procforge test procedures/<name> [--param k=v]");
+    console.error("procedure 실행: proof test procedures/<name> [--param k=v]");
     return 2;
   }
   // positional이 UUID면 세션 id로 해석 (M3.5 지시 호환)
@@ -107,7 +107,7 @@ async function cmdTest(): Promise<number> {
 async function cmdTrace(): Promise<number> {
   const [sid] = positionals.slice(1);
   if (!sid) {
-    console.error("usage: procforge trace <sessionId>");
+      console.error("usage: proof trace <sessionId>");
     return 2;
   }
   const { projectRoot, procforgeDir } = resolveDirs(values, process.env);
@@ -124,7 +124,7 @@ async function cmdTrace(): Promise<number> {
 async function cmdExport(): Promise<number> {
   const [sid] = positionals.slice(1);
   if (!sid) {
-    console.error("usage: procforge export <sessionId> [--redact] [--include-originals] [--out path]");
+      console.error("usage: proof export <sessionId> [--redact] [--include-originals] [--out path]");
     return 2;
   }
   const { projectRoot, procforgeDir } = resolveDirs(values, process.env);
@@ -148,7 +148,7 @@ async function cmdRun(): Promise<number> {
   const positional = positionals[1];
   const procRef = (!values.session ? positional : undefined) ?? values.procedure;
   if (!procRef) {
-    console.error("procedure 실행: procforge run procedures/<name> [--param k=v] [--out dir] [--state dir] [--force] [--unattended] [--allow-unverified] [--retry-attempts n] [--retry-base-ms ms]");
+    console.error("procedure 실행: proof run procedures/<name> [--param k=v] [--out dir] [--state dir] [--force] [--unattended] [--allow-unverified] [--retry-attempts n] [--retry-base-ms ms]");
     return 2;
   }
   const params: Record<string, string> = {};
@@ -232,7 +232,7 @@ async function cmdApprove(): Promise<number> {
   const target = normalizeCliPath(positionals[1]);
   const nodeId = positionals[2];
   if (!target) {
-    console.error("usage: procforge approve <runId> <nodeId> | procforge approve <procedure> --node <id> [--allow-wildcard <key> ...]");
+      console.error("usage: proof approve <runId> <nodeId> | proof approve <procedure> --node <id> [--allow-wildcard <key> ...]");
     return 2;
   }
   const { projectRoot, procforgeDir } = resolveDirs(values, process.env);
@@ -253,7 +253,7 @@ async function cmdApprove(): Promise<number> {
       return 0;
     }
     if (!target || !nodeId) {
-      console.error("usage: procforge approve <runId> <nodeId> | procforge approve procedures/<name> --node <id>");
+      console.error("usage: proof approve <runId> <nodeId> | proof approve procedures/<name> --node <id>");
       return 2;
     }
     const r = await app.runApprove({ runId: target, nodeId });
@@ -267,7 +267,7 @@ async function cmdApprove(): Promise<number> {
 
 async function cmdRepair(): Promise<number> {  const [sid] = positionals.slice(1);  const discard = values.discard;
   if (!sid || discard === undefined) {
-    console.error("usage: procforge repair <sessionId> --discard <rev>");
+    console.error("usage: proof repair <sessionId> --discard <rev>");
     return 2;
   }
   if (!/^\d+$/.test(discard)) {
@@ -334,7 +334,7 @@ export async function main(argv: string[] = process.argv.slice(2)): Promise<numb
   if (cmd === "run") return cmdRun();
   if (cmd === "approve") return cmdApprove();
   if (cmd === "ui") return cmdUi();
-  console.error("usage: procforge <test|trace|export|repair|run|approve|ui> ...");
+  console.error("usage: proof <test|trace|export|repair|run|approve|ui> ...");
   console.error("  approve <runId> <nodeId> | approve <procedure> --node <id> [--allow-wildcard <key> ...]");
   console.error("  <procedure>: 이름 | procedures/<name> | <dir> | <procedure.json>");
   console.error("  ui [--port 0] [--open]");

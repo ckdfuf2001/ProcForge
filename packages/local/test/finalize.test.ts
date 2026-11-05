@@ -396,11 +396,13 @@ describe("pf_finalize", () => {
     const sid = await scripted();
     const out = await appFor().finalize({ sessionId: sid, name: "run-test" });
     const skill = readFileSync(join(out.dir, "SKILL.md"), "utf8");
-    expect(skill).toContain("procforge run");
+    expect(skill).toContain("proof run");
+    expect(skill).not.toContain("procforge run");
     expect(skill).not.toContain("미지원(M5)");
     expect(skill).not.toContain("검증(replay)만 가능");
     const cmd = readFileSync(join(out.dir, "command.md"), "utf8");
-    expect(cmd).toContain("procforge run");
+    expect(cmd).toContain("proof run");
+    expect(cmd).not.toContain("procforge run");
     expect(cmd).not.toContain("미지원(M5");
     expect(skill).not.toContain("그대로 실행");
   }, 30000);

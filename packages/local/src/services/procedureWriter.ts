@@ -353,7 +353,7 @@ function renderSkillMd(doc: ProcedureDoc): string {
   return [
     "---",
     `name: ${doc.name}`,
-    `description: ProcForge 확정 절차 (${steps}단계). 검증(replay) + 새 데이터 실행(run) 가능.`,
+    `description: Proof 확정 절차 (${steps}단계). 검증(replay) + 새 데이터 실행(run) 가능.`,
     "---",
     ``,
     `# ${doc.name}`,
@@ -366,8 +366,8 @@ function renderSkillMd(doc: ProcedureDoc): string {
     `run fs 밖 쓰기는 실행 전후 스냅샷으로 감지해 실패 처리한다.`,
     `파라미터: ${Object.keys(doc.params).map((k) => `\`${k}\``).join(", ") || "없음"}`,
     ``,
-    `검증: \`procforge test procedures/${doc.name} --param k=v ...\``,
-    `실행: \`procforge run procedures/${doc.name} --param k=v ... [--out dir]\``,
+    `검증: \`proof test procedures/${doc.name} --param k=v ...\``,
+    `실행: \`proof run procedures/${doc.name} --param k=v ... [--out dir]\``,
     `상세 단계는 PROCEDURE.md 참조. 실패 시 단계 번호와 constraint를 보고하라.`,
     ``,
   ].join("\n");
@@ -383,8 +383,8 @@ function renderCommandMd(doc: ProcedureDoc): string {
       const vv = v as { default?: string; required?: boolean };
       return vv.required === true ? `${k}=(필수)` : `${k}="${vv.default}"`;
     }).join(" ") || "없음"}`,
-    `검증: \`procforge test procedures/${doc.name}\` + --param 전달.`,
-    `실행: \`procforge run procedures/${doc.name}\` + --param 전달.`,
+    `검증: \`proof test procedures/${doc.name}\` + --param 전달.`,
+    `실행: \`proof run procedures/${doc.name}\` + --param 전달.`,
     ``,
   ].join("\n");
 }
