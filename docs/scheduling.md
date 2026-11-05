@@ -1,6 +1,7 @@
 # 스케줄 실행 (M5.5-4)
 
-스케줄러는 내장하지 않는다. OS 스케줄러에서 `procforge run --unattended`를 호출하라.
+스케줄러는 내장하지 않는다. OS 스케줄러에서 `proof run --unattended`를 호출하라.
+(`procforge` 명령도 별칭으로 계속 동작한다. 새로 등록할 때는 `proof`를 쓰라.)
 
 ## 종료 코드
 
@@ -41,7 +42,7 @@
   var 참조 상류 노드 재귀. 상류·템플릿·스크립트 변경도 stale). 절차서를 수정하면
   기존 승인은 거부된다 (`approval: 승인 갱신 필요`). 항목 생성은 CLI로 한다
   (MCP 도구 추가 없음):
-  `procforge approve procedures/<name> --node <id> [--allow-wildcard <key> ...]`
+   `proof approve procedures/<name> --node <id> [--allow-wildcard <key> ...]`
   (같은 노드 항목이 있으면 갱신).
 - `args` 생략 = 해당 tool 전체 승인 (노드 pin은 유지).
 - `args`가 있으면 실제 호출 인자의 키 집합과 정확히 일치해야 한다
@@ -74,10 +75,10 @@
 스케줄러의 PATH를 믿지 마라. `cmd.exe /c`에 절대경로를 쓴다.
 
 - 프로그램: `C:\Windows\System32\cmd.exe`
-- 인수: `/c ""C:\Tools\nodejs\procforge.cmd" run procedures/daily-crawl --unattended --out out >> D:\logs\procforge.log 2>&1"`
+- 인수: `/c ""C:\Tools\nodejs\proof.cmd" run procedures/daily-crawl --unattended --out out >> D:\logs\procforge.log 2>&1"`
 - 시작 위치: `D:\work\site` (projectRoot. `--project-root`으로 대신 지정 가능)
 
-`procforge.cmd`가 없으면 node 절대경로로 dist 직접 호출:
+`proof.cmd`가 없으면 node 절대경로로 dist 직접 호출:
 
 - 프로그램: `C:\Tools\nodejs\node.exe`
 - 인수: `D:\tools\ProcForge\packages\local\dist\cli.js run procedures/daily-crawl --unattended --out out >> D:\logs\procforge.log 2>&1`
@@ -94,7 +95,7 @@ PowerShell에서 등록할 때 예시:
 
 ```powershell
 $action = New-ScheduledTaskAction -Execute "C:\Windows\System32\cmd.exe" `
-  -Argument '/c ""C:\Tools\nodejs\procforge.cmd" run procedures/daily-crawl --unattended --out out >> D:\logs\procforge.log 2>&1"' `
+  -Argument '/c ""C:\Tools\nodejs\proof.cmd" run procedures/daily-crawl --unattended --out out >> D:\logs\procforge.log 2>&1"' `
   -WorkingDirectory "D:\work\site"
 $trigger = New-ScheduledTaskTrigger -Daily -At "06:00"
 $principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount -RunLevel Highest
@@ -106,7 +107,7 @@ Register-ScheduledTask -TaskName "procforge-daily" -Action $action -Trigger $tri
 ## cron 예시
 
 ```sh
-0 6 * * * cd /srv/site && procforge run procedures/daily-crawl --unattended --out out >> /var/log/procforge.log 2>&1
+0 6 * * * cd /srv/site && proof run procedures/daily-crawl --unattended --out out >> /var/log/procforge.log 2>&1
 ```
 
 ## @날짜 param (M6-0)
@@ -120,7 +121,7 @@ Register-ScheduledTask -TaskName "procforge-daily" -Action $action -Trigger $tri
 - `@yesterday:utc` — UTC 어제
 
 ```sh
-0 6 * * * cd /srv/site && procforge run procedures/hn-daily --param date=@today:utc --unattended >> /var/log/procforge.log 2>&1
+0 6 * * * cd /srv/site && proof run procedures/hn-daily --param date=@today:utc --unattended >> /var/log/procforge.log 2>&1
 ```
 
 ## 주의

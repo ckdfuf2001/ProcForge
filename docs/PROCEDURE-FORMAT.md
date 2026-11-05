@@ -1,6 +1,6 @@
 # procedure.json 공개 포맷 (v1)
 
-절차서 재실행 입력의 단일 원천. `procforge test procedures/<name>` 및
+절차서 재실행 입력의 단일 원천. `proof test procedures/<name>` 및
 `pf_test({procedure})`가 이 파일만으로 replay한다.
 
 ```jsonc

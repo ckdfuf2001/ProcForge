@@ -1,6 +1,6 @@
 ---
 name: monthly
-description: ProcForge 확정 절차 (2단계). 검증(replay) + 새 데이터 실행(run) 가능.
+description: Proof 확정 절차 (2단계). 검증(replay) + 새 데이터 실행(run) 가능.
 ---
 
 # monthly
@@ -13,6 +13,6 @@ description: ProcForge 확정 절차 (2단계). 검증(replay) + 새 데이터 �
 run fs 밖 쓰기는 실행 전후 스냅샷으로 감지해 실패 처리한다.
 파라미터: `month`
 
-검증: `procforge test procedures/monthly --param k=v ...`
-실행: `procforge run procedures/monthly --param k=v ... [--out dir]`
+검증: `proof test procedures/monthly --param k=v ...`
+실행: `proof run procedures/monthly --param k=v ... [--out dir]`
 상세 단계는 PROCEDURE.md 참조. 실패 시 단계 번호와 constraint를 보고하라.

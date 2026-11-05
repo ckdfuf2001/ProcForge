@@ -1,4 +1,4 @@
-# M2/M2.5 수동 검증 (OpenCode + ProcForge local MCP, Windows 기준)
+# M2/M2.5 수동 검증 (OpenCode + Proof local MCP, Windows 기준)
 
 ## 0. 도구 구성 (M2.5+M4)
 
@@ -8,8 +8,8 @@
 `pf_reopen`, `pf_refresh_catalog`, `pf_test`, `pf_finalize`.
 프롬프트 `procforge_decompose` 1개 등록.
 
-환경변수: `PROCFORGE_READ_ONLY=1`이면 읽기 3종(`pf_next`, `pf_tree`, `pf_get_node`)만 등록.
-`PROCFORGE_SESSION_TTL_DAYS`(기본 30), `PROCFORGE_DIR`, `PROCFORGE_PROJECT_ROOT`.
+환경변수: `PROOF_READ_ONLY=1`이면 읽기 3종(`pf_next`, `pf_tree`, `pf_get_node`)만 등록.
+`PROOF_SESSION_TTL_DAYS`(기본 30), `PROOF_DIR`, `PROOF_PROJECT_ROOT`.
 
 ## 1. 빌드
 
@@ -25,10 +25,14 @@ pnpm -r build
 ```json
 {
   "mcp": {
-    "procforge": {
+    "proof": {
       "type": "local",
       "command": ["node", "<REPO>/packages/local/dist/main.js", "."],
-      "enabled": true
+      "enabled": true,
+      "environment": {
+        "PROOF_DIR": "<저장소 경로>",
+        "PROCFORGE_DIR": "<저장소 경로>"
+      }
     },
     "pptx": {
       "type": "local",
@@ -39,9 +43,12 @@ pnpm -r build
 }
 ```
 
+- 키를 `proof`로 등록하면 도구 이름도 `proof_pf_*`가 된다. `toolPrefix`를 설정하면 정확히 일치하는 이름만 인정하므로, 옛 `procforge_pf_*` 대화를 찾지 못한다.
+- `PROOF_DIR`와 `PROCFORGE_DIR`는 같은 값을 쓴다. 값이 다르면 `PROOF_*`를 쓰고 충돌 경고를 낸다 (셸 환경변수와 opencode.json 값이 다를 때도 같다).
+
 - PPT 서버 설치: `pip install "pptx-mcp-server[mcp]"` (knorq-ai, 선택 근거는 `docs/M3.5-dogfood.md`).
-- `command` 세 번째 인자(`.`)는 프로젝트 루트다. 생략 시 `PROCFORGE_PROJECT_ROOT` 환경변수, 그것도 없으면 cwd.
-- `.procforge/` 저장 위치 변경: `PROCFORGE_DIR` 환경변수.
+- `command` 세 번째 인자(`.`)는 프로젝트 루트다. 생략 시 `PROOF_PROJECT_ROOT` 환경변수, 그것도 없으면 cwd.
+- `.procforge/` 저장 위치 변경: `PROOF_DIR` 환경변수.
 - 전역 등록은 `%USERPROFILE%/.config/opencode/opencode.json`에 동일 항목 추가.
 
 주의: 수정 후 OpenCode 재시작 (MCP 서버는 시작 시 연결).
@@ -67,7 +74,7 @@ node packages/local/dist/cli.js trace <sid>
 
 ## 3. 확인 절차
 
-1. OpenCode 대화창에서 MCP 목록에 `procforge`와 위 13개 도구가 보이는지 확인.
+1. OpenCode 대화창에서 MCP 목록에 `proof`와 위 13개 도구가 보이는지 확인.
 2. `procforge_decompose` 프롬프트 확인: OpenCode는 MCP prompts를 지원한다
    (공식 문서 "MCP prompts become commands", 클라이언트 `listPrompts`/`getPrompt` 보유).
    프롬프트가 노출되지 않는 클라이언트에서도 `pf_start` 응답 instruction에 동일 전문이 포함되므로 무방.
