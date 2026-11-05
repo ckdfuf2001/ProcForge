@@ -1,18 +1,26 @@
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, afterAll } from "vitest";
 import {
   assertAllTrackedReplays,
   assertReplayMatchesStore,
   trackReplay,
 } from "../test/replay-invariant.js";
-import { mkdtempSync, mkdirSync, writeFileSync, cpSync } from "node:fs";
+import { mkdirSync, writeFileSync, cpSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { CoreService } from "../src/service.js";
 import { createMemoryStore } from "../src/store.js";
 import { FileStore } from "@proof/shared/filestore.js";
 import type { Store } from "@proof/shared/store.js";
 import type { Session } from "@proof/shared/schema.js";
+import { makeTmp, cleanRegisteredTmp } from "@proof/shared/tmp.js";
+
+// M9-tmp2: useTmpCleanup 3줄 (vitest는 테스트 파일에서만 import).
+function useTmpCleanup(): void {
+  afterAll(() => {
+    cleanRegisteredTmp();
+  });
+}
+useTmpCleanup();
 
 // M8-ui2: 분해 사유·이벤트 상세·읽기 API(history/tree) 계약.
 //
@@ -376,7 +384,7 @@ describe("M8-ui2 조언→재분해 연결 (causeAdviseIds)", () => {
 describe("M8-ui2 구 세션 호환 (패치 없는 이벤트)", () => {
   /** 구 형식 이벤트(상세 없음)로 된 세션을 만든다. */
   function legacySession(): { store: FileStore; sid: string } {
-    const dir = mkdtempSync(join(tmpdir(), "pf-m8-legacy-"));
+    const dir = makeTmp("pf-m8-legacy-");
     const store = new FileStore(dir);
     const sid = "11111111-2222-4333-8444-555555555555";
     mkdirSync(join(dir, "sessions", sid, "nodes"), { recursive: true });
@@ -454,7 +462,7 @@ describe("M8-ui2 구 세션 호환 (패치 없는 이벤트)", () => {
    * 상태는 노드별로 null 을 허용하고, structureOnly 는 "null 상태 노드 존재" 로만 정한다.
    */
   function mixedSession(): { store: FileStore; sid: string } {
-    const dir = mkdtempSync(join(tmpdir(), "pf-m8-mixed-"));
+    const dir = makeTmp("pf-m8-mixed-");
     const store = new FileStore(dir);
     const sid = "22222222-3333-4444-8555-666666666666";
     mkdirSync(join(dir, "sessions", sid, "nodes"), { recursive: true });
@@ -540,7 +548,7 @@ describe("M8-ui2 구 세션 호환 (패치 없는 이벤트)", () => {
 
 describe("M8-ui2 파일 저장소 왕복", () => {
   it("파일에 저장된 이벤트에도 detail이 남는다", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "pf-m8-file-"));
+    const dir = makeTmp("pf-m8-file-");
     const store = new FileStore(dir);
     const s = svc(store);
     const sid = await started(s);
@@ -564,7 +572,7 @@ describe("M8-ui2 파일 저장소 왕복", () => {
     const fixture = fileURLToPath(
       new URL("../test/fixtures/legacy-d290", import.meta.url),
     );
-    const dir = mkdtempSync(join(tmpdir(), "pf-m8-d290-"));
+    const dir = makeTmp("pf-m8-d290-");
     cpSync(join(fixture, "sessions", sid), join(dir, "sessions", sid), {
       recursive: true,
     });
