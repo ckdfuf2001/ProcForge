@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { mkdtempSync, writeFileSync, existsSync, mkdirSync, readFileSync, readdirSync } from "node:fs";
+import { writeFileSync, existsSync, mkdirSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 import {
   normalizeResponseForStore,
   restoreResponseForRun,
@@ -11,10 +10,16 @@ import {
   compareToolResponses,
 } from "./recordings.js";
 import { replacePathForms } from "./pathnorm.js";
+import { makeTmp } from "@proof/shared/tmp.js";
+import { useTmpCleanup } from "../../test/tmp-hooks.js";
+
+// M9-tmp2: tmp 정리는 등록 역순으로 가장 나중에 돈다.
+useTmpCleanup();
+
 
 let dir: string;
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), "pf-rec-"));
+  dir = makeTmp("pf-rec-");
 });
 
 describe("recordings normalize/restore (M3.4-6/M3.4.1-2)", () => {

@@ -1,13 +1,18 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { mkdtempSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
+import { writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { assertSafePath, ingestArtifacts, setupSandbox, isEscapeRel, normalizeArgSpecs } from "../src/artifacts.js";
+import { makeTmp } from "@proof/shared/tmp.js";
+import { useTmpCleanup } from "../test/tmp-hooks.js";
+
+// M9-tmp2: tmp 정리는 등록 역순으로 가장 나중에 돈다.
+useTmpCleanup();
+
 
 let root: string;
 let pfdir: string;
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), "pf-art-"));
+  root = makeTmp("pf-art-");
   pfdir = join(root, ".procforge");
   writeFileSync(join(root, "report.txt"), "hello");
 });

@@ -1,15 +1,20 @@
 import { describe, it, expect } from "vitest";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
+import { mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { resolveProcedureRef } from "./procedure-run.js";
+import { makeTmp } from "@proof/shared/tmp.js";
+import { useTmpCleanup } from "../../test/tmp-hooks.js";
+
+// M9-tmp2: tmp 정리는 등록 역순으로 가장 나중에 돈다.
+useTmpCleanup();
+
 
 // M5.6-a: .json 파일 / bare name·procedures/ 접두 / 디렉터리 3형식이
 // 같은 {dir, file}로 수렴 (+ 파일 해시 동일).
 
 function setup(): { pfdir: string; file: string } {
-  const pfdir = join(mkdtempSync(join(tmpdir(), "pf-m56a-")), ".procforge");
+  const pfdir = join(makeTmp("pf-m56a-"), ".procforge");
   mkdirSync(join(pfdir, "procedures", "p1"), { recursive: true });
   const file = join(pfdir, "procedures", "p1", "procedure.json");
   writeFileSync(file, JSON.stringify({ name: "p1" }));

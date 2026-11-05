@@ -1,9 +1,14 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
+import { mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { seedBoundInputs } from "./workdir.js";
 import type { Node } from "@proof/shared/schema.js";
+import { makeTmp } from "@proof/shared/tmp.js";
+import { useTmpCleanup } from "../../test/tmp-hooks.js";
+
+// M9-tmp2: tmp 정리는 등록 역순으로 가장 나중에 돈다.
+useTmpCleanup();
+
 
 // M5.2-1: 입력 바인딩 시딩 단위 테스트.
 
@@ -11,7 +16,7 @@ let root: string;
 let fsDir: string;
 
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), "pf-bind-"));
+  root = makeTmp("pf-bind-");
   fsDir = join(root, "fs");
   mkdirSync(fsDir, { recursive: true });
   writeFileSync(join(root, "sales-2026-10.xlsx"), "XLSX-10");

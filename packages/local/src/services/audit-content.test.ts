@@ -1,6 +1,11 @@
 import { describe, it, expect } from "vitest";
 import { deflateRawSync } from "node:zlib";
 import { auditContentTexts, collectAuditContent, extractPptxText } from "./audit-content.js";
+import { makeTmp } from "@proof/shared/tmp.js";
+import { useTmpCleanup } from "../../test/tmp-hooks.js";
+
+// M9-tmp2: tmp 정리는 등록 역순으로 가장 나중에 돈다.
+useTmpCleanup();
 
 // M5.3-1: 파일 내용 감사 단위 테스트.
 
@@ -63,10 +68,9 @@ describe("auditContentTexts", () => {
 
 describe("collectAuditContent", () => {
   it("script 수집 + 바인딩 템플릿 제외 + 고정 템플릿 포함", async () => {
-    const { mkdtempSync, mkdirSync, writeFileSync } = await import("node:fs");
+    const { mkdirSync, writeFileSync } = await import("node:fs");
     const { join } = await import("node:path");
-    const { tmpdir } = await import("node:os");
-    const root = mkdtempSync(join(tmpdir(), "pf-auditc-"));
+    const root = makeTmp("pf-auditc-");
     mkdirSync(join(root, "scripts"), { recursive: true });
     writeFileSync(join(root, "scripts", "agg.py"), "print(1)");
     writeFileSync(join(root, "template.j2"), "hello");

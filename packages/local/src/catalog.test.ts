@@ -1,7 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import { join, resolve, dirname } from "node:path";
-import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import {
@@ -15,6 +14,12 @@ import {
 } from "../src/catalog.js";
 import { ConnectionPool } from "../src/runner/connections.js";
 import { FileStore } from "../src/filestore.js";
+import { makeTmp } from "@proof/shared/tmp.js";
+import { useTmpCleanup } from "../test/tmp-hooks.js";
+
+// M9-tmp2: tmp 정리는 등록 역순으로 가장 나중에 돈다.
+useTmpCleanup();
+
 
 describe("M3.6-7 카탈로그 버전", () => {
   it("현행 major 스키마: read에 offset/limit", () => {
@@ -51,7 +56,7 @@ describe("M3.6-7 카탈로그 버전", () => {
   });
 
   it("세션 버전 FileStore 왕복", () => {
-    const dir = mkdtempSync(join(tmpdir(), "pf-catstore-"));
+    const dir = makeTmp("pf-catstore-");
     const store = new FileStore(dir);
     const id = randomUUID();
     store.saveSession({
@@ -62,7 +67,7 @@ describe("M3.6-7 카탈로그 버전", () => {
     expect(store.getSession(id)?.opencodeVersion).toBe("1.2.3");
   });
   it("runner read offset/limit", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "pf-cat-"));
+    const dir = makeTmp("pf-cat-");
     writeFileSync(join(dir, "a.txt"), "l0\nl1\nl2\nl3");
     const pool = new ConnectionPool(dir, dir);
     try {
@@ -83,7 +88,7 @@ describe("M3.5.1-4 카탈로그 타임아웃·재시도", () => {
   });
 
   it("첫 실패 서버는 1회 재시도 후 수집", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "pf-catflaky-"));
+    const dir = makeTmp("pf-catflaky-");
     const here = dirname(fileURLToPath(import.meta.url));
     const flag = join(dir, "flag");
     writeFileSync(
@@ -104,7 +109,7 @@ describe("M3.5.1-4 카탈로그 타임아웃·재시도", () => {
   }, 60000);
 
   it("계속 실패 서버는 경고 + 내장 항목 유지", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "pf-catbad-"));
+    const dir = makeTmp("pf-catbad-");
     writeFileSync(
       join(dir, "opencode.json"),
       JSON.stringify({ mcp: { bad: { type: "local", command: ["nonexistent-procforge-bin-xyz"] } } }),

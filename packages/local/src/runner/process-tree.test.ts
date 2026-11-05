@@ -1,14 +1,19 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { mkdtempSync, writeFileSync, mkdirSync } from "node:fs";
+import { writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { runScript } from "./script-run.js";
 import { isGroupAlive, killProcessTree } from "../services/process-tree.js";
+import { makeTmp } from "@proof/shared/tmp.js";
+import { useTmpCleanup } from "../../test/tmp-hooks.js";
+
+// M9-tmp2: tmp 정리는 등록 역순으로 가장 나중에 돈다.
+useTmpCleanup();
+
 
 // M7-5-c: 종료 함수 하나 / **그룹** 기준 유예 / 유예는 비동기.
 // SIGTERM 을 무시하는 손자(트랩)·스크립트가 남아도 반드시 끝나야 한다.
 
-const root = mkdtempSync(join(tmpdir(), "pf-kill-"));
+const root = makeTmp("pf-kill-");
 const fsDir = join(root, "fs");
 mkdirSync(fsDir, { recursive: true });
 

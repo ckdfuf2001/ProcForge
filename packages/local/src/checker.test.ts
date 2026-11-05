@@ -1,10 +1,15 @@
 import { describe, it, expect } from "vitest";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { deflateRawSync } from "node:zlib";
 import { evaluateConstraint, evaluateAll } from "../src/checker.js";
 import type { Constraint } from "@proof/shared/schema.js";
+import { makeTmp } from "@proof/shared/tmp.js";
+import { useTmpCleanup } from "../test/tmp-hooks.js";
+
+// M9-tmp2: tmp 정리는 등록 역순으로 가장 나중에 돈다.
+useTmpCleanup();
+
 
 describe("checker kinds", () => {
   it("file_exists pass/fail", () => {
@@ -196,7 +201,7 @@ describe("checker kinds", () => {
   });
 
   it("M5.5-0 pptx_table_sum: 표 합산·ref·deferred", () => {
-    const dir = mkdtempSync(join(tmpdir(), "pf-ptsum-"));
+    const dir = makeTmp("pf-ptsum-");
     const cell = (t: string) => `<a:tc><a:txBody><a:p><a:r><a:t>${t}</a:t></a:r></a:p></a:txBody></a:tc>`;
     const row = (cs: string[]) => `<a:tr>${cs.map(cell).join("")}</a:tr>`;
     const table = (rows: string[][]) => `<a:tbl>${rows.map(row).join("")}</a:tbl>`;
@@ -307,7 +312,7 @@ describe("checker kinds", () => {
   });
 
   it("M5.8.2-4 csv_rows: 헤더 제외 행 수 + ref", () => {
-    const dir = mkdtempSync(join(tmpdir(), "pf-csv-"));
+    const dir = makeTmp("pf-csv-");
     writeFileSync(join(dir, "d.csv"), "title,date\nt1,2026-10-13\nt2,2026-10-13\n");
     const base = { id: "c", kind: "csv_rows", source: "human" } as never;
     const ctx = { fsDir: dir };

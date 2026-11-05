@@ -1,12 +1,18 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { inferPathRole, rewritePaths } from "./runner/paths.js";
+import { makeTmp } from "@proof/shared/tmp.js";
+import { useTmpCleanup } from "../test/tmp-hooks.js";
+
+// M9-tmp2: tmp 정리는 등록 역순으로 가장 나중에 돈다.
+useTmpCleanup();
+
 
 let fsDir: string;
 beforeEach(() => {
-  fsDir = mkdtempSync(join(tmpdir(), "pf-paths-"));
+  fsDir = makeTmp("pf-paths-");
   writeFileSync(join(fsDir, "in.txt"), "x");
 });
 

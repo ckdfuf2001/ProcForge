@@ -1,14 +1,18 @@
 import { describe, it, expect, beforeEach, afterAll } from "vitest";
 import {
   mkdirSync,
-  mkdtempSync,
   writeFileSync,
   symlinkSync,
   rmSync,
 } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { readSandboxed, SCRIPT_READ_MAX_BYTES } from "./approval-scripts.js";
+import { makeTmp } from "@proof/shared/tmp.js";
+import { useTmpCleanup } from "../../test/tmp-hooks.js";
+
+// M9-tmp2: tmp 정리는 등록 역순으로 가장 나중에 돈다.
+useTmpCleanup();
+
 
 // M7-5-d: 이전 공회전 테스트를 **직접 함수** 단위로 교체.
 // "../"·심링크 탈출·NUL·5MB+1 이 **진짜로** 오류 코드를 내는지 assert 한다.
@@ -17,7 +21,7 @@ import { readSandboxed, SCRIPT_READ_MAX_BYTES } from "./approval-scripts.js";
 
 let root: string;
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), "pf-sandbox-"));
+  root = makeTmp("pf-sandbox-");
   mkdirSync(join(root, "inner"), { recursive: true });
   writeFileSync(join(root, "inner", "ok.py"), "print(1)\n", "utf8");
 });
@@ -43,7 +47,7 @@ describe("M7-5-d readSandboxed 경계", () => {
 
   it("../ 탈출 → bad_request", () => {
     // root/ 바깥(형제 디렉터리)에 있는 비밀 파일 — "../" 로 접근하면 나가야 한다
-    const base = mkdtempSync(join(tmpdir(), "pf-escape-"));
+    const base = makeTmp("pf-escape-");
     const inside = join(base, "inside");
     mkdirSync(join(inside, "inner"), { recursive: true });
     writeFileSync(join(base, "secret.txt"), "secret\n", "utf8");
@@ -57,7 +61,7 @@ describe("M7-5-d readSandboxed 경계", () => {
   });
 
   it("루트 밖 절대 경로 → bad_request", () => {
-    const outside = mkdtempSync(join(tmpdir(), "pf-outside-"));
+    const outside = makeTmp("pf-outside-");
     writeFileSync(join(outside, "s.txt"), "secret\n", "utf8");
     const code = codeOf(() => readSandboxed(root, join(outside, "s.txt")));
     expect(code).toBe("bad_request");
@@ -65,7 +69,7 @@ describe("M7-5-d readSandboxed 경계", () => {
   });
 
   it("심링크로 sandbox 밖 탈출 → bad_request", () => {
-    const outside = mkdtempSync(join(tmpdir(), "pf-outside-"));
+    const outside = makeTmp("pf-outside-");
     writeFileSync(join(outside, "s.txt"), "secret\n", "utf8");
     const link = join(root, "inner", "escape.txt");
     let linked = false;

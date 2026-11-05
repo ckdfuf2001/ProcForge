@@ -1,15 +1,19 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { mkdtempSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { savePairing, getPairing, loadPairings } from "./pairings.js";
+import { makeTmp } from "@proof/shared/tmp.js";
+import { useTmpCleanup } from "../../test/tmp-hooks.js";
+
+// M9-tmp2: tmp 정리는 등록 역순으로 가장 나중에 돈다.
+useTmpCleanup();
+
 
 // M7-1: 짝짓기 latest-wins + 이력.
 
 describe("pairings", () => {
   let pfdir: string;
   beforeEach(() => {
-    pfdir = join(mkdtempSync(join(tmpdir(), "pf-pair-")), ".procforge");
+    pfdir = join(makeTmp("pf-pair-"), ".procforge");
   });
 
   it("없으면 빈 대응표", () => {

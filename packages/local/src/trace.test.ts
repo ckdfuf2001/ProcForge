@@ -1,7 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { mkdtempSync, existsSync, readFileSync, appendFileSync } from "node:fs";
+import { existsSync, readFileSync, appendFileSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { createLocalStack } from "../src/core-inprocess.js";
 import {
   buildTrace,
@@ -19,12 +18,18 @@ import {
   writeZip,
 } from "../src/export.js";
 import type { CoreClient } from "@proof/shared/core-client.js";
+import { makeTmp } from "@proof/shared/tmp.js";
+import { useTmpCleanup } from "../test/tmp-hooks.js";
+
+// M9-tmp2: tmp 정리는 등록 역순으로 가장 나중에 돈다.
+useTmpCleanup();
+
 
 let pfdir: string;
 let client: CoreClient;
 
 beforeEach(() => {
-  const root = mkdtempSync(join(tmpdir(), "pf-trace-"));
+  const root = makeTmp("pf-trace-");
   pfdir = join(root, ".procforge");
   client = createLocalStack(pfdir).client;
 });

@@ -1,9 +1,14 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs";
+import { mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { collectScripts, rewriteAutoFileExists } from "./procedureWriter.js";
 import type { ProcedureDoc } from "@proof/shared/procedure.js";
+import { makeTmp } from "@proof/shared/tmp.js";
+import { useTmpCleanup } from "../../test/tmp-hooks.js";
+
+// M9-tmp2: tmp 정리는 등록 역순으로 가장 나중에 돈다.
+useTmpCleanup();
+
 
 // M5.2-2: collectScripts 단위 테스트.
 
@@ -23,7 +28,7 @@ function docWith(args: Record<string, unknown>): ProcedureDoc {
 }
 
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), "pf-collect-"));
+  root = makeTmp("pf-collect-");
   buildDir = join(root, "build");
   mkdirSync(buildDir, { recursive: true });
   mkdirSync(join(root, "scripts"), { recursive: true });
