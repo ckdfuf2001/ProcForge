@@ -171,3 +171,18 @@
   항상 통과하는 무효 검사였음. 이번에 `isApproved(`로 바로잡았다 (위반 0건).
 - `procedureWriter.ts:356` "ProcForge 확정 절차"는 생성물(SKILL.md) 문구로 절차서 hash·승인 hash·golden 비교
   어디에도 들어가지 않는다. M9-1-3에서 변경 가능.
+
+## 11. M9-tmp-2 제품 누수 측정 기록 (2026-11-05)
+
+제품(`packages/*/src`, 테스트 제외)에 `os.tmpdir()`·`mkdtemp`·`process.env.TEMP|TMP` 사용 0건,
+tmp/temp 계열 dependencies 0건. 종료 핸들러(`process.on`)도 없음 (자식 kill용 `SIGTERM` 발신 1곳 제외).
+
+| 실행 | 종료 | tmp-delta |
+|---|---|---|
+| `m3-ci-replay` (CLI record+replay, exit 0) | 정상 | +2 (스크립트 자체 `pf-ci-*`. 제품 0) |
+| `proof run mtest` (실제 MCP 실행, exit 0) | 정상 | 0 |
+| `proof run mtest` (도구 스폰 실패, exit 1) | 비정상 | 0 |
+| `proof ui` 기동 후 kill | 강제 종료 | 0 |
+| `proof ui` 기동 후 SIGINT | 강제 종료(SIGINT 신호, Windows에서는 kill과 동일) | 0 |
+
+스크립트 leaf 경로는 미실행 — src grep 0건으로 갈음한다 (실행해도 제품 temp를 만들 코드 경로가 없음).
