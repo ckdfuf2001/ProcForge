@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdirSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { ProcForgeApp } from "../src/app/app.js";
@@ -7,10 +7,16 @@ import { testStack } from "./client-mode.js";
 import { runDir, spawnTrackedChild, isAlive } from "../src/app/run-control.js";
 import { readRunState } from "../src/services/run-state.js";
 import { makeTmp } from "@proof/shared/tmp.js";
-import { useTmpCleanup } from "./tmp-hooks.js";
+import { useTmpCleanup, settleRun } from "./tmp-hooks.js";
 
 // M9-tmp2: tmp 정리는 등록 역순으로 가장 나중에 돈다.
 useTmpCleanup();
+
+// M9-tmp2-fix: 만든 실행은 테스트가 끝나기 전에 수습한다 (취소+종료대기).
+const liveRuns: { app: ProcForgeApp; pfdir: string; runId: string }[] = [];
+afterEach(async () => {
+  for (const t of liveRuns.splice(0)) await settleRun(t.app, t.pfdir, t.runId);
+});
 
 
 // M7 5-1: UI 실행 — 등록 절차서·선언 param만, 동시 1개(409), 취소=프로세스 트리,
@@ -89,6 +95,7 @@ describe("M7 5-1 uiRun 입력 검증", () => {
       /선언되지 않은 param/,
     );
     const ok = await a.uiRun({ procedure: "demo", params: { month: "2026-10" } });
+    liveRuns.push({ app: a, pfdir, runId: ok.runId });
     expect(ok.runId).toMatch(/[0-9a-f-]{36}/);
   });
 
@@ -106,6 +113,7 @@ describe("M7 5-1 동시 실행 409", () => {
     const a = await mkApp();
     registerProcedure();
     const first = await a.uiRun({ procedure: "demo", params: { month: "2026-10" } });
+    liveRuns.push({ app: a, pfdir, runId: first.runId });
     const second = await a.uiRun({ procedure: "demo", params: { month: "2026-10" } }).then(
       () => "성공",
       (e: Error) => e.message,
@@ -124,6 +132,7 @@ describe("M7 5-1 동시 실행 409", () => {
       if (third === null) await new Promise((r) => setTimeout(r, 50));
     }
     expect(third).not.toBeNull();
+    if (third) liveRuns.push({ app: a, pfdir, runId: third.runId });
     expect(third?.runId).not.toBe(first.runId);
   });
 });
@@ -133,6 +142,7 @@ describe("M7 5-1 실행 기록 = runs/<runId>, 세션 TTL 무관", () => {
     const a = await mkApp();
     registerProcedure();
     const run = await a.uiRun({ procedure: "demo", params: { month: "2026-10" } });
+    liveRuns.push({ app: a, pfdir, runId: run.runId });
     expect(existsSync(join(runDir(pfdir, run.runId), "state.json"))).toBe(true);
     await new Promise((r) => setTimeout(r, 300));
     const log = await a.uiRunLog({ runId: run.runId });
@@ -157,6 +167,7 @@ describe("M7 5-1 실행 기록 = runs/<runId>, 세션 TTL 무관", () => {
       expect(r.status).toBe(200);
       const body = (await r.json()) as { runId: string; sessionId: string };
       expect(body.runId).toBeTruthy();
+      liveRuns.push({ app: a, pfdir, runId: body.runId });
       // 주입 키는 HTTP에서도 400
       const bad = await fetch(`${srv.url}/api/runs`, {
         method: "POST",

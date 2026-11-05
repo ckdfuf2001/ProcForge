@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { execSync } from "node:child_process";
@@ -8,10 +8,17 @@ import { testStack } from "./client-mode.js";
 import { isAlive, listChildren } from "../src/app/run-control.js";
 import { readRunState } from "../src/services/run-state.js";
 import { makeTmp } from "@proof/shared/tmp.js";
-import { useTmpCleanup } from "./tmp-hooks.js";
+import { useTmpCleanup, settleRun } from "./tmp-hooks.js";
 
 // M9-tmp2: tmp 정리는 등록 역순으로 가장 나중에 돈다.
 useTmpCleanup();
+
+// M9-tmp2-fix: 만든 실행은 테스트가 끝나기 전에 수습한다 (취소+종료대기).
+// afterAll rmSync와 살아 있는 자식·열린 로그 핸들의 경쟁(EBUSY 부분 정리)을 막는다.
+const liveRuns: { app: ProcForgeApp; pfdir: string; runId: string }[] = [];
+afterEach(async () => {
+  for (const t of liveRuns.splice(0)) await settleRun(t.app, t.pfdir, t.runId);
+});
 
 
 // M7-5-a/b: 취소가 **실제 runner가 띄운 자식**을 멈추는지.
@@ -67,6 +74,7 @@ async function running() {
   });
   await app.finalize({ sessionId: s.sessionId, name: "slow" });
   const run = await app.uiRun({ procedure: "slow" });
+  liveRuns.push({ app, pfdir, runId: run.runId });
   let kids: number[] = [];
   for (let i = 0; i < 100 && kids.length === 0; i++) {
     kids = listChildren(pfdir, run.runId);
@@ -96,7 +104,8 @@ describe("M7-5-a 실제 runner 자식이 취소에 죽는다", () => {
 
   it("취소 로그와 actor ui 기록이 남는다", async () => {
     const { pfdir, app, run, kids } = await running();
-    if (kids.length === 0) return;
+    // M9-tmp2-fix: 조용 통과 금지 — 취소 대상이 없으면 테스트가 아무것도 검증하지 않는다.
+    expect(kids.length).toBeGreaterThan(0);
     const srv = await createUiServer({ app: app as never });
     try {
       await app.uiRunCancel({ runId: run.runId });
