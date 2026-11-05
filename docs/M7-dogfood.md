@@ -371,6 +371,8 @@ Get-Content ".procforge\sessions\$sid\calls.jsonl" |
        화면 배지는 촬영 시점에 사라짐). 타임라인 화면(`m8-1-close3-*.png`)은 확보.
    16. `pf_test replay` failed 1 / blocked 3 (M8-1 실측, live API 비결정성) — 재현성 문제.
    17. serve 기본 모델 무응답 (M8-1 실측: big-pickle 15분 무응답으로 명시 모델 전환) — 기본 모델 health 확인 수단 필요.
+   18. `docs/M2-manual.md`의 "위 13개 도구" 표기는 현행 21종과 불일치. M9-1-4 범위 밖이라 후속에서 갱신 (M9-tmp-2 보고).
+   19. 강제 종료 시 `.procforge` 아래 `*.<pid>.tmp` (writeAtomicFile 중간 산출물) 정리 경로 없음. `.lock`은 stale 회수로 자가 치유. M9-tmp-2 0번 보고 (측정 저장소는 측정 후 정리되어 직접 확인은 못 했고 코드로 판단).
 
 ## 9. 증거 링크
 

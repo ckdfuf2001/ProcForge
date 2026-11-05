@@ -42,7 +42,7 @@
   var 참조 상류 노드 재귀. 상류·템플릿·스크립트 변경도 stale). 절차서를 수정하면
   기존 승인은 거부된다 (`approval: 승인 갱신 필요`). 항목 생성은 CLI로 한다
   (MCP 도구 추가 없음):
-   `proof approve procedures/<name> --node <id> [--allow-wildcard <key> ...]`
+  `proof approve procedures/<name> --node <id> [--allow-wildcard <key> ...]`
   (같은 노드 항목이 있으면 갱신).
 - `args` 생략 = 해당 tool 전체 승인 (노드 pin은 유지).
 - `args`가 있으면 실제 호출 인자의 키 집합과 정확히 일치해야 한다
