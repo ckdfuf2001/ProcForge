@@ -155,26 +155,41 @@ async function main() {
     // M9-tmp-fix: origin이 아니라 로컬 저장소에서 클론하고 작업 HEAD를 체크아웃한다.
     // origin/master를 클론하면 푸시 전 코드를 테스트하는 구멍이 생긴다.
     const dir = mkdtempSync(join(tmpdir(), "pf-verify-"));
-    await retry("git clone", () => {
-      execSync(`git clone "${ROOT}" "${dir}"`, { cwd: tmpdir(), env: baseEnv(), stdio: "inherit" });
-    });
-    execSync(`git -C "${dir}" checkout "${head}"`, { cwd: tmpdir(), env: baseEnv(), stdio: "inherit" });
-    const cloneHead = out("git", ["-C", dir, "rev-parse", "HEAD"]);
-    console.log(`[dev-verify] 클론 sha=${cloneHead} (작업 HEAD=${head})`);
-    if (cloneHead !== head) {
-      throw new Error(`클린 클론 sha 불일치: ${cloneHead} != ${head}`);
+    try {
+      await retry("git clone", () => {
+        execSync(`git clone "${ROOT}" "${dir}"`, { cwd: tmpdir(), env: baseEnv(), stdio: "inherit" });
+      });
+      execSync(`git -C "${dir}" checkout "${head}"`, { cwd: tmpdir(), env: baseEnv(), stdio: "inherit" });
+      const cloneHead = out("git", ["-C", dir, "rev-parse", "HEAD"]);
+      console.log(`[dev-verify] 클론 sha=${cloneHead} (작업 HEAD=${head})`);
+      if (cloneHead !== head) {
+        throw new Error(`클린 클론 sha 불일치: ${cloneHead} != ${head}`);
+      }
+      const cenv = baseEnv();
+      const crun = (bin, args) => {
+        const r = spawnSync(bin, args, { cwd: dir, env: cenv, stdio: "pipe", shell: true });
+        appendFileSync(log, `$ ${bin} ${args.join(" ")}\n`);
+        if (r.stdout && r.stdout.length > 0) appendFileSync(log, r.stdout);
+        if (r.stderr && r.stderr.length > 0) appendFileSync(log, r.stderr);
+        if (r.status !== 0) throw new Error(`클린 클론 실패(${r.status}): ${bin} ${args.join(" ")}`);
+      };
+      crun("pnpm", ["install", "--frozen-lockfile"]);
+      crun("pnpm", ["-r", "run", "build"]);
+      crun("pnpm", ["-r", "run", "test", "--", "--run", "--testTimeout=20000", "--hookTimeout=20000", ...(process.platform === "win32" ? ["--maxWorkers=2", "--minWorkers=1"] : [])]);
+    } finally {
+      // M9-tmp-2: 끝나면(실패해도) 클론 폴더를 지운다. crun은 동기 실행이라
+      // 자식 프로세스는 이미 회수된 상태다. EBUSY 대비 재시도.
+      // PROOF_KEEP_TMP=1이면 남기고 경로를 stderr에 출력한다.
+      if (process.env.PROOF_KEEP_TMP === "1") {
+        console.error(`[dev-verify] KEEP(삭제 안 함): ${dir}`);
+      } else {
+        try {
+          rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+        } catch (e) {
+          console.error(`[dev-verify] 클린 클론 정리 실패(남김): ${dir} (${e instanceof Error ? e.message : String(e)})`);
+        }
+      }
     }
-    const cenv = baseEnv();
-    const crun = (bin, args) => {
-      const r = spawnSync(bin, args, { cwd: dir, env: cenv, stdio: "pipe", shell: true });
-      appendFileSync(log, `$ ${bin} ${args.join(" ")}\n`);
-      if (r.stdout && r.stdout.length > 0) appendFileSync(log, r.stdout);
-      if (r.stderr && r.stderr.length > 0) appendFileSync(log, r.stderr);
-      if (r.status !== 0) throw new Error(`클린 클론 실패(${r.status}): ${bin} ${args.join(" ")}`);
-    };
-    crun("pnpm", ["install", "--frozen-lockfile"]);
-    crun("pnpm", ["-r", "run", "build"]);
-    crun("pnpm", ["-r", "run", "test", "--", "--run", "--testTimeout=20000", "--hookTimeout=20000", ...(process.platform === "win32" ? ["--maxWorkers=2", "--minWorkers=1"] : [])]);
   } else {
     step(4, "생략 (--from)");
   }
