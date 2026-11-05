@@ -1,5 +1,5 @@
 import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
-import { join, extname, basename, dirname } from "node:path";
+import { join, extname, basename, dirname, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
 // M9-gates: ci.yml에 직접 적혀 있던 게이트를 같은 내용으로 옮김.
@@ -172,8 +172,8 @@ function check(name, hits, targets) {
     if (!existsSync(d)) continue;
     let n = 0;
     for (const f of walk(d)) {
-      if (!f.endsWith(".ts") && !f.endsWith(".tsx")) continue;
-      if (f.endsWith(".test.ts")) continue;
+      if (!/\.(test\.)?tsx?$/.test(f)) continue;
+      if (/\.test\.tsx?$/.test(f)) continue;
       n++;
       targets++;
       read(f)
@@ -192,16 +192,56 @@ function check(name, hits, targets) {
 
 // 6. no test-dir imports from product src (M9-tmp-fix2: src가 test/ 경로를
 // import하면 제품-테스트 경계가 깨진다).
+// M9-tmp-2: side-effect import, 동적 import(), require()도 잡는다.
 {
-  const re = /from\s+["'][^"']*\/test\//;
+  const pats = [
+    /from\s+["'][^"']*\/test\//,
+    /^\s*import\s+["'][^"']*\/test\//,
+    /import\s*\(\s*["'][^"']*\/test\//,
+    /require\s*\(\s*["'][^"']*\/test\//,
+  ];
   const hits = [];
   let targets = 0;
   for (const p of ["core", "core-server", "local", "shared", "ui"]) {
     const d = join(ROOT, "packages", p, "src");
     if (!existsSync(d)) continue;
     for (const f of walk(d)) {
-      if (!f.endsWith(".ts") && !f.endsWith(".tsx")) continue;
-      if (f.endsWith(".test.ts")) continue;
+      if (!/\.(test\.)?tsx?$/.test(f)) continue;
+      if (/\.test\.tsx?$/.test(f)) continue;
+      targets++;
+      read(f)
+        .split("\n")
+        .forEach((line, i) => {
+          if (pats.some((re) => re.test(line))) hits.push(`${f}:${i + 1}: ${line.trim().slice(0, 120)}`);
+        });
+    }
+  }
+  violations.push(...hits.map((h) => "test-import: " + h));
+  check("no test-dir imports from product src", hits, targets);
+}
+
+// 7. mkdtemp는 shared/src/tmp.ts에서만 (M9-tmp-2: 테스트 임시폴더 중앙 관리).
+// 테스트 파일도 포함한다 (makeTmp를 쓸 것).
+{
+  const re = /mkdtemp(Sync)?\s*\(/;
+  const dirs = [
+    join(ROOT, "packages", "core", "src"),
+    join(ROOT, "packages", "core", "test"),
+    join(ROOT, "packages", "core-server", "src"),
+    join(ROOT, "packages", "core-server", "test"),
+    join(ROOT, "packages", "local", "src"),
+    join(ROOT, "packages", "local", "test"),
+    join(ROOT, "packages", "local", "test-e2e"),
+    join(ROOT, "packages", "shared", "src"),
+    join(ROOT, "packages", "ui", "src"),
+  ];
+  const hits = [];
+  let targets = 0;
+  for (const d of dirs) {
+    if (!existsSync(d)) continue;
+    for (const f of walk(d)) {
+      if (!/\.(test\.)?tsx?$/.test(f)) continue;
+      if (relative(ROOT, f).replace(/\\/g, "/") === "packages/shared/src/tmp.ts") continue;
       targets++;
       read(f)
         .split("\n")
@@ -210,8 +250,8 @@ function check(name, hits, targets) {
         });
     }
   }
-  violations.push(...hits.map((h) => "test-import: " + h));
-  check("no test-dir imports from product src", hits, targets);
+  violations.push(...hits.map((h) => "mkdtemp-direct: " + h));
+  check("mkdtemp only in shared tmp", hits, targets);
 }
 
 if (violations.length > 0) {
