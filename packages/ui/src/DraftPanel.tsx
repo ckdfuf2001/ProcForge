@@ -41,7 +41,11 @@ export function DraftPanel() {
     void (async () => {
       try {
         const r = await api.applyDraft(draft.draftId, checked);
-        setResult(`적용됨: ${r.applied.map((a) => `${a.nodeId}(${a.kind})`).join(", ") || "없음"}`);
+        const changed = r.changedNodes.join(", ") || "없음";
+        const reset = r.approvalReset.length > 0
+          ? ` 다음 실행 때 승인 필요: ${r.approvalReset.join(", ")}`
+          : "";
+        setResult(`적용됨: ${r.applied.map((a) => `${a.nodeId}(${a.kind})`).join(", ") || "없음"} · 바뀐 노드: ${changed}.${reset}`);
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
       } finally {

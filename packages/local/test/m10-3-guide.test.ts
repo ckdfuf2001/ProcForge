@@ -6,7 +6,7 @@ import { createUiServer, type UiServer } from "../src/app/ui-server.js";
 import { ProcForgeApp } from "../src/app/app.js";
 import { testStack } from "./client-mode.js";
 import { makeTmp } from "@proof/shared/tmp.js";
-import { useTmpCleanup } from "./tmp-hooks.js";
+import { useTmpCleanup, settleRun } from "./tmp-hooks.js";
 
 useTmpCleanup();
 
@@ -22,6 +22,8 @@ let pfdir: string;
 let app: ProcForgeApp;
 let srv: UiServer;
 
+const liveRuns: { app: ProcForgeApp; pfdir: string; runId: string }[] = [];
+
 beforeEach(async () => {
   root = makeTmp("pf-m103gd-");
   pfdir = join(root, ".procforge");
@@ -31,8 +33,9 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  for (const t of liveRuns.splice(0)) await settleRun(t.app, t.pfdir, t.runId);
   await srv.close();
-});
+}, 30000);
 
 function h() {
   return {
@@ -133,6 +136,16 @@ describe("M10-3-e2e 확인 화면 데이터", () => {
     expect(draft.ops.length).toBe(1);
     const applied = await postJson(`/api/drafts/${draftId}/apply`, { opIds: [0] });
     expect(applied.status).toBe(200);
+    const appliedBody = applied.body as {
+      changedNodes: string[];
+      approvalReset: string[];
+    };
+    expect(appliedBody.changedNodes).toEqual(["1"]);
+    // memo 노드는 승인 대상(external·script)이 아니라 approvalReset 비어 있음.
+    expect(appliedBody.approvalReset).toEqual([]);
+    // 같은 초안으로 다시 적용하면 sourceHash 불일치 → 409.
+    const replay = await postJson(`/api/drafts/${draftId}/apply`, { opIds: [0] });
+    expect(replay.status).toBe(409);
 
     // 6) run phase: 실행 시작 로그에 phase 마커 (실시간 로그 구동원).
     const dir = join(pfdir, "procedures", "demo");
@@ -152,6 +165,7 @@ describe("M10-3-e2e 확인 화면 데이터", () => {
       }),
     );
     const run = await app.uiRun({ procedure: "demo", params: {} });
+    liveRuns.push({ app, pfdir, runId: run.runId });
     const log = await app.uiRunLog({ runId: run.runId });
     expect(log.entries[0].message).toContain("phase:started");
     await app.uiRunCancel({ runId: run.runId });

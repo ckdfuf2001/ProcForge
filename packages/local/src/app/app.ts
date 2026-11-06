@@ -159,7 +159,7 @@ import {
 import { buildTrace, formatTraceMarkdown, recordCall } from "../trace.js";
 import { exportSession } from "../export.js";
 import { assertProjectPath } from "../artifacts.js";
-import { writeProcedure } from "../services/procedureWriter.js";
+import { writeProcedure, writeFileAtomic } from "../services/procedureWriter.js";
 
 // ProcForge 유스케이스층 (M4.2-1). 사용자 행동 1개 = 메서드 1개.
 // 어댑터(server/cli/ui)는 입력 검증·호출·응답 포맷만 하고 정책·파일 작업은 여기에 위임한다.
@@ -3207,13 +3207,32 @@ private hasCurrentApproval(
    * edit_goal→node.goal (pfEditNode 상당), edit_arg→node.args (pfEditArgs 상당,
    * 확정값 fixed로 기록), edit_why→node.why (editWhy 상당, trim 후 1~500 동일 문구).
    * draft는 절차서 스코프(sourceHash가 procedure.json 기준)이므로 절차서 파일에
-   * 직접 적용한다. 세션 stale/재검증 규칙은 다음 import/run(M10-4)에서 적용된다.
+   * 직접 적용한다.
+   *
+   * M10-3-apply-fix: 실행 중 적용 금지(finalize와 같은 .run.lock, 409) +
+   * 원자 쓰기(임시+교체) + 적용 전 판본 history 보관.
+   * 승인 게이트는 별도 코드가 아니라 기존 approvals.json stale 판정이다:
+   * goal/arg가 바뀐 승인 대상 노드는 다음 무인 실행에서 fail["approval"]
+   * (승인 갱신 필요)로 걸린다. 순수 분해 노드(승인 대상 아님)의 goal 변경은
+   * 게이트 없이 다음 import에 반영된다 — "판정 필요" 참조.
    * sourceHash가 현재 절차서와 다르면 적용 전체를 거부한다 (conflict → HTTP 409).
    */
   async applyDraft(a: {
     draftId: string;
     opIds: unknown;
-  }): Promise<{ draftId: string; procedure: string; applied: { nodeId: string; kind: string }[] }> {
+  }): Promise<{
+    draftId: string;
+    procedure: string;
+    applied: { nodeId: string; kind: string }[];
+    /** 바뀐 노드 id (정렬·중복 제거) */
+    changedNodes: string[];
+    /**
+     * 승인이 풀린 노드 (다음 실행 때 승인 필요).
+     * goal/arg-kind 적용 + 승인 대상(external·script) + approvals.json에 기존 항목.
+     * why-kind는 승인 해시에 안 들어가므로 제외.
+     */
+    approvalReset: string[];
+  }> {
     const draft = await this.getDraft({ draftId: a.draftId });
     if (draft.status !== "ready") {
       throw pfError(
@@ -3238,64 +3257,131 @@ private hasCurrentApproval(
     if (!PROCEDURE_NAME_RE.test(draft.procedure)) {
       throw pfError("bad_request", `절차서 이름 오류: ${draft.procedure}`);
     }
-    const procFile = join(this.procforgeDir, "procedures", draft.procedure, "procedure.json");
-    let raw: string;
+    const procDir = join(this.procforgeDir, "procedures", draft.procedure);
+    const procFile = join(procDir, "procedure.json");
+    // M10-3-apply-fix: 실행 중 적용 금지 (finalize와 같은 .run.lock 기제).
+    let releaseRunLock: (() => void) | undefined;
     try {
-      raw = readFileSync(procFile, "utf8");
-    } catch {
-      throw pfError("not_found", `절차서 없음: ${draft.procedure}`);
-    }
-    const cur = createHash("sha256").update(raw, "utf8").digest("hex");
-    if (cur !== draft.sourceHash) {
-      throw pfError(
-        "conflict",
-        "절차서가 바뀜: 재분석 필요 (sourceHash 불일치).",
-        "draft 생성 이후 procedure.json이 바뀌었다. 다시 재분석하라.",
+      releaseRunLock = new FileStore(this.procforgeDir).acquireFileLock(
+        join(procDir, ".run.lock"),
+        `procedure apply locked: ${draft.procedure}`,
+        60000,
       );
-    }
-    let doc: {
-      nodes?: { id?: unknown; goal?: unknown; args?: Record<string, unknown>; why?: unknown }[];
-    };
-    try {
-      doc = JSON.parse(raw) as typeof doc;
-    } catch {
-      throw pfError("bad_request", `procedure.json 파싱 실패: ${draft.procedure}`);
-    }
-    if (!doc || typeof doc !== "object" || !Array.isArray(doc.nodes)) {
-      throw pfError("bad_request", `procedure.json 형식 오류: ${draft.procedure}`);
-    }
-    const applied: { nodeId: string; kind: string }[] = [];
-    for (const n of a.opIds as number[]) {
-      const op = draft.ops[n] as DraftOp;
-      const node = doc.nodes.find((x) => x.id === op.nodeId);
-      if (!node) throw pfError("bad_request", `없는 노드: ${op.nodeId}`);
-      if (op.op === "edit_goal") {
-        if (typeof op.goal !== "string" || op.goal.trim().length === 0) {
-          throw pfError("bad_request", `edit_goal에 goal 없음: ${op.nodeId}`);
-        }
-        node.goal = op.goal;
-        applied.push({ nodeId: op.nodeId, kind: "goal" });
-      } else if (op.op === "edit_arg") {
-        if (!node.args || typeof node.args !== "object" || !(op.arg in node.args)) {
-          throw pfError("bad_request", `없는 인자: ${op.nodeId}.${op.arg}`);
-        }
-        node.args[op.arg] = { kind: "fixed", value: op.value };
-        applied.push({ nodeId: op.nodeId, kind: "arg" });
-      } else {
-        const why = typeof op.why === "string" ? op.why.trim() : "";
-        if (why.length < 1 || why.length > 500) {
-          throw pfError(
-            "bad_request",
-            "why는 1~500자여야 한다.",
-            "바꾼 이유를 1줄로 적어라.",
-          );
-        }
-        node.why = why;
-        applied.push({ nodeId: op.nodeId, kind: "why" });
+    } catch (e) {
+      if ((e as { code?: string }).code === "conflict") {
+        throw pfError(
+          "conflict",
+          `실행 중인 절차서에는 초안을 적용할 수 없습니다: ${draft.procedure} (실행 종료 후 다시 적용하세요)`,
+        );
       }
+      throw e;
     }
-    writeFileSync(procFile, JSON.stringify(doc, null, 2));
-    return { draftId: draft.draftId, procedure: draft.procedure, applied };
+    try {
+      let raw: string;
+      try {
+        raw = readFileSync(procFile, "utf8");
+      } catch {
+        throw pfError("not_found", `절차서 없음: ${draft.procedure}`);
+      }
+      const cur = createHash("sha256").update(raw, "utf8").digest("hex");
+      if (cur !== draft.sourceHash) {
+        throw pfError(
+          "conflict",
+          "절차서가 바뀜: 재분석 필요 (sourceHash 불일치).",
+          "draft 생성 이후 procedure.json이 바뀌었다. 다시 재분석하라.",
+        );
+      }
+      let doc: {
+        nodes?: {
+          id?: unknown;
+          goal?: unknown;
+          tool?: { server?: unknown; name?: unknown };
+          args?: Record<string, unknown>;
+          sideEffect?: unknown;
+          why?: unknown;
+        }[];
+      };
+      try {
+        doc = JSON.parse(raw) as typeof doc;
+      } catch {
+        throw pfError("bad_request", `procedure.json 파싱 실패: ${draft.procedure}`);
+      }
+      if (!doc || typeof doc !== "object" || !Array.isArray(doc.nodes)) {
+        throw pfError("bad_request", `procedure.json 형식 오류: ${draft.procedure}`);
+      }
+      const applied: { nodeId: string; kind: string }[] = [];
+      for (const n of a.opIds as number[]) {
+        const op = draft.ops[n] as DraftOp;
+        const node = doc.nodes.find((x) => x.id === op.nodeId);
+        if (!node) throw pfError("bad_request", `없는 노드: ${op.nodeId}`);
+        if (op.op === "edit_goal") {
+          if (typeof op.goal !== "string" || op.goal.trim().length === 0) {
+            throw pfError("bad_request", `edit_goal에 goal 없음: ${op.nodeId}`);
+          }
+          node.goal = op.goal;
+          applied.push({ nodeId: op.nodeId, kind: "goal" });
+        } else if (op.op === "edit_arg") {
+          if (!node.args || typeof node.args !== "object" || !(op.arg in node.args)) {
+            throw pfError("bad_request", `없는 인자: ${op.nodeId}.${op.arg}`);
+          }
+          node.args[op.arg] = { kind: "fixed", value: op.value };
+          applied.push({ nodeId: op.nodeId, kind: "arg" });
+        } else {
+          const why = typeof op.why === "string" ? op.why.trim() : "";
+          if (why.length < 1 || why.length > 500) {
+            throw pfError(
+              "bad_request",
+              "why는 1~500자여야 한다.",
+              "바꾼 이유를 1줄로 적어라.",
+            );
+          }
+          node.why = why;
+          applied.push({ nodeId: op.nodeId, kind: "why" });
+        }
+      }
+      // M10-3-apply-fix: 적용 전 판본 보관 (재사용 메모리 M9-2).
+      const histDir = join(procDir, "history");
+      mkdirSync(histDir, { recursive: true });
+      const stamp = new Date().toISOString().replace(/[-:]/g, "").split(".")[0] + "Z";
+      writeFileSync(join(histDir, `${stamp}-${cur.slice(0, 12)}.json`), raw);
+      // M10-3-apply-fix: 원자 쓰기 (임시 파일 + 교체).
+      writeFileAtomic(procFile, JSON.stringify(doc, null, 2));
+      const changedNodes = [...new Set(applied.map((x) => x.nodeId))].sort();
+      // M10-3-apply-fix: 승인 리셋 판정. goal/arg 변경 + 승인 대상 노드 +
+      // approvals.json에 기존 항목이 있으면 다음 실행에서 stale로 걸린다.
+      const byId = new Map(doc.nodes.map((x) => [String(x.id), x]));
+      let approvalReset: string[];
+      try {
+        const entries = loadApprovals(procDir);
+        const pinned = new Set(entries.map((e) => e.node.id));
+        approvalReset = changedNodes.filter((id) => {
+          if (!pinned.has(id)) return false;
+          if (!applied.some((x) => x.nodeId === id && (x.kind === "goal" || x.kind === "arg"))) {
+            return false;
+          }
+          const node = byId.get(id);
+          if (!node || typeof node.tool !== "object" || node.tool === null) return false;
+          if (node.sideEffect === "external") return true;
+          const args = node.args;
+          if (!args || typeof args !== "object") return false;
+          return Object.values(args).some(
+            (s) => typeof s === "object" && s !== null && (s as { kind?: unknown }).kind === "script",
+          );
+        });
+      } catch {
+        // approvals.json 파싱 실패는 적용을 막지 않는다 — 다음 실행에서 판정된다.
+        approvalReset = [];
+      }
+      return {
+        draftId: draft.draftId,
+        procedure: draft.procedure,
+        applied,
+        changedNodes,
+        approvalReset,
+      };
+    } finally {
+      releaseRunLock?.();
+    }
   }
 
   /** M7 5-1: 백그라운드 진행 루프 (결정점까지 자동) */

@@ -79,6 +79,31 @@ function renameWithRetry(from: string, to: string, tries = 3): void {
   throw last;
 }
 
+/**
+ * M10-3-apply-fix: 단일 파일 원자 쓰기 (임시 파일 + 교체).
+ * Windows는 rename 덮어쓰기가 안 되므로 기존 파일을 지우고 rename한다.
+ * 쓰다가 죽어도 기존 파일 또는 완성본 중 하나만 남는다 (깨진 중간 없음).
+ */
+export function writeFileAtomic(target: string, data: string): void {
+  const tmp = `${target}.tmp-${randomUUID()}`;
+  try {
+    writeFileSync(tmp, data);
+  } catch (e) {
+    throw codedFs(e, `원자 쓰기 실패(임시 기록): ${target}`);
+  }
+  try {
+    if (existsSync(target)) rmSync(target, { force: true });
+    renameWithRetry(tmp, target);
+  } catch (e) {
+    try {
+      rmSync(tmp, { force: true });
+    } catch {
+      // 임시 잔재 best-effort 정리
+    }
+    throw codedFs(e, `원자 쓰기 실패(교체): ${target}`);
+  }
+}
+
 export type WriteProcedureResult = {
   dir: string;
   files: string[];

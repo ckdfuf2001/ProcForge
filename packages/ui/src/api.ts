@@ -400,7 +400,13 @@ export const api = {
   getDraft: (draftId: string) =>
     get<DraftDetail>(`/api/drafts/${encodeURIComponent(draftId)}`),
   applyDraft: (draftId: string, opIds: number[]) =>
-    post<{ draftId: string; procedure: string; applied: { nodeId: string; kind: string }[] }>(
+    post<{
+      draftId: string;
+      procedure: string;
+      applied: { nodeId: string; kind: string }[];
+      changedNodes: string[];
+      approvalReset: string[];
+    }>(
       `/api/drafts/${encodeURIComponent(draftId)}/apply`,
       { opIds },
     ),
