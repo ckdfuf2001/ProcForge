@@ -66,6 +66,7 @@ import {
 } from "./paths.js";
 import { setupRunFs } from "./workdir.js";
 import { writeRunState } from "../services/run-state.js";
+import { writeRunMetrics } from "../services/metrics.js";
 import type {
   NodeResult,
   RunMode,
@@ -652,6 +653,20 @@ export async function runSession(opts: RunOptions): Promise<RunReport> {
       join(runDir, "report.json"),
       JSON.stringify(report, null, 2),
     );
+    // M9-2-2: 노드 산출 CSV 행 수 기록 (실패해도 run에 영향 없음).
+    const metricsNodes = [...store.getNodes(opts.sessionId).values()].map((n) => ({
+      id: n.id,
+      constraints: n.constraints as unknown[] | undefined,
+    }));
+    writeRunMetrics({
+      procforgeDir: opts.procforgeDir,
+      runId,
+      procedure: opts.procedure ?? "",
+      fsDir,
+      params: session.params as Record<string, string>,
+      nodes: metricsNodes,
+      ...(accumulate ? { accumulate } : {}),
+    });
     // M5: suspend 시 run state 저장 (재개용)
     const suspended = results.find((r) => r.status === "suspended");
     if (suspended) {

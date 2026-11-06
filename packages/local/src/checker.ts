@@ -28,6 +28,14 @@ export {
   resolvePath,
 } from "@proof/shared/check.js";
 
+// M9-2-2: csv 데이터 행 수 (M5.8.2-4 규칙: 공백 줄 제외, 기본 헤더 1행 제외).
+// metrics.json이 같은 계산을 재사용한다 (복제 금지).
+export function countCsvDataRows(text: string, skipHeader: unknown = true): number {
+  const lines = text.split(/\r?\n/).filter((l) => l.trim() !== "");
+  const skip = Boolean(skipHeader ?? true);
+  return lines.length - (skip && lines.length > 0 ? 1 : 0);
+}
+
 function evaluateFsConstraint(c: Constraint, ctx: CheckContext): CheckResult {
   if (c.kind === "pptx_table_sum") {
     // M5.5-0: 산출 pptx 표를 직접 합산 (보고값이 아닌 그려진 값 검증).
@@ -84,8 +92,7 @@ function evaluateFsConstraint(c: Constraint, ctx: CheckContext): CheckResult {
   } catch {
     return { pass: false, reason: `csv file not found: ${rel}` };
   }
-  const lines = text.split(/\r?\n/).filter((l) => l.trim() !== "");
-  const rows = lines.length - (((c.spec as { skipHeader?: unknown }).skipHeader ?? true) && lines.length > 0 ? 1 : 0);
+  const rows = countCsvDataRows(text, (c.spec as { skipHeader?: unknown }).skipHeader ?? true);
   let expected: number | undefined;
   if (typeof (c.spec as { value?: unknown }).value === "number") {
     expected = (c.spec as { value: number }).value;

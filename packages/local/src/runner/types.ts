@@ -93,3 +93,14 @@ export type ToolResponse = {
   resultText: string;
   resultJson?: unknown;
 };
+
+/** M9-2-2: 실행 종료 시 노드 산출 CSV 행 수 (runs/<runId>/metrics.json) */
+export type RunMetrics = {
+  runId: string;
+  procedure: string;
+  at: string;
+  nodes: {
+    nodeId: string;
+    files: { path: string; rows?: number; reason?: string }[];
+  }[];
+};

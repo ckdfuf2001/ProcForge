@@ -284,4 +284,27 @@ describe("M7 accumulate(B)", () => {
     const n2 = rows(join(outDir, "data.csv")).length;
     expect(n2).toBe(n1 + 1);
   }, 180000);
+
+  it("metrics.json에 노드 산출 CSV 행 수가 기록된다 (2회차 > 1회차)", async () => {
+    // M9-2-2: metrics.json = { runId, procedure, at, nodes[] }.
+    const readMetrics = (runId: string): {
+      nodes: { nodeId: string; files: { path: string; rows?: number }[] }[];
+    } => JSON.parse(readFileSync(join(pfdir, "runs", runId, "metrics.json"), "utf8"));
+    const r1 = await run("D1");
+    expect(r1.report.summary.fail).toBe(0);
+    const m1 = readMetrics(r1.report.runId);
+    const f1 = m1.nodes
+      .find((n) => n.nodeId === "1.1")
+      ?.files.find((f) => f.path === "data.csv");
+    expect(f1?.rows).toBeGreaterThan(0);
+    // CSV 없는 루트 노드는 빈 배열.
+    expect(m1.nodes.find((n) => n.nodeId === "1")?.files).toEqual([]);
+    const r2 = await run("D2");
+    expect(r2.report.summary.fail).toBe(0);
+    const m2 = readMetrics(r2.report.runId);
+    const f2 = m2.nodes
+      .find((n) => n.nodeId === "1.1")
+      ?.files.find((f) => f.path === "data.csv");
+    expect(f2?.rows).toBeGreaterThan(f1?.rows ?? 0);
+  }, 180000);
 });
