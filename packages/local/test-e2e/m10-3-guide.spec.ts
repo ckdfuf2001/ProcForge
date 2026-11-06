@@ -168,3 +168,40 @@ test("③ diff 적용: 200 + 대상만 변경 + approvalReset + 재적용 409", 
   await page.getByRole("button", { name: "적용", exact: true }).click();
   await expect(page.getByText(/절차서가 바뀜/)).toBeVisible({ timeout: 30000 });
 });
+
+test("④ 가이드 확인 후 실행 → 레인이 실제 이벤트로 바뀜", async ({ page }) => {
+  h = await setup({ fakeMode: "ok" });
+  const sid = await seedTwoLeaves(h);
+  const procDir = join(h.pfdir, "procedures", "g-e2e");
+  mkdirSync(procDir, { recursive: true });
+  writeFileSync(
+    join(procDir, "procedure.json"),
+    JSON.stringify({
+      format: "procforge-procedure",
+      version: 1,
+      name: "g-e2e",
+      sourceSession: "11111111-1111-4111-8111-111111111111",
+      createdAt: new Date(0).toISOString(),
+      params: {},
+      toolCatalog: [],
+      tree: { rootId: "1", nodes: [] },
+      nodes: [],
+    }),
+  );
+
+  await openSession(page, sid);
+  await openGuideTab(page);
+  // 실행 전: 단계 레인 없음 (가이드 화면의 세션 레인과 무관).
+  const guideRunner = page.locator('section[aria-label="순차 자동 실행"]');
+  await expect(guideRunner.getByText("순차 자동 실행")).toBeVisible();
+  // GuideRunner: 단계 추가 → 가이드 시작 → 확인 후 실행.
+  await page.getByLabel("절차서").selectOption("g-e2e");
+  await page.getByRole("button", { name: "단계 추가", exact: true }).click();
+  await page.getByRole("button", { name: "가이드 시작", exact: true }).click();
+  await expect(page.getByText(/1\. g-e2e · pending/)).toBeVisible();
+  await page.getByRole("button", { name: "확인 후 실행", exact: true }).click();
+  await expect(page.getByText(/1\. g-e2e · done/)).toBeVisible({ timeout: 60000 });
+  // lane.started/finished가 실행 세션에 실제로 기록돼 단계 레인이 "종료됨"으로 바뀐다.
+  const stepLane = guideRunner.locator(".step-lane-execute");
+  await expect(stepLane.getByText("종료됨")).toBeVisible({ timeout: 30000 });
+});
