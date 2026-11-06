@@ -20,6 +20,7 @@ import {
   writeBackAccumulate,
 } from "../src/services/accumulate.js";
 import { readRunLog } from "../src/services/run-log.js";
+import { copyRunFsToOut } from "../src/services/runner.js";
 import { computeNodeHash } from "@proof/shared/schema.js";
 import { makeTmp } from "@proof/shared/tmp.js";
 import { useTmpCleanup } from "./tmp-hooks.js";
@@ -268,4 +269,19 @@ describe("M7 accumulate(B)", () => {
       checkApproval([entry], changedPins, "host", "script", { day: "D1" }),
     ).toBe("stale");
   });
+
+  it("--out 복사본의 누적 CSV 행 수가 다음 실행에서 줄지 않는다", async () => {
+    // M9-2-0-guard: 5.1 유실(1562행→859행) 회귀. --out은 실행 후 복사본이므로
+    // D2 복사본은 D1 복사본보다 정확히 1행 많아야 한다 (fixture 리셋이면 실패).
+    const outDir = join(root, "out");
+    const r1 = await run("D1");
+    expect(r1.report.summary.fail).toBe(0);
+    copyRunFsToOut(pfdir, r1.report.runId, outDir, true);
+    const n1 = rows(join(outDir, "data.csv")).length;
+    const r2 = await run("D2");
+    expect(r2.report.summary.fail).toBe(0);
+    copyRunFsToOut(pfdir, r2.report.runId, outDir, true);
+    const n2 = rows(join(outDir, "data.csv")).length;
+    expect(n2).toBe(n1 + 1);
+  }, 180000);
 });
