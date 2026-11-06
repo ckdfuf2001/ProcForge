@@ -6,7 +6,11 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import { runProcedureTest } from "../src/runner/procedure-run.js";
+import { randomUUID } from "node:crypto";
+import { runProcedureTest, loadProcedureDoc } from "../src/runner/procedure-run.js";
+import { importProcedure } from "../src/procedure.js";
+import { runSession } from "../src/runner/run.js";
+import { writeCancelFlag } from "../src/app/run-control.js";
 import {
   approvalPins,
   buildApprovalEntry,
@@ -306,5 +310,43 @@ describe("M7 accumulate(B)", () => {
       .find((n) => n.nodeId === "1.1")
       ?.files.find((f) => f.path === "data.csv");
     expect(f2?.rows).toBeGreaterThan(f1?.rows ?? 0);
+  }, 180000);
+
+  it("latest.json이 2회 실행 후 2회차를 가리킨다", async () => {
+    // M9-2-3: runs/by-procedure/acc/latest.json = { runId, status, at }.
+    await run("D1");
+    const r2 = await run("D2");
+    expect(r2.report.summary.fail).toBe(0);
+    const latest = JSON.parse(
+      readFileSync(join(pfdir, "runs", "by-procedure", "acc", "latest.json"), "utf8"),
+    ) as { runId: string; status: string };
+    expect(latest.runId).toBe(r2.report.runId);
+    expect(latest.status).toBe("done");
+  }, 180000);
+
+  it("취소된 run도 latest에 기록된다", async () => {
+    // M9-2-3: 종료 상태(done/failed/cancelled)일 때만 갱신. 취소는
+    // cancel.json 존재로 판정한다 (runState cancelled은 App층이 굳힌다).
+    const { doc } = loadProcedureDoc(pfdir, "acc");
+    const { sessionId } = importProcedure(pfdir, doc, { day: "CX" });
+    const runId = randomUUID();
+    writeCancelFlag(pfdir, runId);
+    await runSession({
+      procforgeDir: pfdir,
+      projectRoot: root,
+      sessionId,
+      mode: "live",
+      params: { day: "CX" },
+      runId,
+      procedure: "acc",
+      procedureDir: join(pfdir, "procedures", "acc"),
+      stateRoot,
+      isRunCancelled: () => true,
+    });
+    const latest = JSON.parse(
+      readFileSync(join(pfdir, "runs", "by-procedure", "acc", "latest.json"), "utf8"),
+    ) as { runId: string; status: string };
+    expect(latest.runId).toBe(runId);
+    expect(latest.status).toBe("cancelled");
   }, 180000);
 });

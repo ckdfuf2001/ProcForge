@@ -67,6 +67,7 @@ import {
 import { setupRunFs } from "./workdir.js";
 import { writeRunState } from "../services/run-state.js";
 import { writeRunMetrics } from "../services/metrics.js";
+import { writeProcedureLatest } from "../services/procedure-latest.js";
 import type {
   NodeResult,
   RunMode,
@@ -727,6 +728,24 @@ export async function runSession(opts: RunOptions): Promise<RunReport> {
         lastPassHash: merged,
       }),
     );
+    // M9-2-3: 절차서별 latest 인덱스. 종료 상태일 때만 갱신.
+    // 취소는 cancel.json 존재로 판정 (runState cancelled은 App층이 굳힌다).
+    // suspended/needs_reverify만으로는 끝이 아니라서 건너뛴다.
+    const endStatus = existsSync(join(runDir, "cancel.json"))
+      ? ("cancelled" as const)
+      : summary.fail > 0
+        ? ("failed" as const)
+        : summary.suspended > 0
+          ? undefined
+          : ("done" as const);
+    if (endStatus && opts.procedure) {
+      writeProcedureLatest({
+        procforgeDir: opts.procforgeDir,
+        procedure: opts.procedure,
+        runId,
+        status: endStatus,
+      });
+    }
     // M5.5-3: 성공 종료 시에만 state 저장 (원자). 실패·중단은 불변.
     // M5.7-2: 무인 실행 기본 on — unverified>0이면 저장 안 함 (M5.7.1: --allow-unverified로 해제).
     const fou = opts.unattended === true && opts.allowUnverified !== true;

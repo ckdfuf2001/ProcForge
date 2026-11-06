@@ -104,3 +104,10 @@ export type RunMetrics = {
     files: { path: string; rows?: number; reason?: string }[];
   }[];
 };
+
+/** M9-2-3: 절차서별 latest 인덱스 (runs/by-procedure/<name>/latest.json) */
+export type ProcedureLatest = {
+  runId: string;
+  status: "done" | "failed" | "cancelled";
+  at: string;
+};
