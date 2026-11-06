@@ -393,6 +393,20 @@ C4 CI E2E에도 C2·C3를 fake 서버로 추가. M5-dogfood.md 3절을 실제 �
    실제 웹 크롤링 도구 연동은 범위 밖(DECISIONS 기록).
 6. 분해 instruction에 "항목 반복은 map, 페이지는 until, 지난 실행 기억은 state" 문구 추가, 계약 테스트 유지.
 
+### M5.5-5 누적 선언 수동 작성 (M9-2)
+finalize는 `accumulate`·`stateWrites`를 생성하지 않는다 (M9-2 판정 2 = B안).
+필요하면 procedure.json을 수동으로 선언하고 approvals를 재생성한다
+(누적 선언은 approvalHash에 포함되므로 변경 시 stale).
+```jsonc
+// procedures/monthly-2026-09/procedure.json (수동 추가 부분)
+"accumulate": [{ "path": "sales.csv", "node": "1.3" }]
+// 노드 1.3의 args 옆에:
+// "stateWrites": [{ "key": "lastId", "from": "$1.3.lastId" }]
+```
+참조는 `${state.lastId}`, 첫 실행은 `params.stateDefaults` (JSON) 또는 bad_request.
+재finalize는 `state.json`·`approvals.json`·`approved/`를 보존하고 `.run.lock`은
+복사하지 않는다 (M9-2-1). 실행 중 재finalize는 `conflict`로 거부된다.
+
 ### M5.5-4.1 (무인 실행 보강)
 0. M5.5-3 CI failure 경위 확인·DECISIONS 기록 (신규 파일만 로컬 실행하고 CI 미확인.
    CI는 전체 스위트이므로 파일 수 검사는 추가하지 않고 head_sha 일치 확인 강제).

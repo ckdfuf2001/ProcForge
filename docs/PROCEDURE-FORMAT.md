@@ -48,3 +48,18 @@
 - `schemaHash`가 카탈로그와 다르면 실행 전 경고 후 중단 (재녹화 필요).
 - params 재바인딩: import 시 `params` 기본값을 `--param k=v`로 덮어쓴다.
   `var` 참조는 새 값으로, `fixed`는 그대로 (finalize 경고 참조).
+- procedure.json 형식은 불변. 아래 2종은 실행 기록물이며 별도 파일이다.
+
+## runs/&lt;runId&gt;/metrics.json (M9-2-2)
+실행 종료 시 노드 산출 CSV 행 수. 계산 실패는 해당 파일만 rows 생략+사유,
+run 결과에 영향 없음.
+```jsonc
+{ "runId": "<uuid>", "procedure": "<name>", "at": "<iso>",
+  "nodes": [{ "nodeId": "1.1", "files": [{ "path": "data.csv", "rows": 859 }] }] }
+```
+
+## runs/by-procedure/&lt;name&gt;/latest.json (M9-2-3)
+절차서별 최근 종료 실행 1건. 종료 상태(done/failed/cancelled)일 때만 원자 갱신.
+```jsonc
+{ "runId": "<uuid>", "status": "done|failed|cancelled", "at": "<iso>" }
+```

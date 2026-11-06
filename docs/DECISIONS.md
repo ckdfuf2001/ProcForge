@@ -1190,4 +1190,14 @@ argv: [...]}` 고정. runner는 run fs에서 직접 실행해 stdout을 golden�
   (`src/win/async.c`)으로 3221226505 크래시가 난다. 근거: M8-1 실측 후 로컬 재현
   (master에서도 같은 crash, inprocess·loopback은 정상).
 
+## M9-2
+
+- [M9-2] **판정 5건 (판정자, 3c79890): 1=B(metrics.json 별도),
+  2=B(수동 선언+문서), 3=A(기존 report.json 재사용, 기록까지만),
+  4=B(교훈 집계는 M9-3 후보), 5=해당 없음(613a935로 커밋됨).**
+- [M9-2-1] **재finalize는 `state.json`·`approvals.json`·`approved/`를 보존하고
+  `.run.lock`은 복사하지 않는다. 실행 중 재finalize는 `conflict`로 거부
+  (run.ts:319-335와 같은 acquireFileLock, stale 60초 재사용).
+  approvals hash 불일치 항목은 기존 fail-closed 유지 (무효+무인 거부).**
+
 
