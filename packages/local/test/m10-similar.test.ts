@@ -41,12 +41,12 @@ function writeProcedure(name: string, goals: string[]): void {
   );
 }
 
-function writeLatest(name: string, runId: string, at: string): void {
+function writeLatest(name: string, runId: string, at: string, status = "done"): void {
   const dir = join(pfdir, "runs", "by-procedure", name);
   mkdirSync(dir, { recursive: true });
   writeFileSync(
     join(dir, "latest.json"),
-    JSON.stringify({ runId, status: "done", at }),
+    JSON.stringify({ runId, status, at }),
   );
 }
 
@@ -96,5 +96,35 @@ describe("M10-1 유사 분석 조회", () => {
     ]);
     const limited = await app.similarProcedures({ query: "", limit: 1 });
     expect(limited.procedures).toHaveLength(1);
+  });
+
+  it("④ 조사 펼침형 요청도 절차서를 찾는다", async () => {
+    // M10-1-fix: 완전 일치가 아니라 점수제 (토큰+2-gram).
+    writeProcedure("monthly-sales", ["월간 매출 집계", "표 그리기"]);
+    writeProcedure("daily-crawl", ["일간 수집", "CSV 누적"]);
+    const r = await app.similarProcedures({ query: "월간 매출을 집계해줘" });
+    expect(r.procedures.map((p) => p.name)).toEqual(["monthly-sales"]);
+  });
+
+  it("⑤ 같은 어휘 점수면 done이 failed보다 앞선다", async () => {
+    writeProcedure("a-fail", ["월간 보고"]);
+    writeProcedure("b-done", ["월간 보고"]);
+    writeLatest("a-fail", "run-a", "2026-11-04T00:00:00.000Z", "failed");
+    writeLatest("b-done", "run-b", "2026-11-02T00:00:00.000Z", "done");
+    const r = await app.similarProcedures({ query: "월간 보고" });
+    expect(r.procedures.map((p) => p.name)).toEqual(["b-done", "a-fail"]);
+  });
+
+  it("⑥ swap 잔재 폴더는 목록에서 빠진다", async () => {
+    writeProcedure("real-one", ["월간 보고"]);
+    const stale = join(pfdir, "procedures", "x.old");
+    mkdirSync(stale, { recursive: true });
+    writeFileSync(
+      join(stale, "procedure.json"),
+      JSON.stringify({ format: "x", nodes: [{ goal: "월간 보고" }] }),
+    );
+    writeLatest("x.old", "run-x", "2026-11-05T00:00:00.000Z");
+    const r = await app.similarProcedures({ query: "월간 보고" });
+    expect(r.procedures.map((p) => p.name)).toEqual(["real-one"]);
   });
 });

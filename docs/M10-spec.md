@@ -29,6 +29,8 @@
 - 유사 분석 입력: `procedures/<name>/procedure.json` (목표·노드),
   `runs/<runId>/report.json` (성공 이력), `metrics.json` (규모),
   `by-procedure/<name>/latest.json` (최근 상태). — 판정 1 [실측 의존 없음]
+  (metrics는 요약 필드로만 싣고 순위에는 쓰지 않는다:
+  규모가 크다고 비슷한 게 아니고, 성공 이력은 status로 이미 반영되기 때문).
 - 가이드 단계 상태: `guides/<guideId>.json` (초안 경로 + runId 목록 참조).
   판정 2 = C 확정.
 - 자동 실행 시 승인·취소·실패 처리: 기존 `uiRun`·`uiRunApprove`·
