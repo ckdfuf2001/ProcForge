@@ -10,10 +10,28 @@
 ```powershell
 pnpm install
 pnpm -r build
+```
+
+명령은 두 가지 방법으로 씁니다. 쉬운 쪽부터 확인하세요.
+
+```powershell
+node <REPO>/packages/local/dist/cli.js --version
+```
+
+버전이 찍히면 됩니다. 매번 경로를 치기 귀찮으면 전역 명령으로 등록합니다.
+
+```powershell
+cd packages/local
+npm link
 proof --version
 ```
 
-`--version`이 버전을 찍으면 준비 끝입니다.
+등록 후에는 어느 폴더에서든 `proof`가 됩니다.
+지울 때는 `npm uninstall -g @proof/local`입니다.
+
+주의: `pnpm link --global`은 이 저장소의 pnpm 9.0.0에서 실패할 수 있습니다
+(전역 bin 미등록 안내 또는 인자 오류). 그때는 `pnpm setup`으로 PATH를 고치거나
+위 `npm link`·직접 실행을 쓰세요.
 
 ## 2. OpenCode 등록
 
@@ -69,7 +87,8 @@ proof run procedures/<이름> --param month=2026-09 --out out/2026-09
 - `--out <dir>`을 주면 산출물이 그 폴더에 복사됩니다.
 - 무인 실행(승인된 것만 자동 진행)은 `--unattended`를 붙입니다.
   외부 영향 단계는 사전 승인(`proof approve`)이 없으면 멈춥니다.
-- 저장소를 바꾸려면 `--state <dir>`, 덮어쓰기는 `--force`를 씁니다.
+- 누적 파일 둘 곳을 바꾸려면 `--state <dir>`을 씁니다
+  (누적 상태 루트, 기본 `.procforge/state`). 덮어쓰기는 `--force`를 씁니다.
 
 ## 5. 웹 UI
 
@@ -82,13 +101,23 @@ proof ui
 - 세션 목록에서 진행 상황을 보고, 노드에 의견을 답니다.
 - 실행 화면에서 절차서를 실행·취소합니다.
 - 의견을 남기면 모델이 같은 세션에서 이어서 다시 실행합니다
-  (새 세션을 파지 마세요).
+  (새 세션을 파지 마세요). 이 이어가기(계속 신호)에는 조건이 있습니다.
+  OpenCode를 서버 모드로 띄우고 (`opencode serve --port 4096`),
+  `proof ui`를 띄우는 터미널에 아래 3개를 설정해야 합니다.
+
+```powershell
+$env:PROOF_OPENCODE_URL="http://127.0.0.1:4096"
+$env:PROOF_OPENCODE_MODE="b"
+$env:PROOF_OPENCODE_TOOL_PREFIX="proof"
+```
+
+  `TOOL_PREFIX`는 opencode.json의 MCP 등록 키와 같게 씁니다.
 
 ## 6. 누적형 절차서
 
 매일·매달 쌓는 CSV처럼 "지난 실행 결과를 다음 실행이 이어받는" 절차서는
 `procedure.json`에 선언합니다 (finalize가 만들지 않으므로 수동 추가,
-추가 후 승인을 다시 받습니다).
+추가 후 승인을 다시 받습니다). 아래 예시는 procedure.json 스키마 통과 확인됨.
 
 ```jsonc
 // procedures/monthly-2026-09/procedure.json
