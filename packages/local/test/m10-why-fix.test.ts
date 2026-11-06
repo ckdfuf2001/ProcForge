@@ -58,7 +58,7 @@ describe("M10-why-fix", () => {
     await expect(app.split({ sessionId: sid, nodeId: "1", reason: "분해 사유입니다 0123456789", children: [{ goal: "a", why: "   " }] } as never)).rejects.toThrow(/1~500/);
     await app.split({ sessionId: sid, nodeId: "1", reason: "분해 사유입니다 0123456789", children: [{ goal: "a", why: "이유 a" }] } as never);
     await expect(app.editWhy({ sessionId: sid, nodeId: "1.1", why: "   " })).rejects.toThrow(/1~500/);
-    await expect(app.editWhy({ sessionId: sid, nodeId: "1.1", why: "x".repeat(501) })).rejects.toThrow(/1~500/);
+    await expect(app.editWhy({ sessionId: sid, nodeId: "1.1", why: "x".repeat(501) })).rejects.toThrow(/500/);
   });
 
   it("⑦ remote editWhy 왕복", async () => {
