@@ -49,7 +49,7 @@ const DOC = {
   ],
 };
 
-type FakeMode = { responseText: string } | { sessionError: string };
+type FakeMode = { responseText: string; foreignError?: string } | { sessionError: string };
 
 let server: Server | null = null;
 let baseUrl = "";
@@ -85,6 +85,11 @@ async function startFake(): Promise<string> {
     if (req.url === "/event") {
       res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" });
       sseClients.push(res);
+      try {
+        res.write(`data: ${JSON.stringify({ id: "evt-0", type: "server.connected", properties: {} })}\n\n`);
+      } catch {
+        // 무시
+      }
       req.on("close", () => {
         sseClients = sseClients.filter((r) => r !== res);
       });
@@ -105,6 +110,12 @@ async function startFake(): Promise<string> {
             properties: { sessionID: "ses-test", error: { name: "X", message: mode.sessionError } },
           });
         } else {
+          if (mode.foreignError !== undefined) {
+            sendAll({
+              type: "session.error",
+              properties: { sessionID: "ses-other", error: { name: "X", message: mode.foreignError } },
+            });
+          }
           sendAll({ type: "session.status", properties: { sessionID: "ses-test", status: { type: "busy" } } });
           sendAll({ type: "session.idle", properties: { sessionID: "ses-test" } });
         }
@@ -165,7 +176,7 @@ describe("M10-2 재분석 초안 (fake OpenCode)", () => {
   it("① 원본 procedure.json 바이트 무손상", async () => {
     baseUrl = await startFake();
     mode = {
-      responseText: JSON.stringify({ ops: [{ op: "edit_goal", nodeId: "1.1", goal: "표 그리기+합계" }] }),
+      responseText: JSON.stringify({ ops: [{ op: "edit_goal", nodeId: "1.1", goal: "표 그리기+합계", reason: "합계 필요" }] }),
     };
     const r = await runOnce();
     expect(r.status).toBe("ready");
@@ -180,8 +191,8 @@ describe("M10-2 재분석 초안 (fake OpenCode)", () => {
     mode = {
       responseText: JSON.stringify({
         ops: [
-          { op: "edit_goal", nodeId: "1.1", goal: "표 그리기+합계" },
-          { op: "edit_arg", nodeId: "1.1", arg: "month", value: "2026-10" },
+          { op: "edit_goal", nodeId: "1.1", goal: "표 그리기+합계", reason: "합계 필요" },
+          { op: "edit_arg", nodeId: "1.1", arg: "month", value: "2026-10", reason: "10월분" },
         ],
       }),
     };
@@ -195,7 +206,7 @@ describe("M10-2 재분석 초안 (fake OpenCode)", () => {
   it("③ 노드 추가 op는 rejected (새 분해 필요)", async () => {
     baseUrl = await startFake();
     mode = {
-      responseText: JSON.stringify({ ops: [{ op: "add_node", nodeId: "1.2", goal: "새 단계" }] }),
+      responseText: JSON.stringify({ ops: [{ op: "add_node", nodeId: "1.2", goal: "새 단계", reason: "분해 필요" }] }),
     };
     const r = await runOnce();
     expect(r.status).toBe("rejected");
@@ -221,7 +232,54 @@ describe("M10-2 재분석 초안 (fake OpenCode)", () => {
     expect(r.status).toBe("ready");
     const prompt = requests.find((x) => x.url === "/session/ses-test/prompt_async");
     const body = JSON.parse(prompt?.body ?? "{}") as { tools?: Record<string, boolean> };
-    expect(body.tools).toEqual({ edit: false, write: false, apply_patch: false, bash: false });
+    expect(body.tools).toEqual({ "*": false });
     expect(requests.filter((x) => (x.url ?? "").includes("/permissions/"))).toHaveLength(0);
+  });
+
+  it("⑥ 프롬프트 바디에 모든 nodeId와 goal이 들어 있다", async () => {
+    baseUrl = await startFake();
+    mode = { responseText: JSON.stringify({ ops: [] }) };
+    requests.length = 0;
+    await runOnce();
+    const prompt = requests.find((x) => x.url === "/session/ses-test/prompt_async");
+    const body = JSON.parse(prompt?.body ?? "{}") as { parts?: { text?: string }[] };
+    const text = body.parts?.map((p) => p.text ?? "").join("\n") ?? "";
+    expect(text).toContain("1.1");
+    expect(text).toContain("표 그리기");
+    expect(text).toContain("월간 보고");
+  });
+
+  it("⑦ reason이 없는 op가 오면 rejected", async () => {
+    baseUrl = await startFake();
+    mode = {
+      responseText: JSON.stringify({ ops: [{ op: "edit_goal", nodeId: "1.1", goal: "표 그리기+합계" }] }),
+    };
+    const r = await runOnce();
+    expect(r.status).toBe("rejected");
+    expect(r.reason ?? "").toContain("reason");
+  });
+
+  it("⑧ 다른 세션의 session.error는 무시한다", async () => {
+    baseUrl = await startFake();
+    mode = {
+      responseText: JSON.stringify({ ops: [{ op: "edit_goal", nodeId: "1.1", goal: "표 그리기+합계", reason: "합계 필요" }] }),
+      foreignError: "남의 세션 오류",
+    };
+    const r = await runOnce();
+    expect(r.status).toBe("ready");
+    expect(r.ops).toHaveLength(1);
+  });
+
+  it("⑨ 코드 블록으로 감싼 JSON은 ready", async () => {
+    baseUrl = await startFake();
+    mode = {
+      responseText:
+        "```json\n" +
+        JSON.stringify({ ops: [{ op: "edit_goal", nodeId: "1.1", goal: "표 그리기+합계", reason: "합계 필요" }] }) +
+        "\n```",
+    };
+    const r = await runOnce();
+    expect(r.status).toBe("ready");
+    expect(r.ops).toHaveLength(1);
   });
 });

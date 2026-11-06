@@ -6,17 +6,23 @@ import { pfError } from "@proof/shared/errors.js";
 // M10-2: 재분석 초안 생성 (App 메서드 경유, MCP 표면 불변).
 // 입력 절차서를 .procforge/drafts/<draftId>/에 복사하고,
 // OpenCode 세션에 prompt_async(도구 비활성)로 diff 초안을 요청한다.
-// JSON ops만 받는다 (edit_goal/edit_arg). 노드 추가·삭제나 스키마 불일치는
-// rejected (사유: "새 분해 필요" 또는 검증 오류 원문). 재시도 없음.
-// session.error나 대기 시간 초과는 즉시 failed. 권한 응답은 보내지 않는다
-// (불변 규칙: Proof는 always로 응답하지 않는다).
+// JSON ops만 받는다 (edit_goal/edit_arg + 필수 reason). 노드 추가·삭제나
+// 스키마 불일치는 rejected (사유: "새 분해 필요" 또는 검증 오류 원문).
+// 재시도 없음. session.error(같은 세션만)나 대기 시간 초과는 즉시 failed.
+// 권한 응답은 보내지 않는다 (불변 규칙: Proof는 always로 응답하지 않는다).
 
 /** idle 대기 상한 (M10-2, 상수). 넘기면 failed. */
 export const REDRAFT_IDLE_TIMEOUT_MS = 120000;
 
+/** M10-2-fix: 프롬프트 상한 (노드 목록 포함). 넘기면 failed. */
+export const REDRAFT_PROMPT_MAX_CHARS = 20000;
+
+/** M10-2-fix: SSE 첫 이벤트(server.connected) 대기 상한. 넘기면 failed. */
+export const REDRAFT_SSE_TIMEOUT_MS = 5000;
+
 export type DraftOp =
-  | { op: "edit_goal"; nodeId: string; goal: string }
-  | { op: "edit_arg"; nodeId: string; arg: string; value: unknown };
+  | { op: "edit_goal"; nodeId: string; goal: string; reason: string }
+  | { op: "edit_arg"; nodeId: string; arg: string; value: unknown; reason: string };
 
 export type DraftStatus = "ready" | "rejected" | "failed";
 
@@ -83,11 +89,16 @@ function validateOps(
     }
     const node = nodes.get(oo.nodeId);
     if (!node) return { error: `없는 노드: ${oo.nodeId}` };
+    // M10-2-fix: op마다 reason 필수 (방향성 "모든 변경에는 이유가 붙는다").
+    if (typeof oo.reason !== "string" || oo.reason.length === 0) {
+      return { error: `op에 reason 없음: ${oo.nodeId}` };
+    }
+    const reason = oo.reason;
     if (oo.op === "edit_goal") {
       if (typeof oo.goal !== "string" || oo.goal.length === 0) {
         return { error: `edit_goal에 goal 없음: ${oo.nodeId}` };
       }
-      ops.push({ op: "edit_goal", nodeId: oo.nodeId, goal: oo.goal });
+      ops.push({ op: "edit_goal", nodeId: oo.nodeId, goal: oo.goal, reason });
       diff.push({
         nodeId: oo.nodeId,
         kind: "goal",
@@ -99,7 +110,7 @@ function validateOps(
         return { error: `edit_arg에 arg 없음: ${oo.nodeId}` };
       }
       if (!("value" in oo)) return { error: `edit_arg에 value 없음: ${oo.nodeId}` };
-      ops.push({ op: "edit_arg", nodeId: oo.nodeId, arg: oo.arg, value: oo.value });
+      ops.push({ op: "edit_arg", nodeId: oo.nodeId, arg: oo.arg, value: oo.value, reason });
       diff.push({
         nodeId: oo.nodeId,
         kind: "arg",
@@ -109,6 +120,25 @@ function validateOps(
     }
   }
   return { ops, diff };
+}
+
+/** M10-2-fix: 코드 블록 1개로 감싼 JSON은 벗겨서 읽는다 (그 외는 원문 그대로). */
+export function unwrapCodeFence(text: string): string {
+  const m = /^\s*```(?:json)?\s*\n([\s\S]*?)\n?\s*```\s*$/.exec(text);
+  return m ? m[1] : text;
+}
+
+/** M10-2-fix: 프롬프트용 노드 목록 (id·goal·args·why(있으면)). */
+export function describeNodesForPrompt(nodes: Map<string, DocNode>): string {
+  const rows: string[] = [];
+  for (const [id, n] of nodes) {
+    const parts = [`- ${id}: ${typeof n.goal === "string" ? n.goal : ""}`];
+    if (n.args !== undefined) parts.push(`args=${JSON.stringify(n.args)}`);
+    const why = (n as { why?: unknown }).why;
+    if (typeof why === "string" && why.length > 0) parts.push(`why=${why}`);
+    rows.push(parts.join(" "));
+  }
+  return rows.join("\n");
 }
 
 type SseEvent = { t: string; p: Record<string, unknown> };
@@ -251,36 +281,55 @@ export async function runRedraft(input: {
     return save({ ...base, openCodeSessionId: null, status: "failed", ops: [], diff: [], reason: `세션 생성 실패: ${e instanceof Error ? e.message : String(e)}` });
   }
   const base2 = { ...base, openCodeSessionId: sessionId };
-  // 2. prompt_async (도구 비활성 — M10-0 §3 실측 형식).
+  // 2. SSE 연결 확인 후 prompt_async.
+  // M10-2-fix: 첫 이벤트(server.connected)를 받은 뒤에 보내야 idle을 놓치지 않는다.
+  // 도구 비활성은 실측된 와일드카드 {"*": false}를 쓴다 (M10 실측).
   const events: SseEvent[] = [];
   const ctl = new AbortController();
   const sub = readSse(baseUrl, headers, (e) => events.push(e), ctl.signal).catch(() => undefined);
   try {
-    await new Promise((r) => setTimeout(r, 500));
+    {
+      const t0 = Date.now();
+      while (!events.some((e) => e.t === "server.connected")) {
+        if (Date.now() - t0 > REDRAFT_SSE_TIMEOUT_MS) {
+          return save({ ...base2, status: "failed", ops: [], diff: [], reason: `SSE 연결 대기 초과(${REDRAFT_SSE_TIMEOUT_MS}ms)` });
+        }
+        await new Promise((r) => setTimeout(r, 200));
+      }
+    }
+    // M10-2-fix: 모델에게 절차서 내용을 보낸다. 없으면 nodeId를 알 수 없다.
+    const nodeList = describeNodesForPrompt(nodes);
+    const promptText =
+      `다음 요청을 반영한 절차서 변경분을 JSON ops로만 답해라 (설명 금지).\n` +
+      `요청: ${input.request}\n` +
+      `절차서 노드:\n${nodeList}\n` +
+      `허용 op (reason 필수): {"op":"edit_goal","nodeId":"...","goal":"...","reason":"..."}, ` +
+      `{"op":"edit_arg","nodeId":"...","arg":"...","value":...,"reason":"..."}.\n` +
+      `형식: {"ops":[...]}`;
+    if (promptText.length > REDRAFT_PROMPT_MAX_CHARS) {
+      return save({
+        ...base2,
+        status: "failed",
+        ops: [],
+        diff: [],
+        reason: `프롬프트 상한 초과(${promptText.length} > ${REDRAFT_PROMPT_MAX_CHARS})`,
+      });
+    }
     const p = await api(baseUrl, headers, `/session/${sessionId}/prompt_async`, {
       method: "POST",
       body: JSON.stringify({
         model: input.openCode.model,
-        tools: { edit: false, write: false, apply_patch: false, bash: false },
-        parts: [
-          {
-            type: "text",
-            text:
-              `다음 요청을 반영한 절차서 변경분을 JSON ops로만 답해라 (설명 금지).\n` +
-              `요청: ${input.request}\n` +
-              `허용 op: {"op":"edit_goal","nodeId":"...","goal":"..."}, {"op":"edit_arg","nodeId":"...","arg":"...","value":...}.\n` +
-              `형식: {"ops":[...]}`,
-          },
-        ],
+        tools: { "*": false },
+        parts: [{ type: "text", text: promptText }],
       }),
     });
     if (p.status !== 204) {
       return save({ ...base2, status: "failed", ops: [], diff: [], reason: `prompt_async 실패: ${p.status}` });
     }
-    // 3. idle 대기 (session.error 즉시 실패 — 재시도 없음).
+    // 3. idle 대기 (같은 세션의 session.error만 즉시 실패 — 재시도 없음).
     const t0 = Date.now();
     for (;;) {
-      const err = events.find((e) => e.t === "session.error" && (e.p.sessionID === sessionId || e.p.info === undefined));
+      const err = events.find((e) => e.t === "session.error" && e.p.sessionID === sessionId);
       const errMsg = err
         ? ((err.p.error as { message?: unknown } | undefined)?.message ?? JSON.stringify(err.p.error ?? err.p).slice(0, 200))
         : null;
@@ -309,7 +358,8 @@ export async function runRedraft(input: {
     }
     let parsed: unknown;
     try {
-      parsed = JSON.parse(texts[texts.length - 1]);
+      // M10-2-fix: 코드 블록 1개로 감싼 JSON은 벗겨서 읽는다.
+      parsed = JSON.parse(unwrapCodeFence(texts[texts.length - 1]));
     } catch {
       return save({ ...base2, status: "rejected", ops: [], diff: [], reason: "응답이 JSON 아님" });
     }
