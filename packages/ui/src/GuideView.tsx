@@ -6,6 +6,7 @@ import { GraphView } from "./GraphView.js";
 import { RemainingList } from "./RemainingList.js";
 import { MemoryPanel } from "./MemoryPanel.js";
 import { DraftPanel } from "./DraftPanel.js";
+import { GuideRunner } from "./GuideRunner.js";
 import { NodeDetailPanel } from "./NodeDetailPanel.js";
 
 // M10-3-ui: M10 확인 화면 (진행률·레인·그래프·노드상세·오른쪽패널).
@@ -62,6 +63,7 @@ export function GuideView({ sessionId }: { sessionId: string }) {
         <MemoryPanel sessionId={sessionId} />
         <DraftPanel />
       </div>
+      <GuideRunner />
       <RemainingList nodes={nodes} needsHuman={needsHuman} />
       {picked && (
         <div className="node-detail-wrap">

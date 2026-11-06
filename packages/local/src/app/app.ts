@@ -110,6 +110,17 @@ import {
   toHashable,
 } from "../services/approvals.js";
 import { copyImportFiles } from "../procedure.js";
+import {
+  readGuide,
+  writeGuide,
+  nextStepIndex,
+  newGuideId,
+  assertGuideId,
+  touchGuide,
+  guidePath,
+  type GuideFile,
+  type GuideStepState,
+} from "../services/guide.js";
 import { loadAccumulateFromProcedure } from "../services/accumulate.js";
 import { resolveDateParams } from "../services/date-params.js";
 import { runnableTools } from "../services/runnable-tools.js";
@@ -2841,6 +2852,214 @@ private hasCurrentApproval(
 }
 
   /**
+   * M10-4: 순차 자동 실행 가이드.
+   * - 사람이 단계마다 확인하면(advanceGuide 호출) 다음 단계를 uiRun 계열로 실행한다.
+   * - 실행 중 lane.started/finished를 실행 세션에 기록한다 (run.phase는 uiRun 경로가 기록).
+   * - 진행 상태는 guides/<id>.json에 저장 → 재시작 후 guideStatus/advanceGuide로 이어간다.
+   * - session.error 즉시 실패: M10-4 경로에 OpenCode가 없으므로(역할 표) 해당 없음.
+   *   실행 중 예외는 단계 failed로 기록하고 자동 재시도하지 않는다.
+   * - OpenCode 권한 요청에 always로 응답하지 않는다: advance 경로는 승인 API를 부르지 않는다.
+   */
+  async startGuide(a: {
+    guideId?: string;
+    steps: { procedure: string; params?: Record<string, string> }[];
+  }): Promise<GuideFile> {
+    const steps = a.steps;
+    if (!Array.isArray(steps) || steps.length === 0 || steps.length > 50) {
+      throw pfError("bad_request", "steps는 1~50개의 배열이어야 함");
+    }
+    const norm = steps.map((s, i) => {
+      const procedure = String(s?.procedure ?? "");
+      if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(procedure)) {
+        throw pfError("bad_request", `단계 ${i}: procedure 이름 오류`);
+      }
+      try {
+        loadProcedureDoc(this.procforgeDir, procedure);
+      } catch {
+        throw pfError("bad_request", `단계 ${i}: 등록되지 않은 절차서: ${procedure}`);
+      }
+      const params = s?.params ?? {};
+      if (typeof params !== "object" || params === null || Array.isArray(params)) {
+        throw pfError("bad_request", `단계 ${i}: params는 문자열 맵이어야 함`);
+      }
+      for (const [k, v] of Object.entries(params)) {
+        if (typeof v !== "string") {
+          throw pfError("bad_request", `단계 ${i}: param ${k}는 문자열이어야 함`);
+        }
+      }
+      return { procedure, params: params as Record<string, string> };
+    });
+    const guideId = typeof a.guideId === "string" && a.guideId.length > 0 ? a.guideId : newGuideId();
+    assertGuideId(guideId);
+    if (existsSync(guidePath(this.procforgeDir, guideId))) {
+      throw pfError("conflict", `이미 있는 가이드: ${guideId}`);
+    }
+    const now = new Date().toISOString();
+    const guide: GuideFile = {
+      version: 1,
+      guideId,
+      steps: norm,
+      state: norm.map(() => ({ status: "pending" as const, updatedAt: now })),
+      createdAt: now,
+      updatedAt: now,
+    };
+    writeGuide(this.procforgeDir, guide);
+    return guide;
+  }
+
+  /** M10-4: 가이드 상태 조회 (읽기 전용, 재시작 후 이어가기용). */
+  async guideStatus(a: { guideId: string }): Promise<GuideFile> {
+    return readGuide(this.procforgeDir, String(a.guideId ?? ""));
+  }
+
+  /**
+   * M10-4: 사람 확인 후 다음 단계 실행. 완료 단계는 건너뛴다.
+   * 종료(done/failed/cancelled)까지 폴링한 뒤 guides/<id>.json에 기록한다.
+   * 대기(waiting·suspended)에 걸리면 단계 waiting으로 두고 돌아온다
+   * (승인·생성값은 화면에서 처리한 뒤 다시 advance로 이어간다).
+   */
+  async advanceGuide(a: {
+    guideId: string;
+    stepIndex?: number;
+    timeoutMs?: number;
+  }): Promise<{ guideId: string; stepIndex: number; status: GuideStepState["status"]; runId: string }> {
+    const guideId = String(a.guideId ?? "");
+    let guide = readGuide(this.procforgeDir, guideId);
+    const next = nextStepIndex(guide);
+    const idx =
+      typeof a.stepIndex === "number" ? a.stepIndex : next;
+    if (!Number.isInteger(idx) || idx < 0 || idx >= guide.steps.length) {
+      throw pfError("bad_request", "stepIndex 범위 오류 (다음 차례 없음 포함)");
+    }
+    if (guide.state[idx].status === "done") {
+      throw pfError("bad_request", `단계 ${idx}는 이미 완료됨`);
+    }
+    for (let i = 0; i < idx; i++) {
+      if (guide.state[i].status !== "done") {
+        throw pfError("bad_request", `단계 ${i}가 끝나야 ${idx}를 실행할 수 있음`);
+      }
+    }
+    const timeoutMs =
+      a.timeoutMs === undefined ? 120000 : Number(a.timeoutMs);
+    if (!Number.isInteger(timeoutMs) || timeoutMs < 1000 || timeoutMs > 600000) {
+      throw pfError("bad_request", "timeoutMs는 1000~600000 정수");
+    }
+    const step = guide.steps[idx];
+    // M10-4: prepare → lane.started → drive 순서 (drive가 세션 락을 잡기 전에
+    // 알림을 끝낸다. 반대로 하면 drive의 단일 시도 acquireLock이 죽고 run이 멈춘다).
+    const { started } = await this.prepareRun(step.procedure, step.params, {
+      procedure: step.procedure,
+      params: step.params,
+    });
+    guide.state[idx] = {
+      status: "running",
+      runId: started.runId,
+      sessionId: started.sessionId,
+      updatedAt: new Date().toISOString(),
+    };
+    writeGuide(this.procforgeDir, touchGuide(guide));
+    try {
+      await this.notifySessionEvent({
+        sessionId: started.sessionId,
+        method: "lane.started",
+        summary: `실행 단계 시작: ${step.procedure}`,
+      });
+    } catch {
+      // 알림 실패는 실행을 막지 않는다
+    }
+    this.launchDrive(started.runId, started.procedure);
+    const deadline = Date.now() + timeoutMs;
+    for (;;) {
+      const info = await this.uiRunInfo({ runId: started.runId });
+      const terminal =
+        info.status === "done" ||
+        info.status === "failed" ||
+        info.status === "cancelled";
+      if (terminal) {
+        const status = info.status as GuideStepState["status"];
+        guide = readGuide(this.procforgeDir, guideId);
+        guide.state[idx] = {
+          status,
+          runId: started.runId,
+          sessionId: started.sessionId,
+          updatedAt: new Date().toISOString(),
+        };
+        writeGuide(this.procforgeDir, touchGuide(guide));
+        try {
+          await this.notifySessionEvent({
+            sessionId: started.sessionId,
+            method: "lane.finished",
+            summary: `실행 단계 종료: ${step.procedure} (${status})`,
+          });
+        } catch {
+          // 알림 실패는 결과를 바꾸지 않는다
+        }
+        return { guideId, stepIndex: idx, status, runId: started.runId };
+      }
+      if (info.waiting !== null || info.suspended !== null) {
+        guide = readGuide(this.procforgeDir, guideId);
+        guide.state[idx] = {
+          status: "waiting",
+          runId: started.runId,
+          sessionId: started.sessionId,
+          updatedAt: new Date().toISOString(),
+        };
+        writeGuide(this.procforgeDir, touchGuide(guide));
+        return { guideId, stepIndex: idx, status: "waiting", runId: started.runId };
+      }
+      if (Date.now() > deadline) {
+        // 단계는 running 그대로 (runId 유지) — 재시작 후 이어간다.
+        throw pfError("internal", `가이드 단계 시간 초과: ${step.procedure} (run ${started.runId})`);
+      }
+      await new Promise((r) => setTimeout(r, 200));
+    }
+  }
+
+  /** M10-4: 실행 중인 단계 취소 (run 정리 + 단계 cancelled 기록). */
+  async cancelGuideStep(a: {
+    guideId: string;
+    stepIndex?: number;
+  }): Promise<{ guideId: string; stepIndex: number; status: "cancelled"; runId: string }> {
+    const guideId = String(a.guideId ?? "");
+    const guide = readGuide(this.procforgeDir, guideId);
+    let idx: number;
+    if (typeof a.stepIndex === "number") {
+      idx = a.stepIndex;
+      if (!Number.isInteger(idx) || idx < 0 || idx >= guide.steps.length) {
+        throw pfError("bad_request", "stepIndex 범위 오류");
+      }
+    } else {
+      idx = guide.state.findIndex(
+        (s) => (s.status === "running" || s.status === "waiting") && s.runId,
+      );
+      if (idx < 0) throw pfError("bad_request", "취소할 실행 중인 단계 없음");
+    }
+    const st = guide.state[idx];
+    if ((st.status !== "running" && st.status !== "waiting") || !st.runId) {
+      throw pfError("bad_request", `단계 ${idx}는 실행 중이 아님`);
+    }
+    const step = guide.steps[idx];
+    const info = await this.uiRunInfo({ runId: st.runId });
+    await this.uiRunCancel({ runId: st.runId });
+    guide.state[idx] = {
+      status: "cancelled",
+      runId: st.runId,
+      updatedAt: new Date().toISOString(),
+    };
+    writeGuide(this.procforgeDir, touchGuide(guide));
+    try {
+      await this.notifySessionEvent({
+        sessionId: info.sessionId,
+        method: "lane.finished",
+        summary: `실행 단계 취소: ${step.procedure}`,
+      });
+    } catch {
+      // 알림 실패는 취소 결과를 바꾸지 않는다
+    }
+    return { guideId, stepIndex: idx, status: "cancelled", runId: st.runId };
+  }
+
+  /**
    * M7 5-1: UI 실행. **즉시** `{runId}`를 돌려주고, 로그는 SSE로 흘린다.
    * - 등록된 절차서만 / - 선언된 param만 / - 절차서당 동시 1개(409)
    */
@@ -2853,18 +3072,39 @@ private hasCurrentApproval(
     procedure: string;
     params: Record<string, string>;
   }> {
+    const { started } = await this.prepareRun(input.procedure, input.params, input);
+    this.launchDrive(started.runId, started.procedure);
+    return started;
+  }
+
+  /**
+   * 실행 준비 (검증 + runStart + 시작 로그, drive 미기동).
+   * uiRun과 advanceGuide가 공유한다. advanceGuide는 여기서 반환된 뒤
+   * lane.started를 기록하고 drive를 띄운다 — drive가 세션 락을 잡기 전에
+   * 알림을 끝내야 경합으로 drive가 죽지 않는다 (M10-4).
+   */
+  private async prepareRun(
+    procedureArg: unknown,
+    paramsArg: unknown,
+    rawInput: unknown,
+  ): Promise<{
+    started: { runId: string; sessionId: string; procedure: string; params: Record<string, string> };
+    docName: string;
+  }> {
     // M7-5-d: **화이트리스트**. denylist 는 키가 늘 때마다 구멍이 된다.
     const allowed = new Set(["procedure", "params"]);
-    const extra = Object.keys(input).filter((k) => !allowed.has(k));
+    const extra = Object.keys((rawInput ?? {}) as Record<string, unknown>).filter(
+      (k) => !allowed.has(k),
+    );
     if (extra.length > 0) {
       throw pfError("bad_request", `지정할 수 없는 키: ${extra.join(",")} (M7-5-d).`);
     }
-    for (const [k, v] of Object.entries(input.params ?? {})) {
+    for (const [k, v] of Object.entries((paramsArg ?? {}) as Record<string, unknown>)) {
       if (typeof v !== "string") {
         throw pfError("bad_request", `param ${k}는 문자열이어야 합니다 (M7-5-d).`);
       }
     }
-    const ref = String(input.procedure ?? "");
+    const ref = String(procedureArg ?? "");
     if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(ref)) {
       throw pfError("bad_request", "procedure 이름이 올바르지 않습니다.");
     }
@@ -2878,7 +3118,7 @@ private hasCurrentApproval(
     } catch (e) {
       throw pfError("bad_request", `등록되지 않은 절차서입니다: ${ref}`);
     }
-    const params = input.params ?? {};
+    const params = (paramsArg ?? {}) as Record<string, string>;
     const declared = new Set(Object.keys(doc.params ?? {}));
     const unknownParams = Object.keys(params).filter((k) => !declared.has(k));
     if (unknownParams.length > 0) {
@@ -2906,15 +3146,22 @@ private hasCurrentApproval(
     });
     // M7-5-d: 실행 요청도 calls.jsonl 에 남긴다 (누가 무엇을 띄웠는지)
     this.recordUiCall(started.sessionId, "pf_run_start", "");
+    return { started, docName: doc.name };
+  }
+
+  /**
+   * 백그라운드 진행 시작 (uiRun·advanceGuide 공유).
+   * drive가 세션 락을 잡기 전에 호출자가 알림 등을 끝내야 한다.
+   */
+  private launchDrive(runId: string, docName: string): void {
     // 백그라운드 진행 — UI는 기다리지 않는다(로그·결과는 SSE).
-    void this.driveRun(started.runId, doc.name).catch(() => {
+    void this.driveRun(runId, docName).catch(() => {
       // 오류는 로그로 남는다 (흘러나오면 UI가 조용히 멈춘 것처럼 보인다)
-      appendRunLog(this.procforgeDir, started.runId, {
+      appendRunLog(this.procforgeDir, runId, {
         level: "error",
         message: "실행 진행 중 오류",
       });
     });
-    return started;
   }
 
   /** M7 5-1: 취소 — 플래그 + 자식 프로세스 트리 종료 */

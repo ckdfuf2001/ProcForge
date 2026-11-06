@@ -15,6 +15,8 @@ const LANES = [
 
 type LaneKey = (typeof LANES)[number]["key"];
 
+export type { LaneKey };
+
 type LaneState = {
   active: boolean;
   nodeIds: string[];

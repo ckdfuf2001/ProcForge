@@ -47,6 +47,10 @@ export type UiApp = Pick<
   | "similarProcedures"
   | "getDraft"
   | "applyDraft"
+  | "startGuide"
+  | "guideStatus"
+  | "advanceGuide"
+  | "cancelGuideStep"
 >;
 
 export type UiServer = {
@@ -509,6 +513,12 @@ export async function createUiServer(opts: {
           send(res, await opts.app.getDraft({ draftId: pathId(mDraft[1], "draftId") }));
           return;
         }
+        // M10-4: 가이드 상태 조회 (읽기 전용).
+        const mGuide = /^\/api\/guides\/([^/]+)$/.exec(url.pathname);
+        if (req.method === "GET" && mGuide && !url.pathname.endsWith("/advance") && !url.pathname.endsWith("/cancel")) {
+          send(res, await opts.app.guideStatus({ guideId: pathId(mGuide[1], "guideId") }));
+          return;
+        }
         // M8-ui2: 분해 라운드 이력 (읽기 전용)
         const mHistory = /^\/api\/sessions\/([^/]+)\/decomposition-history$/.exec(
           url.pathname,
@@ -749,6 +759,51 @@ export async function createUiServer(opts: {
                 text: String(body.text ?? ""),
                 expectedRevision: expected as number,
                 ...(body.signal === false ? { signal: false } : {}),
+              }),
+            );
+            return;
+          }
+          // M10-4: 가이드 시작. 본문 {guideId?, steps:[{procedure, params?}]}.
+          if (req.method === "POST" && url.pathname === "/api/guides") {
+            const body = await readJsonBody(req, res);
+            if (body === null) return;
+            send(
+              res,
+              await opts.app.startGuide({
+                ...(body.guideId !== undefined ? { guideId: String(body.guideId) } : {}),
+                // 배열 아니면 App이 bad_request (여기선 타입만 맞춘다).
+                steps: (Array.isArray(body.steps) ? body.steps : []) as {
+                  procedure: string;
+                  params?: Record<string, string>;
+                }[],
+              }),
+            );
+            return;
+          }
+          // M10-4: 가이드 단계 확인 후 실행 / 실행 중 취소.
+          const mGuideStep = /^\/api\/guides\/([^/]+)\/(advance|cancel)$/.exec(url.pathname);
+          if (req.method === "POST" && mGuideStep) {
+            const body = await readJsonBody(req, res);
+            if (body === null) return;
+            const gid = pathId(mGuideStep[1], "guideId");
+            const toNum = (v: unknown): number | undefined =>
+              typeof v === "number" && Number.isInteger(v) ? v : undefined;
+            if (mGuideStep[2] === "advance") {
+              send(
+                res,
+                await opts.app.advanceGuide({
+                  guideId: gid,
+                  ...(toNum(body.stepIndex) !== undefined ? { stepIndex: toNum(body.stepIndex) as number } : {}),
+                  ...(toNum(body.timeoutMs) !== undefined ? { timeoutMs: toNum(body.timeoutMs) as number } : {}),
+                }),
+              );
+              return;
+            }
+            send(
+              res,
+              await opts.app.cancelGuideStep({
+                guideId: gid,
+                ...(toNum(body.stepIndex) !== undefined ? { stepIndex: toNum(body.stepIndex) as number } : {}),
               }),
             );
             return;

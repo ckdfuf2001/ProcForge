@@ -227,6 +227,22 @@ export type DraftOp = {
   reason?: string;
   [k: string]: unknown;
 };
+/** M10-4: 가이드 상태 (guides/<id>.json 그대로). */
+export type GuideStepState = {
+  status: "pending" | "running" | "waiting" | "done" | "failed" | "cancelled";
+  runId?: string;
+  /** 실행 세션 (단계 레인 조회용) */
+  sessionId?: string;
+  updatedAt: string;
+};
+export type GuideDetail = {
+  version: 1;
+  guideId: string;
+  steps: { procedure: string; params: Record<string, string> }[];
+  state: GuideStepState[];
+  createdAt: string;
+  updatedAt: string;
+};
 export type DraftDetail = {
   draftId: string;
   procedure: string;
@@ -420,6 +436,24 @@ export const api = {
     }>(
       `/api/drafts/${encodeURIComponent(draftId)}/apply`,
       { opIds },
+    ),
+  // M10-4: 순차 자동 실행 가이드 (사람 확인 → 단계 실행).
+  startGuide: (steps: { procedure: string; params?: Record<string, string> }[], guideId?: string) =>
+    post<GuideDetail>("/api/guides", {
+      ...(guideId !== undefined ? { guideId } : {}),
+      steps,
+    }),
+  guideStatus: (guideId: string) =>
+    get<GuideDetail>(`/api/guides/${encodeURIComponent(guideId)}`),
+  advanceGuide: (guideId: string, body?: { stepIndex?: number; timeoutMs?: number }) =>
+    post<{ guideId: string; stepIndex: number; status: GuideStepState["status"]; runId: string }>(
+      `/api/guides/${encodeURIComponent(guideId)}/advance`,
+      body ?? {},
+    ),
+  cancelGuideStep: (guideId: string, body?: { stepIndex?: number }) =>
+    post<{ guideId: string; stepIndex: number; status: "cancelled"; runId: string }>(
+      `/api/guides/${encodeURIComponent(guideId)}/cancel`,
+      body ?? {},
     ),
 };
 
