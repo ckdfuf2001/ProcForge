@@ -61,7 +61,13 @@ function subscribeEvents(onEvent, signal) {
       const flush = () => {
         if (cur.data !== undefined) {
           try {
-            onEvent(cur.event ?? "message", JSON.parse(cur.data));
+            const j = JSON.parse(cur.data);
+            // 실측: 1.18.18 SSE data는 {id, type, properties} 봉투다.
+            if (j && typeof j === "object" && typeof j.type === "string") {
+              onEvent(j.type, j.properties ?? j);
+            } else {
+              onEvent(cur.event ?? "message", j);
+            }
           } catch {
             onEvent(cur.event ?? "message", cur.data);
           }
@@ -195,8 +201,9 @@ async function main() {
     record("prompt_async→idle", "실패", String(e && e.message ? e.message : e));
   }
 
-  // 4. 권한 왕복 (once/always/reject 각각 시도)
-  for (const resp of ["once", "always", "reject"]) {
+  // 4. 권한 왕복 (once/reject/always 순 — always 규칙이 이후 세션에 남기 때문).
+  // 실측(1.18.18): 요청 이벤트는 permission.asked (types 문서의 permission.updated 아님).
+  for (const resp of ["once", "reject", "always"]) {
     let psid = null;
     try {
       const c = await api("/session", { method: "POST", body: JSON.stringify({ title: `m10-probe-perm-${resp}` }) });
@@ -207,31 +214,51 @@ async function main() {
         method: "POST",
         body: JSON.stringify({
           model: { providerID, modelID },
-          parts: [{ type: "text", text: "bash로 `echo probe-ok`를 실행해라. 다른 도구는 쓰지 마라." }],
+          parts: [{ type: "text", text: "You MUST call the bash tool with command \"echo probe-ok\" right now. Do nothing else first." }],
         }),
       });
       const perm = await waitFor(
         events,
-        (e) => e.t === "permission.updated" && e.p?.sessionID === psid,
-        120000,
-        "permission.updated",
+        (e) => e.t === "permission.asked" && e.p?.sessionID === psid,
+        150000,
+        "permission.asked",
       ).catch(() => null);
       if (!perm) {
-        record(`권한 응답(${resp})`, "불일치", "permission.updated 없음 (서버가 허용함)");
+        const attempted = events.some(
+          (e) => e.t === "message.part.updated" && e.p?.part?.type === "tool" && e.p?.part?.sessionID === psid,
+        );
+        record(
+          `권한 응답(${resp})`,
+          "불일치",
+          attempted ? "permission.asked 없음 (서버가 허용함)" : "도구 호출 없음 (모델이 bash를 쓰지 않음)",
+        );
         continue;
       }
       const pid = perm.p?.id;
-      const r = await api(`/session/${psid}/permissions/${pid}`, {
+      const r = await fetch(BASE + `/session/${psid}/permissions/${pid}`, {
         method: "POST",
         body: JSON.stringify({ response: resp }),
       });
-      const replied = await waitFor(
-        events,
-        (e) => e.t === "permission.replied" && e.p?.permissionID === pid,
-        30000,
-        "permission.replied",
-      ).catch(() => null);
-      record(`권한 응답(${resp})`, r.status === 200 && replied ? "확인" : "불일치", `api=${r.status} replied=${!!replied}`);
+      // 응답 효과로 판정한다 (실측: 별도 replied 이벤트는 오지 않는다).
+      // once/always → 도구 completed, reject → completed 없이 idle.
+      try {
+        await waitFor(events, (e) => e.t === "session.idle" && e.p?.sessionID === psid, 120000, "idle");
+      } catch {
+        // idle 없이 끝나도 아래 tool 상태로 판정한다
+      }
+      const doneTools = events.filter(
+        (e) =>
+          e.t === "message.part.updated" &&
+          e.p?.part?.type === "tool" &&
+          e.p?.part?.sessionID === psid &&
+          e.p?.part?.state?.status === "completed",
+      );
+      const denied = resp === "reject" ? doneTools.length === 0 : doneTools.length > 0;
+      record(
+        `권한 응답(${resp})`,
+        r.status === 200 && denied ? "확인" : "불일치",
+        `api=${r.status} completed=${doneTools.length}건 permissionId=${pid}`,
+      );
     } catch (e) {
       record(`권한 응답(${resp})`, "실패", String(e && e.message ? e.message : e));
     }
@@ -304,7 +331,7 @@ async function main() {
     await cleanup();
   }
 
-  const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+  const stamp = new Date().toISOString().slice(0, 19).replace(/[-:]/g, "").replace("T", "-");
   const { writeFileSync } = await import("node:fs");
   writeFileSync(`m10-probe-${stamp}.json`, JSON.stringify({ at: new Date().toISOString(), url: BASE, model: MODEL, totalCostUsd: totalCost, results }, null, 2));
   console.log(`[m10-probe] 저장: m10-probe-${stamp}.json`);
