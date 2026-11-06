@@ -129,6 +129,11 @@ import {
   type RunState,
 } from "../services/run-state.js";
 import {
+  listProceduresWithLatest,
+  filterProcedures,
+  type SimilarProcedure,
+} from "../services/similar.js";
+import {
   writeJUnitFile,
   resolveJUnitPath,
   copyRunFsToOut,
@@ -2999,6 +3004,16 @@ private hasCurrentApproval(
       }
     }
     return { procedures: out };
+  }
+
+  /** M10-1: 유사 분석 조회 (읽기 전용, 로컬 전용). MCP 표면 불변. */
+  async similarProcedures(a: { query?: string; limit?: number }): Promise<{
+    procedures: SimilarProcedure[];
+  }> {
+    const all = listProceduresWithLatest(this.procforgeDir);
+    const q = typeof a.query === "string" ? a.query : "";
+    const lim = typeof a.limit === "number" ? a.limit : undefined;
+    return { procedures: filterProcedures(all, q, lim) };
   }
 
   /** M7 5-1: 백그라운드 진행 루프 (결정점까지 자동) */
