@@ -1,6 +1,6 @@
 # M9-2-spec 초안 — 실행 기록 재사용 메모리 (읽기 조사 기반)
 
-> 구현 착수 조건: 판정자 승인 (§5 판정 필요 목록을 먼저 확정).
+> 구현 착수 조건: 승인됨 (판정자, 3c79890).
 > 본 문서는 코드 읽기만으로 작성 (M9-2-0 항목 1~6). 테스트 실행 없음.
 
 ## §0 조사 6항목 (위치 / 사실 / 빈틈)
@@ -125,43 +125,39 @@
 
 ## §4 구현 커밋 분할안
 
-### M9-2-1 (최우선) 재finalize sidecar 소실 확정 — 코드 판독 결과 (수정 없음)
-- 소실 위치: `packages/local/src/services/procedureWriter.ts:21-44` (swapDir,
-  디렉터리 전체 교체) + `:188-289` (빌드물=procedure.json·PROCEDURE.md·
-  SKILL.md·command.md·tests/·scripts/만).
-- ① 절차서 폴더 `state.json`: 누적 KV 상태 맞음
-  (`services/procedure-state.ts:9`, 성공 종료 시 원자 저장 `run.ts:755`,
-  다음 실행 로드 `run.ts:292-297`). 재finalize 시 실제로 사라지는 경로임
-  (빌드물에 없음 → swap 후 소멸).
-- ② `.run.lock`: 실행 중 재finalize가 막히지 않음. `app.ts` 확정 경로
-  (`finalize`·UI·MCP·CLI 모두 `app.finalize` 경유)에 `.run.lock` 검사 없음
-  (acquire는 `run.ts:319-335` runSession만). 허용되므로 Windows에서는
-  swap rename이 잠금 파일에 걸려 `io_error`로 finalize가 실패하거나,
-  성공 시 실행 중 run은 `.old` 쪽을 계속 붙잡는다.
-- ③ approvals: 사라지면 재승인 요구로 안전함. `loadApprovals`는 파일 없으면
-  `[]` 반환 (`services/approvals.ts:225`). 무인 실행은 빈 목록=external 전부
-  거부 (`run.ts:298-301` + 승인 게이트) — fail-closed. 단 수동 재승인 비용 발생.
+### M9-2-1 재finalize 안전
+- 배경 (소실 확정, 코드 판독): `packages/local/src/services/procedureWriter.ts:21-44`
+  (swapDir, 디렉터리 전체 교체) + `:188-289` (빌드물만).
+  ① 절차서 폴더 `state.json`은 누적 KV 상태 (`procedure-state.ts:9`,
+  `run.ts:755` 저장·`run.ts:292-297` 로드)이나 빌드물에 없어 swap 후 소멸.
+  ② `.run.lock` 검사가 `app.finalize` 경로에 없어 실행 중 재finalize 허용
+  (acquire는 `run.ts:319-335`만). Windows rename 경합 시 finalize `io_error`
+  실패 또는 실행 중 run이 `.old` 쪽을 계속 붙잡음.
+  ③ approvals 소실 시 `loadApprovals`→`[]` (`approvals.ts:225`) → 무인 실행
+  external 전부 거부 (`run.ts:298-301`) — fail-closed, 수동 재승인 비용만 발생.
+- 구현: finalize 시작 시 `.run.lock` 검사(살아 있는 run 보유 시 거부) +
+  swap 직전 state.json·approvals.json·approved/ 복사(.run.lock 제외) +
+  hash 불일치 항목 무효 유지.
+- 테스트(`m92-refinalize.test.ts`): ① state.json 동일 ② 미변경 노드 approvals
+  유효 ③ args 변경 노드 승인 무효+무인 거부 ④ lock 보유 중 거부·무손상
+  ⑤ stale lock이면 허용.
+### M9-2-2 metrics.json (`runs/<runId>/metrics.json`)
+- `{ runId, procedure, at, nodes: [{ nodeId, files: [{ path, rows }] }] }`.
+  산출 CSV만 `csv_rows` 계산 함수 재사용. 계산 실패는 rows 생략+사유, run 무영향.
+  report.json·JUnit 불변.
+- 테스트: ① 2회 실행 2회차 rows > 1회차 ② CSV 없는 노드는 files 빈 배열.
+### M9-2-3 절차서별 latest 인덱스
+- `.procforge/runs/by-procedure/<name>/latest.json` = `{ runId, status, at }`.
+  종료 상태(done/failed/cancelled)일 때만 원자 갱신.
+- 테스트: ① 2회 실행 후 latest=2회차 runId ② 취소 run도 기록.
+### M9-2-4 문서
+- DEV-GUIDE accumulate·stateWrites 수동 선언 절(monthly 예시 1개) +
+  PROCEDURE-FORMAT metrics.json·latest.json 형식 (procedure.json 불변) +
+  DECISIONS [M9-2] 판정 5건 + §8 M9-2 [x] (CI 확인 후 별도 docs 커밋).
 
-- M9-2-1 행 수 기록: `csv_rows` 등 산출물 요약을 report에 기록.
-  테스트: ① 누적 CSV 2회 실행 행 수 증가 기록 (m7-accumulate 확장).
-- M9-2-2 재finalize sidecar 보존: approvals.json·state.json 유지,
-  없으면 재생성 안내. 테스트: ① 재finalize 후 approvals 잔존 ② state 잔존.
-- M9-2-3 절차서별 latest 인덱스: `by-procedure/<name>/latest.json`.
-  테스트: ① 2회 실행 후 latest가 2회차 runId.
-- M9-2-4 문서: DEV-GUIDE §8 M9-2 [x] + 본 사양 §5 판정 반영.
-- (조건부, M9-2-0-guard 결과에 따라) --out 통합 회귀 1건은 M9-2-1에 포함
-  가능 — 판정 필요 (§5 판정 5).
-
-## §5 판정 필요 목록
-1. 행 수 기록 위치 — A안: `report.json` results[]에 필드 추가.
-   B안: `runs/<runId>/metrics.json` 별도. 추천: B안
-   (report 스키마·JUnit 변환·기존 판독 코드 영향 최소).
-2. `accumulate`·`stateWrites` 선언의 finalize 지원 — A안: finalize가 세션에서
-   추론해 생성. B안: 수동 선언 + 문서. 추천: B안 (추론 오선언이 누적 오염으로
-   직결, M7-5-a/b 수준의 검증 비용이 큼).
-3. 3층 비교 리포트 형식 — A안: 기존 report.json 재사용.
-   B안: `compare` 전용 출력. 추천: A안 (재사용 메모리 조회 1회로 충분).
-4. 4층(교훈 집계) 범위 — A안: M9-2 포함. B안: 별도 마일스톤.
-   추천: B안 (attempt 해시 미기록 등 선행 작업이 별도 커밋급).
-5. guard 회귀 1건의 소속 — A안: M9-2-1에 포함. B안: M9-tmp-2-fix 후속으로
-   분리 커밋. 추천: A안 (같은 accumulate 경로, 테스트 1건).
+## §5 판정 기록 (판정자 확정)
+1. 행 수 기록 위치 — **B 확정** (`metrics.json` 별도).
+2. `accumulate`·`stateWrites` finalize 지원 — **B 확정** (수동 선언 + 문서).
+3. 3층 비교 리포트 형식 — **A 확정**, 기록까지만 (기존 report.json 재사용).
+4. 4층(교훈 집계) 범위 — **B 확정** (M9-3 후보).
+5. guard 회귀 소속 — 해당 없음 (`613a935`로 이미 커밋됨).
