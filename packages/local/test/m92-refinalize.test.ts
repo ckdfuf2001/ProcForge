@@ -238,4 +238,18 @@ describe("M9-2-1 재finalize 안전", () => {
     await app.finalize({ sessionId: sid, name: NAME, force: true });
     expect(existsSync(join(dir, "procedure.json"))).toBe(true);
   }, 120000);
+
+  it("⑥ 실패한 finalize도 잠금을 남기지 않는다", async () => {
+    // M9-2-1-fix: 잠금은 swap 끝까지 보유 후 finally 해제. 같은 프로세스에서는
+    // 보유 구간을 관찰할 수 없으므로(동기 구간), 해제 보장 + ④⑤ 유지로 대체한다.
+    const { app, sid } = await buildSession("hi");
+    await app.finalize({ sessionId: sid, name: NAME });
+    const dir = procDir();
+    await expect(app.finalize({ sessionId: sid, name: NAME })).rejects.toMatchObject({
+      code: "bad_request",
+    });
+    expect(existsSync(join(dir, ".run.lock"))).toBe(false);
+    await app.finalize({ sessionId: sid, name: NAME, force: true });
+    expect(existsSync(join(dir, "procedure.json"))).toBe(true);
+  }, 120000);
 });

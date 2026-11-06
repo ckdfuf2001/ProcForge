@@ -2402,19 +2402,21 @@ export class ProcForgeApp {
     // M9-2-1: 실행 중 재finalize 금지. runSession의 절차서 run 잠금과 같은 기제
     // (FileStore.acquireFileLock, stale 60초 — run.ts:319-335를 재사용, 새로 만들지 않음).
     // UI·MCP·CLI 모두 app.finalize를 경유하므로 한 곳에서만 검사한다.
-    // advisory lock이라 검사-교체 사이 경합은 감수한다 (충돌 시 swap이 io_error로 실패).
+    // M9-2-1-fix: 잠금은 writeProcedure(swap 포함)가 끝날 때까지 쥐고 finally에서
+    // 놓는다. 검사 후 바로 놓으면 검사-교체 사이에 run이 시작되는 틈이 남는다.
     const procRunLockPath = join(
       this.procforgeDir,
       "procedures",
       doc.name,
       ".run.lock",
     );
+    let releaseProcRunLock: (() => void) | undefined;
     try {
-      new FileStore(this.procforgeDir).acquireFileLock(
+      releaseProcRunLock = new FileStore(this.procforgeDir).acquireFileLock(
         procRunLockPath,
         `procedure finalize locked: ${doc.name}`,
         60000,
-      )();
+      );
     } catch (e) {
       if ((e as { code?: string }).code === "conflict") {
         throw pfError(
@@ -2424,21 +2426,25 @@ export class ProcForgeApp {
       }
       throw e;
     }
-    const written = writeProcedure({
-      procforgeDir: this.procforgeDir,
-      projectRoot: this.projectRoot,
-      sessionId: sid,
-      doc,
-      force: (a.force as boolean | undefined) ?? false,
-      auditFindings: allAudit,
-    });
-    return {
-      name: doc.name,
-      dir: written.dir,
-      warnings: [...warnings, ...allAudit],
-      files: written.files,
-      commandFile: written.commandFile,
-    };
+    try {
+      const written = writeProcedure({
+        procforgeDir: this.procforgeDir,
+        projectRoot: this.projectRoot,
+        sessionId: sid,
+        doc,
+        force: (a.force as boolean | undefined) ?? false,
+        auditFindings: allAudit,
+      });
+      return {
+        name: doc.name,
+        dir: written.dir,
+        warnings: [...warnings, ...allAudit],
+        files: written.files,
+        commandFile: written.commandFile,
+      };
+    } finally {
+      releaseProcRunLock?.();
+    }
   }
 
 /**
