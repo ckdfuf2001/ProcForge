@@ -134,6 +134,11 @@ import {
   type SimilarProcedure,
 } from "../services/similar.js";
 import {
+  runRedraft,
+  openCodeAuthHeaders,
+  type RedraftResult,
+} from "../services/redraft.js";
+import {
   writeJUnitFile,
   resolveJUnitPath,
   copyRunFsToOut,
@@ -3014,6 +3019,43 @@ private hasCurrentApproval(
     const q = typeof a.query === "string" ? a.query : "";
     const lim = typeof a.limit === "number" ? a.limit : undefined;
     return { procedures: filterProcedures(all, q, lim) };
+  }
+
+  /** M10-2: 재분석 초안 생성 (App 메서드, MCP 표면 불변).
+   * 모델은 서버 기본값(GET /config/providers default 첫 항목)을 쓴다
+   * (명시 모델 파라미터 없음 — M10-spec 판정 6). */
+  async createRedraft(a: { procedure: string; request: string }): Promise<RedraftResult> {
+    const baseUrl = this.signal.baseUrl;
+    if (!baseUrl) {
+      throw pfError("bad_request", "OpenCode 서버 주소 없음 (PROOF_OPENCODE_URL)");
+    }
+    const password = process.env.OPENCODE_SERVER_PASSWORD;
+    const headers = openCodeAuthHeaders(password);
+    let model: { providerID: string; modelID: string } | undefined;
+    try {
+      const r = await fetch(`${baseUrl.replace(/\/$/, "")}/config/providers`, { headers });
+      const j = (await r.json()) as {
+        default?: Record<string, string>;
+        providers?: Record<string, { models?: Record<string, unknown> }>;
+      };
+      const firstDefault = j && typeof j === "object" ? Object.entries(j.default ?? {})[0] : undefined;
+      if (firstDefault) {
+        model = { providerID: firstDefault[0], modelID: firstDefault[1] };
+      } else {
+        const firstProv = j && typeof j === "object" ? Object.entries(j.providers ?? {})[0] : undefined;
+        const firstModel = firstProv ? Object.keys(firstProv[1].models ?? {})[0] : undefined;
+        if (firstProv && firstModel) model = { providerID: firstProv[0], modelID: firstModel };
+      }
+    } catch {
+      // 조회 실패는 아래 기본 모델 없음 오류로 합친다
+    }
+    if (!model) throw pfError("bad_request", "OpenCode 기본 모델 없음 (서버 providers 확인)");
+    return runRedraft({
+      procforgeDir: this.procforgeDir,
+      procedure: String(a.procedure),
+      request: String(a.request),
+      openCode: { baseUrl, ...(password ? { password } : {}), model },
+    });
   }
 
   /** M7 5-1: 백그라운드 진행 루프 (결정점까지 자동) */

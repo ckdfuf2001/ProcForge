@@ -75,3 +75,7 @@
    (즉시 실패. 실행 단계에는 OpenCode가 없으므로 판정 범위는 재분석으로 한정).
    [실측 반영: `session.error` 즉시 실패 확인]
 5. M10-1 조회 범위 — **A 확정** (로컬 저장소만). [실측 의존 없음]
+6. 재분석 모델 선택 — A안: `PROOF_OPENCODE_MODEL` env 추가.
+   B안: 서버 기본값(GET /config/providers default 첫 항목).
+   확정: **B** (env 16종 계약을 깨지 않기 위해. A 기각 이유 1줄).
+   [실측 의존 없음]
