@@ -33,6 +33,7 @@
 | `calls.jsonl` 필드 | `trace.ts:15-28` (tool/sessionId/nodeId/actor/connectionId/clientName) | `migrateCallLog`이 `tool` 키로 판별(`trace.ts:53`) |
 | UI 키·meta | `pf.token:<origin>`·`pf.instance:<origin>`(`auth.ts:7-8`), `pf-instance`(`ui-server.ts:331`) | `procforge` 문자열 없음·`pf_` 계열 |
 | 헤더 `x-procforge-token` | 송신 `api.ts:243,253,364`, 수신 `ui-server.ts:392` | 서버·SPA 동일 빌드, 토큰 매실행 재생성 → 유지 |
+| MCP 예외 1건: `pf_split` 선택 필드 `why` | M10-why-1 (M10-spec §0) | 기존 호출 그대로 동작. 이름·도구 수 불변, `procforge_decompose` 프롬프트 본문 1줄 추가만 허용 |
 
 ## 2. 환경변수
 

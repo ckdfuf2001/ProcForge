@@ -1200,4 +1200,13 @@ argv: [...]}` 고정. runner는 run fs에서 직접 실행해 stdout을 golden�
   (run.ts:319-335와 같은 acquireFileLock, stale 60초 재사용).
   approvals hash 불일치 항목은 기존 fail-closed 유지 (무효+무인 거부).**
 
+## M10-why
+
+- [M10-why] **MCP 표면의 유일한 예외: `pf_split`에 선택 필드 `why`(문자열)를
+  둔다.** 기존 호출(필드 없음)은 그대로 동작한다. `why`는 분해 사유 1줄이며,
+  `procforge_decompose` 프롬프트 본문에 "각 하위 노드에 why를 쓴다" 1줄을
+  추가한다 (프롬프트 *이름* `procforge_decompose`는 불변).
+  이유: 재분석이 "왜"를 기준으로 고치려면 처음 분해 때부터 기록해야 한다
+  (M10-spec §0). 도구 추가·이름 변경은 아니다.
+
 
