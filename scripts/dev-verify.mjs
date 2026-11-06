@@ -11,6 +11,8 @@ import { fileURLToPath } from "node:url";
 // - 외부 네트워크를 쓰는 테스트는 정책 실패로 간주한다 (스위트는 hermetic 유지).
 // - M5.8.1-5: 단계별 로그 분리(.verify/<단계>.log, *.log라 ignore됨) +
 //   --from <n> 재개 (끊긴 단계부터 이어서. 앞 단계 산출물(dist 등)이 있어야 함).
+// - M9-verify-log: fresh 시작(from=1)은 단계 로그를 먼저 비운다. append만 하면
+//   이전 실행의 FAIL 행이 섞여 원인 파악을 어긋나게 한다 (--from 재개는 유지).
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const LOGDIR = join(ROOT, ".verify");
@@ -101,6 +103,15 @@ const step = (n, msg) => console.log(`\n[dev-verify ${n}] ${msg}`);
 
 async function main() {
   const from = parseFrom(process.argv.slice(2));
+  if (from === 1) {
+    for (const s of STEPS) {
+      try {
+        rmSync(join(LOGDIR, `${s}.log`), { force: true });
+      } catch {
+        // 로그 없음 — 새로 쓰면 된다
+      }
+    }
+  }
   // M9-gates: NODE_ENV=production이면 pnpm이 devDependencies를 스킵한다.
   // 경고만 내고 계속한다 (L3 실패 사유가 아님. 자식 환경은 baseEnv가 해제함).
   if (process.env.NODE_ENV === "production") {
