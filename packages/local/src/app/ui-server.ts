@@ -43,6 +43,10 @@ export type UiApp = Pick<
   | "uiApprovalInfo"
   | "uiApprove"
   | "uiRunApprove"
+  | "editWhy"
+  | "similarProcedures"
+  | "getDraft"
+  | "applyDraft"
 >;
 
 export type UiServer = {
@@ -415,6 +419,27 @@ export async function createUiServer(opts: {
           send(res, await opts.app.listProcedures());
           return;
         }
+        // M10-3-api: 불러온 메모리 — 유사 분석 조회 (읽기 전용, 로컬 전용).
+        if (req.method === "GET" && url.pathname === "/api/procedures/similar") {
+          const q = url.searchParams.get("query") ?? undefined;
+          const limRaw = url.searchParams.get("limit");
+          let limit: number | undefined;
+          if (limRaw !== null) {
+            limit = Number(limRaw);
+            if (!Number.isInteger(limit) || limit < 1 || limit > 50) {
+              err(res, 400, "limit은 1~50 정수");
+              return;
+            }
+          }
+          send(
+            res,
+            await opts.app.similarProcedures({
+              ...(q !== undefined ? { query: q } : {}),
+              ...(limit !== undefined ? { limit } : {}),
+            }),
+          );
+          return;
+        }
         // M7-5-4: 실행 결과 (노드별 status 그대로)
         const mRunInfo = /^\/api\/runs\/([^/]+)$/.exec(url.pathname);
         if (req.method === "GET" && mRunInfo) {
@@ -464,6 +489,12 @@ export async function createUiServer(opts: {
               nodeId: pathId(mApproval[2], "nodeId"),
             }),
           );
+          return;
+        }
+        // M10-3-api: 재분석 초안 조회 (읽기 전용).
+        const mDraft = /^\/api\/drafts\/([^/]+)$/.exec(url.pathname);
+        if (req.method === "GET" && mDraft) {
+          send(res, await opts.app.getDraft({ draftId: pathId(mDraft[1], "draftId") }));
           return;
         }
         // M8-ui2: 분해 라운드 이력 (읽기 전용)
@@ -603,6 +634,35 @@ export async function createUiServer(opts: {
             );
             return;
           }
+          // M10-3-api: 왜 수정 (App.editWhy, 1~500자 규칙은 core가 재사용).
+          const mWhy = /^\/api\/sessions\/([^/]+)\/nodes\/([^/]+)\/why$/.exec(
+            url.pathname,
+          );
+          if (req.method === "POST" && mWhy) {
+            const body = await readJsonBody(req, res);
+            if (body === null) return;
+            if (typeof body.why !== "string") {
+              err(res, 400, "why 필수");
+              return;
+            }
+            const expected = body.expectedRevision;
+            if (expected !== undefined && !Number.isInteger(expected)) {
+              err(res, 400, "expectedRevision은 정수");
+              return;
+            }
+            send(
+              res,
+              await opts.app.editWhy({
+                sessionId: pathId(mWhy[1], "sessionId"),
+                nodeId: pathId(mWhy[2], "nodeId"),
+                why: body.why,
+                ...(expected !== undefined
+                  ? { expectedRevision: expected as number }
+                  : {}),
+              }),
+            );
+            return;
+          }
           const sidFromPath = /^\/api\/sessions\/([^/]+)\/(preview-edit|advise-and-signal|edit-args|edit-node)$/.exec(
             url.pathname,
           );
@@ -677,6 +737,21 @@ export async function createUiServer(opts: {
                 text: String(body.text ?? ""),
                 expectedRevision: expected as number,
                 ...(body.signal === false ? { signal: false } : {}),
+              }),
+            );
+            return;
+          }
+          // M10-3-api: 재분석 diff 적용. 본문 {opIds: 인덱스 배열}.
+          // sourceHash 불일치는 conflict → 409 (아래 catch 매핑).
+          const mApply = /^\/api\/drafts\/([^/]+)\/apply$/.exec(url.pathname);
+          if (req.method === "POST" && mApply) {
+            const body = await readJsonBody(req, res);
+            if (body === null) return;
+            send(
+              res,
+              await opts.app.applyDraft({
+                draftId: pathId(mApply[1], "draftId"),
+                opIds: body.opIds,
               }),
             );
             return;

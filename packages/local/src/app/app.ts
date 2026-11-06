@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync, appendFileSync, mkdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { randomUUID, createHash } from "node:crypto";
 import { join, resolve, basename } from "node:path";
 import type { CoreClient } from "@proof/shared/core-client.js";
@@ -137,7 +137,9 @@ import {
   runRedraft,
   openCodeAuthHeaders,
   type RedraftResult,
+  type DraftOp,
 } from "../services/redraft.js";
+import { PROCEDURE_NAME_RE } from "@proof/shared/procedure.js";
 import {
   writeJUnitFile,
   resolveJUnitPath,
@@ -3084,6 +3086,136 @@ private hasCurrentApproval(
       request: String(a.request),
       openCode: { baseUrl, ...(password ? { password } : {}), model },
     });
+  }
+
+  /** M10-3-api: 재분석 초안 조회 (읽기 전용). draft.json 그대로 반환. */
+  async getDraft(a: { draftId: string }): Promise<RedraftResult> {
+    const id = String(a.draftId ?? "");
+    if (!/^[A-Za-z0-9._-]{1,128}$/.test(id) || id.includes("..")) {
+      throw pfError("bad_request", "draftId 형식이 잘못되었습니다.");
+    }
+    const file = join(this.procforgeDir, "drafts", id, "draft.json");
+    let raw: string;
+    try {
+      raw = readFileSync(file, "utf8");
+    } catch {
+      throw pfError("not_found", `초안 없음: ${id}`);
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      throw pfError("bad_request", `draft.json 파싱 실패: ${id}`);
+    }
+    const d = parsed as Partial<RedraftResult>;
+    if (
+      !d ||
+      typeof d !== "object" ||
+      typeof d.procedure !== "string" ||
+      typeof d.sourceHash !== "string" ||
+      typeof d.status !== "string" ||
+      !Array.isArray(d.ops)
+    ) {
+      throw pfError("bad_request", `draft.json 형식 오류: ${id}`);
+    }
+    return parsed as RedraftResult;
+  }
+
+  /** M10-3-api: 재분석 diff 적용.
+   *
+   * 판정 B의 기존 경로 재사용 = 절차서 문서에 필드 규칙 그대로 적용:
+   * edit_goal→node.goal (pfEditNode 상당), edit_arg→node.args (pfEditArgs 상당,
+   * 확정값 fixed로 기록), edit_why→node.why (editWhy 상당, trim 후 1~500 동일 문구).
+   * draft는 절차서 스코프(sourceHash가 procedure.json 기준)이므로 절차서 파일에
+   * 직접 적용한다. 세션 stale/재검증 규칙은 다음 import/run(M10-4)에서 적용된다.
+   * sourceHash가 현재 절차서와 다르면 적용 전체를 거부한다 (conflict → HTTP 409).
+   */
+  async applyDraft(a: {
+    draftId: string;
+    opIds: unknown;
+  }): Promise<{ draftId: string; procedure: string; applied: { nodeId: string; kind: string }[] }> {
+    const draft = await this.getDraft({ draftId: a.draftId });
+    if (draft.status !== "ready") {
+      throw pfError(
+        "bad_request",
+        "초안이 적용 가능 상태가 아님 (ready 아님).",
+        "ready 상태의 초안만 적용할 수 있다.",
+      );
+    }
+    if (
+      !Array.isArray(a.opIds) ||
+      a.opIds.length === 0 ||
+      a.opIds.some(
+        (n) => !Number.isInteger(n) || (n as number) < 0 || (n as number) >= draft.ops.length,
+      )
+    ) {
+      throw pfError(
+        "bad_request",
+        "opIds는 draft ops 인덱스의 비어 있지 않은 배열이어야 함.",
+        "적용할 diff 항목 번호를 배열로 넘겨라.",
+      );
+    }
+    if (!PROCEDURE_NAME_RE.test(draft.procedure)) {
+      throw pfError("bad_request", `절차서 이름 오류: ${draft.procedure}`);
+    }
+    const procFile = join(this.procforgeDir, "procedures", draft.procedure, "procedure.json");
+    let raw: string;
+    try {
+      raw = readFileSync(procFile, "utf8");
+    } catch {
+      throw pfError("not_found", `절차서 없음: ${draft.procedure}`);
+    }
+    const cur = createHash("sha256").update(raw, "utf8").digest("hex");
+    if (cur !== draft.sourceHash) {
+      throw pfError(
+        "conflict",
+        "절차서가 바뀜: 재분석 필요 (sourceHash 불일치).",
+        "draft 생성 이후 procedure.json이 바뀌었다. 다시 재분석하라.",
+      );
+    }
+    let doc: {
+      nodes?: { id?: unknown; goal?: unknown; args?: Record<string, unknown>; why?: unknown }[];
+    };
+    try {
+      doc = JSON.parse(raw) as typeof doc;
+    } catch {
+      throw pfError("bad_request", `procedure.json 파싱 실패: ${draft.procedure}`);
+    }
+    if (!doc || typeof doc !== "object" || !Array.isArray(doc.nodes)) {
+      throw pfError("bad_request", `procedure.json 형식 오류: ${draft.procedure}`);
+    }
+    const applied: { nodeId: string; kind: string }[] = [];
+    for (const n of a.opIds as number[]) {
+      const op = draft.ops[n] as DraftOp;
+      const node = doc.nodes.find((x) => x.id === op.nodeId);
+      if (!node) throw pfError("bad_request", `없는 노드: ${op.nodeId}`);
+      if (op.op === "edit_goal") {
+        if (typeof op.goal !== "string" || op.goal.trim().length === 0) {
+          throw pfError("bad_request", `edit_goal에 goal 없음: ${op.nodeId}`);
+        }
+        node.goal = op.goal;
+        applied.push({ nodeId: op.nodeId, kind: "goal" });
+      } else if (op.op === "edit_arg") {
+        if (!node.args || typeof node.args !== "object" || !(op.arg in node.args)) {
+          throw pfError("bad_request", `없는 인자: ${op.nodeId}.${op.arg}`);
+        }
+        node.args[op.arg] = { kind: "fixed", value: op.value };
+        applied.push({ nodeId: op.nodeId, kind: "arg" });
+      } else {
+        const why = typeof op.why === "string" ? op.why.trim() : "";
+        if (why.length < 1 || why.length > 500) {
+          throw pfError(
+            "bad_request",
+            "why는 1~500자여야 한다.",
+            "바꾼 이유를 1줄로 적어라.",
+          );
+        }
+        node.why = why;
+        applied.push({ nodeId: op.nodeId, kind: "why" });
+      }
+    }
+    writeFileSync(procFile, JSON.stringify(doc, null, 2));
+    return { draftId: draft.draftId, procedure: draft.procedure, applied };
   }
 
   /** M7 5-1: 백그라운드 진행 루프 (결정점까지 자동) */
