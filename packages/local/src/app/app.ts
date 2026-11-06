@@ -201,6 +201,8 @@ export type SessionNodeRow = {
   locked: boolean;
   sideEffect: string;
   staleSince?: { revision: number; causeNodeId: string };
+  /** M10-3-ui: 그래프 카드용 분해 사유 1줄 (없으면 null) */
+  why: string | null;
 };
 
 /** M7-ui3: 노드 상세 (표시 매핑은 UI. 여기선 판단 없음) */
@@ -213,6 +215,8 @@ export type NodeDetail = {
   locked: boolean;
   sideEffect: string;
   staleSince: { revision: number; causeNodeId: string } | null;
+  /** M10-3-ui: 분해 사유 1줄 (없으면 null) */
+  why: string | null;
   /** M8-1-0: 자기 재검증 대기 사유 (확정 후 hash 변경) */
   reverifySince: {
     revision: number;
@@ -1460,6 +1464,8 @@ export class ProcForgeApp {
       locked: node.locked,
       sideEffect: node.sideEffect,
       staleSince: node.staleSince ?? null,
+      // M10-3-ui: 노드 상세 "왜" 읽기용 (없으면 null).
+      why: typeof node.why === "string" && node.why.length > 0 ? node.why : null,
       reverifySince: node.reverifySince ?? null,
       hash: node.hash,
       tool: node.tool ?? null,
@@ -1528,6 +1534,11 @@ export class ProcForgeApp {
         locked: e.node?.locked ?? false,
         sideEffect: e.node?.sideEffect ?? "none",
         ...(e.node?.staleSince ? { staleSince: e.node.staleSince } : {}),
+        // M10-3-ui: 그래프 카드 1줄 (Node에 why가 있으면 그대로).
+        why:
+          typeof e.node?.why === "string" && e.node.why.length > 0
+            ? e.node.why
+            : null,
       })),
       revision: s.revision,
     };

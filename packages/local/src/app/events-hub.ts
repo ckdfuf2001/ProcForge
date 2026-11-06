@@ -9,6 +9,11 @@ export const SseEventSchema = z.object({
   nodeIds: z.array(z.string()),
   method: z.string(),
   actor: z.string(),
+  /**
+   * M10-3-events: 레인 식별용 1줄 요약 (200자 상한, textPreview와 같은 규칙).
+   * 기존 구독자는 무시해도 된다 (additive).
+   */
+  summary: z.string().max(200),
 });
 export type SseEvent = z.infer<typeof SseEventSchema>;
 
@@ -142,6 +147,8 @@ export class SessionEventHub {
           nodeIds: e.nodeIds,
           method: e.method,
           actor: e.actor,
+          summary:
+            e.summary.length > 200 ? e.summary.slice(0, 200) : e.summary,
         };
         const chunk = `id: ${e.revision}\nevent: change\ndata: ${JSON.stringify(payload)}\n\n`;
         for (const s of set) {

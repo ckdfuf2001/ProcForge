@@ -38,6 +38,8 @@ export type NodeRow = {
   locked: boolean;
   sideEffect: string;
   staleSince?: { revision: number; causeNodeId: string };
+  /** M10-3-ui: 분해 사유 1줄 (없으면 null) */
+  why: string | null;
 };
 
 export type NodeDetail = {
@@ -49,6 +51,8 @@ export type NodeDetail = {
   locked: boolean;
   sideEffect: string;
   staleSince: { revision: number; causeNodeId: string } | null;
+  /** M10-3-ui: 분해 사유 1줄 (없으면 null) */
+  why: string | null;
   /** M8-1-0: 자기 재검증 대기 사유 */
   reverifySince: {
     revision: number;
@@ -207,6 +211,33 @@ export type RunLogEntry = {
   message: string;
 };
 
+/** M10-3-ui: 불러온 메모리 1행 (similarProcedures 그대로) */
+export type SimilarProcedure = {
+  name: string;
+  goals: string[];
+  latest: { runId: string; status: string; at: string } | null;
+  metrics: { files: number; rows: number } | null;
+};
+
+/** M10-3-ui: 재분석 초안 (draft.json 그대로) */
+export type DraftOp = {
+  op: string;
+  nodeId: string;
+  goal?: string;
+  reason?: string;
+  [k: string]: unknown;
+};
+export type DraftDetail = {
+  draftId: string;
+  procedure: string;
+  request: string;
+  sourceHash: string;
+  status: string;
+  ops: DraftOp[];
+  diff: unknown[];
+  reason: string;
+};
+
 export type ApprovalInfo = {
   sessionId: string;
   nodeId: string;
@@ -344,6 +375,35 @@ export const api = {
       `/api/sessions/${encodeURIComponent(sid)}/nodes/${encodeURIComponent(nid)}/approve`,
       body,
     ),
+  // M10-3-ui: 왜 수정 (App.editWhy 직접, MCP 없음)
+  postWhy: (
+    sid: string,
+    nid: string,
+    body: { why: string; expectedRevision?: number },
+  ) =>
+    post<{ node: unknown; revision: number; changedNodeIds: string[] }>(
+      `/api/sessions/${encodeURIComponent(sid)}/nodes/${encodeURIComponent(nid)}/why`,
+      body,
+    ),
+  // M10-3-ui: 불러온 메모리 — 유사 분석 조회 (읽기 전용)
+  similar: (query?: string, limit?: number, sessionId?: string) => {
+    const q = new URLSearchParams();
+    if (query !== undefined && query !== "") q.set("query", query);
+    if (limit !== undefined) q.set("limit", String(limit));
+    if (sessionId !== undefined) q.set("sessionId", sessionId);
+    const s = q.toString();
+    return get<{ procedures: SimilarProcedure[] }>(
+      `/api/procedures/similar${s ? `?${s}` : ""}`,
+    );
+  },
+  // M10-3-ui: 재분석 diff 조회·적용 (읽기 전용 조회 + 인덱스 배열 적용)
+  getDraft: (draftId: string) =>
+    get<DraftDetail>(`/api/drafts/${encodeURIComponent(draftId)}`),
+  applyDraft: (draftId: string, opIds: number[]) =>
+    post<{ draftId: string; procedure: string; applied: { nodeId: string; kind: string }[] }>(
+      `/api/drafts/${encodeURIComponent(draftId)}/apply`,
+      { opIds },
+    ),
 };
 
 /** SSE 공통 파서 (EventSource 금지 — 토큰 헤더를 못 붙인다). */
@@ -418,6 +478,8 @@ export function subscribeEvents(
     nodeIds: string[];
     method: string;
     actor: string;
+    /** M10-3-events: 레인 식별용 1줄 요약 (200자 상한) */
+    summary: string;
   }) => void,
   onStatus?: (s: "open" | "closed" | "error") => void,
 ): () => void {

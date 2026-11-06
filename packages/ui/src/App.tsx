@@ -17,6 +17,7 @@ import {
 import { TokenGate } from "./TokenGate.js";
 import { TreeView } from "./TreeView.js";
 import { RoundView } from "./RoundView.js";
+import { GuideView } from "./GuideView.js";
 import { RunPanel } from "./RunPanel.js";
 
 // M7-1: 세션 목록 화면 (저장소 경로·중복 경고·연결 배지·짝 이력).
@@ -60,7 +61,7 @@ export function App() {
   const [picked, setPicked] = useState<string | null>(null);
   const [tab, setTab] = useState<"sessions" | "run">("sessions");
   // M8-ui3: 세션 안에서 "분해 라운드" 3단 화면과 "트리"를 고른다.
-  const [view, setView] = useState<"rounds" | "tree">("rounds");
+  const [view, setView] = useState<"rounds" | "tree" | "guide">("rounds");
   // M7-5-4: 실행 화면 "이 노드 열기" → 세션 탭의 상세로 이동 (n 은 재진입 강제용)
   const [focus, setFocus] = useState<{
     sessionId: string;
@@ -229,6 +230,15 @@ export function App() {
               >
                 트리
               </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={view === "guide"}
+                aria-pressed={view === "guide"}
+                onClick={() => setView("guide")}
+              >
+                M10 확인
+              </button>
             </div>
           </div>
           {view === "rounds" ? (
@@ -236,11 +246,16 @@ export function App() {
               key={`${picked}:${focus?.sessionId === picked ? focus.n : 0}`}
               sessionId={picked}
             />
-          ) : (
+          ) : view === "tree" ? (
             <TreeView
               key={`${picked}:${focus?.sessionId === picked ? focus.n : 0}`}
               sessionId={picked}
               focusNodeId={focus?.sessionId === picked ? focus.nodeId : null}
+            />
+          ) : (
+            <GuideView
+              key={`${picked}:${focus?.sessionId === picked ? focus.n : 0}`}
+              sessionId={picked}
             />
           )}
         </section>
