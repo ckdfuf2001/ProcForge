@@ -117,6 +117,7 @@ function deferredRemoteClient(basePromise: Promise<string>): CoreClient {
     pfTree: (sid) => invoke("pfTree", [sid]) as never,
     pfLock: (i) => invoke("pfLock", [i]) as never,
     pfReopen: (i) => invoke("pfReopen", [i]) as never,
+    pfEditWhy: (i) => invoke("pfEditWhy", [i]) as never,
     amendAttemptArtifacts: (i) => invoke("amendAttemptArtifacts", [i]) as never,
     pfUpdateCatalog: (i) => invoke("pfUpdateCatalog", [i]) as never,
     pfEditArgs: (i) => invoke("pfEditArgs", [i]) as never,
