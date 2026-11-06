@@ -613,6 +613,7 @@ c·d·j는 하네스 과제로 DECISIONS에 기록만.
 | M9-1-1 | env 호환 (PROOF_* 우선 + PROCFORGE_* 대체, 보안 5종 불일치 시 기동 오류) | [x] | `93620d0` | https://github.com/ckdfuf2001/ProcForge/actions/runs/41831024508 | 구현 범위 fdb548d..93620d0, M9-1-spec.md §2·§8-1 |
 | M9-1-2~4 | 이름 변경 구현 3개 | [x] | `dcfacc6` | https://github.com/ckdfuf2001/ProcForge/actions/runs/41976390256 | 순서: bin/패키지 → 화면 문구 → 문서. 문서 후속 커밋 제외한 코드 head 기록 |
 | M9-tmp-2 | tmp 누적 해소 + 실행 수습 | [x] | `f4395f7` | https://github.com/ckdfuf2001/ProcForge/actions/runs/42123793077 | 제품 temp 누수 0, L3 INCREASED_TOTAL 0. M9-tmp-2-fix: settleRun+afterEach, m75-cancel 조용통과 제거 |
+| M9-2 | 실행 기록 재사용 메모리 | [x] | `4c7fca5` | https://github.com/ckdfuf2001/ProcForge/actions/runs/42160479008 | 재finalize 안전(lock 검사+sidecar 보존) · metrics.json · by-procedure latest · accumulate 수동 선언 문서 |
 
 > M8은 dogfood(`docs/M7-dogfood.md`) 결과를 반영해 정의했다. 완료 기준은 각 항목 비고에 따른다.
 
