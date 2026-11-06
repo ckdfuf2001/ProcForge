@@ -1,5 +1,7 @@
 # Proof
 
+사용법: [docs/USER-GUIDE.md](docs/USER-GUIDE.md)
+
 [![ci](https://github.com/ckdfuf2001/ProcForge/actions/workflows/ci.yml/badge.svg)](https://github.com/ckdfuf2001/ProcForge/actions/workflows/ci.yml)
 
 자연어 요청을 재귀 분해해 "AI 코딩툴의 툴 호출로 이루어진 절차서 + 단위 테스트 묶음"을 만드는 MCP.

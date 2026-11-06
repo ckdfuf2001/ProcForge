@@ -1,5 +1,7 @@
 # M2/M2.5 수동 검증 (OpenCode + Proof local MCP, Windows 기준)
 
+> 현행 사용법은 USER-GUIDE.md를 보세요. 이 문서는 당시 기록으로 유지합니다.
+
 ## 0. 도구 구성 (M2.5+M4)
 
 등록 도구 16개 (결정적 순서):
