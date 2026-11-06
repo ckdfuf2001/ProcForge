@@ -12,12 +12,11 @@ export function useTmpCleanup(): void {
   });
 }
 
-// M9-tmp2-fix: 테스트 종료 후에도 실행이 살아 있으면 afterAll rmSync가
-// Windows EBUSY로 중간에 던지고 디렉터리 일부가 고아로 남는다.
-// 각 테스트가 만든 실행은 afterEach에서 여기서 수습한다 (취소 요청 +
-// 자식 사망 + run-state.ts status가 running/ready가 아닐 때까지 대기).
-// 대기는 최선형이다 — 시간 초과해도 throw하지 않는다 (정리 실패를
-// 테스트 실패로 바꾸지 않는다. 잔존은 tmp-delta로 측정한다).
+// M9-tmp2-fix2: settle 예산 20초. f4395f7의 100회×100ms(최대 10초+cancel)가
+// afterEach 기본 hookTimeout 10초를 넘을 수 있어 L3에서 hook timeout이 났다
+// (ledger 2026-11-06행). afterEach timeout 30초와 함께 예산을 역전한다
+// (hook 30s > settle 20s). 시간 초과해도 throw하지 않는다.
+export const SETTLE_BUDGET_MS = 20000;
 export async function settleRun(
   app: { uiRunCancel(input: { runId: string }): Promise<unknown> },
   procforgeDir: string,
@@ -28,11 +27,19 @@ export async function settleRun(
   } catch {
     // 이미 끝났거나 기록 없음 — 아래 대기로 확인한다
   }
-  for (let i = 0; i < 100; i++) {
-    const alive = listChildren(procforgeDir, runId).some((pid) => isAlive(pid));
+  const deadline = Date.now() + SETTLE_BUDGET_MS;
+  for (;;) {
+    const kids = listChildren(procforgeDir, runId);
+    const alive = kids.filter((pid) => isAlive(pid));
     const st = readRunState(procforgeDir, runId);
     const active = !!st && (st.status === "running" || st.status === "ready");
-    if (!alive && !active) return;
+    if (alive.length === 0 && !active) return;
+    if (Date.now() >= deadline) {
+      process.stderr.write(
+        `[settle] timeout runId=${runId} status=${st?.status ?? "none"} alivePids=${alive.join(",")}\n`,
+      );
+      return;
+    }
     await new Promise((r) => setTimeout(r, 100));
   }
 }

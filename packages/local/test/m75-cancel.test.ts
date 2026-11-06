@@ -16,9 +16,11 @@ useTmpCleanup();
 // M9-tmp2-fix: 만든 실행은 테스트가 끝나기 전에 수습한다 (취소+종료대기).
 // afterAll rmSync와 살아 있는 자식·열린 로그 핸들의 경쟁(EBUSY 부분 정리)을 막는다.
 const liveRuns: { app: ProcForgeApp; pfdir: string; runId: string }[] = [];
+// 예산: hook 30s > settle 20s (SETTLE_BUDGET_MS). hook이 먼저 끊기면
+// afterAll rmSync와 살아 있는 자식이 경쟁해 EBUSY 고아가 남는다.
 afterEach(async () => {
   for (const t of liveRuns.splice(0)) await settleRun(t.app, t.pfdir, t.runId);
-});
+}, 30000);
 
 
 // M7-5-a/b: 취소가 **실제 runner가 띄운 자식**을 멈추는지.
