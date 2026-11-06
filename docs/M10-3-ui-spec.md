@@ -63,3 +63,16 @@
 - 판정 필요: **A안 d3-hierarchy** (추천 — why 표시·OmO 커스텀이 목적에 맞음) /
   B안 ECharts (빠른 구현, 커스텀 제약) / C안 CSS 리스트 (폴백).
 - 목업(`m10-guide.html`)은 라이브러리 없이 CSS 중첩 리스트로 그린 동일 레이아웃이다.
+
+## 5. M10-3 구현 메모 (설계서 원문 유지, 아래만 추가)
+
+- 그래프 판정: **A안 확정**. d3-hierarchy 3.1.3 (ISC, Copyright Mike Bostock —
+  registry LICENSE 확인) + SVG 직접 렌더. `packages/ui` 의존성에 고정.
+- 부족한 이벤트 4종 채널: `pfNotify` (core, revision+1·상태 불변·MCP 미노출,
+  wire 27번째) + `run.phase`는 실행 로그 `phase:` 마커
+  (started/waiting-approval/waiting-input/resumed/done/failed/cancelled).
+  `lane.*` 실측정 송출은 M10-4에서 연결한다.
+- 화면: 세션 상세에 `M10 확인` 탭 추가 (진행률·레인·그래프·남은작업 +
+  메모리·초안 오른쪽패널). 기존 rounds/tree 탭·테이블은 그대로 둔다.
+  노드 카드 1줄 why를 위해 tree 행·노드 상세에 `why` 필드 추가 (additive).
+- SSE `change` 페이로드에 `summary`(200자 상한) 추가 (additive, 레인 식별용).
