@@ -136,10 +136,18 @@ function deferredRemoteClient(basePromise: Promise<string>): CoreClient {
       invoke("pfBuildProcedure", [sid, name]) as never,
     pfApprove: (i) => invoke("pfApprove", [i]) as never,
     pfImportProcedure: (i) => invoke("pfImportProcedure", [i]) as never,
-    pfWriteGolden: (i) => invoke("pfWriteGolden", [i]) as never,
+    pfWriteGolden: (i) =>
+      invoke("pfWriteGolden", [i]) as never,
   } as CoreClient;
 }
 
+/**
+ * 테스트 전용: deferred remote 프록시의 메서드 키 목록.
+ * wire 메서드 추가 시 하네스 갱신 누락을 잡는다 (M10-3-prep).
+ */
+export function deferredRemoteClientKeys(): string[] {
+  return Object.keys(deferredRemoteClient(new Promise(() => {})));
+}
 export function testStack(
   pfdir: string,
   opts: { sessionTtlMs?: number } = {},

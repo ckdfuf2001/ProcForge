@@ -58,7 +58,15 @@ describe("M10-why-fix", () => {
     await expect(app.split({ sessionId: sid, nodeId: "1", reason: "분해 사유입니다 0123456789", children: [{ goal: "a", why: "   " }] } as never)).rejects.toThrow(/1~500/);
     await app.split({ sessionId: sid, nodeId: "1", reason: "분해 사유입니다 0123456789", children: [{ goal: "a", why: "이유 a" }] } as never);
     await expect(app.editWhy({ sessionId: sid, nodeId: "1.1", why: "   " })).rejects.toThrow(/1~500/);
-    await expect(app.editWhy({ sessionId: sid, nodeId: "1.1", why: "x".repeat(501) })).rejects.toThrow(/500/);
+    // 거부 지점이 모드마다 다름: inprocess는 서비스(trim 후 1~500), loopback·remote는 zod(max 500, trim 없음) — 모두 거부되므로 결함 아님.
+    try {
+      await app.editWhy({ sessionId: sid, nodeId: "1.1", why: "x".repeat(501) });
+      expect.unreachable();
+    } catch (e) {
+      const err = e as Error & { code?: string };
+      expect(String(err.message)).toMatch(/500/);
+      if (!String(err.message).startsWith("loopback")) expect(err.code).toBe("bad_request");
+    }
   });
 
   it("⑦ remote editWhy 왕복", async () => {
