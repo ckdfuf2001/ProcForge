@@ -97,15 +97,16 @@ function validateOps(
     }
     const reason = oo.reason;
     if (oo.op === "edit_why") {
-      if (typeof oo.why !== "string" || oo.why.length === 0) {
+      const whyTrimmed = typeof oo.why === "string" ? oo.why.trim() : "";
+      if (whyTrimmed.length < 1 || whyTrimmed.length > 500) {
         return { error: `edit_why에 why 없음: ${oo.nodeId}` };
       }
-      ops.push({ op: "edit_why", nodeId: oo.nodeId, why: oo.why, reason });
+      ops.push({ op: "edit_why", nodeId: oo.nodeId, why: whyTrimmed, reason });
       diff.push({
         nodeId: oo.nodeId,
         kind: "why",
         before: typeof node.why === "string" ? node.why : "",
-        after: oo.why,
+        after: whyTrimmed,
       });
       continue;
     }

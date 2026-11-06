@@ -616,6 +616,7 @@ c·d·j는 하네스 과제로 DECISIONS에 기록만.
 | M9-2 | 실행 기록 재사용 메모리 | [x] | `4c7fca5` | https://github.com/ckdfuf2001/ProcForge/actions/runs/42160479008 | 재finalize 안전(lock 검사+sidecar 보존) · metrics.json · by-procedure latest · accumulate 수동 선언 문서 |
 | M10-why-1 | 분해 사유 `why` (`pf_split` 선택 필드) | [ ] | | | MCP 표면 유일 예외. 기존 호출 호환, 노드·procedure.json 왕복 |
 | M10-why-2 | `editWhy` (의견 경로) + 재분석 `edit_why` | [ ] | | | 대상+하위만 stale, 이벤트 before/after |
+| M10-why-fix | contract rule | [ ] | | | wire method add -> update count assert and MCP inputSchema check together |
 | M10-3-0 | 화면 설계서 + 정적 목업 | [ ] | | | 설계+목업만, 구현은 M10-3에서 |
 
 > M8은 dogfood(`docs/M7-dogfood.md`) 결과를 반영해 정의했다. 완료 기준은 각 항목 비고에 따른다.
