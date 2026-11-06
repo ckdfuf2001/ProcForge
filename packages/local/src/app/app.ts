@@ -2399,6 +2399,31 @@ export class ProcForgeApp {
         `고정값 감사 실패(${allAudit.length}건): ${allAudit.slice(0, 3).join("; ")}`,
       );
     }
+    // M9-2-1: 실행 중 재finalize 금지. runSession의 절차서 run 잠금과 같은 기제
+    // (FileStore.acquireFileLock, stale 60초 — run.ts:319-335를 재사용, 새로 만들지 않음).
+    // UI·MCP·CLI 모두 app.finalize를 경유하므로 한 곳에서만 검사한다.
+    // advisory lock이라 검사-교체 사이 경합은 감수한다 (충돌 시 swap이 io_error로 실패).
+    const procRunLockPath = join(
+      this.procforgeDir,
+      "procedures",
+      doc.name,
+      ".run.lock",
+    );
+    try {
+      new FileStore(this.procforgeDir).acquireFileLock(
+        procRunLockPath,
+        `procedure finalize locked: ${doc.name}`,
+        60000,
+      )();
+    } catch (e) {
+      if ((e as { code?: string }).code === "conflict") {
+        throw pfError(
+          "conflict",
+          `실행 중인 절차서는 확정할 수 없습니다: ${doc.name} (실행 종료 후 다시 확정하세요)`,
+        );
+      }
+      throw e;
+    }
     const written = writeProcedure({
       procforgeDir: this.procforgeDir,
       projectRoot: this.projectRoot,

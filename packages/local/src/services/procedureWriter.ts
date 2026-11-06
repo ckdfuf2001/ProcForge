@@ -139,6 +139,30 @@ export function rewriteAutoFileExists(doc: ProcedureDoc, manifestFile: string): 
 }
 
 /**
+ * M9-2-1: 재finalize 시 sidecar 보존. 디렉터리 통째 복사 + files 목록 적재
+ * (상대경로 / 구분). 실패는 호출자가 codedFs로 finalize 실패로 올린다.
+ */
+function copyTreeInto(
+  srcDir: string,
+  dstDir: string,
+  prefix: string,
+  files: string[],
+): void {
+  for (const e of readdirSync(srcDir, { withFileTypes: true })) {
+    const p = join(srcDir, e.name);
+    const rel = `${prefix}/${e.name}`;
+    if (e.isDirectory()) {
+      mkdirSync(join(dstDir, e.name), { recursive: true });
+      copyTreeInto(p, join(dstDir, e.name), rel, files);
+    } else if (e.isFile()) {
+      mkdirSync(dstDir, { recursive: true });
+      copyFileSync(p, join(dstDir, e.name));
+      files.push(rel);
+    }
+  }
+}
+
+/**
  * M5.2-2: script-kind 인자의 호스트 스크립트 수집.
  * procedures/<name>/scripts/<nodeId>.<ext>로 복사하고 doc의 file 값을
  * 수집 경로로 재작성. 노드당 스크립트 1개 초과·미존재·범위 밖·확장자 불가는
@@ -261,6 +285,27 @@ export function writeProcedure(input: {
     mkdirSync(join(buildDir, "tests"), { recursive: true });
     copyFileSync(mf, join(buildDir, "tests", "fixtures-manifest.json"));
     files.push("tests/fixtures-manifest.json");
+  }
+  // M9-2-1: 재finalize 시 sidecar 보존 (.run.lock 제외 — app.finalize 진입
+  // 시점에 없음이 보장됨; 있으면 swap 대상에서 빠지므로 실행 중 잠금은 건드리지 않는다).
+  // 복사 실패는 조용히 넘기지 않고 finalize 실패로 올린다 (상태 유실 방지).
+  for (const rel of ["state.json", "approvals.json"]) {
+    const src = join(dir, rel);
+    if (!existsSync(src)) continue;
+    try {
+      copyFileSync(src, join(buildDir, rel));
+      files.push(rel);
+    } catch (e) {
+      throw codedFs(e, `절차서 상태 보존 실패(${rel})`);
+    }
+  }
+  const approvedSrc = join(dir, "approved");
+  if (existsSync(approvedSrc)) {
+    try {
+      copyTreeInto(approvedSrc, join(buildDir, "approved"), "approved", files);
+    } catch (e) {
+      throw codedFs(e, "절차서 승인본 보존 실패(approved/)");
+    }
   }
   // M4.1-5: tmp에 빌드 후 원자 교체 (실패 시 tmp 정리)
   // 정리 실패는 본 에러를 가리면 안 되므로 best-effort (M5.8.1-5:
