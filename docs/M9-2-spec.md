@@ -124,6 +124,24 @@
   server.ts:618/app.ts:160 건드리지 않음.
 
 ## §4 구현 커밋 분할안
+
+### M9-2-1 (최우선) 재finalize sidecar 소실 확정 — 코드 판독 결과 (수정 없음)
+- 소실 위치: `packages/local/src/services/procedureWriter.ts:21-44` (swapDir,
+  디렉터리 전체 교체) + `:188-289` (빌드물=procedure.json·PROCEDURE.md·
+  SKILL.md·command.md·tests/·scripts/만).
+- ① 절차서 폴더 `state.json`: 누적 KV 상태 맞음
+  (`services/procedure-state.ts:9`, 성공 종료 시 원자 저장 `run.ts:755`,
+  다음 실행 로드 `run.ts:292-297`). 재finalize 시 실제로 사라지는 경로임
+  (빌드물에 없음 → swap 후 소멸).
+- ② `.run.lock`: 실행 중 재finalize가 막히지 않음. `app.ts` 확정 경로
+  (`finalize`·UI·MCP·CLI 모두 `app.finalize` 경유)에 `.run.lock` 검사 없음
+  (acquire는 `run.ts:319-335` runSession만). 허용되므로 Windows에서는
+  swap rename이 잠금 파일에 걸려 `io_error`로 finalize가 실패하거나,
+  성공 시 실행 중 run은 `.old` 쪽을 계속 붙잡는다.
+- ③ approvals: 사라지면 재승인 요구로 안전함. `loadApprovals`는 파일 없으면
+  `[]` 반환 (`services/approvals.ts:225`). 무인 실행은 빈 목록=external 전부
+  거부 (`run.ts:298-301` + 승인 게이트) — fail-closed. 단 수동 재승인 비용 발생.
+
 - M9-2-1 행 수 기록: `csv_rows` 등 산출물 요약을 report에 기록.
   테스트: ① 누적 CSV 2회 실행 행 수 증가 기록 (m7-accumulate 확장).
 - M9-2-2 재finalize sidecar 보존: approvals.json·state.json 유지,
