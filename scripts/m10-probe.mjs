@@ -235,7 +235,7 @@ async function main() {
         continue;
       }
       const pid = perm.p?.id;
-      const r = await fetch(BASE + `/session/${psid}/permissions/${pid}`, {
+      const r = await api(`/session/${psid}/permissions/${pid}`, {
         method: "POST",
         body: JSON.stringify({ response: resp }),
       });
