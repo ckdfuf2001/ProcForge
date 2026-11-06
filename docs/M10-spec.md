@@ -90,3 +90,20 @@
    B안: 서버 기본값(GET /config/providers default 첫 항목).
    확정: **B** (env 16종 계약을 깨지 않기 위해. A 기각 이유 1줄).
    [실측 의존 없음]
+
+## §6 `why` 경로 (M10-why-0 조사, 코드만 — 수정 없음)
+
+| # | 지점 | 파일:행 | `why` 취급 | 비고 |
+|---|---|---|---|---|
+| 1 | shared 노드 스키마 | `shared/src/schema.ts:273` (`NodeSchema`, goal `:276`) | `why: z.string().optional()` 추가 | — |
+| 2 | `pf_split` 입력 | `shared/src/dto.ts:157-169` (`SplitInputSchema.children` 항목) — `server.ts:302`가 inputSchema로 사용 | 항목에 `why?` 선택 추가 | `wire.ts:56`·`core-client.ts:130`·`loopback.ts:105`에 병렬 정의 존재. core 검증이 뭘 쓰는지 M10-why-1에서 확정할 것. 기존 `reason`(분해 전체 사유, `:171-175`)과 다름 |
+| 3 | 출력 요약 | `local/src/views.ts:53-65` (`NodeSummarySchema`, goal `:55`) | `why` 포함 | M8-1-close2 a 교훈 (요약 누락 시 MCP -32602). `PfSplitOutputSchema` (`views.ts:327`)도 함께 확인할 것 |
+| 4 | `procedure.json` 내보내기 | `core/src/service.ts` `pfBuildProcedure` 노드 매핑 + `shared/src/procedure.ts` (`ProcedureDocSchema` nodes) | `why` 포함 (수평 이동). `buildImportSession` 역방향도 | — |
+| 5 | mcp-contract 스냅샷 | `test/mcp-contract.test.ts:50` (`EXPECTED_ORDER`), `:86` (이름·스키마 유무) | 선택 필드라 기존 단언 유지 | `why` 왕복은 M10-why-1 ④에서 별도 확인 |
+| 6 | 노드 hash | `shared/src/schema.ts:423` (`computeNodeHash`) | **제외** (판정 아래) | 선례: `splitReason`도 hash 대상 아님 (`core/src/service.ts:1210-1212`) |
+| 7 | 승인 hash | `services/approvals.ts:109` (`computeApprovalHash`), `:541` (`approvalPins`) | **제외** (판정 아래) | — |
+| 8 | golden | `core/src/service.ts` golden 조립 (`fixtures`+`output`만) | 변경 없음 (노드 필드 미포함) | — |
+
+판정: 노드 hash와 승인 hash에서는 `why`를 **제외**한다 (추천).
+이유: `why`를 고친다고 실행 내용이 바뀌는 것이 아니므로, 바뀔 때마다
+승인·golden이 무효 되면 안 된다. `procedure.json` 문서에는 포함한다.
