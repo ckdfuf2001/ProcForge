@@ -101,3 +101,19 @@
 6. Basic auth + 기존 토큰 헤더 병행 (§8).
 7. 동시 세션 2개·4개 메모리 측정 (serve 프로세스 RSS, 각 세션 prompt 전후.
    ProcForge M7 dogfood 방식 참고: 동일 프롬프트·동일 모델로 반복).
+
+## 실측 스크립트 사용법 (scripts/m10-probe.mjs)
+
+serve가 떠 있는 사용자 PC에서 1회 실행한다 (에이전트는 serve를 띄우지 않음).
+
+```powershell
+node scripts/m10-probe.mjs --model <provider/model>
+node scripts/m10-probe.mjs --model <provider/model> --url http://127.0.0.1:4096 --password <pw>
+node scripts/m10-probe.mjs --model <provider/model> --concurrency 4
+```
+
+- 체크리스트 1~6 수집 → `m10-probe-<날짜>.json` + 항목별 확인/불일치/실패 요약 출력.
+- 7번(동시 세션 RSS)은 `--concurrency 2|4` 별도 실행. serve 프로세스 RSS는
+  스크립트가 안내하는 PowerShell 명령으로 직접 기록한다.
+- 안전: 임시 세션만 만들고 끝나면 삭제, 파일 쓰기 도구는 끄고 보낸다.
+  장문 대화 금지·비용 상한 안내를 먼저 출력한다.
