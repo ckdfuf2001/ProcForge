@@ -114,6 +114,11 @@ function waitFor(events, pred, timeoutMs, label) {
 }
 
 const createdSessions = [];
+let totalCost = 0;
+function noteCost(p) {
+  const c = p?.info?.cost;
+  if (typeof c === "number") totalCost += c;
+}
 async function cleanup() {
   for (const id of createdSessions.splice(0)) {
     try {
@@ -157,7 +162,7 @@ async function main() {
   // 3. 세션 생성 → prompt_async → idle 순서
   const events = [];
   const ctl = new AbortController();
-  const sub = subscribeEvents((t, p) => events.push({ t, p, at: Date.now() }), ctl.signal).catch(() => {});
+  const sub = subscribeEvents((t, p) => { events.push({ t, p, at: Date.now() }); noteCost(p); }, ctl.signal).catch(() => {});
   let sid = null;
   try {
     const c = await api("/session", { method: "POST", body: JSON.stringify({ title: "m10-probe" }) });
@@ -281,7 +286,7 @@ async function main() {
         });
         const evs = [];
         const c2 = new AbortController();
-        const s2 = subscribeEvents((t, p) => evs.push({ t, p }), c2.signal).catch(() => {});
+        const s2 = subscribeEvents((t, p) => { evs.push({ t, p }); noteCost(p); }, c2.signal).catch(() => {});
         try {
           await waitFor(evs, (e) => e.t === "session.idle" && e.p?.sessionID === id, 180000, "idle");
         } finally {
@@ -301,8 +306,9 @@ async function main() {
 
   const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, "");
   const { writeFileSync } = await import("node:fs");
-  writeFileSync(`m10-probe-${stamp}.json`, JSON.stringify({ at: new Date().toISOString(), url: BASE, model: MODEL, results }, null, 2));
+  writeFileSync(`m10-probe-${stamp}.json`, JSON.stringify({ at: new Date().toISOString(), url: BASE, model: MODEL, totalCostUsd: totalCost, results }, null, 2));
   console.log(`[m10-probe] 저장: m10-probe-${stamp}.json`);
+  console.log(`[m10-probe] 총 비용(USD 합산): ${totalCost}`);
   const bad = results.filter((r) => r.status !== "확인").length;
   if (bad > 0) process.exitCode = 1;
 }
