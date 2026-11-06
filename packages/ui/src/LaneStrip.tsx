@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { subscribeEvents } from "./api.js";
+import { api, subscribeEvents } from "./api.js";
 
 // M10-3-ui: 에이전트 레인 4개 (가로 swimlane).
 // lane.started/finished 세션 이벤트로 구동한다. summary에서 레인 키를 찾고
@@ -32,6 +32,40 @@ export function laneOf(summary: string): LaneKey | null {
   return null;
 }
 
+type LaneEvent = { method: string; summary: string; nodeIds: string[] };
+
+/** lane.started/finished 1건을 상태에 반영한다 (이력·실시간 공통). */
+function applyLaneEvent(
+  prev: Record<LaneKey, LaneState>,
+  e: LaneEvent,
+): { next: Record<LaneKey, LaneState>; touched: boolean } {
+  if (e.method !== "lane.started" && e.method !== "lane.finished") {
+    return { next: prev, touched: false };
+  }
+  const starting = e.method === "lane.started";
+  const key = laneOf(e.summary);
+  const next: Record<LaneKey, LaneState> = {
+    analysis: { ...prev.analysis },
+    redraft: { ...prev.redraft },
+    execute: { ...prev.execute },
+    verify: { ...prev.verify },
+  };
+  if (key !== null) {
+    next[key] = starting ? { active: true, nodeIds: [...e.nodeIds] } : { ...EMPTY };
+  } else {
+    // 키 불명: 칩이 겹치는 레인을 시작/종료한다.
+    for (const k of Object.keys(next) as LaneKey[]) {
+      const overlap =
+        e.nodeIds.length === 0 ||
+        next[k].nodeIds.some((id) => e.nodeIds.includes(id));
+      if (overlap) {
+        next[k] = starting ? { active: true, nodeIds: [...e.nodeIds] } : { ...EMPTY };
+      }
+    }
+  }
+  return { next, touched: true };
+}
+
 export function LaneStrip({ sessionId }: { sessionId: string }) {
   const [lanes, setLanes] = useState<Record<LaneKey, LaneState>>({
     analysis: { ...EMPTY },
@@ -49,38 +83,38 @@ export function LaneStrip({ sessionId }: { sessionId: string }) {
       execute: { ...EMPTY },
       verify: { ...EMPTY },
     });
-    return subscribeEvents(sessionId, (e) => {
-      if (e.method !== "lane.started" && e.method !== "lane.finished") return;
-      setSeen(true);
-      const starting = e.method === "lane.started";
-      const key = laneOf(e.summary);
-      setLanes((prev) => {
-        const next: Record<LaneKey, LaneState> = {
-          analysis: { ...prev.analysis },
-          redraft: { ...prev.redraft },
-          execute: { ...prev.execute },
-          verify: { ...prev.verify },
-        };
-        if (key !== null) {
-          next[key] = starting
-            ? { active: true, nodeIds: [...e.nodeIds] }
-            : { ...EMPTY };
-        } else {
-          // 키 불명: 칩이 겹치는 레인을 시작/종료한다.
-          for (const k of Object.keys(next) as LaneKey[]) {
-            const overlap =
-              e.nodeIds.length === 0 ||
-              next[k].nodeIds.some((id) => e.nodeIds.includes(id));
-            if (overlap) {
-              next[k] = starting
-                ? { active: true, nodeIds: [...e.nodeIds] }
-                : { ...EMPTY };
-            }
+    let cancelled = false;
+    // 과거 lane 이벤트로 초기 상태를 복원한다 (새로고침 대응).
+    void (async () => {
+      try {
+        const log = await api.eventLog(sessionId, { limit: 200, tail: true });
+        if (cancelled) return;
+        setLanes((prev) => {
+          let next = prev;
+          let touched = false;
+          for (const e of log.events) {
+            const r = applyLaneEvent(next, e);
+            next = r.next;
+            touched = touched || r.touched;
           }
-        }
-        return next;
+          if (touched) setSeen(true);
+          return next;
+        });
+      } catch {
+        // 이력 실패는 실시간 구독으로 메운다 (화면을 막지 않는다).
+      }
+    })();
+    const stop = subscribeEvents(sessionId, (e) => {
+      setLanes((prev) => {
+        const r = applyLaneEvent(prev, e);
+        if (r.touched) setSeen(true);
+        return r.next;
       });
     });
+    return () => {
+      cancelled = true;
+      stop();
+    };
   }, [sessionId]);
 
   return (

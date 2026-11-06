@@ -77,21 +77,18 @@ export function GraphView({
   if (!layout) return <p className="muted">그래프에 올릴 노드가 없습니다.</p>;
   const { laid, minX, maxX, maxY } = layout;
   const pad = 12;
-  const height = maxX - minX + CARD_H + pad * 2;
+  // 카드 좌상단 기준: x = d.y (깊이, 0부터), y = d.x - minX (0부터).
   const width = maxY + CARD_W + pad * 2;
-  const ox = pad - minX;
-  const oy = pad;
+  const height = maxX - minX + CARD_H + pad * 2;
 
   const links: { key: string; d: string }[] = [];
   laid.each((d) => {
     const p = d.parent;
     if (!p) return;
-    const x1 = p.y + CARD_W;
-    const y1 = p.x + CARD_H / 2;
-    const sx = x1;
-    const sy = y1;
+    const sx = p.y + CARD_W;
+    const sy = p.x - minX + CARD_H / 2;
     const tx = d.y;
-    const ty = d.x + CARD_H / 2;
+    const ty = d.x - minX + CARD_H / 2;
     const mx = (sx + tx) / 2;
     links.push({
       key: `${p.data.id}->${d.data.id}`,
@@ -109,7 +106,7 @@ export function GraphView({
         role="img"
         aria-label="노드 그래프"
       >
-        <g transform={`translate(${ox},${oy})`}>
+        <g transform={`translate(${pad},${pad})`}>
           {links.map((l) => (
             <path key={l.key} className="glink" d={l.d} />
           ))}
@@ -119,7 +116,7 @@ export function GraphView({
               const datum = d.data;
               const cls = `gnode gnode-st-${datum.status}${datum.stale ? " gnode-st-stale" : ""}`;
               const x = d.y;
-              const y = d.x - CARD_H / 2;
+              const y = d.x - minX;
               return (
                 <g
                   key={datum.id}

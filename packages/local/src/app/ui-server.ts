@@ -844,6 +844,42 @@ export async function createUiServer(opts: {
           send(res, { nodes, blocked });
           return;
         }
+        // M10-3-ui: 세션 이벤트 이력 JSON (읽기 전용. SSE 스트림과 다른 경로).
+        // 레인 스트립 초기 상태 등 "과거 이벤트가 필요한" 화면용.
+        const mEventLog = /^\/api\/sessions\/([^/]+)\/event-log$/.exec(url.pathname);
+        if (req.method === "GET" && mEventLog) {
+          const sid = pathId(mEventLog[1], "sessionId");
+          const parseNonNegInt = (raw: string | null, name: string): number | undefined => {
+            if (raw === null || raw === "") return undefined;
+            const n = Number(raw);
+            if (!Number.isInteger(n) || n < 0) throw pfError("bad_request", `${name}은 0 이상의 정수`);
+            return n;
+          };
+          let afterRevision: number | undefined;
+          let limit: number | undefined;
+          try {
+            afterRevision = parseNonNegInt(url.searchParams.get("afterRevision"), "afterRevision");
+            limit = parseNonNegInt(url.searchParams.get("limit"), "limit");
+          } catch (e) {
+            err(res, 400, e instanceof Error ? e.message : String(e));
+            return;
+          }
+          if (limit !== undefined && limit > 500) {
+            err(res, 400, "limit은 500 이하");
+            return;
+          }
+          const tail = url.searchParams.get("tail") === "1";
+          send(
+            res,
+            await opts.app.getEventsPage({
+              sessionId: sid,
+              ...(afterRevision !== undefined ? { afterRevision } : {}),
+              ...(limit !== undefined ? { limit } : {}),
+              ...(tail ? { tail: true as const } : {}),
+            }),
+          );
+          return;
+        }
         // M7-ui2: 세션 이벤트 SSE (토큰 헤더 필수. 쿼리 토큰 금지)
         const mEvents = /^\/api\/sessions\/([^/]+)\/events$/.exec(url.pathname);
         if (req.method === "GET" && mEvents) {

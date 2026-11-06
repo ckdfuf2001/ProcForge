@@ -78,7 +78,7 @@ test("② 의견 → needs_reverify + 진행률 분자 감소", async ({ page })
   await openNode(page, "1.1");
   await page.getByLabel("사람 조언").fill("다시 나눠야 할 것 같다");
   await page.getByRole("button", { name: "의견 등록 + 계속 신호", exact: true }).click();
-  // 의견 저장 완료 (신호成否와 무관 — 저장됨 또는 신호 실패 문구; 둘 다 뜰 수 있어 first).
+  // 의견 저장 완료 (신호 성공 여부와 무관 — 저장됨 또는 신호 실패 문구; 둘 다 뜰 수 있어 first).
   await expect(
     page.getByText(/advise-and-signal 저장됨|저장은 끝났습니다/).first(),
   ).toBeVisible({ timeout: 30000 });

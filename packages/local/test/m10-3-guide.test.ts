@@ -84,6 +84,14 @@ describe("M10-3-e2e 확인 화면 데이터", () => {
     };
     expect(node.detail.why).toBe("나눈 이유 한 줄");
     expect(node.events.some((e) => e.method === "lane.started")).toBe(true);
+    // event-log 이력 JSON (레인 초기 상태용): tail + limit + 400.
+    const evlog = (await getJson(`/api/sessions/${sid}/event-log?limit=200&tail=1`)).body as {
+      events: { method: string; summary: string }[];
+      lastRevision: number;
+    };
+    expect(evlog.events.some((e) => e.method === "lane.started")).toBe(true);
+    expect(evlog.lastRevision).toBeGreaterThan(0);
+    expect((await getJson(`/api/sessions/${sid}/event-log?limit=abc`)).status).toBe(400);
 
     // 3) 왜 수정 → 200, 트리 재조회 없이 상세에 반영.
     const whyRes = await postJson(`/api/sessions/${sid}/nodes/1.1/why`, { why: "바꾼 이유" });

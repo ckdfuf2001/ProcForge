@@ -385,6 +385,17 @@ export const api = {
       `/api/sessions/${encodeURIComponent(sid)}/nodes/${encodeURIComponent(nid)}/why`,
       body,
     ),
+  // M10-3-ui: 세션 이벤트 이력 JSON (레인 초기 상태 등 과거 이벤트용)
+  eventLog: (sid: string, opts?: { afterRevision?: number; limit?: number; tail?: boolean }) => {
+    const q = new URLSearchParams();
+    if (opts?.afterRevision !== undefined) q.set("afterRevision", String(opts.afterRevision));
+    if (opts?.limit !== undefined) q.set("limit", String(opts.limit));
+    if (opts?.tail) q.set("tail", "1");
+    const s = q.toString();
+    return get<{ events: NodeEvent[]; lastRevision: number }>(
+      `/api/sessions/${encodeURIComponent(sid)}/event-log${s ? `?${s}` : ""}`,
+    );
+  },
   // M10-3-ui: 불러온 메모리 — 유사 분석 조회 (읽기 전용)
   similar: (query?: string, limit?: number, sessionId?: string) => {
     const q = new URLSearchParams();
