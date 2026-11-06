@@ -252,6 +252,27 @@ export type PfEditWhyInput = {
 };
 
 /**
+ * M10-3-events: 세션 알림 이벤트 (상태 변경 없음, revision만 +1).
+ * method는 부족한 이벤트 4종으로 고정 (lane 시작·끝, 메모리 로드, 초안 준비).
+ * 노드 변경이 없으므로 changedNodeIds는 비어 있다.
+ */
+export type NotifyMethod =
+  | "lane.started"
+  | "lane.finished"
+  | "memory.loaded"
+  | "draft.ready";
+
+export type PfNotifyInput = {
+  sessionId: string;
+  method: NotifyMethod;
+  summary: string;
+  nodeIds?: string[];
+  reason?: string;
+  expectedRevision?: number;
+  actor?: Actor;
+};
+
+/**
  * M7-ui4: 편집 미리보기 입력 (읽기 전용).
  * change는 pfEditArgs의 patch 또는 pfEditNode의 필드 중 하나.
  * 최대 길이는 core 검증과 동일(goal·텍스트 4KB).
@@ -329,6 +350,8 @@ export interface CoreClient {
   pfEditWhy(
     input: PfEditWhyInput,
   ): Promise<{ node: Node; instruction: string } & ChangeMeta>;
+  /** 세션 알림 이벤트 (M10-3-events, 상태 변경 없음·MCP 표면 아님) */
+  pfNotify(input: PfNotifyInput): Promise<ChangeMeta>;
   /** 상태 이벤트 조회 (M4.2-2, R7 히스토리 원천) */
   getEvents(sessionId: string, sinceSeq?: number): Promise<EventEntry[]>;
   /** M8-ui2: 분해 라운드 목록 (읽기 전용, touch 없음) */

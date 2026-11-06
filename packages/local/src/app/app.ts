@@ -1248,6 +1248,46 @@ export class ProcForgeApp {
     };
   }
 
+  /**
+   * M10-3-events: 세션 알림 이벤트 기록 (lane/memory/draft).
+   * 상태 변경 없음 — revision만 +1. UI는 세션 events 폴링/SSE로 수신한다.
+   * 레인 실측정 송출은 M10-4(순차 자동 실행)에서 연결한다.
+   */
+  async notifySessionEvent(a: {
+    sessionId: string;
+    method: "lane.started" | "lane.finished" | "memory.loaded" | "draft.ready";
+    summary: string;
+    nodeIds?: string[];
+    reason?: string;
+    expectedRevision?: number;
+    actor?: "host" | "human" | "runner" | "ui";
+  }): Promise<{ revision: number; changedNodeIds: string[] }> {
+    const sid = String(a.sessionId ?? "");
+    if (sid.length === 0) throw pfError("bad_request", "sessionId 필수");
+    const allowed = new Set([
+      "lane.started",
+      "lane.finished",
+      "memory.loaded",
+      "draft.ready",
+    ]);
+    if (!allowed.has(a.method)) {
+      throw pfError("bad_request", `알 수 없는 알림: ${String(a.method)}`);
+    }
+    const summary = String(a.summary ?? "").trim();
+    if (summary.length === 0) throw pfError("bad_request", "알림 요약(summary) 필수");
+    return this.core.pfNotify({
+      sessionId: sid,
+      method: a.method,
+      summary,
+      ...(a.nodeIds !== undefined ? { nodeIds: a.nodeIds } : {}),
+      ...(a.reason !== undefined ? { reason: a.reason } : {}),
+      ...(a.expectedRevision !== undefined
+        ? { expectedRevision: a.expectedRevision }
+        : {}),
+      actor: a.actor ?? "ui",
+    });
+  }
+
   /** 세션(절차서) 컨텍스트가 있으면 승인 + 스냅샷을 공통 경로로 남긴다 */
   private persistSessionApproval(
     sessionId: string,
@@ -2661,7 +2701,7 @@ async uiApprove(input: {
     if (input.approved) {
       this.resumeRunIfWaiting(waitingRun.runId, waitingRun.procedure);
     } else {
-      this.finishRun(waitingRun.runId, waitingRun.procedure, "info", "거부됨 — 실행 종료", input.nodeId);
+      this.finishRun(waitingRun.runId, waitingRun.procedure, "info", "거부됨 — 실행 종료", input.nodeId, "cancelled");
       writeRunState(this.procforgeDir, {
         ...(readRunState(this.procforgeDir, waitingRun.runId) as RunState),
         status: "cancelled",
@@ -2850,7 +2890,8 @@ private hasCurrentApproval(
     this.activeRuns.set(doc.name, started.runId);
     appendRunLog(this.procforgeDir, started.runId, {
       level: "info",
-      message: `실행 시작: ${started.procedure}`,
+      // M10-3-events: run.phase 기계 판독 마커 (기존 문구 유지 + 접미).
+      message: `실행 시작: ${started.procedure} (phase:started)`,
     });
     // M7-5-d: 실행 요청도 calls.jsonl 에 남긴다 (누가 무엇을 띄웠는지)
     this.recordUiCall(started.sessionId, "pf_run_start", "");
@@ -2894,7 +2935,8 @@ private hasCurrentApproval(
     }
     appendRunLog(this.procforgeDir, runId, {
       level: "info",
-      message: `취소 요청 (자식 ${r.children.length}개 종료 시도)`,
+      // M10-3-events: run.phase 기계 판독 마커 (기존 문구 유지 + 접미).
+      message: `취소 요청 (자식 ${r.children.length}개 종료 시도) (phase:cancelled)`,
     });
     return { runId, cancelled: true, killed: r.killed, failed: r.failed };
   }
@@ -3042,19 +3084,38 @@ private hasCurrentApproval(
   }
 
   /** M10-1: 유사 분석 조회 (읽기 전용, 로컬 전용). MCP 표면 불변. */
-  async similarProcedures(a: { query?: string; limit?: number }): Promise<{
+  async similarProcedures(a: {
+    query?: string;
+    limit?: number;
+    /** M10-3-events: 지정 시 조회 뒤 memory.loaded 알림을 해당 세션에 남긴다. */
+    sessionId?: string;
+  }): Promise<{
     procedures: SimilarProcedure[];
   }> {
     const all = listProceduresWithLatest(this.procforgeDir);
     const q = typeof a.query === "string" ? a.query : "";
     const lim = typeof a.limit === "number" ? a.limit : undefined;
-    return { procedures: filterProcedures(all, q, lim) };
+    const out = { procedures: filterProcedures(all, q, lim) };
+    if (typeof a.sessionId === "string" && a.sessionId.length > 0) {
+      await this.notifySessionEvent({
+        sessionId: a.sessionId,
+        method: "memory.loaded",
+        summary: `memory loaded: ${out.procedures.length}건`,
+        reason: q.length > 0 ? q.slice(0, 200) : undefined,
+      });
+    }
+    return out;
   }
 
   /** M10-2: 재분석 초안 생성 (App 메서드, MCP 표면 불변).
    * 모델은 서버 기본값(GET /config/providers default 첫 항목)을 쓴다
    * (명시 모델 파라미터 없음 — M10-spec 판정 6). */
-  async createRedraft(a: { procedure: string; request: string }): Promise<RedraftResult> {
+  async createRedraft(a: {
+    procedure: string;
+    request: string;
+    /** M10-3-events: 지정 시 초안 준비 뒤 draft.ready 알림을 해당 세션에 남긴다. */
+    sessionId?: string;
+  }): Promise<RedraftResult> {
     const baseUrl = this.signal.baseUrl;
     if (!baseUrl) {
       throw pfError("bad_request", "OpenCode 서버 주소 없음 (PROOF_OPENCODE_URL)");
@@ -3080,12 +3141,20 @@ private hasCurrentApproval(
       // 조회 실패는 아래 기본 모델 없음 오류로 합친다
     }
     if (!model) throw pfError("bad_request", "OpenCode 기본 모델 없음 (서버 providers 확인)");
-    return runRedraft({
+    const result = await runRedraft({
       procforgeDir: this.procforgeDir,
       procedure: String(a.procedure),
       request: String(a.request),
       openCode: { baseUrl, ...(password ? { password } : {}), model },
     });
+    if (typeof a.sessionId === "string" && a.sessionId.length > 0) {
+      await this.notifySessionEvent({
+        sessionId: a.sessionId,
+        method: "draft.ready",
+        summary: `draft ready ${result.draftId}`,
+      });
+    }
+    return result;
   }
 
   /** M10-3-api: 재분석 초안 조회 (읽기 전용). draft.json 그대로 반환. */
@@ -3245,11 +3314,13 @@ private hasCurrentApproval(
             procedure,
             "result",
             `완료: pass ${step.pass} / fail ${step.fail} / blocked ${step.blocked}`,
+            undefined,
+            "done",
           );
           return;
         }
         if (step.kind === "failed") {
-          this.finishRun(runId, procedure, "error", `실패: ${step.detail}`, step.nodeId);
+          this.finishRun(runId, procedure, "error", `실패: ${step.detail}`, step.nodeId, "failed");
           return;
         }
         // need_generated / need_approval 은 사람이 결정해야 한다 → 멈추되
@@ -3257,10 +3328,11 @@ private hasCurrentApproval(
         appendRunLog(this.procforgeDir, runId, {
           level: "info",
           nodeId: step.nodeId,
+          // M10-3-events: run.phase 기계 판독 마커 (기존 문구 유지 + 접미).
           message:
             step.kind === "need_approval"
-              ? "승인 대기 — 결정을 기다립니다"
-              : "생성값 대기 — 값을 기다립니다",
+              ? "승인 대기 — 결정을 기다립니다 (phase:waiting-approval)"
+              : "생성값 대기 — 값을 기다립니다 (phase:waiting-input)",
         });
         // 테스트 전용 경쟁 재현: waiting 기록 후·캐시 등록 전.
         if (this.onWaitingPersisted) {
@@ -3319,7 +3391,7 @@ private hasCurrentApproval(
   private markCancelled(runId: string, procedure: string): void {
     const st = readRunState(this.procforgeDir, runId) as RunState | undefined;
     if (!st) {
-      this.finishRun(runId, procedure, "info", "취소됨");
+      this.finishRun(runId, procedure, "info", "취소됨", undefined, "cancelled");
       return;
     }
     // 취소 확정은 여러 경로(uiRunCancel·driveRun)에서 동시에 불릴 수 있다.
@@ -3337,7 +3409,7 @@ private hasCurrentApproval(
       failedDetail: undefined,
       updatedAt: new Date().toISOString(),
     });
-    this.finishRun(runId, procedure, "info", "취소됨");
+    this.finishRun(runId, procedure, "info", "취소됨", undefined, "cancelled");
   }
 
   /** 실행 종료 처리 (로그 + 잠금 해제) */
@@ -3347,10 +3419,12 @@ private hasCurrentApproval(
     level: "info" | "error" | "result",
     message: string,
     nodeId?: string,
+    // M10-3-events: run.phase 기계 판독 마커 (종료 전환에만 부여).
+    phase?: "done" | "failed" | "cancelled",
   ): void {
     appendRunLog(this.procforgeDir, runId, {
       level,
-      message,
+      message: phase === undefined ? message : `${message} (phase:${phase})`,
       ...(nodeId !== undefined ? { nodeId } : {}),
     });
     // 뒤에 시작한 실행이 잠금을 가져갔을 수 있다. runId 가 소유자일 때만 푼다.
@@ -3382,7 +3456,8 @@ private hasCurrentApproval(
     this.activeRuns.set(procedure, runId);
     appendRunLog(this.procforgeDir, runId, {
       level: "info",
-      message: "결정 반영 — 실행을 이어갑니다",
+      // M10-3-events: run.phase 기계 판독 마커 (기존 문구 유지 + 접미).
+      message: "결정 반영 — 실행을 이어갑니다 (phase:resumed)",
     });
     void this.driveRun(runId, procedure).catch(() => {
       /* driveRun 이 스스로 로그/해제를 처리한다 */
@@ -3761,7 +3836,7 @@ async runApprove(a: {
         status: "cancelled",
         updatedAt: new Date().toISOString(),
       });
-      this.finishRun(runId, st.procedure, "info", "승인 거부 — 실행 종료", nodeId);
+      this.finishRun(runId, st.procedure, "info", "승인 거부 — 실행 종료", nodeId, "cancelled");
       this.activeRuns.delete(st.procedure);
       this.waitingRuns.delete(runId);
       return { runId, nodeId, approved: false };

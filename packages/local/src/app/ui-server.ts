@@ -431,11 +431,23 @@ export async function createUiServer(opts: {
               return;
             }
           }
+          // M10-3-events: sessionId 지정 시 memory.loaded 알림을 해당 세션에 남긴다.
+          const rawSid = url.searchParams.get("sessionId");
+          let sessionId: string | undefined;
+          if (rawSid !== null) {
+            try {
+              sessionId = pathId(rawSid, "sessionId");
+            } catch (e) {
+              err(res, 400, e instanceof Error ? e.message : String(e));
+              return;
+            }
+          }
           send(
             res,
             await opts.app.similarProcedures({
               ...(q !== undefined ? { query: q } : {}),
               ...(limit !== undefined ? { limit } : {}),
+              ...(sessionId !== undefined ? { sessionId } : {}),
             }),
           );
           return;

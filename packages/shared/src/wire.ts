@@ -82,6 +82,7 @@ export type WireMethodName =
   | "pfLock"
   | "pfReopen"
   | "pfEditWhy"
+  | "pfNotify"
   | "amendAttemptArtifacts"
   | "pfUpdateCatalog"
   | "pfEditArgs"
@@ -269,6 +270,23 @@ export const WireMethods: Record<WireMethodName, WireDef> = {
       instruction: z.string(),
       ...ChangeMeta,
     }),
+  },
+  pfNotify: {
+    path: "/v1/pfNotify",
+    input: z.object({
+      sessionId: SessionIdSchema,
+      method: z.enum([
+        "lane.started",
+        "lane.finished",
+        "memory.loaded",
+        "draft.ready",
+      ]),
+      summary: z.string().min(1),
+      nodeIds: z.array(z.string()).optional(),
+      reason: z.string().optional(),
+      ...RevActor,
+    }),
+    output: z.object({ ...ChangeMeta }),
   },
   amendAttemptArtifacts: {
     path: "/v1/amendAttemptArtifacts",

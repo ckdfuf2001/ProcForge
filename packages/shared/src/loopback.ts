@@ -150,6 +150,16 @@ const Methods = {
     in: z.object({ sessionId: SessionIdSchema, nodeId: NodeIdSchema, why: z.string().min(1).max(500) }).merge(RevActorSchema).passthrough(),
     out: z.object({ node: NodeSchema, instruction: z.string() }).passthrough().and(ChangeMetaSchema),
   },
+  pfNotify: {
+    in: z.object({
+      sessionId: SessionIdSchema,
+      method: z.enum(["lane.started", "lane.finished", "memory.loaded", "draft.ready"]),
+      summary: z.string().min(1),
+      nodeIds: z.array(z.string()).optional(),
+      reason: z.string().optional(),
+    }).merge(RevActorSchema).passthrough(),
+    out: ChangeMetaSchema.passthrough(),
+  },
   amendAttemptArtifacts: {
     in: z.object({
       sessionId: SessionIdSchema, nodeId: NodeIdSchema, attemptId: z.string(), artifacts: z.array(z.string()),
@@ -320,6 +330,7 @@ export function createLoopbackClient(inner: CoreClient): CoreClient {
     pfLock: (i) => wrapObj("pfLock", i, (x) => inner.pfLock(x)),
     pfReopen: (i) => wrapObj("pfReopen", i, (x) => inner.pfReopen(x)),
     pfEditWhy: (i) => wrapObj("pfEditWhy", i, (x) => inner.pfEditWhy(x)),
+    pfNotify: (i) => wrapObj("pfNotify", i, (x) => inner.pfNotify(x)),
     amendAttemptArtifacts: (i) => wrapObj("amendAttemptArtifacts", i, (x) => inner.amendAttemptArtifacts(x)),
     pfUpdateCatalog: (i) => wrapObj("pfUpdateCatalog", i, (x) => inner.pfUpdateCatalog(x)),
     pfEditArgs: (i) => wrapObj("pfEditArgs", i, (x) => inner.pfEditArgs(x)),

@@ -30,6 +30,7 @@ import type {
   PfApproveInput,
   PfEditArgsInput,
   PfEditNodeInput,
+  PfNotifyInput,
   PreviewEditInput,
   AmendAttemptArtifactsInput,
   PfStartInput,
@@ -2110,6 +2111,63 @@ if (oldHash !== saved.hash) this.propagateStale(s.id, input.nodeId, s.revision +
     );
     return {
       ...c.result,
+      revision: c.revision,
+      changedNodeIds: c.changedNodeIds,
+    };
+  }
+
+  /**
+   * M10-3-events: 세션 알림 이벤트 (lane/memory/draft).
+   * 상태 변경 없음 — 노드는 그대로, revision만 +1하고 이벤트 1건을 남긴다.
+   * change()는 쓰기가 없으면 revision을 올리지 않으므로, 본문이 세션을
+   * 그대로 다시 저장해(내용 불변) 알림 커밋을 강제한다.
+   * UI는 getEventsPage/SSE로 method별 알림을 받는다 (트리 재조회 불필요).
+   */
+  async pfNotify(input: PfNotifyInput): Promise<ChangeMeta> {
+    const allowed = new Set([
+      "lane.started",
+      "lane.finished",
+      "memory.loaded",
+      "draft.ready",
+    ]);
+    const c = await this.change(
+      input.sessionId,
+      {
+        method: input.method,
+        expectedRevision: input.expectedRevision,
+        actor: input.actor,
+      },
+      () => {
+        if (!allowed.has(input.method)) {
+          throw err("bad_request", `알 수 없는 알림: ${input.method}`);
+        }
+        const summary =
+          typeof input.summary === "string" ? input.summary.trim() : "";
+        if (summary.length < 1) {
+          throw err("bad_request", "알림 요약(summary) 필수");
+        }
+        const nodeIds = [...(input.nodeIds ?? [])].sort();
+        // 세션 존재·만료 판정 먼저 (노드 없음과 구분).
+        const s = this.sess(input.sessionId);
+        // 내용 불변 다시 저장 — revision bump + 이벤트 nodeIds 귀속용.
+        // (hash 동일, 노드 이력 필터에 알림이 보인다)
+        for (const id of nodeIds) {
+          const n = this.store.getNode(input.sessionId, id);
+          if (!n) throw err("not_found", `node ${id} not found`);
+          this.store.saveNode(input.sessionId, { ...n });
+        }
+        // 노드가 없어도 세션을 그대로 다시 저장해 알림 커밋을 강제한다.
+        this.store.saveSession(s);
+        return {
+          result: null,
+          summary,
+          ...(input.reason !== undefined
+            ? { detail: { reason: input.reason } as EventDetail }
+            : {}),
+        };
+      },
+    );
+    return {
       revision: c.revision,
       changedNodeIds: c.changedNodeIds,
     };
