@@ -164,6 +164,8 @@ export const SplitInputSchema = z
           goal: z.string().min(1),
           dependsOn: z.array(z.string()).optional(),
           sideEffect: z.enum(["none", "local_write", "external"]).optional(),
+          /** M10-why-1: 이 자식을 만든 이유 1줄 (선택, hash·승인 대상 아님). */
+          why: z.string().min(1).max(500).optional(),
         }),
       )
       .min(1),

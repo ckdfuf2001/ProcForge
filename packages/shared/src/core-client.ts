@@ -127,7 +127,7 @@ export type PfResolveInput = {
   sessionId: string;
   nodeId: string;
   decision: PfResolveDecision;
-  children?: { goal: string; dependsOn?: string[]; sideEffect?: SideEffect }[];
+  children?: { goal: string; dependsOn?: string[]; sideEffect?: SideEffect; why?: string }[];
   /** M8-ui1: 분해 사유 (사용자·MCP 경로는 필수, import/fixture는 면제) */
   reason?: string;
   /** M8-ui1: 버린 대안 */

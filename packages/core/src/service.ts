@@ -1107,6 +1107,16 @@ export class CoreService implements CoreClient {
               )
             )
               throw err("conflict", "ancestor of locked node");
+            for (const c of input.children ?? []) {
+              const w = (c as { why?: unknown }).why;
+              if (w !== undefined && (typeof w !== "string" || w.length < 1 || w.length > 500)) {
+                throw pfError(
+                  "bad_request",
+                  "자식 why는 1~500자여야 한다.",
+                  "왜 이 자식으로 나눴는지 1줄로 적어라.",
+                );
+              }
+            }
             if (!input.children || input.children.length === 0)
               throw err("bad_request", "split requires children");
             if (n.depth + 1 > s.limits.maxDepth) {
@@ -1178,6 +1188,8 @@ export class CoreService implements CoreClient {
                 id,
                 parentId: n.id,
                 goal: c.goal,
+                // M10-why-1: 분해 사유 1줄 (hash·승인 대상 아님).
+                ...(typeof c.why === "string" ? { why: c.why } : {}),
                 status: "open",
                 depth: n.depth + 1,
                 dependsOn: c.dependsOn ?? [],
@@ -2245,6 +2257,8 @@ if (oldHash !== saved.hash) this.propagateStale(s.id, input.nodeId, s.revision +
           id: n.id,
           parentId: n.parentId,
           goal: n.goal,
+          // M10-why-1: 분해 사유 내보내기 (hash·승인 대상 아님).
+          ...(typeof n.why === "string" ? { why: n.why } : {}),
           depth: n.depth,
           dependsOn: n.dependsOn,
           children: n.children,

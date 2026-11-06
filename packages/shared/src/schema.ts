@@ -274,6 +274,8 @@ export const NodeSchema = z.object({
   id: NodeIdSchema,
   parentId: NodeIdSchema.nullable(),
   goal: z.string().min(1),
+  /** M10-why-1: 이 노드를 만든 이유 1줄 (hash·승인 대상 아님). */
+  why: z.string().min(1).max(500).optional(),
   status: NodeStatusSchema,
   depth: z.number().int().min(0),
   dependsOn: z.array(NodeIdSchema).default([]),

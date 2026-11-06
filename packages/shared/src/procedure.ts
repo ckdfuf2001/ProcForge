@@ -48,6 +48,8 @@ export const ProcedureDocSchema = z.object({
       id: z.string(),
       parentId: z.string().nullable(),
       goal: z.string(),
+      /** M10-why-1: 분해 사유 1줄 (선택, hash·승인 대상 아님). */
+      why: z.string().min(1).max(500).optional(),
       depth: z.number(),
       dependsOn: z.array(z.string()),
       children: z.array(z.string()),
@@ -133,6 +135,8 @@ export function buildImportSession(
       id: n.id,
       parentId: n.parentId,
       goal: n.goal,
+      // M10-why-1: 분해 사유 왕복 (hash 대상 아님).
+      ...(typeof n.why === "string" ? { why: n.why } : {}),
       status: (n.tool
         ? "leaf"
         : n.children.length > 0

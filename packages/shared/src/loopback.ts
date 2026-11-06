@@ -50,6 +50,8 @@ const ChildSchema = z.object({
   goal: z.string().min(1),
   dependsOn: z.array(z.string()).optional(),
   sideEffect: SideEffectSchema.optional(),
+  /** M10-why-1: 이 자식을 만든 이유 1줄 (선택). */
+  why: z.string().min(1).max(500).optional(),
 });
 
 const Methods = {

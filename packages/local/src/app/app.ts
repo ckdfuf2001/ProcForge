@@ -178,6 +178,7 @@ export const PROMPT_TEXT = [
   '   예: "sales-${params.month}.xlsx", "월간보고서 ${params.month} (최종)".',
   "8. 앞 노드 출력과 같은 값은 fixed로 박지 말고 ref로 받아온다.",
   '   예: 표 셀은 "$1.1.rows", 합계는 "$1.1.total".',
+  "9. pf_split의 각 하위 노드에 why(왜 이렇게 나눴는지 1줄)를 쓴다.",
 ].join("\n");
 
 /** M7-1: 세션 목록 1행 (core 요약 + 로컬 부가. 판단 없음. UI가 배지를 붙인다) */

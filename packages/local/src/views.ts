@@ -53,6 +53,8 @@ export const AttemptSummarySchema = z.object({
 export const NodeSummarySchema = z.object({
   id: z.string(),
   goal: z.string(),
+  /** M10-why-1: 분해 사유 1줄 (선택, M8-1-close2 a 교훈: 요약 누락 금지). */
+  why: z.string().optional(),
   status: z.string(),
   depth: z.number(),
   dependsOn: z.array(z.string()),
@@ -78,6 +80,7 @@ export function nodeSummary(
   return {
     id: node.id,
     goal: node.goal,
+    ...(node.why !== undefined ? { why: node.why } : {}),
     status: node.status,
     depth: node.depth,
     dependsOn: node.dependsOn,
