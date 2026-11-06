@@ -8,7 +8,7 @@ import { readEnvPair } from "@proof/shared/env-compat.js";
 import { collectCatalog } from "../catalog.js";
 import { FileStore } from "../filestore.js";
 import { constraintSummary, nodeSummary, retriesLeft } from "../views.js";
-import type { OUTPUT_SCHEMAS } from "../views.js";
+import type { NodeSummary, OUTPUT_SCHEMAS } from "../views.js";
 import type {
   AdviseInput,
   ApproveInput,
@@ -1212,6 +1212,33 @@ export class ProcForgeApp {
     // M7-5-e: MCP 승인도 UI 와 **같은** 승인 기록(스냅샷 포함)을 남긴다.
     // (여기를 빠지면 모델이 승인한 스크립트는 diff 가 영원히 null 이다)
     this.persistSessionApproval(sid, a.nodeId as string, out.node as never);
+    return {
+      node: nodeSummary(out.node, s.limits),
+      revision: out.revision,
+      changedNodeIds: out.changedNodeIds,
+    };
+  }
+
+  /** M10-why-2: 분해 사유 수정 (의견 경로와 같은 취급, MCP 도구는 만들지 않는다). */
+  async editWhy(a: {
+    sessionId: string;
+    nodeId: string;
+    why: string;
+    expectedRevision?: number;
+  }): Promise<{
+    node: NodeSummary;
+    revision: number;
+    changedNodeIds: string[];
+  }> {
+    const sid = a.sessionId as string;
+    const s = await this.core.getSession(sid);
+    const out = await this.core.pfEditWhy({
+      sessionId: sid,
+      nodeId: a.nodeId as string,
+      why: a.why as string,
+      expectedRevision: a.expectedRevision as number | undefined,
+      actor: "host",
+    });
     return {
       node: nodeSummary(out.node, s.limits),
       revision: out.revision,

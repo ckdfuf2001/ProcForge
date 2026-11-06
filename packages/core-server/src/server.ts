@@ -151,6 +151,8 @@ async function dispatch(
       return svc.pfLock(b as never);
     case "pfReopen":
       return svc.pfReopen(b as never);
+    case "pfEditWhy":
+      return svc.pfEditWhy(b as never);
     case "amendAttemptArtifacts":
       return svc.amendAttemptArtifacts(b as never);
     case "pfUpdateCatalog":

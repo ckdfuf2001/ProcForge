@@ -22,13 +22,14 @@ export const REDRAFT_SSE_TIMEOUT_MS = 5000;
 
 export type DraftOp =
   | { op: "edit_goal"; nodeId: string; goal: string; reason: string }
-  | { op: "edit_arg"; nodeId: string; arg: string; value: unknown; reason: string };
+  | { op: "edit_arg"; nodeId: string; arg: string; value: unknown; reason: string }
+  | { op: "edit_why"; nodeId: string; why: string; reason: string };
 
 export type DraftStatus = "ready" | "rejected" | "failed";
 
 export type DraftDiffEntry = {
   nodeId: string;
-  kind: "goal" | "arg";
+  kind: "goal" | "arg" | "why";
   before: string;
   after: string;
 };
@@ -51,6 +52,7 @@ type DocNode = {
   id?: unknown;
   goal?: unknown;
   args?: Record<string, unknown>;
+  why?: unknown;
 };
 
 function fail(
@@ -81,7 +83,7 @@ function validateOps(
   for (const o of (raw as { ops: unknown[] }).ops) {
     if (!o || typeof o !== "object") return { error: `op 형식 오류: ${JSON.stringify(o)?.slice(0, 120)}` };
     const oo = o as Record<string, unknown>;
-    if (oo.op !== "edit_goal" && oo.op !== "edit_arg") {
+    if (oo.op !== "edit_goal" && oo.op !== "edit_arg" && oo.op !== "edit_why") {
       return { error: `새 분해 필요: 지원하지 않는 op (${String(oo.op)})` };
     }
     if (typeof oo.nodeId !== "string" || oo.nodeId.length === 0) {
@@ -94,6 +96,19 @@ function validateOps(
       return { error: `op에 reason 없음: ${oo.nodeId}` };
     }
     const reason = oo.reason;
+    if (oo.op === "edit_why") {
+      if (typeof oo.why !== "string" || oo.why.length === 0) {
+        return { error: `edit_why에 why 없음: ${oo.nodeId}` };
+      }
+      ops.push({ op: "edit_why", nodeId: oo.nodeId, why: oo.why, reason });
+      diff.push({
+        nodeId: oo.nodeId,
+        kind: "why",
+        before: typeof node.why === "string" ? node.why : "",
+        after: oo.why,
+      });
+      continue;
+    }
     if (oo.op === "edit_goal") {
       if (typeof oo.goal !== "string" || oo.goal.length === 0) {
         return { error: `edit_goal에 goal 없음: ${oo.nodeId}` };
@@ -134,8 +149,7 @@ export function describeNodesForPrompt(nodes: Map<string, DocNode>): string {
   for (const [id, n] of nodes) {
     const parts = [`- ${id}: ${typeof n.goal === "string" ? n.goal : ""}`];
     if (n.args !== undefined) parts.push(`args=${JSON.stringify(n.args)}`);
-    const why = (n as { why?: unknown }).why;
-    if (typeof why === "string" && why.length > 0) parts.push(`why=${why}`);
+    if (typeof n.why === "string" && n.why.length > 0) parts.push(`why=${n.why}`);
     rows.push(parts.join(" "));
   }
   return rows.join("\n");
@@ -304,7 +318,8 @@ export async function runRedraft(input: {
       `요청: ${input.request}\n` +
       `절차서 노드:\n${nodeList}\n` +
       `허용 op (reason 필수): {"op":"edit_goal","nodeId":"...","goal":"...","reason":"..."}, ` +
-      `{"op":"edit_arg","nodeId":"...","arg":"...","value":...,"reason":"..."}.\n` +
+      `{"op":"edit_arg","nodeId":"...","arg":"...","value":...,"reason":"..."}, ` +
+      `{"op":"edit_why","nodeId":"...","why":"...","reason":"..."}.\n` +
       `형식: {"ops":[...]}`;
     if (promptText.length > REDRAFT_PROMPT_MAX_CHARS) {
       return save({

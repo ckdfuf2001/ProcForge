@@ -359,6 +359,7 @@ export class CoreService implements CoreClient {
       id: n.id,
       parentId: n.parentId,
       goal: n.goal,
+      ...(typeof n.why === "string" ? { why: n.why } : {}),
       status: n.status,
       depth: n.depth,
       children: [...n.children],
@@ -2037,6 +2038,70 @@ if (oldHash !== saved.hash) this.propagateStale(s.id, input.nodeId, s.revision +
             instruction: `노드 수정됨. pf_next로 계속하라.`,
           },
           summary: `editNode ${n.id}`,
+        };
+      },
+    );
+    return {
+      ...c.result,
+      revision: c.revision,
+      changedNodeIds: c.changedNodeIds,
+    };
+  }
+
+  /** M10-why-2: 분해 사유 수정 (의견 경로와 같은 취급, MCP 표면 아님). */
+  async pfEditWhy(input: {
+    sessionId: string;
+    nodeId: string;
+    why: unknown;
+    expectedRevision?: number;
+    actor?: Actor;
+  }): Promise<{ node: Node; instruction: string } & ChangeMeta> {
+    const c = await this.change(
+      input.sessionId,
+      {
+        method: "pfEditWhy",
+        expectedRevision: input.expectedRevision,
+        actor: input.actor,
+      },
+      () => {
+        const s = this.sess(input.sessionId);
+        const n = this.node(input.sessionId, input.nodeId);
+        if (n.locked && n.status === "leaf") throw err("conflict", `node ${n.id} is locked`);
+        const why = typeof input.why === "string" ? input.why.trim() : "";
+        if (why.length < 1 || why.length > 500) {
+          throw pfError(
+            "bad_request",
+            "why는 1~500자여야 한다.",
+            "바꾼 이유를 1줄로 적어라.",
+          );
+        }
+        const next: Node = { ...n, why, status: "needs_reverify" as const };
+        next.hash = this.hashFor(s.id, next);
+        this.store.saveNode(s.id, next);
+        // 하위 노드는 전부 stale 표시 (기존 표시는 유지).
+        const rev = s.revision + 1;
+        const queue = [...next.children];
+        const seen = new Set<string>([next.id]);
+        while (queue.length > 0) {
+          const id = queue.shift() as string;
+          if (seen.has(id)) continue;
+          seen.add(id);
+          const m = this.store.getNode(s.id, id);
+          if (!m) continue;
+          if (!m.staleSince) {
+            this.store.saveNode(s.id, {
+              ...m,
+              staleSince: { revision: rev, causeNodeId: n.id },
+            });
+          }
+          queue.push(...m.children);
+        }
+        return {
+          result: {
+            node: next,
+            instruction: `이유 기록됨: ${n.id} (하위 stale). pf_next로 계속하라.`,
+          },
+          summary: `editWhy ${n.id}`,
         };
       },
     );

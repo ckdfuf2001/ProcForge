@@ -81,6 +81,7 @@ export type WireMethodName =
   | "pfTree"
   | "pfLock"
   | "pfReopen"
+  | "pfEditWhy"
   | "amendAttemptArtifacts"
   | "pfUpdateCatalog"
   | "pfEditArgs"
@@ -254,6 +255,20 @@ export const WireMethods: Record<WireMethodName, WireDef> = {
       ...RevActor,
     }),
     output: z.object({ node: NodeSchema, ...ChangeMeta }),
+  },
+  pfEditWhy: {
+    path: "/v1/pfEditWhy",
+    input: z.object({
+      sessionId: SessionIdSchema,
+      nodeId: NodeIdSchema,
+      why: z.string().min(1).max(500),
+      ...RevActor,
+    }),
+    output: z.object({
+      node: NodeSchema,
+      instruction: z.string(),
+      ...ChangeMeta,
+    }),
   },
   amendAttemptArtifacts: {
     path: "/v1/amendAttemptArtifacts",

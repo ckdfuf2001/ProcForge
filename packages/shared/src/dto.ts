@@ -23,6 +23,8 @@ export const HistoryNodeSchema = z.object({
   id: NodeIdSchema,
   parentId: NodeIdSchema.nullable(),
   goal: z.string().nullable(),
+  /** M10-why-1: 분해 사유 (선택, 이력 표시용) */
+  why: z.string().nullable().optional(),
   status: NodeStatusSchema.nullable(),
   depth: z.number().int().min(0),
   children: z.array(NodeIdSchema),

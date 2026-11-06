@@ -223,8 +223,7 @@ export type PfEditArgsInput = {
   actor?: Actor;
 };
 
-export type PfEditNodeInput = {
-  sessionId: string;
+export type PfEditNodeInput = {  sessionId: string;
   nodeId: string;
   goal?: string;
   addConstraints?: Constraint[];
@@ -239,6 +238,15 @@ export type PfEditNodeInput = {
   retry?: { attempts: number };
   /** 선행 의존 사후 편집 (M5.8.1-4, 기존 노드만·순환 거부) */
   dependsOn?: string[];
+  expectedRevision?: number;
+  actor?: Actor;
+};
+
+/** M10-why-2: 분해 사유 수정 (의견 경로와 같은 취급). */
+export type PfEditWhyInput = {
+  sessionId: string;
+  nodeId: string;
+  why: string;
   expectedRevision?: number;
   actor?: Actor;
 };
@@ -316,6 +324,10 @@ export interface CoreClient {
   /** 목표·검사 조건 직접 수정 (M4.2-2) */
   pfEditNode(
     input: PfEditNodeInput,
+  ): Promise<{ node: Node; instruction: string } & ChangeMeta>;
+  /** 분해 사유 수정 (M10-why-2, MCP 표면 아님) */
+  pfEditWhy(
+    input: PfEditWhyInput,
   ): Promise<{ node: Node; instruction: string } & ChangeMeta>;
   /** 상태 이벤트 조회 (M4.2-2, R7 히스토리 원천) */
   getEvents(sessionId: string, sinceSeq?: number): Promise<EventEntry[]>;

@@ -156,6 +156,7 @@ export function createRemoteCoreClient(opts: RemoteCoreClientOpts): CoreClient {
     pfTree: (sid) => call("pfTree", { sessionId: sid }) as never,
     pfLock: (i) => call("pfLock", i as Record<string, unknown>) as never,
     pfReopen: (i) => call("pfReopen", i as Record<string, unknown>) as never,
+    pfEditWhy: (i) => call("pfEditWhy", i as Record<string, unknown>) as never,
     amendAttemptArtifacts: (i) =>
       call("amendAttemptArtifacts", i as Record<string, unknown>) as never,
     pfUpdateCatalog: (i) =>
