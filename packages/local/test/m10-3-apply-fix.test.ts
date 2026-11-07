@@ -10,7 +10,10 @@ import {
   saveApproval,
   loadApprovals,
   checkApproval,
+  approvalPins,
+  toHashableMap,
 } from "../src/services/approvals.js";
+import type { CoreClient } from "@proof/shared/core-client.js";
 import { makeTmp } from "@proof/shared/tmp.js";
 import { useTmpCleanup } from "./tmp-hooks.js";
 
@@ -26,6 +29,7 @@ const CAT = [
 let root: string;
 let pfdir: string;
 let app: ProcForgeApp;
+let client: CoreClient;
 
 function docWith(goal1: string) {
   return {
@@ -91,7 +95,7 @@ function seedApproval(nodeId: string, goal: string) {
 beforeEach(() => {
   root = makeTmp("pf-m103afx-");
   pfdir = join(root, ".procforge");
-  const { client } = testStack(pfdir);
+  ({ client } = testStack(pfdir));
   app = new ProcForgeApp({ core: client, procforgeDir: pfdir, projectRoot: root });
 });
 
@@ -144,15 +148,19 @@ describe("M10-3-apply-fix", () => {
     ]);
     const out = await app.applyDraft({ draftId: "d1", opIds: [0] });
     expect(out.approvalReset).toEqual(["1"]);
-    // 기존 항목으로 새 pins를 판정하면 stale.
+    // 실제 경로: 적용 후 procedure.json을 다시 import한 노드로 pins 계산.
+    const afterRaw = readFileSync(join(pfdir, "procedures", "appr", "procedure.json"), "utf8");
+    const imported = await client.pfImportProcedure({
+      doc: JSON.parse(afterRaw) as never,
+      params: {},
+    });
+    const node = await client.getNode(imported.sessionId, "1");
+    const pins = approvalPins(node, undefined, toHashableMap(new Map([[node.id, node]])));
     const stored = loadApprovals(join(pfdir, "procedures", "appr"));
     const kept = stored.find((e) => e.node.id === "1") ?? entry;
-    const staleVerdict = checkApproval(
-      [kept],
-      [{ id: "1", hash: "바뀐-해시", approvalHash: "바뀐-승인해시" }],
-      "t", "sh", { cmd: "echo hi" },
-    );
-    expect(staleVerdict).toBe("stale");
+    expect(
+      checkApproval([kept], pins, "t", "sh", { cmd: "echo hi" }),
+    ).toBe("stale");
     // 같은 해시면 ok (판정식 자체 확인).
     const okVerdict = checkApproval(
       [kept],
