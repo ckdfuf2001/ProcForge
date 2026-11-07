@@ -65,5 +65,9 @@ export function copyImportFiles(
     join(sessDir, "scripts"),
   );
   const mf = join(procTests, "fixtures-manifest.json");
-  if (existsSync(mf)) copyFileSync(mf, join(sessDir, "fixtures-manifest.json"));
+  if (existsSync(mf)) {
+    // 원격 모드에서는 세션 dir이 서버에만 있어 로컬에 없을 수 있다.
+    mkdirSync(sessDir, { recursive: true });
+    copyFileSync(mf, join(sessDir, "fixtures-manifest.json"));
+  }
 }

@@ -2914,9 +2914,12 @@ private hasCurrentApproval(
 
   /**
    * M10-4: 사람 확인 후 다음 단계 실행. 완료 단계는 건너뛴다.
+   * M10-4-fix-resume: running/waiting 단계는 기존 runId로 폴링만 한다
+   * (새 run 금지). pending/failed/cancelled만 새 run을 시작한다.
    * 종료(done/failed/cancelled)까지 폴링한 뒤 guides/<id>.json에 기록한다.
    * 대기(waiting·suspended)에 걸리면 단계 waiting으로 두고 돌아온다
    * (승인·생성값은 화면에서 처리한 뒤 다시 advance로 이어간다).
+   * 시간 초과면 throw 없이 저장된 상태 그대로 돌려준다.
    */
   async advanceGuide(a: {
     guideId: string;
@@ -2945,6 +2948,16 @@ private hasCurrentApproval(
       throw pfError("bad_request", "timeoutMs는 1000~600000 정수");
     }
     const step = guide.steps[idx];
+    // M10-4-fix-resume: running/waiting + runId가 있으면 그 run을 이어서 폴링만 한다.
+    // 새 run은 pending/failed/cancelled일 때만 시작한다 (중복 실행 금지).
+    const existing = guide.state[idx];
+    if (
+      (existing.status === "running" || existing.status === "waiting") &&
+      typeof existing.runId === "string" &&
+      existing.runId.length > 0
+    ) {
+      return this.pollGuideRun(guideId, idx, existing.runId, step.procedure, timeoutMs);
+    }
     // M10-4: prepare → lane.started → drive 순서 (drive가 세션 락을 잡기 전에
     // 알림을 끝낸다. 반대로 하면 drive의 단일 시도 acquireLock이 죽고 run이 멈춘다).
     const { started } = await this.prepareRun(step.procedure, step.params, {
@@ -2968,48 +2981,65 @@ private hasCurrentApproval(
       // 알림 실패는 실행을 막지 않는다
     }
     this.launchDrive(started.runId, started.procedure);
+    return this.pollGuideRun(guideId, idx, started.runId, step.procedure, timeoutMs);
+  }
+
+  /**
+   * M10-4-fix-resume: 기존 run 폴링 (새 run 시작 없음).
+   * 종료하면 단계 기록 + lane.finished, 대기면 waiting 기록,
+   * 시간 초과면 기록 없이 저장된 상태 그대로 돌려준다 (throw 없음).
+   */
+  private async pollGuideRun(
+    guideId: string,
+    idx: number,
+    runId: string,
+    procedure: string,
+    timeoutMs: number,
+  ): Promise<{ guideId: string; stepIndex: number; status: GuideStepState["status"]; runId: string }> {
     const deadline = Date.now() + timeoutMs;
     for (;;) {
-      const info = await this.uiRunInfo({ runId: started.runId });
+      const info = await this.uiRunInfo({ runId });
       const terminal =
         info.status === "done" ||
         info.status === "failed" ||
         info.status === "cancelled";
       if (terminal) {
         const status = info.status as GuideStepState["status"];
-        guide = readGuide(this.procforgeDir, guideId);
+        const guide = readGuide(this.procforgeDir, guideId);
         guide.state[idx] = {
           status,
-          runId: started.runId,
-          sessionId: started.sessionId,
+          runId,
+          sessionId: info.sessionId,
           updatedAt: new Date().toISOString(),
         };
         writeGuide(this.procforgeDir, touchGuide(guide));
         try {
           await this.notifySessionEvent({
-            sessionId: started.sessionId,
+            sessionId: info.sessionId,
             method: "lane.finished",
-            summary: `실행 단계 종료: ${step.procedure} (${status})`,
+            summary: `실행 단계 종료: ${procedure} (${status})`,
           });
         } catch {
           // 알림 실패는 결과를 바꾸지 않는다
         }
-        return { guideId, stepIndex: idx, status, runId: started.runId };
+        return { guideId, stepIndex: idx, status, runId };
       }
       if (info.waiting !== null || info.suspended !== null) {
-        guide = readGuide(this.procforgeDir, guideId);
+        const guide = readGuide(this.procforgeDir, guideId);
         guide.state[idx] = {
           status: "waiting",
-          runId: started.runId,
-          sessionId: started.sessionId,
+          runId,
+          sessionId: info.sessionId,
           updatedAt: new Date().toISOString(),
         };
         writeGuide(this.procforgeDir, touchGuide(guide));
-        return { guideId, stepIndex: idx, status: "waiting", runId: started.runId };
+        return { guideId, stepIndex: idx, status: "waiting", runId };
       }
       if (Date.now() > deadline) {
-        // 단계는 running 그대로 (runId 유지) — 재시작 후 이어간다.
-        throw pfError("internal", `가이드 단계 시간 초과: ${step.procedure} (run ${started.runId})`);
+        // 기록 없이 저장된 상태 그대로 (runId 유지) — 다음 advance가 이어간다.
+        const guide = readGuide(this.procforgeDir, guideId);
+        const stored = guide.state[idx].status;
+        return { guideId, stepIndex: idx, status: stored, runId };
       }
       await new Promise((r) => setTimeout(r, 200));
     }

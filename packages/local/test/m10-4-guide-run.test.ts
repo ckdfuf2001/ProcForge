@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync, readdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { ProcForgeApp } from "../src/app/app.js";
 import { testStack } from "./client-mode.js";
@@ -146,8 +146,7 @@ describe("M10-4 guide run", () => {
     expect(file.state.map((s) => s.status)).toEqual(["failed", "pending"]);
   }, 120000);
 
-  it("④ 취소 시 run 정리 + 단계 cancelled", async () => {
-    const script = ["import time", "time.sleep(60)"].join("\n");
+  it("④ 취소 시 run 정리 + 단계 cancelled", async () => {    const script = ["import time", "time.sleep(60)"].join("\n");
     writeFileSync(join(root, "slow.py"), script, "utf8");
     const s = await app.start({ request: "run", toolCatalog: CAT });
     const sid = s.sessionId;
@@ -189,4 +188,77 @@ describe("M10-4 guide run", () => {
     const info = await app.uiRunInfo({ runId });
     expect(info.status).toBe("cancelled");
   }, 180000);
+
+  /** 승인 없는 external 노드 — 무인 경로에서 waiting에 걸린다. */
+  async function waitingProcedure(name: string) {
+    const s = await app.start({ request: "wait", toolCatalog: CAT });
+    const sid = s.sessionId;
+    await app.split({
+      sessionId: sid, nodeId: "1",
+      reason: "M10-4 테스트용 분해 사유입니다.",
+      children: [{ goal: "x" }],
+      expectedRevision: 0,
+    } as never);
+    await app.report({
+      sessionId: sid, nodeId: "1.1", tool: TOOL,
+      args: { note: "hi" }, resultSummary: "ok", resultJson: { note: "hi" },
+      selfVerdict: "pass", selfReason: "ok",
+    });
+    await app.confirmLeaf({
+      sessionId: sid, nodeId: "1.1", tool: TOOL,
+      argSpecs: { note: { kind: "fixed", value: "hi" } } as never,
+      sideEffect: "external",
+    });
+    await app.finalize({ sessionId: sid, name });
+  }
+
+  function runDirCount(): number {
+    try {
+      // runs/by-session 은 인덱스이므로 제외.
+      return readdirSync(join(pfdir, "runs")).filter((e) => e !== "by-session").length;
+    } catch {
+      return 0;
+    }
+  }
+
+  it("⑤ waiting 단계 advance 재호출은 같은 runId로 폴링만 (새 run 없음)", async () => {
+    await waitingProcedure("g-w");
+    const g = await app.startGuide({ steps: [{ procedure: "g-w", params: {} }] });
+    const before = runDirCount();
+    const r0 = await app.advanceGuide({ guideId: g.guideId });
+    expect(r0.status).toBe("waiting");
+    const r1 = await app.advanceGuide({ guideId: g.guideId });
+    expect(r1.status).toBe("waiting");
+    expect(r1.runId).toBe(r0.runId);
+    expect(runDirCount()).toBe(before + 1);
+    liveRuns.push({ app, pfdir, runId: r0.runId });
+  }, 120000);
+
+  it("⑥ 시간 초과 후 advance는 같은 runId로 끝까지 감 (throw 없음)", async () => {
+    writeFileSync(join(root, "slow10.py"), "import time, json\ntime.sleep(10)\nprint(json.dumps({\"slept\": True}))\n", "utf8");
+    const s = await app.start({ request: "run", toolCatalog: CAT });
+    const sid = s.sessionId;
+    await app.split({
+      sessionId: sid, nodeId: "1",
+      reason: "M10-4 테스트용 분해 사유입니다.",
+      children: [{ goal: "run script" }],
+      expectedRevision: 0,
+    } as never);
+    await app.report({
+      sessionId: sid, nodeId: "1.1", tool: TOOL,
+      args: {}, resultSummary: "ok", selfVerdict: "pass", selfReason: "ok",
+    });
+    await app.confirmLeaf({
+      sessionId: sid, nodeId: "1.1", tool: TOOL,
+      argSpecs: { script: { kind: "script", file: "slow10.py", runtime: "python" } } as never,
+    });
+    await app.finalize({ sessionId: sid, name: "g-s10" });
+    const g = await app.startGuide({ steps: [{ procedure: "g-s10", params: {} }] });
+    const r0 = await app.advanceGuide({ guideId: g.guideId, timeoutMs: 1000 });
+    expect(r0.status).toBe("running");
+    liveRuns.push({ app, pfdir, runId: r0.runId });
+    const r1 = await app.advanceGuide({ guideId: g.guideId, timeoutMs: 60000 });
+    expect(r1.status).toBe("done");
+    expect(r1.runId).toBe(r0.runId);
+  }, 120000);
 });
