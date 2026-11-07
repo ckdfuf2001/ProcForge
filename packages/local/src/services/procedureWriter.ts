@@ -311,8 +311,8 @@ export function writeProcedure(input: {
     copyFileSync(mf, join(buildDir, "tests", "fixtures-manifest.json"));
     files.push("tests/fixtures-manifest.json");
   }
-  // M9-2-1: 재finalize 시 sidecar 보존 (.run.lock 제외 — app.finalize 진입
-  // 시점에 없음이 보장됨; 있으면 swap 대상에서 빠지므로 실행 중 잠금은 건드리지 않는다).
+  // M9-2-1: 재finalize 시 sidecar 보존. 잠금은 procedures/.locks/에 있어
+  // swap 대상이 아니므로 건드리지 않는다 (M10-lock).
   // 복사 실패는 조용히 넘기지 않고 finalize 실패로 올린다 (상태 유실 방지).
   for (const rel of ["state.json", "approvals.json"]) {
     const src = join(dir, rel);

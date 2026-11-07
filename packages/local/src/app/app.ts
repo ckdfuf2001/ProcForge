@@ -171,6 +171,7 @@ import { buildTrace, formatTraceMarkdown, recordCall } from "../trace.js";
 import { exportSession } from "../export.js";
 import { assertProjectPath } from "../artifacts.js";
 import { writeProcedure, writeFileAtomic } from "../services/procedureWriter.js";
+import { acquireProcRunLock } from "../services/run-lock.js";
 
 // ProcForge 유스케이스층 (M4.2-1). 사용자 행동 1개 = 메서드 1개.
 // 어댑터(server/cli/ui)는 입력 검증·호출·응답 포맷만 하고 정책·파일 작업은 여기에 위임한다.
@@ -283,6 +284,11 @@ export type AppDeps = {  core: CoreClient;
    * 호출된다. 이 구간의 취소 경쟁을 결정적으로 재현하기 위한 훅이다.
    */
   onWaitingPersisted?: (runId: string, procedure: string) => void | Promise<void>;
+  /**
+   * M10-lock-test: finalize의 writeProcedure(swap) 직전에 호출된다.
+   * swap 구간 잠금 보유를 결정적으로 확인하기 위한 훅이다 (1개만 허용).
+   */
+  onBeforeProcedureSwap?: (procedure: string) => void;
 };
 
 /** M7-ui4-b/c: 신호 대상 (서버 설정에서만 온다) */
@@ -339,6 +345,7 @@ export class ProcForgeApp {
   private catalogTimeoutMs: number | undefined;
   private linkFetchImpl: typeof fetch | undefined;
   private onWaitingPersisted: AppDeps["onWaitingPersisted"];
+  private onBeforeProcedureSwap: AppDeps["onBeforeProcedureSwap"];
   /** M7-ui4: UI 연결 id (호출 귀속 기록용. 연결마다 1개) */
   private readonly uiConnectionId = `ui-${randomUUID()}`;
   private readonly signal: SignalTarget;
@@ -386,6 +393,7 @@ export class ProcForgeApp {
     this.catalogTimeoutMs = deps.catalogTimeoutMs;
     this.linkFetchImpl = deps.linkFetchImpl;
     this.onWaitingPersisted = deps.onWaitingPersisted;
+    this.onBeforeProcedureSwap = deps.onBeforeProcedureSwap;
     // M7-ui4-b: 신호 대상은 여기서 한 번만 정한다.
     // M9-1-1: PROOF_OPENCODE_* 우선, PROCFORGE_OPENCODE_* 대체.
     const toolPrefix =
@@ -2502,20 +2510,17 @@ export class ProcForgeApp {
       );
     }
     // M9-2-1: 실행 중 재finalize 금지. runSession의 절차서 run 잠금과 같은 기제
-    // (FileStore.acquireFileLock, stale 60초 — run.ts:319-335를 재사용, 새로 만들지 않음).
+    // (M10-lock: acquireProcRunLock 공용, 위치 procedures/.locks/<name>.run.lock).
     // UI·MCP·CLI 모두 app.finalize를 경유하므로 한 곳에서만 검사한다.
     // M9-2-1-fix: 잠금은 writeProcedure(swap 포함)가 끝날 때까지 쥐고 finally에서
     // 놓는다. 검사 후 바로 놓으면 검사-교체 사이에 run이 시작되는 틈이 남는다.
-    const procRunLockPath = join(
-      this.procforgeDir,
-      "procedures",
-      doc.name,
-      ".run.lock",
-    );
+    // M10-lock-test: swap 직전 훅(onBeforeProcedureSwap)으로 잠금 보유를 확인한다.
     let releaseProcRunLock: (() => void) | undefined;
     try {
-      releaseProcRunLock = new FileStore(this.procforgeDir).acquireFileLock(
-        procRunLockPath,
+      releaseProcRunLock = acquireProcRunLock(
+        new FileStore(this.procforgeDir),
+        this.procforgeDir,
+        doc.name,
         `procedure finalize locked: ${doc.name}`,
         60000,
       );
@@ -2529,6 +2534,7 @@ export class ProcForgeApp {
       throw e;
     }
     try {
+      this.onBeforeProcedureSwap?.(doc.name);
       const written = writeProcedure({
         procforgeDir: this.procforgeDir,
         projectRoot: this.projectRoot,
@@ -3557,11 +3563,13 @@ private hasCurrentApproval(
     }
     const procDir = join(this.procforgeDir, "procedures", draft.procedure);
     const procFile = join(procDir, "procedure.json");
-    // M10-3-apply-fix: 실행 중 적용 금지 (finalize와 같은 .run.lock 기제).
+    // M10-3-apply-fix: 실행 중 적용 금지 (M10-lock: acquireProcRunLock 공용).
     let releaseRunLock: (() => void) | undefined;
     try {
-      releaseRunLock = new FileStore(this.procforgeDir).acquireFileLock(
-        join(procDir, ".run.lock"),
+      releaseRunLock = acquireProcRunLock(
+        new FileStore(this.procforgeDir),
+        this.procforgeDir,
+        draft.procedure,
         `procedure apply locked: ${draft.procedure}`,
         60000,
       );

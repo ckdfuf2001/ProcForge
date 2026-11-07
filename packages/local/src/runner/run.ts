@@ -57,6 +57,10 @@ import {
   type AccumulateState,
 } from "../services/accumulate.js";
 import type { AccumulateSpec } from "@proof/shared/procedure.js";
+import {
+  procRunLockPath,
+  acquireProcRunLock,
+} from "../services/run-lock.js";
 import { runScript, describeRunError } from "./script-run.js";
 import {
   inferPathRole,
@@ -318,18 +322,24 @@ export async function runSession(opts: RunOptions): Promise<RunReport> {
   const release = store.acquireLock(opts.sessionId, 60000);
   // M5.5-4.1-5: 절차서 단위 run 잠금 (겹친 스케줄 실행 방지). 세션 락과 함께 보유.
   // M5.5-4.2-5: 절차서 잠금 실패 시 세션 잠금도 해제 (누수 금지).
-  const procLockPath = procedureDir
-    ? join(procedureDir, ".run.lock")
-    : undefined;
+  // M10-lock: 위치는 procedures/.locks/<name>.run.lock (폴더 안이면 swap 때 함께 옮겨감).
+  const procName = procedureDir ? basename(procedureDir as string) : undefined;
+  const procLockPath =
+    procName !== undefined
+      ? procRunLockPath(opts.procforgeDir, procName)
+      : undefined;
   let releaseProcLock: (() => void) | undefined;
   try {
-    releaseProcLock = procLockPath
-      ? store.acquireFileLock(
-          procLockPath,
-          `procedure run locked: ${basename(procedureDir as string)}`,
-          60000,
-        )
-      : undefined;
+    releaseProcLock =
+      procName !== undefined
+        ? acquireProcRunLock(
+            store,
+            opts.procforgeDir,
+            procName,
+            `procedure run locked: ${procName}`,
+            60000,
+          )
+        : undefined;
   } catch (e) {
     release();
     throw e;
