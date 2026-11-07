@@ -3185,12 +3185,33 @@ private hasCurrentApproval(
    */
   private launchDrive(runId: string, docName: string): void {
     // 백그라운드 진행 — UI는 기다리지 않는다(로그·결과는 SSE).
-    void this.driveRun(runId, docName).catch(() => {
-      // 오류는 로그로 남는다 (흘러나오면 UI가 조용히 멈춘 것처럼 보인다)
+    void this.driveRun(runId, docName).catch((e: unknown) => {
+      // 오류는 로그로 남긴다 (흘러나오면 UI가 조용히 멈춘 것처럼 보인다)
+      const detail = e instanceof Error ? e.message : String(e);
       appendRunLog(this.procforgeDir, runId, {
         level: "error",
-        message: "실행 진행 중 오류",
+        message: `실행 진행 중 오류: ${detail}`,
       });
+      // M10-4-fix(판정2): 시작 실패가 조용히 ready 고착되지 않게 failed로 기록한다.
+      // 사유는 원문 그대로 failedDetail에 남긴다 (이미 끝난 run은 건드리지 않음).
+      try {
+        const st = readRunState(this.procforgeDir, runId);
+        if (
+          st &&
+          st.status !== "done" &&
+          st.status !== "failed" &&
+          st.status !== "cancelled"
+        ) {
+          writeRunState(this.procforgeDir, {
+            ...st,
+            status: "failed",
+            failedDetail: detail,
+            updatedAt: new Date().toISOString(),
+          });
+        }
+      } catch {
+        // 상태 기록 실패는 로그로 남겼으므로 무시
+      }
     });
   }
 
@@ -3734,10 +3755,31 @@ private hasCurrentApproval(
       });
     } catch (e) {
       // 예외가 나도 잠금은 풀어야 한다 (아니면 그 절차서는 재시작 불가)
+      const detail = e instanceof Error ? e.message : String(e);
       appendRunLog(this.procforgeDir, runId, {
         level: "error",
-        message: `실행 오류: ${e instanceof Error ? e.message : String(e)}`,
+        message: `실행 오류: ${detail}`,
       });
+      // M10-4-fix(판정2): 예상 밖 예외도 ready 고착 금지 — failed로 기록한다
+      // (사유 원문 유지. 이미 끝난 run은 건드리지 않는다).
+      try {
+        const st = readRunState(this.procforgeDir, runId);
+        if (
+          st &&
+          st.status !== "done" &&
+          st.status !== "failed" &&
+          st.status !== "cancelled"
+        ) {
+          writeRunState(this.procforgeDir, {
+            ...st,
+            status: "failed",
+            failedDetail: detail,
+            updatedAt: new Date().toISOString(),
+          });
+        }
+      } catch {
+        // 로그는 남겼으므로 상태 기록 실패는 무시
+      }
     } finally {
       if (!this.waitingRuns.has(runId)) this.releaseRun(procedure, runId);
     }

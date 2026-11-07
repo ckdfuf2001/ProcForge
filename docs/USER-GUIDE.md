@@ -163,6 +163,8 @@ $env:PROOF_OPENCODE_TOOL_PREFIX="proof"
   적용 전 판본은 `procedures/<이름>/history/`에 남습니다.
   `다음 실행 때 승인 필요` 목록이 뜨면 해당 노드는 다음 실행 전에
   다시 승인해야 합니다. `폐기`는 화면에서만 지웁니다.
+  실행 도구가 없는 순수 분해 노드의 목표 변경은 승인 없이 다음 실행에
+  반영됩니다 (history와 "바뀐 노드" 표시로 충분).
 
 ![M10 확인 화면: 그래프와 노드 상세](images/m10-guide-graph.png)
 ![M10 확인 화면: 재분석 diff 적용](images/m10-guide-draft.png)
