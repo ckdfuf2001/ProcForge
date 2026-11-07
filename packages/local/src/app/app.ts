@@ -3379,6 +3379,8 @@ private hasCurrentApproval(
       }[];
     }[] = [];
     for (const dirName of names.sort()) {
+      // M10-lock-legacy: procedures/.locks 같은 내부 항목은 절차서가 아니다.
+      if (dirName.startsWith(".")) continue;
       try {
         const { doc } = loadProcedureDoc(this.procforgeDir, dirName);
         out.push({

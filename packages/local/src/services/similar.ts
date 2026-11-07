@@ -78,7 +78,9 @@ export function listProceduresWithLatest(
   const out: SimilarProcedure[] = [];
   for (const name of names.sort()) {
     // M10-1-fix: swap 잔재(<name>.old) 등은 절차서가 아니다.
+    // M10-lock-legacy: procedures/.locks 같은 내부 항목도 제외.
     // 판정은 procedure-latest.ts와 같은 공용 정규식으로 한다.
+    if (name.startsWith(".")) continue;
     if (!PROCEDURE_NAME_RE.test(name)) continue;
     let goals: string[] = [];
     try {

@@ -1,10 +1,11 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { writeFileSync, readFileSync, existsSync, mkdirSync } from "node:fs";
+import { writeFileSync, readFileSync, existsSync, mkdirSync, utimesSync } from "node:fs";
 import { join } from "node:path";
 import { ProcForgeApp } from "../src/app/app.js";
 import { FileStore } from "../src/filestore.js";
 import {
   procRunLockPath,
+  legacyProcRunLockPath,
   acquireProcRunLock,
 } from "../src/services/run-lock.js";
 import { testStack } from "./client-mode.js";
@@ -92,4 +93,38 @@ describe("M10-lock", () => {
     expect(existsSync(procRunLockPath(pfdir, "lockp"))).toBe(false);
     expect(existsSync(join(procDir, ".run.lock"))).toBe(false);
   }, 60000);
+
+  it("stale 구 잠금은 run이 끝난 뒤 구 위치 파일 0개 (새로 만들지 않음)", async () => {
+    const { client } = testStack(pfdir);
+    const app = new ProcForgeApp({ core: client, procforgeDir: pfdir, projectRoot: root });
+    // stale 구 잠금 파일 직접 배치 (깨진 내용 + 10분 전 mtime → pid 없음).
+    const procDir = join(pfdir, "procedures", "leg");
+    mkdirSync(procDir, { recursive: true });
+    const oldPath = legacyProcRunLockPath(pfdir, "leg");
+    writeFileSync(oldPath, "broken");
+    const old = Date.now() - 10 * 60 * 1000;
+    utimesSync(oldPath, new Date(old), new Date(old));
+    const release = acquireProcRunLock(new FileStore(pfdir), pfdir, "leg", "probe", 60000);
+    // 새 잠금은 잡히고, 구 파일은 삭제만 된다 (새로 만들지 않음).
+    expect(existsSync(procRunLockPath(pfdir, "leg"))).toBe(true);
+    expect(existsSync(oldPath)).toBe(false);
+    release();
+    expect(existsSync(procRunLockPath(pfdir, "leg"))).toBe(false);
+    expect(existsSync(oldPath)).toBe(false);
+  });
+
+  it(".locks가 있어도 절차서 목록 수가 그대로", async () => {
+    const { client } = testStack(pfdir);
+    const app = new ProcForgeApp({ core: client, procforgeDir: pfdir, projectRoot: root });
+    const before = await app.listProcedures();
+    const beforeSim = await app.similarProcedures({});
+    // 내부 항목 배치 (.locks + 점파일).
+    mkdirSync(join(pfdir, "procedures", ".locks"), { recursive: true });
+    writeFileSync(join(pfdir, "procedures", ".locks", "x.run.lock"), "x");
+    mkdirSync(join(pfdir, "procedures", ".hidden"), { recursive: true });
+    const after = await app.listProcedures();
+    const afterSim = await app.similarProcedures({});
+    expect(after.procedures.length).toBe(before.procedures.length);
+    expect(afterSim.procedures.length).toBe(beforeSim.procedures.length);
+  });
 });
