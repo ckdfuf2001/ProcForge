@@ -112,6 +112,8 @@ $env:PROOF_OPENCODE_TOOL_PREFIX="proof"
 ```
 
   `TOOL_PREFIX`는 opencode.json의 MCP 등록 키와 같게 씁니다.
+  업데이트 직후에는 OpenCode와 `proof ui`를 모두 재시작합니다
+  (구 버전 프로세스가 남으면 잠금이 서로 갈립니다).
 
 ## 6. 누적형 절차서
 
