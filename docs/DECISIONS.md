@@ -1209,4 +1209,11 @@ argv: [...]}` 고정. runner는 run fs에서 직접 실행해 stdout을 golden�
   이유: 재분석이 "왜"를 기준으로 고치려면 처음 분해 때부터 기록해야 한다
   (M10-spec §0). 도구 추가·이름 변경은 아니다.
 
+## M10-lock
+
+- [M10-lock] **절차서 run 잠금을 `procedures/.locks/<name>.run.lock`에 둔다.**
+  사유: 폴더 안 잠금은 swapDir이 `.old`로 함께 옮겨 실행 중 보호가 깨진다
+  (데이터 손실 종류). 경로는 `acquireProcRunLock` 하나로 모으고, 구 위치
+  잠금은 이행기 1개 마일스톤 동안 run 시작 시 함께 검사한다.
+  `.procforge/` 아래 새 하위 폴더(`.locks/`)를 만드는 것은 불변 위반이 아니다.
 

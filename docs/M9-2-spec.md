@@ -130,7 +130,11 @@
   (swapDir, 디렉터리 전체 교체) + `:188-289` (빌드물만).
   ① 절차서 폴더 `state.json`은 누적 KV 상태 (`procedure-state.ts:9`,
   `run.ts:755` 저장·`run.ts:292-297` 로드)이나 빌드물에 없어 swap 후 소멸.
-  ② `.run.lock` 검사가 `app.finalize` 경로에 없어 실행 중 재finalize 허용
+  ② [정정 M10-lock: 잠금 위치는 `procedures/.locks/<name>.run.lock`이다.
+  폴더 안에 두면 swapDir이 잠금까지 `.old`로 옮겨 실행 중 보호가 깨진다.
+  `acquireProcRunLock` 하나로 모았고, 구 위치 잠금은 이행기 1개 마일스톤 동안
+  run 시작 시 함께 검사한다.]
+  `.run.lock` 검사가 `app.finalize` 경로에 없어 실행 중 재finalize 허용
   (acquire는 `run.ts:319-335`만). Windows rename 경합 시 finalize `io_error`
   실패 또는 실행 중 run이 `.old` 쪽을 계속 붙잡음.
   ③ approvals 소실 시 `loadApprovals`→`[]` (`approvals.ts:225`) → 무인 실행
