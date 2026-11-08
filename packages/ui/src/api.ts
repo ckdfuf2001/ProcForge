@@ -438,8 +438,12 @@ export const api = {
       { opIds },
     ),
   // M10-entry: 재분석 초안 요청 (202 즉시 반환, 백그라운드 완성).
-  requestRedraft: (procedure: string, request: string) =>
-    post<{ draftId: string; status: string }>("/api/drafts", { procedure, request }),
+  requestRedraft: (procedure: string, request: string, sessionId?: string) =>
+    post<{ draftId: string; status: string }>("/api/drafts", {
+      procedure,
+      request,
+      ...(sessionId !== undefined ? { sessionId } : {}),
+    }),
   // M10-4: 순차 자동 실행 가이드 (사람 확인 → 단계 실행).
   startGuide: (steps: { procedure: string; params?: Record<string, string> }[], guideId?: string) =>
     post<GuideDetail>("/api/guides", {

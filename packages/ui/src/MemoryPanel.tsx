@@ -55,7 +55,8 @@ export function MemoryPanel({
     setError(null);
     void (async () => {
       try {
-        const r = await api.requestRedraft(picked.name, req);
+        // M10-entry-fix: sessionId를 함께 보내 draft.ready 알림이 남게 한다.
+        const r = await api.requestRedraft(picked.name, req, sessionId);
         setRedraftState({ kind: "waiting", draftId: r.draftId });
         // 준비될 때까지 폴링 (대기 → 준비됨/실패).
         for (let i = 0; i < 150; i++) {

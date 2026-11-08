@@ -353,6 +353,10 @@ export class ProcForgeApp {
   private activeRuns = new Map<string, string>();
   /** M8-1-close2 b: 신호 감시 결과 배지 갱신 (UI 서버가 주입. 없으면 기록만) */
   private signalNotifier: ((sessionId: string, payload: unknown) => void) | undefined;
+  /** M10-entry-fix: 백그라운드 재분석 진행 중 draftId 집합.
+   * 프로세스가 죽으면 집합이 사라지고, getDraft가 남은 pending을
+   * failed("프로세스 재시작으로 중단")로 확정한다 (고아 pending 방지). */
+  private readonly inflightRedrafts = new Set<string>();
   /** M7-5-c: 결정 대기(승인·생성값) 중 잠금 유지 중인 run */
   private waitingRuns = new Set<string>();
 
@@ -3521,6 +3525,9 @@ private hasCurrentApproval(
     }
     const sessionId =
       typeof a.sessionId === "string" && a.sessionId.length > 0 ? a.sessionId : undefined;
+    if (sessionId !== undefined && !/^[A-Za-z0-9._-]{1,128}$/.test(sessionId)) {
+      throw pfError("bad_request", "sessionId 형식이 잘못되었습니다.");
+    }
     const draftId = randomUUID();
     const draftDir = join(this.procforgeDir, "drafts", draftId);
     mkdirSync(draftDir, { recursive: true });
@@ -3537,7 +3544,9 @@ private hasCurrentApproval(
       diff: [],
       at: new Date().toISOString(),
     };
-    writeFileSync(join(draftDir, "draft.json"), JSON.stringify(pending, null, 2));
+    // M10-entry-fix: UI가 2초마다 읽으므로 원자 쓰기.
+    writeFileAtomic(join(draftDir, "draft.json"), JSON.stringify(pending, null, 2));
+    this.inflightRedrafts.add(draftId);
     // 백그라운드 완성 — 호출자는 기다리지 않는다. 실패는 failed로 남기고 재시도 없음.
     void (async () => {
       try {
@@ -3553,6 +3562,8 @@ private hasCurrentApproval(
           },
           draftId,
         });
+        // M10-entry-fix: 진행 중 집합에서 뺀다 (getDraft의 고아 판정 기준).
+        this.inflightRedrafts.delete(draftId);
         if (result.status === "ready" && sessionId !== undefined) {
           try {
             await this.notifySessionEvent({
@@ -3565,11 +3576,13 @@ private hasCurrentApproval(
           }
         }
       } catch (e) {
+        // M10-entry-fix: 진행 중 집합에서 뺀다 (실패 기록 뒤에도 고아로 안 남는다).
+        this.inflightRedrafts.delete(draftId);
         try {
           const cur = JSON.parse(
             readFileSync(join(draftDir, "draft.json"), "utf8"),
           ) as Partial<RedraftResult>;
-          writeFileSync(
+          writeFileAtomic(
             join(draftDir, "draft.json"),
             JSON.stringify(
               {
@@ -3624,6 +3637,20 @@ private hasCurrentApproval(
     ) {
       throw pfError("bad_request", `draft.json 형식 오류: ${id}`);
     }
+    // M10-entry-fix: 진행 중 집합에 없는 pending은 고아다 (프로세스 재시작으로
+    // 백그라운드가 사라짐). failed로 원자 기록하고 그 상태를 돌려준다.
+    // UI 폴링은 "대기 중"에서 멈추지 않고 실패를 본다.
+    if (d.status === "pending" && !this.inflightRedrafts.has(id)) {
+      const failed = {
+        ...(parsed as Record<string, unknown>),
+        status: "failed",
+        ops: [],
+        diff: [],
+        reason: "프로세스 재시작으로 중단",
+      } as unknown as RedraftResult;
+      writeFileAtomic(file, JSON.stringify(failed, null, 2));
+      return failed;
+    }
     return parsed as RedraftResult;
   }
 
@@ -3651,8 +3678,7 @@ private hasCurrentApproval(
     procedure: string;
     applied: { nodeId: string; kind: string }[];
     /** 바뀐 노드 id (정렬·중복 제거) */
-    changedNodes: string[];
-    /**
+    changedNodes: string[];    /**
      * 승인이 풀린 노드 (다음 실행 때 승인 필요).
      * goal/arg-kind 적용 + 승인 대상(external·script) + approvals.json에 기존 항목.
      * why-kind는 승인 해시에 안 들어가므로 제외.
@@ -3660,10 +3686,12 @@ private hasCurrentApproval(
     approvalReset: string[];
   }> {
     const draft = await this.getDraft({ draftId: a.draftId });
+    // M10-entry-fix: 적용은 ready일 때만 허용한다. pending/failed/rejected는
+    // conflict로 거부한다 (ops 0건 초안의 조용한 성공 방지).
     if (draft.status !== "ready") {
       throw pfError(
-        "bad_request",
-        "초안이 적용 가능 상태가 아님 (ready 아님).",
+        "conflict",
+        `초안이 적용 가능 상태가 아님 (현재 ${draft.status}, ready 필요).`,
         "ready 상태의 초안만 적용할 수 있다.",
       );
     }

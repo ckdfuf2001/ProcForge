@@ -208,6 +208,17 @@ describe("M10-entry POST /api/drafts", () => {
     // 원본 무손상 (파일을 다시 읽어 hash 비교).
     const after = readFileSync(join(pfdir, "procedures", "memo", "procedure.json"), "utf8");
     expect(createHash("sha256").update(after, "utf8").digest("hex")).toBe(hash);
+    // 원자 쓰기: drafts/ 아래 tmp 잔재 0건.
+    const leftovers: string[] = [];
+    const walk = (d: string): void => {
+      for (const e of readdirSync(d, { withFileTypes: true })) {
+        const p = join(d, (e as { name: string }).name);
+        if ((e as unknown as { isDirectory(): boolean }).isDirectory()) walk(p);
+        else if ((e as { name: string }).name.includes(".tmp-")) leftovers.push(p);
+      }
+    };
+    walk(join(pfdir, "drafts"));
+    expect(leftovers).toEqual([]);
   }, 60000);
 
   it("② 가짜 서버가 받은 바디의 tools 비활성", async () => {
@@ -267,5 +278,87 @@ describe("M10-entry POST /api/drafts", () => {
     const done = await waitDraft(started.draftId);
     expect(done.status).toBe("failed");
     expect(promptCount).toBe(1);
+  }, 60000);
+
+  it("⑥ readOnly면 4xx, drafts/ 그대로", async () => {
+    mode = { responseText: JSON.stringify({ ops: [] }) };
+    await startSrv(true, true);
+    writeProcDoc();
+    const r = await apiAuthed("/api/drafts", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ procedure: "memo", request: "req" }),
+    });
+    expect(r.status).toBeGreaterThanOrEqual(400);
+    expect(r.status).toBeLessThan(500);
+    const draftsDir = join(pfdir, "drafts");
+    expect(existsSync(draftsDir) ? readdirSync(draftsDir).length : 0).toBe(0);
+  });
+
+  it("⑧ 새 App에서 고아 pending 조회 → failed(중단)", async () => {
+    await startSrv(true);
+    writeProcDoc();
+    // pending 파일을 손으로 둔다 (죽은 백그라운드의 잔재와 같은 모양).
+    const draftDir = join(pfdir, "drafts", "orphan1");
+    mkdirSync(draftDir, { recursive: true });
+    writeFileSync(
+      join(draftDir, "draft.json"),
+      JSON.stringify({
+        draftId: "orphan1", procedure: "memo", request: "req",
+        sourceHash: "h", status: "pending", ops: [], diff: [], reason: "",
+      }),
+    );
+    // 새 App = 진행 중 집합이 비어 있음 (재시작 상당).
+    const { client } = testStack(pfdir);
+    const app2 = new ProcForgeApp({ core: client, procforgeDir: pfdir, projectRoot: root });
+    const d = await app2.getDraft({ draftId: "orphan1" });
+    expect(d.status).toBe("failed");
+    expect(d.reason).toContain("재시작");
+    const reread = JSON.parse(readFileSync(join(draftDir, "draft.json"), "utf8")) as { status: string };
+    expect(reread.status).toBe("failed");
+  });
+
+  it("⑨ pending/failed 초안 적용 → conflict", async () => {
+    await startSrv(true);
+    writeProcDoc();
+    const draftDir = join(pfdir, "drafts", "np1");
+    mkdirSync(draftDir, { recursive: true });
+    writeFileSync(
+      join(draftDir, "draft.json"),
+      JSON.stringify({
+        draftId: "np1", procedure: "memo", request: "req",
+        sourceHash: "h", status: "pending", ops: [], diff: [], reason: "",
+      }),
+    );
+    await expect(app.applyDraft({ draftId: "np1", opIds: [0] })).rejects.toMatchObject({ code: "conflict" });
+    writeFileSync(
+      join(draftDir, "draft.json"),
+      JSON.stringify({
+        draftId: "np1", procedure: "memo", request: "req",
+        sourceHash: "h", status: "failed", ops: [], diff: [], reason: "x",
+      }),
+    );
+    await expect(app.applyDraft({ draftId: "np1", opIds: [0] })).rejects.toMatchObject({ code: "conflict" });
+  });
+
+  it("⑦ sessionId를 넘기면 draft.ready 1건", async () => {
+    mode = { responseText: JSON.stringify({ ops: [{ op: "edit_goal", nodeId: "1", goal: "g2", reason: "r" }] }) };
+    await startSrv(true);
+    writeProcDoc();
+    const s = await app.start({ request: "r", toolCatalog: CAT });
+    const before = await app.getEventsPage({ sessionId: s.sessionId, afterRevision: 0 });
+    expect(before.events.length).toBe(0);
+    const r = await apiAuthed("/api/drafts", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ procedure: "memo", request: "req", sessionId: s.sessionId }),
+    });
+    expect(r.status).toBe(202);
+    const started = (await r.json()) as { draftId: string };
+    await waitDraft(started.draftId);
+    const after = await app.getEventsPage({ sessionId: s.sessionId, afterRevision: 0 });
+    const found = after.events.filter((e) => e.method === "draft.ready");
+    expect(found.length).toBe(1);
+    expect(found[0].summary).toContain(started.draftId);
   }, 60000);
 });

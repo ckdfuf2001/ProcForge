@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
-import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
+import { writeFileAtomic } from "./procedureWriter.js";
 import { join } from "node:path";
 import { pfError } from "@proof/shared/errors.js";
 
@@ -280,7 +281,8 @@ export async function runRedraft(input: {
     at: new Date().toISOString(),
   };
   const save = (r: RedraftResult): RedraftResult => {
-    writeFileSync(join(draftDir, "draft.json"), JSON.stringify(r, null, 2));
+    // M10-entry-fix: UI가 2초마다 읽으므로 원자 쓰기 (반쯤 쓴 파일 파싱 실패 방지).
+    writeFileAtomic(join(draftDir, "draft.json"), JSON.stringify(r, null, 2));
     return r;
   };
   const headers = authHeaders(input.openCode.password);

@@ -837,6 +837,9 @@ export async function createUiServer(opts: {
               await opts.app.requestRedraft({
                 procedure: body.procedure,
                 request: body.request,
+                ...(typeof body.sessionId === "string" && body.sessionId !== ""
+                  ? { sessionId: body.sessionId as string }
+                  : {}),
               }),
             );
             return;
