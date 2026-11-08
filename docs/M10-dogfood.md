@@ -29,6 +29,15 @@ OpenCode 1.18.18을 serve 모드로 띄운다: `opencode serve --port 4096`.
 업데이트 직후라면 OpenCode와 `proof ui`를 모두 재시작한다
 (구 버전 프로세스가 남으면 잠금이 서로 갈린다).
 
+같은 셸(또는 새 셸, 같은 폴더)에서 UI를 띄운다:
+
+```powershell
+node <REPO>\packages\local\dist\cli.js ui
+```
+
+`ui: http://127.0.0.1:<포트>/#t=<토큰>` 1줄이 찍히면 브라우저로 연다.
+`<포트>`와 `<토큰>`은 이 줄에서 읽는다 (아래 명령은 프로젝트 폴더 셸에서 실행한다).
+
 `dog-b`의 1.1(script 노드)에 승인 항목을 미리 만든다
 (기준 2 "목록 1개 이상"을 만족하려면 항목이 있어야 한다).
 
@@ -66,7 +75,7 @@ Get-FileHash .procforge\procedures\dog-b\procedure.json
 
 ```powershell
 $TOKEN = "<토큰>"
-$BODY = '{"procedure":"dog-b","request":"1.1의 goal을 \\"야간 집계 (60초 대기)\\"으로 바꿔라"}'
+$BODY = '{"procedure":"dog-b","request":"1.1의 goal을 \"야간 집계 (60초 대기)\"으로 바꿔라"}'
 Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:<포트>/api/drafts" -Headers @{"x-procforge-token"=$TOKEN} -ContentType "application/json; charset=utf-8" -Body ([Text.Encoding]::UTF8.GetBytes($BODY))
 ```
 
