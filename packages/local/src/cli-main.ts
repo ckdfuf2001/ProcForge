@@ -2,6 +2,7 @@ import { parseCliArgs, readLocalVersion, resolveDirs, normalizeCliPath } from ".
 import type { CliValues } from "./app/cli-args.js";
 import { createApp } from "./app/bootstrap.js";
 import { createUiServer, openUrl } from "./app/ui-server.js";
+import { readEnvPair } from "@proof/shared/env-compat.js";
 import { cliErrorExit, parseRetryOptions, resolveAllowUnverified, runErrorExit, runExitCode } from "./app/run-exit.js";
 
 // CLI 어댑터 (M4.2-4-1). 파일·저장소 작업은 App 메서드로만 수행한다
@@ -296,7 +297,10 @@ async function cmdUi(): Promise<number> {
   }
   try {
     const { app } = createApp({ procforgeDir, projectRoot });
-    const srv = await createUiServer({ app, port });
+    // M10-entry: 읽기 전용 모드에서는 POST /api/drafts를 거부한다 (MCP와 같은 키).
+    const readOnly =
+      readEnvPair(process.env as Record<string, string | undefined>, "PROOF_READ_ONLY", "PROCFORGE_READ_ONLY") === "1";
+    const srv = await createUiServer({ app, port, ...(readOnly ? { readOnly: true as const } : {}) });
     // M8-1-close2 b: 신호 감시 결과 → SSE signal 배지.
     app.setSignalNotifier((sid, payload) => srv.pushSignal(sid, payload));
     const withToken = `${srv.url}#t=${srv.token}`;

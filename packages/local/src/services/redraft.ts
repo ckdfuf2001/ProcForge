@@ -25,7 +25,7 @@ export type DraftOp =
   | { op: "edit_arg"; nodeId: string; arg: string; value: unknown; reason: string }
   | { op: "edit_why"; nodeId: string; why: string; reason: string };
 
-export type DraftStatus = "ready" | "rejected" | "failed";
+export type DraftStatus = "pending" | "ready" | "rejected" | "failed";
 
 export type DraftDiffEntry = {
   nodeId: string;
@@ -243,6 +243,11 @@ export async function runRedraft(input: {
   request: string;
   openCode: { baseUrl: string; password?: string; model: { providerID: string; modelID: string } };
   idleTimeoutMs?: number;
+  /**
+   * M10-entry: 미리 만든 draftId로 이어쓴다 (POST /api/drafts 202 후 백그라운드 완성용).
+   * 지정 시 디렉터리는 그대로 쓰고 procedure.json 복사본을 덮어쓴다.
+   */
+  draftId?: string;
 }): Promise<RedraftResult> {
   const baseUrl = input.openCode.baseUrl.replace(/\/$/, "");
   if (!baseUrl) throw pfError("bad_request", "OpenCode 서버 주소 없음 (PROOF_OPENCODE_URL)");
@@ -260,7 +265,7 @@ export async function runRedraft(input: {
   for (const n of doc.nodes ?? []) {
     if (n && typeof n.id === "string") nodes.set(n.id, n);
   }
-  const draftId = randomUUID();
+  const draftId = input.draftId ?? randomUUID();
   const draftDir = join(input.procforgeDir, "drafts", draftId);
   mkdirSync(draftDir, { recursive: true });
   // 원본 복사 (바이트 동일 — 무손상 증명용).

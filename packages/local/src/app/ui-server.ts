@@ -51,6 +51,7 @@ export type UiApp = Pick<
   | "guideStatus"
   | "advanceGuide"
   | "cancelGuideStep"
+  | "requestRedraft"
 >;
 
 export type UiServer = {
@@ -111,6 +112,15 @@ function err(res: ServerResponse, code: number, msg: string): void {
 
 function send(res: ServerResponse, v: unknown): void {
   res.writeHead(200, {
+    "content-type": "application/json",
+    "content-security-policy": cspOf(res),
+  });
+  res.end(JSON.stringify(v));
+}
+
+/** M10-entry: 202 Accepted 응답 (비동기 접수용). */
+function sendAccepted(res: ServerResponse, v: unknown): void {
+  res.writeHead(202, {
     "content-type": "application/json",
     "content-security-policy": cspOf(res),
   });
@@ -284,6 +294,8 @@ export async function createUiServer(opts: {
   /** SSE 폴러 주기·heartbeat (테스트 단축용) */
   pollMs?: number;
   heartbeatMs?: number;
+  /** M10-entry: 읽기 전용 모드 — POST /api/drafts를 거부한다. */
+  readOnly?: boolean;
 }): Promise<UiServer> {
   const token = randomBytes(32).toString("hex");
   // M8-ui4: 매 기동마다 다른 값. SPA 가 sessionStorage 의 이전 값과 비교해 재시작을 안다.
@@ -804,6 +816,27 @@ export async function createUiServer(opts: {
               await opts.app.cancelGuideStep({
                 guideId: gid,
                 ...(toNum(body.stepIndex) !== undefined ? { stepIndex: toNum(body.stepIndex) as number } : {}),
+              }),
+            );
+            return;
+          }
+          // M10-entry: 재분석 초안 요청. 202 즉시 반환, 백그라운드 완성.
+          // 읽기 전용 모드에서는 거부한다 (다른 쓰기 경로는 그대로).
+          if (req.method === "POST" && url.pathname === "/api/drafts") {
+            if (opts.readOnly === true) {
+              throw pfError("bad_request", "읽기 전용 모드에서는 초안을 만들 수 없습니다 (PROOF_READ_ONLY=1)");
+            }
+            const body = await readJsonBody(req, res);
+            if (body === null) return;
+            if (typeof body.procedure !== "string" || typeof body.request !== "string") {
+              err(res, 400, "procedure·request 필수");
+              return;
+            }
+            sendAccepted(
+              res,
+              await opts.app.requestRedraft({
+                procedure: body.procedure,
+                request: body.request,
               }),
             );
             return;

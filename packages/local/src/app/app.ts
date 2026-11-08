@@ -3433,6 +3433,36 @@ private hasCurrentApproval(
     /** M10-3-events: 지정 시 초안 준비 뒤 draft.ready 알림을 해당 세션에 남긴다. */
     sessionId?: string;
   }): Promise<RedraftResult> {
+    const target = await this.resolveRedraftTarget();
+    const result = await runRedraft({
+      procforgeDir: this.procforgeDir,
+      procedure: String(a.procedure),
+      request: String(a.request),
+      openCode: {
+        baseUrl: target.baseUrl,
+        ...(target.password !== undefined ? { password: target.password } : {}),
+        model: target.model,
+      },
+    });
+    if (typeof a.sessionId === "string" && a.sessionId.length > 0) {
+      await this.notifySessionEvent({
+        sessionId: a.sessionId,
+        method: "draft.ready",
+        summary: `draft ready ${result.draftId}`,
+      });
+    }
+    return result;
+  }
+
+  /**
+   * 재분석 OpenCode 연결 목표 (baseUrl·헤더·기본 모델).
+   * createRedraft와 requestRedraft(백그라운드)가 공유한다. 실패는 bad_request.
+   */
+  private async resolveRedraftTarget(): Promise<{
+    baseUrl: string;
+    password: string | undefined;
+    model: { providerID: string; modelID: string };
+  }> {
     const baseUrl = this.signal.baseUrl;
     if (!baseUrl) {
       throw pfError("bad_request", "OpenCode 서버 주소 없음 (PROOF_OPENCODE_URL)");
@@ -3458,20 +3488,110 @@ private hasCurrentApproval(
       // 조회 실패는 아래 기본 모델 없음 오류로 합친다
     }
     if (!model) throw pfError("bad_request", "OpenCode 기본 모델 없음 (서버 providers 확인)");
-    const result = await runRedraft({
-      procforgeDir: this.procforgeDir,
-      procedure: String(a.procedure),
-      request: String(a.request),
-      openCode: { baseUrl, ...(password ? { password } : {}), model },
-    });
-    if (typeof a.sessionId === "string" && a.sessionId.length > 0) {
-      await this.notifySessionEvent({
-        sessionId: a.sessionId,
-        method: "draft.ready",
-        summary: `draft ready ${result.draftId}`,
-      });
+    return { baseUrl, password, model };
+  }
+
+  /**
+   * M10-entry: 재분석 초안 요청 (202 즉시 반환, 백그라운드 완성).
+   * 파일 만들기 전 검증: URL 미설정·절차서 없음·request 빈 값은
+   * 여기서 거부한다 (bad_request·not_found — ERROR_CODE_LIST 범위).
+   * 완성은 백그라운드에서 runRedraft(draftId 이어쓰기)가 하며,
+   * ready면 sessionId 지정 시 draft.ready 알림을 남긴다.
+   */
+  async requestRedraft(a: {
+    procedure: string;
+    request: string;
+    sessionId?: string;
+  }): Promise<{ draftId: string; status: "pending" }> {
+    if (!this.signal.baseUrl) {
+      throw pfError("bad_request", "OpenCode 서버 주소 없음 (PROOF_OPENCODE_URL)");
     }
-    return result;
+    const procedure = String(a.procedure ?? "");
+    if (!/^[a-z0-9][a-z0-9-]{0,63}$/.test(procedure)) {
+      throw pfError("bad_request", `절차서 이름 오류: ${procedure}`);
+    }
+    try {
+      loadProcedureDoc(this.procforgeDir, procedure);
+    } catch {
+      throw pfError("not_found", `절차서 없음: ${procedure}`);
+    }
+    const request = String(a.request ?? "");
+    if (request.trim().length === 0) {
+      throw pfError("bad_request", "request가 비어 있음");
+    }
+    const sessionId =
+      typeof a.sessionId === "string" && a.sessionId.length > 0 ? a.sessionId : undefined;
+    const draftId = randomUUID();
+    const draftDir = join(this.procforgeDir, "drafts", draftId);
+    mkdirSync(draftDir, { recursive: true });
+    const procRaw = readFileSync(join(this.procforgeDir, "procedures", procedure, "procedure.json"), "utf8");
+    const pending: RedraftResult = {
+      draftId,
+      dir: draftDir,
+      procedure,
+      request,
+      sourceHash: createHash("sha256").update(procRaw, "utf8").digest("hex"),
+      openCodeSessionId: null,
+      status: "pending",
+      ops: [],
+      diff: [],
+      at: new Date().toISOString(),
+    };
+    writeFileSync(join(draftDir, "draft.json"), JSON.stringify(pending, null, 2));
+    // 백그라운드 완성 — 호출자는 기다리지 않는다. 실패는 failed로 남기고 재시도 없음.
+    void (async () => {
+      try {
+        const target = await this.resolveRedraftTarget();
+        const result = await runRedraft({
+          procforgeDir: this.procforgeDir,
+          procedure,
+          request,
+          openCode: {
+            baseUrl: target.baseUrl,
+            ...(target.password !== undefined ? { password: target.password } : {}),
+            model: target.model,
+          },
+          draftId,
+        });
+        if (result.status === "ready" && sessionId !== undefined) {
+          try {
+            await this.notifySessionEvent({
+              sessionId,
+              method: "draft.ready",
+              summary: `draft ready ${draftId}`,
+            });
+          } catch {
+            // 알림 실패는 초안 결과를 바꾸지 않는다
+          }
+        }
+      } catch (e) {
+        try {
+          const cur = JSON.parse(
+            readFileSync(join(draftDir, "draft.json"), "utf8"),
+          ) as Partial<RedraftResult>;
+          writeFileSync(
+            join(draftDir, "draft.json"),
+            JSON.stringify(
+              {
+                ...cur,
+                draftId,
+                procedure,
+                request,
+                status: "failed",
+                ops: [],
+                diff: [],
+                reason: `재분석 실패: ${e instanceof Error ? e.message : String(e)}`.slice(0, 200),
+              },
+              null,
+              2,
+            ),
+          );
+        } catch {
+          // 보관 실패는 무시 (pending이 그대로 남는다)
+        }
+      }
+    })();
+    return { draftId, status: "pending" };
   }
 
   /** M10-3-api: 재분석 초안 조회 (읽기 전용). draft.json 그대로 반환. */
