@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createServer, type Server } from "node:http";
+import { createServer, type Server, type ServerResponse } from "node:http";
 import { createLocalStack } from "../dist/core-inprocess.js";
 import { ProcForgeApp } from "../dist/app/app.js";
 import { createUiServer } from "../dist/app/ui-server.js";
@@ -29,7 +29,7 @@ export const CATALOG = [
 ];
 export const TOOL = { server: "fake-ppt", name: "echo" };
 
-export type FakeMode = "ok" | "plan" | "unknown-version";
+export type FakeMode = "ok" | "plan" | "unknown-version" | "redraft";
 
 type Part = Record<string, unknown>;
 
@@ -41,13 +41,28 @@ export type FakeOpenCode = {
   close: () => Promise<void>;
 };
 
-/** M7-0.1 / M7-1.1 실측형 가짜 서버. /event 는 404 → 폴링 폴백. */
-export async function startFakeOpenCode(mode: FakeMode): Promise<FakeOpenCode> {
+/** M7-0.1 / M7-1.1 실측형 가짜 서버. /event 는 404 → 폴링 폴백 (redraft 모드 제외). */
+export async function startFakeOpenCode(
+  mode: FakeMode,
+  redraft?: { responseText: string },
+): Promise<FakeOpenCode> {
   const parts = new Map<string, Part[]>();
   const requests: string[] = [];
   const sent: unknown[] = [];
   const push = (sid: string, p: Part) => {
     parts.set(sid, [...(parts.get(sid) ?? []), p]);
+  };
+  // M10-entry: redraft SSE 구독자들.
+  const sseClients: ServerResponse[] = [];
+  const sendRd = (payload: { type: string; properties: unknown }): void => {
+    const line = `data: ${JSON.stringify({ id: "evt-rd", type: payload.type, properties: payload.properties })}\n\n`;
+    for (const r of [...sseClients]) {
+      try {
+        r.write(line);
+      } catch {
+        // 끊긴 클라이언트 무시
+      }
+    }
   };
   const server: Server = createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", "http://x");
@@ -68,7 +83,7 @@ export async function startFakeOpenCode(mode: FakeMode): Promise<FakeOpenCode> {
       return;
     }
     const mMsg = /^\/session\/([^/]+)\/message$/.exec(url.pathname);
-    if (mMsg && req.method === "POST") {
+    if (mMsg && req.method === "POST" && mode !== "redraft") {
       let parsed: { parts?: unknown } = {};
       try {
         parsed = JSON.parse(body) as typeof parsed;
@@ -98,7 +113,7 @@ export async function startFakeOpenCode(mode: FakeMode): Promise<FakeOpenCode> {
       send(200, { data: { admittedSeq: 1 } });
       return;
     }
-    if (mMsg && req.method === "GET") {
+    if (mMsg && req.method === "GET" && mode !== "redraft") {
       send(200, { data: parts.get(mMsg[1]) ?? [] });
       return;
     }
@@ -111,6 +126,44 @@ export async function startFakeOpenCode(mode: FakeMode): Promise<FakeOpenCode> {
     if (req.method === "POST" && url.pathname.startsWith("/tui/")) {
       send(200, true);
       return;
+    }
+    // M10-entry: 재분석 플로우 전용 (redraft 모드에서만).
+    if (mode === "redraft") {
+      if (req.method === "GET" && url.pathname === "/config/providers") {
+        send(200, { default: { t: "m" }, providers: {} });
+        return;
+      }
+      if (req.method === "GET" && url.pathname === "/event") {
+        res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" });
+        res.write(`data: ${JSON.stringify({ id: "evt-0", type: "server.connected", properties: {} })}\n\n`);
+        sseClients.push(res);
+        req.on("close", () => {
+          try { res.end(); } catch { /* 무시 */ }
+          const ix = sseClients.indexOf(res);
+          if (ix >= 0) sseClients.splice(ix, 1);
+        });
+        return;
+      }
+      if (req.method === "POST" && url.pathname === "/session") {
+        send(200, { id: "ses-rd" });
+        return;
+      }
+      if (req.method === "POST" && url.pathname === "/session/ses-rd/prompt_async") {
+        res.writeHead(204);
+        res.end();
+        setTimeout(() => {
+          sendRd({ type: "session.status", properties: { sessionID: "ses-rd", status: { type: "busy" } } });
+          sendRd({ type: "session.idle", properties: { sessionID: "ses-rd" } });
+        }, 20);
+        return;
+      }
+      if (req.method !== "POST" && url.pathname === "/session/ses-rd/message") {
+        send(200, [
+          { info: { role: "user" }, parts: [] },
+          { info: { role: "assistant" }, parts: [{ type: "text", text: redraft?.responseText ?? '{"ops":[]}' }] },
+        ]);
+        return;
+      }
     }
     // SSE 는 쓰지 않는다 → 빠르게 폴링 폴백.
     send(404, { error: "nope" });
@@ -164,7 +217,7 @@ export async function restartUi(h: Harness): Promise<void> {
   });
 }
 
-export async function setup(opts: { fakeMode?: FakeMode } = {}): Promise<Harness> {
+export async function setup(opts: { fakeMode?: FakeMode; redraftText?: string } = {}): Promise<Harness> {
   const root = makeTmp("pf-e2e-");
   const pfdir = join(root, ".procforge");
   mkdirSync(pfdir, { recursive: true });
@@ -174,7 +227,7 @@ export async function setup(opts: { fakeMode?: FakeMode } = {}): Promise<Harness
     JSON.stringify({ mcp: { "fake-ppt": { type: "local", command: ["node", FAKE_MCP] } } }),
     "utf8",
   );
-  const fake = await startFakeOpenCode(opts.fakeMode ?? "ok");
+  const fake = await startFakeOpenCode(opts.fakeMode ?? "ok", { responseText: opts.redraftText ?? '{"ops":[]}' });
   const { client } = createLocalStack(pfdir);
   const app = new ProcForgeApp({
     core: client,

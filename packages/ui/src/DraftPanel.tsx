@@ -1,24 +1,24 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api, type DraftDetail } from "./api.js";
 
 // M10-3-ui: 재분석 diff 패널. draftId 입력 → 조회 →
 // op별 before/after + reason, accept(적용)/reject(폐기) 버튼.
-// 적용은 선택한 op 인덱스 배열로 POST한다. 폐기는 화면에서만 지운다.
+// M10-entry: initialDraftId가 오면(재분석 요청 완료) 자동으로 불러온다.
 
-export function DraftPanel() {
-  const [draftId, setDraftId] = useState("");
+export function DraftPanel({ initialDraftId }: { initialDraftId?: string }) {
+  const [draftId, setDraftId] = useState(initialDraftId ?? "");
   const [draft, setDraft] = useState<DraftDetail | null>(null);
   const [checked, setChecked] = useState<number[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const load = () => {
+  const load = (id: string) => {
     setError(null);
     setResult(null);
     void (async () => {
       try {
-        const d = await api.getDraft(draftId.trim());
+        const d = await api.getDraft(id.trim());
         setDraft(d);
         setChecked(d.ops.map((_, i) => i));
       } catch (e) {
@@ -27,6 +27,11 @@ export function DraftPanel() {
       }
     })();
   };
+
+  useEffect(() => {
+    if (initialDraftId) load(initialDraftId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialDraftId]);
 
   const toggle = (i: number) => {
     setChecked((prev) =>
@@ -71,7 +76,7 @@ export function DraftPanel() {
         aria-label="draftId"
       />
       <div>
-        <button className="btn" type="button" onClick={load}>
+        <button className="btn" type="button" onClick={() => load(draftId)}>
           초안 불러오기
         </button>
       </div>

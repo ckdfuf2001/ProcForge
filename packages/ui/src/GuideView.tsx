@@ -18,6 +18,7 @@ export function GuideView({ sessionId }: { sessionId: string }) {
   const [needsHuman, setNeedsHuman] = useState<string[]>([]);
   const [picked, setPicked] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [draftId, setDraftId] = useState("");
   const [live, setLive] = useState<"open" | "closed" | "error" | "connecting">(
     "connecting",
   );
@@ -60,8 +61,8 @@ export function GuideView({ sessionId }: { sessionId: string }) {
       <h3>노드 그래프</h3>
       <GraphView nodes={nodes} onPick={setPicked} />
       <div className="side-panels">
-        <MemoryPanel sessionId={sessionId} />
-        <DraftPanel />
+        <MemoryPanel sessionId={sessionId} onDraftReady={setDraftId} />
+        <DraftPanel key={draftId} initialDraftId={draftId || undefined} />
       </div>
       <GuideRunner />
       <RemainingList nodes={nodes} needsHuman={needsHuman} />

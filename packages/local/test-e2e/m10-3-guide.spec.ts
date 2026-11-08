@@ -169,6 +169,56 @@ test("③ diff 적용: 200 + 대상만 변경 + approvalReset + 재적용 409", 
   await expect(page.getByText(/절차서가 바뀜/)).toBeVisible({ timeout: 30000 });
 });
 
+test("⑤ 재분석 요청 → 대기 → 준비됨 → diff 표시", async ({ page }) => {
+  h = await setup({
+    fakeMode: "redraft",
+    redraftText: JSON.stringify({
+      ops: [{ op: "edit_goal", nodeId: "1.1", goal: "데이터 수집 (월간 확정)", reason: "범위 명확화" }],
+    }),
+  });
+  const sid = await seedTwoLeaves(h);
+  const procDir = join(h.pfdir, "procedures", "memo3");
+  mkdirSync(procDir, { recursive: true });
+  writeFileSync(
+    join(procDir, "procedure.json"),
+    JSON.stringify({
+      format: "procforge-procedure",
+      version: 1,
+      name: "memo3",
+      sourceSession: "s",
+      createdAt: new Date(0).toISOString(),
+      params: {},
+      toolCatalog: [],
+      tree: { rootId: "1", nodes: [] },
+      nodes: [
+        {
+          id: "1", parentId: null, goal: "월간보고서 완성", depth: 0, children: ["1.1"],
+          dependsOn: [], sideEffect: "none", constraints: [],
+        },
+        {
+          id: "1.1", parentId: "1", goal: "데이터 수집", depth: 1, children: [],
+          dependsOn: [], sideEffect: "none", constraints: [],
+        },
+      ],
+    }),
+  );
+
+  await openSession(page, sid);
+  await openGuideTab(page);
+  await expect(page).toHaveTitle("Proof");
+  await page.getByLabel("분석 검색").fill("수집");
+  await page.getByRole("button", { name: "메모리 불러오기", exact: true }).click();
+  await page.getByRole("button", { name: "memo3", exact: true }).click();
+  await page.getByLabel("재분석 요청문").fill("월간 합계 행 추가");
+  await page.getByRole("button", { name: "재분석 요청", exact: true }).click();
+  await expect(page.getByText(/초안 대기 중/)).toBeVisible({ timeout: 30000 });
+  await expect(page.getByText(/초안 준비됨/)).toBeVisible({ timeout: 60000 });
+  // diff가 보인다 (재분석 diff 패널: op·노드·사유).
+  await expect(page.getByText("memo3 · ready · 1건")).toBeVisible({ timeout: 30000 });
+  await expect(page.getByText("범위 명확화")).toBeVisible();
+  await expect(page).toHaveTitle("Proof");
+});
+
 test("④ 가이드 확인 후 실행 → 레인이 실제 이벤트로 바뀜", async ({ page }) => {
   h = await setup({ fakeMode: "ok" });
   const sid = await seedTwoLeaves(h);
