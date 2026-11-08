@@ -1193,13 +1193,25 @@ async function execNode(
     }
     // M5.8.2-3: 무인 live에서 script 노드도 승인 필요 (기본 요구).
     if (mode === "live" && opts.unattended) {
+      // M10-entry-fix 결함 2: commitApproval은 인자 키가 문자 그대로
+      // "script"일 때만 {file, snapshot}을 entry에 남기고, resolveArgs는
+      // script-kind를 소모한다. entry와 같은 키/파일을 넘겨 대칭을 맞춘다
+      // (그 외 키 flat/acc 등은 양쪽 다 없으므로 그대로 둔다).
+      // 내용 동일성은 approvalHash 핀(readScript 스냅샷 양측)이 보증한다.
+      const scriptSpec = (n.args as Record<string, unknown> | undefined)?.["script"] as
+        | { kind?: unknown; file?: unknown }
+        | undefined;
+      const gateArgs =
+        scriptSpec?.kind === "script" && typeof scriptSpec.file === "string"
+          ? { ...logicalArgs, script: { file: scriptSpec.file } }
+          : logicalArgs;
       const gate = requireUnattendedApproval(
         opts,
         byId,
         n,
         server,
         tool,
-        logicalArgs as Record<string, unknown>,
+        gateArgs as Record<string, unknown>,
         start,
         "script",
       );
