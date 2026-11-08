@@ -3014,7 +3014,7 @@ private hasCurrentApproval(
             `procforge approve ${procedure} --node ${id}로 갱신`,
         };
       }
-      // 인자 일치 (runner와 같은 matchApproval; 해석 불가 인자는 건너뛴다).
+      // 인자 일치 (runner 게이트와 같은 판정 함수 사용; 해석 불가 인자는 건너뛴다).
       let logical: Record<string, unknown> | undefined;
       try {
         logical = resolveArgs({
