@@ -50,7 +50,7 @@
 
 완료 선언
 - 완료 기준: GitHub Actions에서 ubuntu-latest·windows-latest × 양 모드가 모두 success.
-- dogfood 기록지에 나오는 사람 조작은 각각 HTTP 또는 UI 경로를 지나는 테스트가 1건 이상 있어야 사양을 닫는다.
+- dogfood 기록지에 나오는 사람 조작은 각각 HTTP·UI·MCP 중 하나의 경로를 지나는 테스트가 1건 이상 있어야 사양을 닫는다.
 - `api.github.com/repos/ckdfuf2001/ProcForge/actions/runs?head_sha=<푸시한 head>`로 head_sha가 일치하는 run의 `conclusion=success`를 확인한 뒤에만 완료를 선언한다. 중간 커밋에는 run이 없을 수 있으니 묶음의 마지막 head로 확인한다.
 - 8절의 커밋은 코드 head(기능·수정 마지막 커밋. 문서 후속 커밋 제외)를 적는다. 완료 선언은 최종 head의 CI success 확인으로 한다 (8절=코드 head, 최종 head CI success 확인).
 - 실패한 run이 있었으면 감추지 말고 "정정" 항목으로 원인과 해소 커밋을 보고한다.
