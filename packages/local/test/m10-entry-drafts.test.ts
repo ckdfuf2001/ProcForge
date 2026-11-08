@@ -318,6 +318,26 @@ describe("M10-entry POST /api/drafts", () => {
     expect(reread.status).toBe("failed");
   });
 
+  it("⑩ readOnly에서는 고아 pending 조회가 파일을 안 바꾼다", async () => {
+    const { client } = testStack(pfdir);
+    const roApp = new ProcForgeApp({
+      core: client,
+      procforgeDir: pfdir,
+      projectRoot: root,
+      readOnly: true,
+    });
+    const draftDir = join(pfdir, "drafts", "orphan-ro");
+    mkdirSync(draftDir, { recursive: true });
+    writeFileSync(
+      join(draftDir, "draft.json"),
+      JSON.stringify({ draftId: "orphan-ro", procedure: "memo", request: "req", sourceHash: "h", status: "pending", ops: [], diff: [], reason: "" }),
+    );
+    const d = await roApp.getDraft({ draftId: "orphan-ro" });
+    expect(d.status).toBe("failed");
+    const reread = JSON.parse(readFileSync(join(draftDir, "draft.json"), "utf8")) as { status: string };
+    expect(reread.status).toBe("pending");
+  });
+
   it("⑨ pending/failed 초안 적용 → conflict", async () => {
     await startSrv(true);
     writeProcDoc();

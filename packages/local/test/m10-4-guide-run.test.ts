@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdirSync, writeFileSync, readdirSync, existsSync } from "node:fs";
+import { mkdirSync, writeFileSync, readFileSync, readdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { ProcForgeApp } from "../src/app/app.js";
+import { listChildren } from "../src/app/run-control.js";
 import { testStack } from "./client-mode.js";
 import { makeTmp } from "@proof/shared/tmp.js";
 import { useTmpCleanup, settleRun } from "./tmp-hooks.js";
@@ -75,21 +76,8 @@ async function failingProcedure(name: string) {
     argSpecs: { script: { kind: "script", file: "fail.py", runtime: "python" } } as never,
   });
   await app.finalize({ sessionId: sid, name });
-  const { buildApprovalEntry: build, saveApproval: save } = await import(
-    "../src/services/approvals.js"
-  );
-  save(
-    join(pfdir, "procedures", name),
-    build(
-      {
-        id: "1.1", goal: "x",
-        tool: { server: "t", name: "echo" },
-        args: { script: { kind: "script", file: "fail.py", runtime: "python" } },
-        constraints: [],
-      },
-      [],
-    ),
-  );
+  // 실제 승인 경로로 시드 (게이트와 같은 해시 공식).
+  await app.approveProcedureNode({ procedure: name, nodeId: "1.1", allowWildcard: [] });
 }
 
 describe("M10-4 guide run", () => {
@@ -165,6 +153,8 @@ describe("M10-4 guide run", () => {
       argSpecs: { script: { kind: "script", file: "slow.py", runtime: "python" } } as never,
     });
     await app.finalize({ sessionId: sid, name: "g-slow" });
+    // 실제 승인 경로로 시드 (게이트 통과용).
+    await app.approveProcedureNode({ procedure: "g-slow", nodeId: "1.1", allowWildcard: [] });
     const g = await app.startGuide({ steps: [{ procedure: "g-slow", params: {} }] });
     const advancing = app.advanceGuide({ guideId: g.guideId, timeoutMs: 120000 });
     // 실행 중이 될 때까지 대기 후 취소.
@@ -210,6 +200,8 @@ describe("M10-4 guide run", () => {
       sideEffect: "external",
     });
     await app.finalize({ sessionId: sid, name });
+    // 실제 승인 경로로 시드 (게이트 통과용; 실행은 승인 대기로 멈춤).
+    await app.approveProcedureNode({ procedure: name, nodeId: "1.1", allowWildcard: [] });
   }
 
   function runDirCount(): number {
@@ -253,6 +245,8 @@ describe("M10-4 guide run", () => {
       argSpecs: { script: { kind: "script", file: "slow10.py", runtime: "python" } } as never,
     });
     await app.finalize({ sessionId: sid, name: "g-s10" });
+    // 실제 승인 경로로 시드 (게이트 통과용).
+    await app.approveProcedureNode({ procedure: "g-s10", nodeId: "1.1", allowWildcard: [] });
     const g = await app.startGuide({ steps: [{ procedure: "g-s10", params: {} }] });
     const r0 = await app.advanceGuide({ guideId: g.guideId, timeoutMs: 1000 });
     expect(r0.status).toBe("running");
@@ -260,5 +254,63 @@ describe("M10-4 guide run", () => {
     const r1 = await app.advanceGuide({ guideId: g.guideId, timeoutMs: 60000 });
     expect(r1.status).toBe("done");
     expect(r1.runId).toBe(r0.runId);
+  }, 120000);
+
+  async function staleProcedure(name: string): Promise<void> {
+    writeFileSync(join(root, "beacon.py"), "print('{\"ok\": true}')\n", "utf8");
+    const s = await app.start({ request: "stale", toolCatalog: CAT });
+    const sid = s.sessionId;
+    await app.split({
+      sessionId: sid, nodeId: "1",
+      reason: "M10-4 테스트용 분해 사유입니다.",
+      children: [{ goal: "신호 대기" }],
+      expectedRevision: 0,
+    } as never);
+    await app.report({
+      sessionId: sid, nodeId: "1.1", tool: TOOL,
+      args: {}, resultSummary: "ok", selfVerdict: "pass", selfReason: "ok",
+    });
+    await app.confirmLeaf({
+      sessionId: sid, nodeId: "1.1", tool: TOOL,
+      argSpecs: { script: { kind: "script", file: "beacon.py", runtime: "python" } } as never,
+    });
+    await app.finalize({ sessionId: sid, name });
+    // 승인 후 goal을 직접 바꿔 stale을 만든다.
+    await app.approveProcedureNode({ procedure: name, nodeId: "1.1", allowWildcard: [] });
+    const file = join(pfdir, "procedures", name, "procedure.json");
+    const doc = JSON.parse(readFileSync(file, "utf8")) as {
+      nodes: { id: string; goal?: string }[];
+    };
+    const target = doc.nodes.find((n) => n.id === "1.1");
+    if (!target) throw new Error("node 1.1 없음");
+    target.goal = `${target.goal ?? ""} v2`;
+    writeFileSync(file, JSON.stringify(doc, null, 2));
+  }
+
+  it("⑦ stale 단계는 failed, 자식 프로세스 0개", async () => {
+    await staleProcedure("g-stale");
+    const g = await app.startGuide({ steps: [{ procedure: "g-stale", params: {} }] });
+    const r0 = await app.advanceGuide({ guideId: g.guideId });
+    expect(r0.status).toBe("failed");
+    const info = await app.uiRunInfo({ runId: r0.runId });
+    expect(info.status).toBe("failed");
+    expect(info.failedDetail ?? "").toMatch(/승인 갱신 필요/);
+    expect(listChildren(pfdir, r0.runId)).toEqual([]);
+    const log = await app.uiRunLog({ runId: r0.runId });
+    // drive 미기동: 시작 1줄 + 실패 1줄만 있고 실행 라인은 없다.
+    expect(log.entries.length).toBe(2);
+    expect(log.entries[1].message).toContain("승인 갱신 필요");
+  }, 60000);
+
+  it("⑧ 재승인하면 같은 단계가 done", async () => {
+    await staleProcedure("g-restore");
+    const g = await app.startGuide({ steps: [{ procedure: "g-restore", params: {} }] });
+    const r0 = await app.advanceGuide({ guideId: g.guideId });
+    expect(r0.status).toBe("failed");
+    await app.approveProcedureNode({ procedure: "g-restore", nodeId: "1.1", allowWildcard: [] });
+    const r1 = await app.advanceGuide({ guideId: g.guideId });
+    expect(r1.status).toBe("done");
+    const file = await app.guideStatus({ guideId: g.guideId });
+    expect(file.state[0].status).toBe("done");
   }, 120000);
 });
