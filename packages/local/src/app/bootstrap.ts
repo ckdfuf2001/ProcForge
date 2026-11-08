@@ -12,6 +12,7 @@ export function createApp(opts: {
   strictSandbox?: boolean;
   maxArtifactBytes?: number;
   catalogTimeoutMs?: number;
+  readOnly?: boolean;
 }): { app: ProcForgeApp; client: CoreClient } {
   const { client } = createLocalStack(
     opts.procforgeDir,
@@ -25,6 +26,7 @@ export function createApp(opts: {
     strictSandbox: opts.strictSandbox,
     maxArtifactBytes: opts.maxArtifactBytes,
     catalogTimeoutMs: opts.catalogTimeoutMs,
+    ...(opts.readOnly === true ? { readOnly: true as const } : {}),
   });
   return { app, client };
 }

@@ -418,6 +418,16 @@ export async function createUiServer(opts: {
           err(res, 401, "unauthorized");
           return;
         }
+        // M10-entry-fix: 읽기 전용 모드 — GET/HEAD과 명시 허용 목록만 통과,
+        // 나머지 쓰기는 4xx로 거부한다.
+        // 허용: 전체 조회(GET/HEAD) + 미리보기(POST preview-edit, 읽기 전용).
+        const readOnlyWrite =
+          req.method !== "GET" &&
+          req.method !== "HEAD" &&
+          !/^\/api\/sessions\/[^/]+\/preview-edit$/.test(url.pathname);
+        if (opts.readOnly === true && readOnlyWrite) {
+          throw pfError("bad_request", "읽기 전용 모드에서는 변경할 수 없습니다 (PROOF_READ_ONLY=1)");
+        }
         if (req.method === "GET" && url.pathname === "/api/store") {
           send(res, await opts.app.storeInfo());
           return;
@@ -820,13 +830,10 @@ export async function createUiServer(opts: {
             );
             return;
           }
-          // M10-entry: 재분석 초안 요청. 202 즉시 반환, 백그라운드 완성.
-          // 읽기 전용 모드에서는 거부한다 (다른 쓰기 경로는 그대로).
-          if (req.method === "POST" && url.pathname === "/api/drafts") {
-            if (opts.readOnly === true) {
-              throw pfError("bad_request", "읽기 전용 모드에서는 초안을 만들 수 없습니다 (PROOF_READ_ONLY=1)");
-            }
-            const body = await readJsonBody(req, res);
+        // M10-entry: 재분석 초안 요청. 202 즉시 반환, 백그라운드 완성.
+        // (읽기 전용 거부는 위 공통 게이트에서 처리)
+        if (req.method === "POST" && url.pathname === "/api/drafts") {
+          const body = await readJsonBody(req, res);
             if (body === null) return;
             if (typeof body.procedure !== "string" || typeof body.request !== "string") {
               err(res, 400, "procedure·request 필수");

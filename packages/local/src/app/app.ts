@@ -109,6 +109,7 @@ import {
   scopeWarnings,
   toHashable,
 } from "../services/approvals.js";
+import { resolveArgs } from "../runner/resolve.js";
 import { copyImportFiles } from "../procedure.js";
 import {
   readGuide,
@@ -289,6 +290,11 @@ export type AppDeps = {  core: CoreClient;
    * swap 구간 잠금 보유를 결정적으로 확인하기 위한 훅이다 (1개만 허용).
    */
   onBeforeProcedureSwap?: (procedure: string) => void;
+  /**
+   * M10-entry-fix: 읽기 전용 모드. getDraft의 고아 확정을 파일에 쓰지 않고
+   * 메모리상의 failed 뷰만 돌려준다. ui-server의 POST /api/drafts 게이트와 한 쌍이다.
+   */
+  readOnly?: boolean;
 };
 
 /** M7-ui4-b/c: 신호 대상 (서버 설정에서만 온다) */
@@ -346,6 +352,7 @@ export class ProcForgeApp {
   private linkFetchImpl: typeof fetch | undefined;
   private onWaitingPersisted: AppDeps["onWaitingPersisted"];
   private onBeforeProcedureSwap: AppDeps["onBeforeProcedureSwap"];
+  private readonly readOnly: boolean;
   /** M7-ui4: UI 연결 id (호출 귀속 기록용. 연결마다 1개) */
   private readonly uiConnectionId = `ui-${randomUUID()}`;
   private readonly signal: SignalTarget;
@@ -398,6 +405,7 @@ export class ProcForgeApp {
     this.linkFetchImpl = deps.linkFetchImpl;
     this.onWaitingPersisted = deps.onWaitingPersisted;
     this.onBeforeProcedureSwap = deps.onBeforeProcedureSwap;
+    this.readOnly = deps.readOnly === true;
     // M7-ui4-b: 신호 대상은 여기서 한 번만 정한다.
     // M9-1-1: PROOF_OPENCODE_* 우선, PROCFORGE_OPENCODE_* 대체.
     const toolPrefix =
@@ -2923,6 +2931,126 @@ private hasCurrentApproval(
   }
 
   /**
+   * M10-entry-fix: 가이드 실행 전 승인 게이트 (runner requireUnattendedApproval과
+   * 같은 판정, 실행 없음). UI/guided 경로는 core change를 거치지 않으므로
+   * 여기서 막는다. 반환값이 있으면 {nodeId, detail}로 단계를 failed 처리한다.
+   * - 항목 없음 → denied 상당 ("승인 필요").
+   * - hash/approvalHash 불일치 → stale 상당 ("승인 갱신 필요").
+   * - 인자 불일치 → denied 상당. generated 등 해석 불가 인자는 건너뛴다
+   *   (실행 시점이 아니라서 prior 출력이 없음 — 다음 단계 판정으로 미룬다).
+   */
+  private async checkGuideApproval(
+    procedure: string,
+    sessionId: string,
+  ): Promise<{ nodeId: string; detail: string } | null> {
+    const procDir = join(this.procforgeDir, "procedures", procedure);
+    const approvals = loadApprovals(procDir);
+    const tree = await this.core.pfTree(sessionId);
+    const session = await this.core.getSession(sessionId);
+    const byId = new Map(tree.nodes.map((n) => [n.id, n]));
+    const hashable = toHashableMap(byId);
+    const readScript = (rel: string): string | undefined => {
+      try {
+        // approveProcedureNode와 같은 sandbox 읽기 (해시 공식 일치).
+        return readSandboxed(join(this.procforgeDir, "procedures", procedure), rel);
+      } catch {
+        return undefined;
+      }
+    };
+    let accumulate: ReturnType<typeof loadAccumulateFromProcedure> | undefined;
+    try {
+      accumulate = loadAccumulateFromProcedure(procDir);
+    } catch {
+      accumulate = undefined;
+    }
+    for (const id of [...byId.keys()].sort()) {
+      const n = byId.get(id);
+      if (!n) continue;
+      const tool = n.tool as { server: string; name: string } | undefined;
+      if (!tool) continue;
+      const args = (n.args ?? {}) as Record<string, { kind?: unknown }>;
+      const isExternal = n.sideEffect === "external";
+      const hasScript = Object.values(args).some(
+        (a) => typeof a === "object" && a !== null && (a as { kind?: unknown }).kind === "script",
+      );
+      if (!isExternal && !hasScript) continue;
+      const mine = approvals.filter((e) => e.node.id === id);
+      if (mine.length === 0) {
+        return {
+          nodeId: id,
+          detail:
+            `approval: 무인 실행 미승인 (script/external ${tool.server}/${tool.name}) — ` +
+            `procedures/${procedure}/approvals.json에 tool·인자 등록 필요`,
+        };
+      }
+      const parent = n.parentId ? byId.get(n.parentId) : undefined;
+      const pins = approvalPins(
+        n,
+        parent && ((parent as { kind?: string }).kind === "map" || (parent as { kind?: string }).kind === "until")
+          ? {
+              id: parent.id,
+              hash: parent.hash,
+              kind: (parent as { kind?: string }).kind,
+            }
+          : undefined,
+        hashable,
+        readScript,
+        accumulate,
+      );
+      if (
+        mine.some((e) =>
+          pins.some(
+            (p) =>
+              p.id === e.node.id &&
+              (p.hash !== e.node.hash ||
+                (e.approvalHash !== undefined && e.approvalHash !== p.approvalHash)),
+          ),
+        )
+      ) {
+        return {
+          nodeId: id,
+          detail:
+            `approval: 승인 갱신 필요 (노드 ${id} 해시 변경). ` +
+            `procforge approve ${procedure} --node ${id}로 갱신`,
+        };
+      }
+      // 인자 일치 (runner와 같은 matchApproval; 해석 불가 인자는 건너뛴다).
+      let logical: Record<string, unknown> | undefined;
+      try {
+        logical = resolveArgs({
+          specs: args as never,
+          params: (session.params ?? {}) as Record<string, string>,
+          outputs: new Map(),
+          attempts: ((n as { attempts?: unknown[] }).attempts ?? []) as never,
+          goldenAttemptId: (n as { golden?: { attemptId?: string } }).golden?.attemptId,
+          live: true,
+          supplied: {},
+          topo: {
+            isSplit: (x: string) => byId.get(x)?.status === "split",
+            childrenOf: (x: string) => byId.get(x)?.children ?? [],
+          },
+        }) as Record<string, unknown>;
+      } catch {
+        logical = undefined;
+      }
+      if (logical !== undefined) {
+        const ok = mine.some((e) =>
+          checkApproval([e], pins, tool.server, tool.name, logical as Record<string, unknown>),
+        );
+        if (!ok) {
+          return {
+            nodeId: id,
+            detail:
+              `approval: 무인 실행 미승인 (${tool.server}/${tool.name}) — ` +
+              `procedures/${procedure}/approvals.json에 tool·인자 등록 필요`,
+          };
+        }
+      }
+    }
+    return null;
+  }
+
+  /**
    * M10-4: 사람 확인 후 다음 단계 실행. 완료 단계는 건너뛴다.
    * M10-4-fix-resume: running/waiting 단계는 기존 runId로 폴링만 한다
    * (새 run 금지). pending/failed/cancelled만 새 run을 시작한다.
@@ -2974,6 +3102,39 @@ private hasCurrentApproval(
       procedure: step.procedure,
       params: step.params,
     });
+    // M10-entry-fix: 가이드도 runner와 같은 승인 게이트를 지난다.
+    // 불일치면 실행 없이 failed (drive 미기동 = 자식 프로세스 0개).
+    const gate = await this.checkGuideApproval(step.procedure, started.sessionId);
+    if (gate !== null) {
+      try {
+        const st = readRunState(this.procforgeDir, started.runId) as RunState | undefined;
+        if (st) {
+          writeRunState(this.procforgeDir, {
+            ...st,
+            status: "failed",
+            failedNodeId: gate.nodeId,
+            failedDetail: gate.detail,
+            updatedAt: new Date().toISOString(),
+          });
+        }
+      } catch {
+        // 상태 기록 실패는 무시 (아래 guide 기록이 진실)
+      }
+      appendRunLog(this.procforgeDir, started.runId, {
+        level: "error",
+        message: `${gate.detail} (phase:failed)`,
+        nodeId: gate.nodeId,
+      });
+      this.releaseRun(step.procedure, started.runId);
+      guide.state[idx] = {
+        status: "failed",
+        runId: started.runId,
+        sessionId: started.sessionId,
+        updatedAt: new Date().toISOString(),
+      };
+      writeGuide(this.procforgeDir, touchGuide(guide));
+      return { guideId, stepIndex: idx, status: "failed", runId: started.runId };
+    }
     guide.state[idx] = {
       status: "running",
       runId: started.runId,
@@ -3576,8 +3737,8 @@ private hasCurrentApproval(
           }
         }
       } catch (e) {
-        // M10-entry-fix: 진행 중 집합에서 뺀다 (실패 기록 뒤에도 고아로 안 남는다).
-        this.inflightRedrafts.delete(draftId);
+        // M10-entry-fix: 실패를 먼저 기록하고 집합에서 뺀다.
+        // 반대 순서면 그 사이 getDraft가 "프로세스 재시작으로 중단"으로 잘못 덮는다.
         try {
           const cur = JSON.parse(
             readFileSync(join(draftDir, "draft.json"), "utf8"),
@@ -3602,6 +3763,7 @@ private hasCurrentApproval(
         } catch {
           // 보관 실패는 무시 (pending이 그대로 남는다)
         }
+        this.inflightRedrafts.delete(draftId);
       }
     })();
     return { draftId, status: "pending" };
@@ -3638,7 +3800,8 @@ private hasCurrentApproval(
       throw pfError("bad_request", `draft.json 형식 오류: ${id}`);
     }
     // M10-entry-fix: 진행 중 집합에 없는 pending은 고아다 (프로세스 재시작으로
-    // 백그라운드가 사라짐). failed로 원자 기록하고 그 상태를 돌려준다.
+    // 백그라운드가 사라짐). 읽기 전용이 아니면 failed로 원자 기록하고 그 상태를 돌려준다.
+    // 읽기 전용이면 파일은 그대로 두고 메모리상의 failed 뷰만 돌려준다.
     // UI 폴링은 "대기 중"에서 멈추지 않고 실패를 본다.
     if (d.status === "pending" && !this.inflightRedrafts.has(id)) {
       const failed = {
@@ -3648,7 +3811,9 @@ private hasCurrentApproval(
         diff: [],
         reason: "프로세스 재시작으로 중단",
       } as unknown as RedraftResult;
-      writeFileAtomic(file, JSON.stringify(failed, null, 2));
+      if (!this.readOnly) {
+        writeFileAtomic(file, JSON.stringify(failed, null, 2));
+      }
       return failed;
     }
     return parsed as RedraftResult;
@@ -3678,7 +3843,8 @@ private hasCurrentApproval(
     procedure: string;
     applied: { nodeId: string; kind: string }[];
     /** 바뀐 노드 id (정렬·중복 제거) */
-    changedNodes: string[];    /**
+    changedNodes: string[];
+    /**
      * 승인이 풀린 노드 (다음 실행 때 승인 필요).
      * goal/arg-kind 적용 + 승인 대상(external·script) + approvals.json에 기존 항목.
      * why-kind는 승인 해시에 안 들어가므로 제외.

@@ -296,10 +296,11 @@ async function cmdUi(): Promise<number> {
     return 2;
   }
   try {
-    const { app } = createApp({ procforgeDir, projectRoot });
-    // M10-entry: 읽기 전용 모드에서는 POST /api/drafts를 거부한다 (MCP와 같은 키).
+    // M10-entry-fix: 읽기 전용 모드에서는 POST /api/drafts를 거부하고
+    // getDraft의 고아 확정도 파일에 쓰지 않는다 (MCP와 같은 키).
     const readOnly =
       readEnvPair(process.env as Record<string, string | undefined>, "PROOF_READ_ONLY", "PROCFORGE_READ_ONLY") === "1";
+    const { app } = createApp({ procforgeDir, projectRoot, ...(readOnly ? { readOnly: true as const } : {}) });
     const srv = await createUiServer({ app, port, ...(readOnly ? { readOnly: true as const } : {}) });
     // M8-1-close2 b: 신호 감시 결과 → SSE signal 배지.
     app.setSignalNotifier((sid, payload) => srv.pushSignal(sid, payload));

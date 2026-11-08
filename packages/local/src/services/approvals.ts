@@ -393,7 +393,34 @@ export function matchApproval(
 ): boolean {
   if (entry.tool.server !== server || entry.tool.name !== name) return false;
   if (entry.args === undefined) return true;
-  return matchValue(entry.args, args);
+  // M10-entry-fix: script 승인 패턴 {file, snapshot?}과 실행 시 파일 경로
+  // 문자열을 같은 모양({file})으로 보고 비교한다. 내용은 approvalHash
+  // (readScript 기반)가 따로 보증하므로 여기서 snapshot 유무는 무시한다.
+  return matchValue(normalizeScriptValue(entry.args), normalizeScriptValue(args));
+}
+
+/**
+ * script 값 정규화 (비교용). {file, snapshot?} → {file}.
+ * 그 외 모양·$any/$prefix는 그대로 둔다 (양쪽에 똑같이 적용되므로
+ * 기존 판정은 바뀌지 않는다).
+ */
+function normalizeScriptValue(v: unknown): unknown {
+  if (Array.isArray(v)) return v.map(normalizeScriptValue);
+  if (typeof v === "object" && v !== null) {
+    const o = v as Record<string, unknown>;
+    const keys = Object.keys(o);
+    if (
+      typeof o.file === "string" &&
+      keys.length > 0 &&
+      keys.every((k) => k === "file" || k === "snapshot")
+    ) {
+      return { file: o.file };
+    }
+    const out: Record<string, unknown> = {};
+    for (const k of keys) out[k] = normalizeScriptValue(o[k]);
+    return out;
+  }
+  return v;
 }
 
 // M5.5-4.3-4: pin 없는 isApproved 삭제 (node pin 없는 매칭 금지).

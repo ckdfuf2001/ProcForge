@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, type SimilarProcedure } from "./api.js";
+import { pollDraftStatus } from "./draftPoll.js";
 
 // M10-3-ui: 불러온 메모리 패널. similarProcedures 상위 N건
 // (이름·최종 실행 상태·metrics 요약). 클릭하면 해당 절차서를 불러와
@@ -23,9 +24,18 @@ export function MemoryPanel({
     | { kind: "waiting"; draftId: string }
     | { kind: "ready"; draftId: string }
     | { kind: "failed"; message: string }
+    | { kind: "timeout"; draftId: string }
   >({ kind: "idle" });
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // M10-entry-fix: 언마운트 시 폴링 중단 (끊긴 setState 방지).
+  const aliveRef = useRef(true);
+  useEffect(() => {
+    aliveRef.current = true;
+    return () => {
+      aliveRef.current = false;
+    };
+  }, []);
 
   const search = () => {
     setBusy(true);
@@ -57,31 +67,30 @@ export function MemoryPanel({
       try {
         // M10-entry-fix: sessionId를 함께 보내 draft.ready 알림이 남게 한다.
         const r = await api.requestRedraft(picked.name, req, sessionId);
+        if (!aliveRef.current) return;
         setRedraftState({ kind: "waiting", draftId: r.draftId });
-        // 준비될 때까지 폴링 (대기 → 준비됨/실패).
-        for (let i = 0; i < 150; i++) {
-          await new Promise((rr) => setTimeout(rr, 2000));
+        // 준비될 때까지 폴링 (대기 → 준비됨/실패/타임아웃). 150회를 넘기면 경고.
+        const out = await pollDraftStatus((id) => api.getDraft(id), r.draftId, {
+          isAlive: () => aliveRef.current,
+        });
+        if (!aliveRef.current) return;
+        if (out.done && out.status === "ready") {
+          setRedraftState({ kind: "ready", draftId: r.draftId });
+          onDraftReady(r.draftId);
+        } else if (out.done) {
           const d = await api.getDraft(r.draftId);
-          if (d.status === "ready") {
-            setRedraftState({ kind: "ready", draftId: r.draftId });
-            onDraftReady(r.draftId);
-            break;
-          }
-          if (d.status === "failed" || d.status === "rejected") {
-            setRedraftState({
-              kind: "failed",
-              message: `실패: ${d.reason || d.status}`,
-            });
-            break;
-          }
+          setRedraftState({ kind: "failed", message: `실패: ${d.reason || d.status}` });
+        } else if (out.reason === "timeout") {
+          setRedraftState({ kind: "timeout", draftId: r.draftId });
         }
       } catch (e) {
+        if (!aliveRef.current) return;
         setRedraftState({
           kind: "failed",
           message: e instanceof Error ? e.message : String(e),
         });
       } finally {
-        setBusy(false);
+        if (aliveRef.current) setBusy(false);
       }
     })();
   };
@@ -143,9 +152,12 @@ export function MemoryPanel({
           {redraftState.kind === "waiting" && (
             <p role="status">초안 대기 중: {redraftState.draftId}</p>
           )}
-          {redraftState.kind === "ready" && (
-            <p role="status">초안 준비됨: {redraftState.draftId} (diff 패널에 표시됨)</p>
-          )}
+        {redraftState.kind === "ready" && (
+          <p role="status">초안 준비됨: {redraftState.draftId} (diff 패널에 표시됨)</p>
+        )}
+        {redraftState.kind === "timeout" && (
+          <p role="alert">시간 초과: 초안이 아직 준비 중입니다 ({redraftState.draftId}). 잠시 후 초안 불러오기로 직접 확인해 주세요.</p>
+        )}
           {redraftState.kind === "failed" && (
             <p role="alert">{redraftState.message}</p>
           )}
