@@ -234,6 +234,18 @@ export function collectScripts(
   return doc;
 }
 
+/**
+ * M11-sidecar: 재finalize 시 보존 목록 (M9-3 교훈 저장소: history/, lessons.md 포함).
+ * 파일은 그대로, 디렉터리는 통째로 복사한다. 여기에 없는 것은 swap 때 사라진다.
+ */
+const SIDECAR_KEEP: { rel: string; dir: boolean }[] = [
+  { rel: "state.json", dir: false },
+  { rel: "approvals.json", dir: false },
+  { rel: "lessons.md", dir: false },
+  { rel: "approved", dir: true },
+  { rel: "history", dir: true },
+];
+
 export function writeProcedure(input: {
   procforgeDir: string;
   projectRoot?: string;
@@ -314,22 +326,18 @@ export function writeProcedure(input: {
   // M9-2-1: 재finalize 시 sidecar 보존. 잠금은 procedures/.locks/에 있어
   // swap 대상이 아니므로 건드리지 않는다 (M10-lock).
   // 복사 실패는 조용히 넘기지 않고 finalize 실패로 올린다 (상태 유실 방지).
-  for (const rel of ["state.json", "approvals.json"]) {
+  // M11-sidecar: history/ + lessons.md (M9-3 교훈 저장소)도 보존한다.
+  for (const { rel, dir: isDir } of SIDECAR_KEEP) {
     const src = join(dir, rel);
     if (!existsSync(src)) continue;
     try {
-      copyFileSync(src, join(buildDir, rel));
-      files.push(rel);
+      if (isDir) copyTreeInto(src, join(buildDir, rel), rel, files);
+      else {
+        copyFileSync(src, join(buildDir, rel));
+        files.push(rel);
+      }
     } catch (e) {
       throw codedFs(e, `절차서 상태 보존 실패(${rel})`);
-    }
-  }
-  const approvedSrc = join(dir, "approved");
-  if (existsSync(approvedSrc)) {
-    try {
-      copyTreeInto(approvedSrc, join(buildDir, "approved"), "approved", files);
-    } catch (e) {
-      throw codedFs(e, "절차서 승인본 보존 실패(approved/)");
     }
   }
   // M4.1-5: tmp에 빌드 후 원자 교체 (실패 시 tmp 정리)
