@@ -42,7 +42,28 @@ export function parseRedraftModelEnv(
 
 /** M10-model: 기동 시 1회 검증 (env 확정값 사용). */
 export function assertRedraftModelEnv(env: NodeJS.ProcessEnv = process.env): void {
-  parseRedraftModelEnv(env[REDRAFT_MODEL_ENV]);
+  parseRedraftModelEnv(env[PROOF_REDRAFT_MODEL]);
+}
+
+/**
+ * M10-model-fix: providers 목록에서 모델 존재 확인 (단일 장치).
+ * 실서버 형식(`providers: [{id, models}]` 배열)만 받는다.
+ * 존재 검사와 default 대체 경로가 모두 이 함수만 쓴다.
+ */
+export function findProviderModel(
+  j: unknown,
+  providerID: string,
+  modelID: string,
+): boolean {
+  if (!j || typeof j !== "object") return false;
+  const providers = (j as { providers?: unknown }).providers;
+  if (!Array.isArray(providers)) return false;
+  const prov = providers.find(
+    (p): p is { id?: unknown; models?: Record<string, unknown> } =>
+      !!p && typeof p === "object" && (p as { id?: unknown }).id === providerID,
+  );
+  if (!prov) return false;
+  return Object.prototype.hasOwnProperty.call(prov.models ?? {}, modelID);
 }
 
 /** M10-2-fix: 프롬프트 상한 (노드 목록 포함). 넘기면 failed. */

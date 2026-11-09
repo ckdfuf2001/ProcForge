@@ -150,6 +150,7 @@ import {
   runRedraft,
   openCodeAuthHeaders,
   parseRedraftModelEnv,
+  findProviderModel,
   PROOF_REDRAFT_MODEL,
   type RedraftResult,
   type RedraftModelSource,
@@ -3643,46 +3644,45 @@ private hasCurrentApproval(
     }
     const password = process.env.OPENCODE_SERVER_PASSWORD;
     const headers = openCodeAuthHeaders(password);
-    // M10-model: env 지정이면 존재 확인, 미설정이면 첫 default.
+    // M10-model-fix: env 지정이면 존재 확인, 미설정이면 첫 default.
+    // 존재 검사와 default 대체 경로 모두 findProviderModel 하나만 쓴다 (배열 전용).
     const envRaw = process.env[PROOF_REDRAFT_MODEL];
     const wanted = parseRedraftModelEnv(envRaw);
-    let providers: Record<string, { models?: Record<string, unknown> }> | undefined;
-    let firstDefault: [string, string] | undefined;
+    let j: { default?: Record<string, string>; providers?: unknown } | undefined;
     try {
       const r = await fetch(`${baseUrl.replace(/\/$/, "")}/config/providers`, { headers });
-      const j = (await r.json()) as {
-        default?: Record<string, string>;
-        providers?: Record<string, { models?: Record<string, unknown> }>;
-      };
-      providers = j && typeof j === "object" ? j.providers : undefined;
-      const fd = j && typeof j === "object" ? Object.entries(j.default ?? {})[0] : undefined;
-      if (fd) firstDefault = [fd[0], String(fd[1])];
-    } catch {
-      // 조회 실패는 아래 기본 모델 없음 오류로 합친다
+      if (!r.ok) {
+        throw pfError("bad_request", `OpenCode 모델 목록 조회 실패: HTTP ${r.status}`);
+      }
+      j = (await r.json()) as { default?: Record<string, string>; providers?: unknown };
+    } catch (e) {
+      if ((e as { code?: unknown } | null)?.code === "bad_request") throw e;
+      throw pfError(
+        "bad_request",
+        `OpenCode 모델 목록 조회 실패: ${e instanceof Error ? e.message : String(e)}`,
+      );
     }
     if (wanted) {
-      const hit = providers?.[wanted.providerID]?.models?.[wanted.modelID] !== undefined;
-      if (!hit) {
-        throw pfError("bad_request", `모델 없음: ${envRaw} (${PROOF_REDRAFT_MODEL})`);
+      // "모델 없음"은 목록을 실제로 받아왔는데 해당 모델이 없을 때만 쓴다.
+      if (!findProviderModel(j, wanted.providerID, wanted.modelID)) {
+        throw pfError("bad_request", `모델 없음: ${envRaw} (PROOF_REDRAFT_MODEL)`);
       }
       return { baseUrl, password, model: wanted, source: "env" };
     }
-    if (firstDefault) {
-      return {
-        baseUrl,
-        password,
-        model: { providerID: firstDefault[0], modelID: firstDefault[1] },
-        source: "default",
-      };
+    const defEntries = j && typeof j === "object" ? Object.entries(j.default ?? {}) : [];
+    for (const [pid, mid] of defEntries) {
+      if (typeof mid === "string" && findProviderModel(j, pid, mid)) {
+        return { baseUrl, password, model: { providerID: pid, modelID: mid }, source: "default" };
+      }
     }
-    if (providers) {
-      const firstProv = Object.entries(providers)[0];
-      const firstModel = firstProv ? Object.keys(firstProv[1].models ?? {})[0] : undefined;
-      if (firstProv && firstModel) {
+    if (Array.isArray(j?.providers)) {
+      const firstProv = (j.providers as { id?: unknown; models?: Record<string, unknown> }[])[0];
+      const firstModel = firstProv ? Object.keys(firstProv.models ?? {})[0] : undefined;
+      if (firstProv && typeof firstProv.id === "string" && firstModel) {
         return {
           baseUrl,
           password,
-          model: { providerID: firstProv[0], modelID: firstModel },
+          model: { providerID: firstProv.id, modelID: firstModel },
           source: "default",
         };
       }

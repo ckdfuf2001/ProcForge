@@ -4,6 +4,7 @@ import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { ProcForgeApp } from "../src/app/app.js";
+import { createUiServer, type UiServer } from "../src/app/ui-server.js";
 import { runRedraft } from "../src/services/redraft.js";
 import { testStack } from "./client-mode.js";
 import { makeTmp } from "@proof/shared/tmp.js";
@@ -30,7 +31,7 @@ const DOC = {
   ],
 };
 
-type FakeMode = { responseText: string; hang?: boolean };
+type FakeMode = { responseText: string; hang?: boolean; providersStatus?: number };
 
 let server: Server | null = null;
 let baseUrl = "";
@@ -63,11 +64,16 @@ function readBody(req: IncomingMessage): Promise<string> {
 async function startFake(): Promise<string> {
   server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     const body = await readBody(req);
-    if (req.url === "/config/providers" && req.method === "GET") {
+    if (req.url === "/config/providers") {
+      if (mode.providersStatus !== undefined && mode.providersStatus !== 200) {
+        res.writeHead(mode.providersStatus, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: "down" }));
+        return;
+      }
       res.writeHead(200, { "content-type": "application/json" });
       res.end(JSON.stringify({
         default: { t: "m" },
-        providers: { t: { models: { m: {}, other: {} } }, u: { models: { x: {} } } },
+        providers: [{ id: "t", models: { m: {}, other: {} } }, { id: "u", models: { x: {} } }],
       }));
       return;
     }
@@ -233,4 +239,42 @@ describe("M10-model PROOF_REDRAFT_MODEL (가짜 OpenCode)", () => {
     expect(r.status).not.toBe(0);
     expect(String(r.stderr)).toContain("PROOF_REDRAFT_MODEL");
   }, 120000);
+
+  it("⑥ POST /api/drafts: 없는 모델이면 400, prompt_async 0회, drafts/ 그대로", async () => {
+    baseUrl = await startFake();
+    process.env.PROOF_OPENCODE_URL = baseUrl;
+    process.env.PROOF_REDRAFT_MODEL = "t/nope";
+    const app = makeApp();
+    const srv: UiServer = await createUiServer({ app, staticDir: makeTmp("pf-m10mdl-ui-") });
+    try {
+      const before = draftsCount();
+      const r = await fetch(`${srv.url}/api/drafts`, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-procforge-token": srv.token },
+        body: JSON.stringify({ procedure: "m10-md", request: "표에 합계 행 추가" }),
+      });
+      expect(r.status).toBe(400);
+      expect(JSON.stringify(await r.json())).toContain("모델 없음: t/nope (PROOF_REDRAFT_MODEL)");
+      expect(promptCount).toBe(0);
+      expect(draftsCount()).toBe(before);
+    } finally {
+      await srv.close();
+    }
+  }, 60000);
+
+  it("⑦ providers 500이면 조회 실패 문구 (모델 없음 아님)", async () => {
+    baseUrl = await startFake();
+    mode.providersStatus = 500;
+    process.env.PROOF_OPENCODE_URL = baseUrl;
+    process.env.PROOF_REDRAFT_MODEL = "t/m";
+    const app = makeApp();
+    let message = "";
+    try {
+      await app.createRedraft({ procedure: "m10-md", request: "표에 합계 행 추가" });
+    } catch (e) {
+      message = e instanceof Error ? e.message : String(e);
+    }
+    expect(message).toContain("조회 실패");
+    expect(message).not.toContain("모델 없음");
+  }, 60000);
 });

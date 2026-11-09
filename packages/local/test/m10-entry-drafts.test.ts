@@ -66,7 +66,7 @@ async function startFake(): Promise<string> {
     }
     if (req.url === "/config/providers") {
       res.writeHead(200, { "content-type": "application/json" });
-      res.end(JSON.stringify({ default: { t: "m" }, providers: {} }));
+      res.end(JSON.stringify({ default: { t: "m" }, providers: [{ id: "t", models: { m: {} } }] }));
       return;
     }
     if (req.url === "/session" && req.method === "POST") {

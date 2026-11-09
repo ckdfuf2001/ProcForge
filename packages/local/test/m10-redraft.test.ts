@@ -82,6 +82,11 @@ async function startFake(): Promise<string> {
   server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     const body = await readBody(req);
     requests.push({ method: req.method, url: req.url, body });
+    if (req.url === "/config/providers") {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ default: { t: "m" }, providers: [{ id: "t", models: { m: {} } }] }));
+      return;
+    }
     if (req.url === "/event") {
       res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" });
       sseClients.push(res);
