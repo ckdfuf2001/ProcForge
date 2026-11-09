@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { copyFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { writeFileAtomic } from "./procedureWriter.js";
+import { acquireDraftLock } from "./draft-lock.js";
 import { join } from "node:path";
 import { pfError } from "@proof/shared/errors.js";
 
@@ -322,6 +323,10 @@ export async function runRedraft(input: {
   const draftId = input.draftId ?? randomUUID();
   const draftDir = join(input.procforgeDir, "drafts", draftId);
   mkdirSync(draftDir, { recursive: true });
+  // M11-draft-lock: 실행 내내 drafts/<id>.lock을 잡는다 (멀티프로세스 고아 오판 방지).
+  // 모든 종료 경로는 save()를 거치므로 거기서 푼다. 선행 throw 3종(주소·절차서 없음·파싱
+  // 실패)은 잠금을 잡기 전이라 정리할 것이 없다.
+  const releaseDraftLock = acquireDraftLock(input.procforgeDir, draftId);
   // 원본 복사 (바이트 동일 — 무손상 증명용).
   copyFileSync(srcFile, join(draftDir, "procedure.json"));
   const sourceHash = createHash("sha256").update(raw, "utf8").digest("hex");
@@ -340,6 +345,12 @@ export async function runRedraft(input: {
     at: new Date().toISOString(),
   };
   const save = (r: RedraftResult): RedraftResult => {
+    // M11-draft-lock: 모든 종료 경로는 save를 거치므로 여기서 잠금을 푼다.
+    try {
+      releaseDraftLock();
+    } catch {
+      // 무시 (이미 풀렸거나 없음)
+    }
     // M10-entry-fix: UI가 2초마다 읽으므로 원자 쓰기 (반쯤 쓴 파일 파싱 실패 방지).
     writeFileAtomic(join(draftDir, "draft.json"), JSON.stringify(r, null, 2));
     return r;

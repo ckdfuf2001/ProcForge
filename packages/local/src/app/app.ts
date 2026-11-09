@@ -110,6 +110,7 @@ import {
   scopeWarnings,
   toHashable,
 } from "../services/approvals.js";
+import { isDraftLockAlive } from "../services/draft-lock.js";
 import { resolveArgs } from "../runner/resolve.js";
 import { copyImportFiles } from "../procedure.js";
 import {
@@ -3836,11 +3837,15 @@ private hasCurrentApproval(
     ) {
       throw pfError("bad_request", `draft.json 형식 오류: ${id}`);
     }
-    // M10-entry-fix: 진행 중 집합에 없는 pending은 고아다 (프로세스 재시작으로
-    // 백그라운드가 사라짐). 읽기 전용이 아니면 failed로 원자 기록하고 그 상태를 돌려준다.
-    // 읽기 전용이면 파일은 그대로 두고 메모리상의 failed 뷰만 돌려준다.
-    // UI 폴링은 "대기 중"에서 멈추지 않고 실패를 본다.
+    // M11-draft-lock: pending 판정 3단계. 1) 메모리에 있으면 진행 중.
+    // 2) 메모리에 없어도 잠금이 살아 있으면 다른 프로세스가 진행 중이니
+    // 덮어쓰지 않고 pending을 그대로 돌려준다.
+    // 3) 잠금이 없거나 stale이면 고아로 보고 failed로 기록한다.
+    // (읽기 전용이면 파일은 그대로 두고 메모리상의 failed 뷰만 돌려준다.)
     if (d.status === "pending" && !this.inflightRedrafts.has(id)) {
+      if (isDraftLockAlive(this.procforgeDir, id)) {
+        return parsed as RedraftResult;
+      }
       const failed = {
         ...(parsed as Record<string, unknown>),
         status: "failed",

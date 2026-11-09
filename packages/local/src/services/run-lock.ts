@@ -27,12 +27,14 @@ export function legacyProcRunLockPath(
  * 살아 있는 pid·fresh면 conflict, stale이면 삭제만 하고 새로 만들지 않는다
  * (다음 finalize 때 .old로 쓸려 나가는 동작 방지, M10-lock-legacy).
  */
+export const PROC_RUN_LOCK_STALE_MS = 60000;
+
 export function acquireProcRunLock(
   store: FileStore,
   procforgeDir: string,
   name: string,
   conflictMessage: string,
-  staleMs = 60000,
+  staleMs = PROC_RUN_LOCK_STALE_MS,
 ): () => void {
   const releaseNew = store.acquireFileLock(
     procRunLockPath(procforgeDir, name),
