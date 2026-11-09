@@ -45,6 +45,8 @@ OpenCode를 serve 모드로 띄운다: `opencode serve --port 4096`.
 재분석 모델은 서버 default로 고정된다
 (제품이 `/config/providers` 첫 default를 그대로 쓴다.
 프로젝트 `model` 지정은 무시된다).
+첫 항목이 부팅마다 바뀔 수 있으므로, 재분석이 120초 idle 초과로 실패하면
+serve를 재시작해 첫 항목을 확인한다(동작 확인 모델: `opencode-go/gpt-5.6-luna`).
 업데이트 직후라면 OpenCode와 `proof ui`를 모두 재시작한다
 (구 버전 프로세스가 남으면 잠금이 서로 갈린다).
 
@@ -198,13 +200,32 @@ node -e "const b='http://127.0.0.1:4096',s='<SES>';(async()=>{const m=await(awai
 
 ## 8. 결과 기입 칸 — 2회차 (빈 칸)
 
-- 일시:
-- OpenCode 버전·모델·비용 합계:
-- 준비: seed init 출력 원문(2줄)·approve 출력 원문(2줄):
-- S1 초안 draftId·status·원본 hash(준비 직후/S1 직후)·tool part 수:
-- S2 바뀐 노드·approvalReset·일치 여부(1개 이상)·적용 후 hash·재승인 출력 원문:
-- S3 guideId·1단계 runId·재시작 후 2단계 runId·최종 상태:
+- 일시: 2026-11-09 14:00~14:47 KST (서버 로그 UTC 05:00~05:47)
+- OpenCode 버전·모델·비용 합계: opencode 1.18.32 (serve, 포트 4096). 재분석 모델은 서버 default 첫 항목 `opencode-go/gpt-5.6-luna` 사용, 합계 0.00065785. 참고: 서버 default 첫 항목이 부팅마다 바뀌어(opencode/big-pickle ↔ opencode-go/…) 무응답 모델이 걸리면 S1이 idle 초과(120000ms)로 실패한다 — 이번 회차 S1 2회 실패 후 serve의 HOME을 분리해 opencode-go 키만 두는 샌드박스(`F:\pf-tmp\oc-home`, 배치 후 삭제 예정)로 고정하고 성공했다.
+- 준비: seed init 출력 원문(2줄):
+```text
+{"op":"init","procedure":"dog-a","sessionId":"6678f9f5-ebd4-4417-b444-946c11caeb32","path":"F:\\pf-dogfood2\\.procforge\\procedures\\dog-a\\procedure.json","finalizeArgs":{"sessionId":"6678f9f5-ebd4-4417-b444-946c11caeb32","name":"dog-a"}}
+{"op":"init","procedure":"dog-b","sessionId":"facaffeb-9e6f-421c-9d23-649c3e1b1947","path":"F:\\pf-dogfood2\\.procforge\\procedures\\dog-b\\procedure.json","finalizeArgs":{"sessionId":"facaffeb-9e6f-421c-9d23-649c3e1b1947","name":"dog-b"}}
+```
+approve 출력 원문(2줄):
+```text
+approved: 1.1 (hash 51a3a811e25d…) → F:\pf-dogfood2\.procforge\procedures\dog-a\approvals.json
+pattern: {}
+approved: 1.1 (hash 0ec03ef8a655…) → F:\pf-dogfood2\.procforge\procedures\dog-b\approvals.json
+pattern: {}
+```
+- S1 초안 draftId·status·원본 hash(준비 직후/S1 직후)·tool part 수: draftId `7551a53a-da5e-46cf-a5a4-18e1c3ebc5a8`, status ready(15초 내, ops 1: edit_goal 1.1→"야간 집계 (40초 대기)"). 준비 직후 hash = S1 직후 hash = B20D253D88383F4F45F15B3C97A0ABDC42636A46D954216FEF4B931403DE7706 (불변 ✓). tool_parts=0 (`p.type==='tool'` 집계; openCodeSessionId `ses_e412cdb99ffe46o0R7XQiJskAu`, 모델 gpt-5.6-luna).
+- S2 바뀐 노드·approvalReset·일치 여부(1개 이상)·적용 후 hash·재승인 출력 원문: applied 1.1(goal), changedNodes [1.1], approvalReset [1.1] (정확히 1개, 일치 ✓). 적용 후 hash: 0F57D1A263311ACDC0CBB795ACA8CF07BCE947EDFB814EB5DF5B163E9B295DE3 (변경됨 ✓). 재승인 출력 원문:
+```text
+approved: 1.1 (hash 8f463599f9da…) → F:\pf-dogfood2\.procforge\procedures\dog-b\approvals.json (갱신)
+pattern: {}
+```
+- S3 guideId·1단계 runId·재시작 후 2단계 runId·최종 상태: guideId `e376ab26-bfa1-4a2f-8447-e422084a2ece`. 1단계 runId `4c86549e-…` done. `proof ui` 재시작(64993→58377) 후 동일 guideId 조회: 1단계 done 유지·2단계 pending으로 이어짐 ✓. 2단계 runId `272ca41c-…` done (약 40초). 최종 상태: `done:4c86549e-… | done:272ca41c-…`.
 - S4 seed finalize 출력 원문(`code` 필드)·state.json 보존 여부:
-- tmp-delta diff:
-- `.locks/` 잔재:
-- 통과/실패 (기준 5개별):
+```text
+{"op":"finalize","code":"conflict","message":"conflict: 실행 중인 절차서는 확정할 수 없습니다: dog-b (실행 종료 후 다시 확정하세요)\nhint: pf_tree로 현재 상태를 확인하고 상태에 맞는 도구를 호출하라."}
+```
+`code=conflict` ✓ (exit 0). state.json: 없음→없음 (보존 ✓). 실행 중 `.locks/dog-b.run.lock` 있음→종료 후 없음 ✓.
+- tmp-delta diff: INCREASED_TOTAL 0 (`.\evidence\dogfood.json`).
+- `.locks/` 잔재: 0건.
+- 통과/실패 (기준 5개별): 1 통과 / 2 통과 / 3 통과 / 4 통과 / 5 통과.
