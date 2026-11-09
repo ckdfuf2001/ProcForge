@@ -1209,6 +1209,10 @@ argv: [...]}` 고정. runner는 run fs에서 직접 실행해 stdout을 golden�
   이유: 재분석이 "왜"를 기준으로 고치려면 처음 분해 때부터 기록해야 한다
   (M10-spec §0). 도구 추가·이름 변경은 아니다.
 
+## M10-close
+
+- [M10-close] **가이드 게이트의 인자 검사는 verdict 문자열 truthy 판정 버그로 죽어 있었다** (`mine.some(e => checkApproval(...))` — "denied"도 truthy라 항상 통과). 영향 구간: 가이드 단계 승인 검사 전체(인자 불일치 미검출). 수정 커밋 `eba0c41`(`=== "ok"` 비교+`gateArgsFor` 단일화). 검증 테스트 `m10-approval-gate` (e)(승인 없음 일치).
+
 ## M10-lock
 
 - [M10-lock] **절차서 run 잠금을 `procedures/.locks/<name>.run.lock`에 둔다.**

@@ -200,6 +200,7 @@ node -e "const b='http://127.0.0.1:4096',s='<SES>';(async()=>{const m=await(awai
 
 ## 8. 결과 기입 칸 — 2회차 (빈 칸)
 
+- 실행자: 에이전트 대행 2·3회차, 결과 재현됨 (동일 입력에서 approve hash·재승인 hash·conflict 문구 바이트 일치)
 - 일시: 2026-11-09 14:00~14:47 KST (서버 로그 UTC 05:00~05:47)
 - OpenCode 버전·모델·비용 합계: opencode 1.18.32 (serve, 포트 4096). 재분석 모델은 서버 default 첫 항목 `opencode-go/gpt-5.6-luna` 사용, 합계 0.00065785. 참고: 서버 default 첫 항목이 부팅마다 바뀌어(opencode/big-pickle ↔ opencode-go/…) 무응답 모델이 걸리면 S1이 idle 초과(120000ms)로 실패한다 — 이번 회차 S1 2회 실패 후 serve의 HOME을 분리해 opencode-go 키만 두는 샌드박스(`F:\pf-tmp\oc-home`, 배치 후 삭제 예정)로 고정하고 성공했다.
 - 준비: seed init 출력 원문(2줄):
@@ -229,3 +230,4 @@ pattern: {}
 - tmp-delta diff: INCREASED_TOTAL 0 (`.\evidence\dogfood.json`).
 - `.locks/` 잔재: 0건.
 - 통과/실패 (기준 5개별): 1 통과 / 2 통과 / 3 통과 / 4 통과 / 5 통과.
+- 3회차 S1 실패 원문 (독립 검증 중, 샌드박스 전, 참고): `status=failed ops=0 reason=idle 대기 초과(120000ms)` (모델 `opencode/big-pickle` 무응답).
