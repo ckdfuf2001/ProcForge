@@ -187,6 +187,8 @@ $env:PROOF_OPENCODE_TOOL_PREFIX="proof"
 ## 9. 주의사항·문제 해결
 
 - OpenCode에 도구가 안 보이면: OpenCode 재시작 → `opencode.json` 경로·오타 확인.
+  `PROOF_REDRAFT_MODEL` 형식이 틀리면 MCP와 CLI도 기동하지 않으므로,
+  OpenCode에서는 도구가 안 보이는 것으로만 나타난다.
 - "카탈로그(schemaHash) 불일치"로 중단되면: 도구 사양이 바뀐 것이니 절차서를
   다시 확정(finalize)하거나 재녹화(`test --mode record`)하세요.
 - 실행이 겹치면(`conflict`): 같은 절차서가 이미 돌고 있습니다. 끝나고 다시 하세요.
