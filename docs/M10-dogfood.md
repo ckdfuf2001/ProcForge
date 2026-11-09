@@ -197,6 +197,15 @@ node -e "const b='http://127.0.0.1:4096',s='<SES>';(async()=>{const m=await(awai
 - 통과/실패 (기준 5개별): 1 통과 (초안·hash불변·tool 0건) / 2 통과 (approvalReset [1.1]·hash 변경) / 3 조건부 통과 (편차 D2·D3·D4 후 done 달성. 기록지 그대로면 stale 실패로 불통과) / 4 실패 (conflict 관측 불가 — 시드 세션으로는 검증 단계에서 bad_request. 잠금 기제 자체는 실행 중 보유·종료 후 해제 확인) / 5 통과 (tmp 0·locks 0·비용 0.00068 기록).
 - 기록지 보완 필요 (후속): ① S2→S3 사이 재승인 단계 추가. ② S3 timeoutMs 안내 또는 wait60 수면 단축 (60s 수면 vs 60000ms 기본 타임아웃 경합). ③ wait60.py `true`→`True` 수정. ④ S4는 현 시드로 conflict 재현 불가 — 기대 수정(검증-우선 순서 명시 또는 별도 유효 세션 절차) 필요. ⑤ 재분석 모델 선택 불가(서버 첫 default 고정) — 제품 개선 후보로 이관.
 - 편차 목록: D1 모델(gpt-5.6-luna 사용) / D2 재승인 1회(기록지 외) / D3 timeoutMs 120000 추가 / D4 `True` 수정. D2·D3·D4는 S3 최종 done에 포함됨. D1은 S1에만 영향.
+- 3회차 (독립 검증, F:\pf-dogfood3) 편차: serve의 `/config/providers` 첫 항목이 부팅마다 바뀌어 무응답 모델이 걸리면 S1이 idle 실패하므로, opencode-go 키만 담은 HOME 샌드박스로 serve를 띄워 luna를 첫 항목으로 고정했다 (배치 후 샌드박스 삭제).
+- 3회차 S1 실패 원문: `status=failed ops=0 reason=idle 대기 초과(120000ms)` (모델 `opencode/big-pickle` 무응답, draft failed).
+- 3회차 결정성 비교 (2회차 vs 3회차):
+| 항목 | 2회차 | 3회차 | 일치 |
+|---|---|---|---|
+| approve dog-a hash | 51a3a811e25d… | 51a3a811e25d… | 예 |
+| approve dog-b hash | 0ec03ef8a655… | 0ec03ef8a655… | 예 |
+| 재승인 hash | 8f463599f9da… | 8f463599f9da… | 예 |
+| conflict 문구 | `conflict: 실행 중인 절차서는 확정할 수 없습니다: dog-b (실행 종료 후 다시 확정하세요)` | 같음 | 예 |
 
 ## 8. 결과 기입 칸 — 2회차 (빈 칸)
 
@@ -230,4 +239,3 @@ pattern: {}
 - tmp-delta diff: INCREASED_TOTAL 0 (`.\evidence\dogfood.json`).
 - `.locks/` 잔재: 0건.
 - 통과/실패 (기준 5개별): 1 통과 / 2 통과 / 3 통과 / 4 통과 / 5 통과.
-- 3회차 S1 실패 원문 (독립 검증 중, 샌드박스 전, 참고): `status=failed ops=0 reason=idle 대기 초과(120000ms)` (모델 `opencode/big-pickle` 무응답).
