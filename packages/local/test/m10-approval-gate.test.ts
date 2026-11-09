@@ -3,6 +3,7 @@ import { mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { ProcForgeApp } from "../src/app/app.js";
 import { loadApprovals, gateArgsFor } from "../src/services/approvals.js";
+import { resolveArgs } from "../src/runner/resolve.js";
 import { testStack } from "./client-mode.js";
 import { makeTmp } from "@proof/shared/tmp.js";
 import { useTmpCleanup } from "./tmp-hooks.js";
@@ -136,12 +137,21 @@ describe("M10-entry gate", () => {
     if (!node) throw new Error("node 없음");
     const entries = loadApprovals(dir);
     expect(entries.length).toBe(1);
-    // runner 경로: logicalArgs에 script가 없음 → gateArgsFor가 채운다.
+    // 가이드 경로: 실제 resolveArgs 출력을 gateArgsFor에 넘긴다 (하드코딩 금지).
+    const resolved = resolveArgs({
+      specs: (node.args ?? {}) as never,
+      params: {},
+      outputs: new Map(),
+      attempts: [],
+      live: true,
+    });
+    const guideSide = gateArgsFor(node, resolved);
+    // runner 경로: script-kind가 도구 인자 파이프라인에서 제외되므로 비어 있다.
     const runnerSide = gateArgsFor(node, {});
-    expect(Object.keys(runnerSide).sort()).toEqual(Object.keys(entries[0].args ?? {}).sort());
-    // 가이드 경로: resolveArgs 출력(파일 문자열) → gateArgsFor가 {file}로 통일.
-    const guideSide = gateArgsFor(node, { script: "scripts/job.py" });
-    expect(Object.keys(guideSide).sort()).toEqual(Object.keys(entries[0].args ?? {}).sort());
+    const entryKeys = Object.keys(entries[0].args ?? {}).sort();
+    expect(Object.keys(guideSide).sort()).toEqual(entryKeys);
+    expect(Object.keys(runnerSide).sort()).toEqual(entryKeys);
     expect(guideSide).toEqual(runnerSide);
+    expect(guideSide).toEqual({ script: { file: "scripts/job.py" } });
   }, 60000);
 });
