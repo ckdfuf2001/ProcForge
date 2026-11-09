@@ -254,6 +254,35 @@ function check(name, hits, targets) {
   check("mkdtemp only in shared tmp", hits, targets);
 }
 
+// 8. 가짜 OpenCode providers는 객체 리터럴 금지 (M10-model-fix: 실서버는 배열).
+// 공용 fakeProvidersBody()만 쓴다. 타입 표기가 같은 모양이라
+// fake-providers.ts 자체는 예외로 둔다.
+{
+  const re = /providers\s*:\s*\{/;
+  const dirs = [];
+  for (const p of ["core", "core-server", "local", "shared", "ui"]) {
+    dirs.push(join(ROOT, "packages", p, "test"));
+  }
+  dirs.push(join(ROOT, "packages", "local", "test-e2e"));
+  const hits = [];
+  let targets = 0;
+  for (const d of dirs) {
+    if (!existsSync(d)) continue;
+    for (const f of walk(d)) {
+      if (!/\.(test\.)?tsx?$/.test(f)) continue;
+      if (relative(ROOT, f).replace(/\\/g, "/") === "packages/local/test/fake-providers.ts") continue;
+      targets++;
+      read(f)
+        .split("\n")
+        .forEach((line, i) => {
+          if (re.test(line)) hits.push(`${f}:${i + 1}: ${line.trim().slice(0, 120)}`);
+        });
+    }
+  }
+  violations.push(...hits.map((h) => "providers-object-literal: " + h));
+  check("no object-literal providers in tests (use fakeProvidersBody)", hits, targets);
+}
+
 if (violations.length > 0) {
   console.error(`check-gates: FAIL (${violations.length}건)`);
   process.exit(1);
