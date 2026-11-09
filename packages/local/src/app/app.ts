@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync, appendFileSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, appendFileSync, mkdirSync, statSync, writeFileSync } from "node:fs";
 import { randomUUID, createHash } from "node:crypto";
 import { join, resolve, basename } from "node:path";
 import type { CoreClient } from "@proof/shared/core-client.js";
@@ -111,6 +111,7 @@ import {
   toHashable,
 } from "../services/approvals.js";
 import { isDraftLockAlive } from "../services/draft-lock.js";
+import { procRunLockPath, PROC_RUN_LOCK_STALE_MS } from "../services/run-lock.js";
 import { resolveArgs } from "../runner/resolve.js";
 import { copyImportFiles } from "../procedure.js";
 import {
@@ -185,6 +186,12 @@ import { acquireProcRunLock } from "../services/run-lock.js";
 // 세션 잠금은 core change()가 맡는다 (M4.2-2.5-2). 세션·노드 읽기는 core 경유.
 
 export const DEFAULT_SESSION_TTL_MS = 30 * 24 * 3600 * 1000;
+
+/**
+ * M11-guide-zombie: drive 루프 상한 (테스트 주입용으로만 바꾼다).
+ * 상한에 걸리면 failed("drive 상한 초과")로 기록한다 (로그만 남기고 끝내기 금지).
+ */
+export const driveLoopTuning = { maxIterations: 500 };
 
 /** 분해 루프 안내 (prompt + pf_start 첫 응답 공유, 정책 세부 없음) */
 export const PROMPT_TEXT = [
@@ -3215,6 +3222,47 @@ private hasCurrentApproval(
         writeGuide(this.procforgeDir, touchGuide(guide));
         return { guideId, stepIndex: idx, status: "waiting", runId };
       }
+      if (!this.isRunAlive(procedure, runId)) {
+        // M11-guide-zombie: 드라이버 없는 running/ready는 좀비로 확정한다.
+        // activeRuns(같은 프로세스)에도 run 잠금 하트비트(다른 프로세스의 live 실행)에도
+        // 없으면 다시 살아나지 않는다. failed로 기록해야 재시도할 수 있다.
+        const deadDetail = "프로세스 재시작으로 중단";
+        try {
+          const st0 = readRunState(this.procforgeDir, runId);
+          if (st0 && st0.status !== "done" && st0.status !== "failed" && st0.status !== "cancelled") {
+            writeRunState(this.procforgeDir, {
+              ...st0,
+              status: "failed",
+              failedDetail: deadDetail,
+              updatedAt: new Date().toISOString(),
+            });
+          }
+        } catch {
+          // 상태 기록 실패는 무시 (아래 로그·가이드 기록이 진실).
+        }
+        appendRunLog(this.procforgeDir, runId, {
+          level: "error",
+          message: `${deadDetail} (phase:failed)`,
+        });
+        const guide = readGuide(this.procforgeDir, guideId);
+        guide.state[idx] = {
+          status: "failed",
+          runId,
+          sessionId: info.sessionId,
+          updatedAt: new Date().toISOString(),
+        };
+        writeGuide(this.procforgeDir, touchGuide(guide));
+        try {
+          await this.notifySessionEvent({
+            sessionId: info.sessionId,
+            method: "lane.finished",
+            summary: `실행 단계 종료: ${procedure} (failed)`,
+          });
+        } catch {
+          // 알림 실패는 결과를 바꾸지 않는다.
+        }
+        return { guideId, stepIndex: idx, status: "failed", runId };
+      }
       if (Date.now() > deadline) {
         // 기록 없이 저장된 상태 그대로 (runId 유지) — 다음 advance가 이어간다.
         const guide = readGuide(this.procforgeDir, guideId);
@@ -4059,7 +4107,7 @@ private hasCurrentApproval(
    */
   private async driveRun(runId: string, procedure: string): Promise<void> {
     try {
-      for (let i = 0; i < 500; i++) {
+      for (let i = 0; i < driveLoopTuning.maxIterations; i++) {
         if (readCancelFlag(this.procforgeDir, runId)) {
           this.markCancelled(runId, procedure);
           return;
@@ -4119,6 +4167,20 @@ private hasCurrentApproval(
         level: "error",
         message: "단계 상한 초과로 중단",
       });
+      // M11-guide-zombie: 상한 초과도 run을 failed로 기록한다 (좀비 금지).
+      try {
+        const stCap = readRunState(this.procforgeDir, runId);
+        if (stCap && stCap.status !== "done" && stCap.status !== "failed" && stCap.status !== "cancelled") {
+          writeRunState(this.procforgeDir, {
+            ...stCap,
+            status: "failed",
+            failedDetail: "drive 상한 초과",
+            updatedAt: new Date().toISOString(),
+          });
+        }
+      } catch {
+        // 상태 기록 실패는 무시 (로그는 남김).
+      }
     } catch (e) {
       // 예외가 나도 잠금은 풀어야 한다 (아니면 그 절차서는 재시작 불가)
       const detail = e instanceof Error ? e.message : String(e);
@@ -4155,6 +4217,23 @@ private hasCurrentApproval(
   private releaseRun(procedure: string, runId: string): void {
     this.waitingRuns.delete(runId);
     if (this.activeRuns.get(procedure) === runId) this.activeRuns.delete(procedure);
+  }
+
+  /**
+   * M11-guide-zombie: 실행 중(run/ready) run의 생존 판정.
+   * 같은 프로세스의 drive면 activeRuns에 있고, 다른 프로세스의 CLI 실행이면
+   * run 잠금 하트비트가 살아 있다. 둘 다 없으면 드라이버가 없는 좀비다.
+   * (가이드 run은 파일 잠금을 잡지 않으므로, 재시작 뒤에는 하트비트도 없다.)
+   */
+  private isRunAlive(procedure: string, runId: string): boolean {
+    if (this.activeRuns.get(procedure) === runId) return true;
+    try {
+      const mtime = statSync(procRunLockPath(this.procforgeDir, procedure)).mtimeMs;
+      if (Date.now() - mtime <= PROC_RUN_LOCK_STALE_MS) return true;
+    } catch {
+      // 잠금 없음 = 하트비트 없음.
+    }
+    return false;
   }
 
   /** M7-close-a: 취소 플래그를 반영한 표시용 상태 (종료 상태는 덮지 않는다). */
