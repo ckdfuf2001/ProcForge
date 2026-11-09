@@ -156,6 +156,35 @@ async function main() {
     if (withRemote) {
       run("pnpm", testArgs, { env: { PROCFORGE_CLIENT: "remote" }, log });
     }
+    // M10-model-fix: e2e 조건부 실행 (CI e2e 누락 방지).
+    // test-e2e/·packages/ui/가 바뀌었거나 가짜 OpenCode가 바뀐 커밋이면
+    // playwright e2e를 1회 돌린다. 판정 기준은 직전에 푸시된 sha와의 diff.
+    try {
+      const base = out("git", ["rev-parse", "origin/master"]).trim();
+      const changed = out("git", ["diff", "--name-only", base, head]).split("\n").map((s) => s.trim()).filter(Boolean);
+      const e2eHit = changed.filter((f) => f.startsWith("packages/local/test-e2e/") || f.startsWith("packages/ui/"));
+      const fakeHit = [];
+      for (const f of changed) {
+        if (!/\.(ts|mjs|js)$/.test(f)) continue;
+        if (!f.includes("test")) continue;
+        let body = "";
+        try {
+          body = execSync(`git show HEAD:"${f}"`, { cwd: ROOT, env: baseEnv(), encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+        } catch {
+          continue;
+        }
+        if (/config\/providers|startFakeOpenCode|fakeProvidersBody/.test(body)) fakeHit.push(f);
+      }
+      const hits = [...new Set([...e2eHit, ...fakeHit])];
+      if (hits.length === 0) {
+        console.log("[dev-verify] e2e: skip(판정 파일 변경 없음)");
+      } else {
+        console.log(`[dev-verify] e2e: 실행 (판정 변경 ${hits.length}건)`);
+        run("pnpm", ["--filter", "@proof/local", "exec", "playwright", "test", "-c", "playwright.config.ts", "--workers=1"], { cwd: join(ROOT, "packages", "local"), log });
+      }
+    } catch (e) {
+      console.log(`[dev-verify] e2e: skip(판정 불가: ${e instanceof Error ? e.message : String(e)})`.slice(0, 160));
+    }
   } else {
     step(3, "생략 (--from)");
   }
