@@ -156,34 +156,21 @@ async function main() {
     if (withRemote) {
       run("pnpm", testArgs, { env: { PROCFORGE_CLIENT: "remote" }, log });
     }
-    // M10-model-fix: e2e 조건부 실행 (CI e2e 누락 방지).
-    // test-e2e/·packages/ui/가 바뀌었거나 가짜 OpenCode가 바뀐 커밋이면
-    // playwright e2e를 1회 돌린다. 판정 기준은 직전에 푸시된 sha와의 diff.
+    // M10-verify-e2e: e2e는 항상 실행한다 (조건 선별 없음 — 조건 판단이
+    // e2e 누락을 만들었다). --skip-e2e 때만 건너뛰고 로그에 남긴다.
+    // 판정만 try로 감싸고, 실행은 try 밖에 둔다 (실패가 skip으로 삼켜지면 안 된다).
+    let e2eSkip = null;
     try {
-      const base = out("git", ["rev-parse", "origin/master"]).trim();
-      const changed = out("git", ["diff", "--name-only", base, head]).split("\n").map((s) => s.trim()).filter(Boolean);
-      const e2eHit = changed.filter((f) => f.startsWith("packages/local/test-e2e/") || f.startsWith("packages/ui/"));
-      const fakeHit = [];
-      for (const f of changed) {
-        if (!/\.(ts|mjs|js)$/.test(f)) continue;
-        if (!f.includes("test")) continue;
-        let body = "";
-        try {
-          body = execSync(`git show HEAD:"${f}"`, { cwd: ROOT, env: baseEnv(), encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
-        } catch {
-          continue;
-        }
-        if (/config\/providers|startFakeOpenCode|fakeProvidersBody/.test(body)) fakeHit.push(f);
-      }
-      const hits = [...new Set([...e2eHit, ...fakeHit])];
-      if (hits.length === 0) {
-        console.log("[dev-verify] e2e: skip(판정 파일 변경 없음)");
-      } else {
-        console.log(`[dev-verify] e2e: 실행 (판정 변경 ${hits.length}건)`);
-        run("pnpm", ["--filter", "@proof/local", "exec", "playwright", "test", "-c", "playwright.config.ts", "--workers=1"], { cwd: join(ROOT, "packages", "local"), log });
-      }
+      if (process.argv.slice(2).includes("--skip-e2e")) e2eSkip = "플래그";
     } catch (e) {
-      console.log(`[dev-verify] e2e: skip(판정 불가: ${e instanceof Error ? e.message : String(e)})`.slice(0, 160));
+      e2eSkip = `판정 불가 (${e instanceof Error ? e.message : String(e)})`.slice(0, 80);
+    }
+    if (e2eSkip !== null) {
+      console.log(`[dev-verify] e2e: skip(${e2eSkip})`);
+    } else {
+      // M7-5-6: 실제 chromium + 실제 UI dist + 실제 local 서버 (CI e2e와 동일).
+      // pnpm --filter는 패키지 디렉터리에서 실행하므로 cwd 지정과 중복되지 않는다.
+      run("pnpm", ["--filter", "@proof/local", "exec", "playwright", "test", "-c", "playwright.config.ts", "--workers=1"], { log });
     }
   } else {
     step(3, "생략 (--from)");
