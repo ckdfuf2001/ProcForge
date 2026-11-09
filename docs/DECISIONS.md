@@ -1233,6 +1233,9 @@ argv: [...]}` 고정. runner는 run fs에서 직접 실행해 stdout을 golden�
   `isRunAlive` 3단계: activeRuns → 디스크 waiting → drive 하트비트(fresh+pid
   생존, 죽은 pid는 회수)/runner 잠금. `prepareRun`은 drive 하트비트가 살아
   있으면 cross-process conflict (절차서당 동시 1개).
-  수정 커밋 `22bd89e`. 검증 테스트 `m11-drive-alive` 2종 (drive 중 conflict·
-  종료 후 통과 / 죽은 pid 회수) + 기존 `m11-guide-zombie` ① 3회 연속 통과.
+   수정 커밋 `22bd89e`. 검증 테스트 `m11-drive-alive` 2종 (drive 중 conflict·
+   종료 후 통과 / 죽은 pid 회수) + 기존 `m11-guide-zombie` ① 3회 연속 통과.
+- [M11-sidecar] **재finalize 시 `history/` + `lessons.md`를 바이트 단위로
+  보존한다** (`SIDECAR_KEEP`, `procedureWriter.ts:241-247`).
+  검증 테스트 `m11-sidecar` (보존 후 바이트 동일).
 
