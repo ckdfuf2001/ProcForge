@@ -149,7 +149,10 @@ import {
 import {
   runRedraft,
   openCodeAuthHeaders,
+  parseRedraftModelEnv,
+  PROOF_REDRAFT_MODEL,
   type RedraftResult,
+  type RedraftModelSource,
   type DraftOp,
 } from "../services/redraft.js";
 import { PROCEDURE_NAME_RE } from "@proof/shared/procedure.js";
@@ -3611,6 +3614,7 @@ private hasCurrentApproval(
         baseUrl: target.baseUrl,
         ...(target.password !== undefined ? { password: target.password } : {}),
         model: target.model,
+        source: target.source,
       },
     });
     if (typeof a.sessionId === "string" && a.sessionId.length > 0) {
@@ -3631,6 +3635,7 @@ private hasCurrentApproval(
     baseUrl: string;
     password: string | undefined;
     model: { providerID: string; modelID: string };
+    source: RedraftModelSource;
   }> {
     const baseUrl = this.signal.baseUrl;
     if (!baseUrl) {
@@ -3638,26 +3643,51 @@ private hasCurrentApproval(
     }
     const password = process.env.OPENCODE_SERVER_PASSWORD;
     const headers = openCodeAuthHeaders(password);
-    let model: { providerID: string; modelID: string } | undefined;
+    // M10-model: env 지정이면 존재 확인, 미설정이면 첫 default.
+    const envRaw = process.env[PROOF_REDRAFT_MODEL];
+    const wanted = parseRedraftModelEnv(envRaw);
+    let providers: Record<string, { models?: Record<string, unknown> }> | undefined;
+    let firstDefault: [string, string] | undefined;
     try {
       const r = await fetch(`${baseUrl.replace(/\/$/, "")}/config/providers`, { headers });
       const j = (await r.json()) as {
         default?: Record<string, string>;
         providers?: Record<string, { models?: Record<string, unknown> }>;
       };
-      const firstDefault = j && typeof j === "object" ? Object.entries(j.default ?? {})[0] : undefined;
-      if (firstDefault) {
-        model = { providerID: firstDefault[0], modelID: firstDefault[1] };
-      } else {
-        const firstProv = j && typeof j === "object" ? Object.entries(j.providers ?? {})[0] : undefined;
-        const firstModel = firstProv ? Object.keys(firstProv[1].models ?? {})[0] : undefined;
-        if (firstProv && firstModel) model = { providerID: firstProv[0], modelID: firstModel };
-      }
+      providers = j && typeof j === "object" ? j.providers : undefined;
+      const fd = j && typeof j === "object" ? Object.entries(j.default ?? {})[0] : undefined;
+      if (fd) firstDefault = [fd[0], String(fd[1])];
     } catch {
       // 조회 실패는 아래 기본 모델 없음 오류로 합친다
     }
-    if (!model) throw pfError("bad_request", "OpenCode 기본 모델 없음 (서버 providers 확인)");
-    return { baseUrl, password, model };
+    if (wanted) {
+      const hit = providers?.[wanted.providerID]?.models?.[wanted.modelID] !== undefined;
+      if (!hit) {
+        throw pfError("bad_request", `모델 없음: ${envRaw} (${PROOF_REDRAFT_MODEL})`);
+      }
+      return { baseUrl, password, model: wanted, source: "env" };
+    }
+    if (firstDefault) {
+      return {
+        baseUrl,
+        password,
+        model: { providerID: firstDefault[0], modelID: firstDefault[1] },
+        source: "default",
+      };
+    }
+    if (providers) {
+      const firstProv = Object.entries(providers)[0];
+      const firstModel = firstProv ? Object.keys(firstProv[1].models ?? {})[0] : undefined;
+      if (firstProv && firstModel) {
+        return {
+          baseUrl,
+          password,
+          model: { providerID: firstProv[0], modelID: firstModel },
+          source: "default",
+        };
+      }
+    }
+    throw pfError("bad_request", "OpenCode 기본 모델 없음 (서버 providers 확인)");
   }
 
   /**
@@ -3693,6 +3723,8 @@ private hasCurrentApproval(
     if (sessionId !== undefined && !/^[A-Za-z0-9._-]{1,128}$/.test(sessionId)) {
       throw pfError("bad_request", "sessionId 형식이 잘못되었습니다.");
     }
+    // M10-model: 모델 존재 확인을 202 전에 한다. 없으면 draft를 만들지 않고 거부.
+    const target = await this.resolveRedraftTarget();
     const draftId = randomUUID();
     const draftDir = join(this.procforgeDir, "drafts", draftId);
     mkdirSync(draftDir, { recursive: true });
@@ -3704,6 +3736,7 @@ private hasCurrentApproval(
       request,
       sourceHash: createHash("sha256").update(procRaw, "utf8").digest("hex"),
       openCodeSessionId: null,
+      model: { ...target.model, source: target.source },
       status: "pending",
       ops: [],
       diff: [],
@@ -3715,7 +3748,6 @@ private hasCurrentApproval(
     // 백그라운드 완성 — 호출자는 기다리지 않는다. 실패는 failed로 남기고 재시도 없음.
     void (async () => {
       try {
-        const target = await this.resolveRedraftTarget();
         const result = await runRedraft({
           procforgeDir: this.procforgeDir,
           procedure,
@@ -3724,6 +3756,7 @@ private hasCurrentApproval(
             baseUrl: target.baseUrl,
             ...(target.password !== undefined ? { password: target.password } : {}),
             model: target.model,
+            source: target.source,
           },
           draftId,
         });

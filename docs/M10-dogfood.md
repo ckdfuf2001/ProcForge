@@ -42,11 +42,14 @@ pattern: {}
 ```
 
 OpenCode를 serve 모드로 띄운다: `opencode serve --port 4096`.
-재분석 모델은 서버 default로 고정된다
-(제품이 `/config/providers` 첫 default를 그대로 쓴다.
-프로젝트 `model` 지정은 무시된다).
-첫 항목이 부팅마다 바뀔 수 있으므로, 재분석이 120초 idle 초과로 실패하면
-serve를 재시작해 첫 항목을 확인한다(동작 확인 모델: `opencode-go/gpt-5.6-luna`).
+재분석 모델은 `PROOF_REDRAFT_MODEL=<providerID>/<modelID>`로 고정한다
+(예: `PROOF_REDRAFT_MODEL=opencode-go/gpt-5.6-luna`).
+미설정이면 서버 default 첫 항목을 쓰므로, 실측 전에 고정값을 정해 둔다.
+서버·UI 모두 같은 셸(같은 env)에서 띄운다:
+
+```powershell
+$env:PROOF_REDRAFT_MODEL="opencode-go/gpt-5.6-luna"
+```
 업데이트 직후라면 OpenCode와 `proof ui`를 모두 재시작한다
 (구 버전 프로세스가 남으면 잠금이 서로 갈린다).
 

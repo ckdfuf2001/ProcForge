@@ -44,6 +44,7 @@
 - **내부용 1종** (개명 제외): `PROCFORGE_CLIENT`. 사용처가 테스트/CI뿐
   (`vitest.config.ts:3`·`client-mode.ts:19,26`·`setup-remote.ts:14`·`ci.yml` matrix·`m8-decomposition.test.ts:12`).
 - **보안 5종** (사용자용 부분집합, 값 불일치 시 기동 거절): `READ_ONLY`·`STRICT_SANDBOX`·`DEV_AUTH`·`API_KEYS`·`CORE_API_KEY`.
+- **M10 신규 1종** (`REDRAFT_MODEL`, 옛 이름 없음, 대체 없음): 형식 `providerID/modelID`. 기동 시 형식을 검사하고, 매 재분석 요청마다 존재를 확인한다.
 
 ### 2.2 읽기 규칙
 

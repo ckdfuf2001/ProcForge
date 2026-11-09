@@ -171,6 +171,19 @@ $env:PROOF_OPENCODE_TOOL_PREFIX="proof"
 ![M10 확인 화면: 그래프와 노드 상세](images/m10-guide-graph.png)
 ![M10 확인 화면: 재분석 diff 적용](images/m10-guide-draft.png)
 
+### 재분석 모델 고정 (`PROOF_REDRAFT_MODEL`)
+
+재분석 초안은 OpenCode 서버의 모델 1개로 만든다. 형식은
+`PROOF_REDRAFT_MODEL=<providerID>/<modelID>` (예: `PROOF_REDRAFT_MODEL=opencode-go/gpt-5.6-luna`).
+`PROCFORGE_` 대체 이름은 없다.
+
+- 미설정 시: 서버 `/config/providers`의 첫 default를 쓰고, 초안에 `기본값`으로 기록된다.
+- 설정 시: 매 재분석 요청마다 해당 모델이 서버에 있는지 확인한다.
+  없으면 초안을 만들지 않고 `모델 없음: <id> (PROOF_REDRAFT_MODEL)`로 거부한다 (400).
+  조용히 다른 모델로 바꾸지 않는다.
+- 형식이 틀리면(빈 값·`/` 없음·앞뒤 비어 있음) 기동할 때 오류로 끝나고,
+  stderr에 변수 이름과 값을 찍는다.
+
 ## 9. 주의사항·문제 해결
 
 - OpenCode에 도구가 안 보이면: OpenCode 재시작 → `opencode.json` 경로·오타 확인.

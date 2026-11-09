@@ -15,6 +15,36 @@ import { pfError } from "@proof/shared/errors.js";
 /** idle 대기 상한 (M10-2, 상수). 넘기면 failed. */
 export const REDRAFT_IDLE_TIMEOUT_MS = 120000;
 
+/** M10-model: 재분석 모델 지정 env (대체 이름 없음). 형식 providerID/modelID. */
+export const REDRAFT_MODEL_ENV = "PROOF_REDRAFT_MODEL";
+/** env 이름 별칭 (메시지·설정용). */
+export const PROOF_REDRAFT_MODEL = REDRAFT_MODEL_ENV;
+
+export type RedraftModelSource = "env" | "default";
+
+/**
+ * M10-model: env 파싱 (첫 `/` 기준 분리). 미설정이면 undefined.
+ * 빈 문자열·`/` 없음·앞뒤 비어 있음은 기동 오류 대상 (bad_request).
+ */
+export function parseRedraftModelEnv(
+  raw: string | undefined,
+): { providerID: string; modelID: string } | undefined {
+  if (raw === undefined) return undefined;
+  const i = raw.indexOf("/");
+  if (i <= 0 || i >= raw.length - 1) {
+    throw pfError(
+      "bad_request",
+      `${REDRAFT_MODEL_ENV} 형식 오류: "${raw}" (형식 providerID/modelID)`,
+    );
+  }
+  return { providerID: raw.slice(0, i), modelID: raw.slice(i + 1) };
+}
+
+/** M10-model: 기동 시 1회 검증 (env 확정값 사용). */
+export function assertRedraftModelEnv(env: NodeJS.ProcessEnv = process.env): void {
+  parseRedraftModelEnv(env[REDRAFT_MODEL_ENV]);
+}
+
 /** M10-2-fix: 프롬프트 상한 (노드 목록 포함). 넘기면 failed. */
 export const REDRAFT_PROMPT_MAX_CHARS = 20000;
 
@@ -42,6 +72,8 @@ export type RedraftResult = {
   request: string;
   sourceHash: string;
   openCodeSessionId: string | null;
+  /** M10-model: 실제 사용 모델과 출처. */
+  model: { providerID: string; modelID: string; source: RedraftModelSource };
   status: DraftStatus;
   ops: DraftOp[];
   diff: DraftDiffEntry[];
@@ -242,7 +274,7 @@ export async function runRedraft(input: {
   procforgeDir: string;
   procedure: string;
   request: string;
-  openCode: { baseUrl: string; password?: string; model: { providerID: string; modelID: string } };
+  openCode: { baseUrl: string; password?: string; model: { providerID: string; modelID: string }; source: RedraftModelSource };
   idleTimeoutMs?: number;
   /**
    * M10-entry: 미리 만든 draftId로 이어쓴다 (POST /api/drafts 202 후 백그라운드 완성용).
@@ -272,12 +304,18 @@ export async function runRedraft(input: {
   // 원본 복사 (바이트 동일 — 무손상 증명용).
   copyFileSync(srcFile, join(draftDir, "procedure.json"));
   const sourceHash = createHash("sha256").update(raw, "utf8").digest("hex");
+  const model = {
+    providerID: input.openCode.model.providerID,
+    modelID: input.openCode.model.modelID,
+    source: input.openCode.source,
+  };
   const base = {
     draftId,
     dir: draftDir,
     procedure: input.procedure,
     request: input.request,
     sourceHash,
+    model,
     at: new Date().toISOString(),
   };
   const save = (r: RedraftResult): RedraftResult => {
@@ -361,7 +399,11 @@ export async function runRedraft(input: {
       }
       if (events.some((e) => e.t === "session.idle" && e.p.sessionID === sessionId)) break;
       if (Date.now() - t0 > timeoutMs) {
-        return save({ ...base2, status: "failed", ops: [], diff: [], reason: `idle 대기 초과(${timeoutMs}ms)` });
+        // M10-model: idle 실패에 모델 표시. 기본값일 때만 지정 권장 문구를 붙인다.
+        const modelId = `${input.openCode.model.providerID}/${input.openCode.model.modelID}`;
+        const src = input.openCode.source === "env" ? "env" : "기본값";
+        const hint = input.openCode.source === "env" ? "" : ` — ${REDRAFT_MODEL_ENV} 지정 권장`;
+        return save({ ...base2, status: "failed", ops: [], diff: [], reason: `idle 대기 초과(${timeoutMs}ms) model=${modelId} (${src})${hint}` });
       }
       await new Promise((r) => setTimeout(r, 200));
     }

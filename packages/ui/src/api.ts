@@ -252,6 +252,7 @@ export type DraftDetail = {
   ops: DraftOp[];
   diff: unknown[];
   reason: string;
+  model?: { providerID: string; modelID: string; source: "env" | "default" };
 };
 
 export type ApprovalInfo = {

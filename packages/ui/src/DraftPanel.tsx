@@ -86,6 +86,12 @@ export function DraftPanel({ initialDraftId }: { initialDraftId?: string }) {
           <p className="muted">
             {draft.procedure} · {draft.status} · {draft.ops.length}건
           </p>
+          {draft.model && (
+            <p className="muted">
+              모델: <code>{`${draft.model.providerID}/${draft.model.modelID}`}</code> (
+              {draft.model.source === "env" ? "env" : "기본값"})
+            </p>
+          )}
           <p>{draft.reason}</p>
           <ul className="diff-list">
             {draft.ops.map((op, i) => (

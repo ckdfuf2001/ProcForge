@@ -167,7 +167,7 @@ async function runOnce() {
     procforgeDir: pfdir,
     procedure: "m10-rd",
     request: "표에 합계 행 추가",
-    openCode: { baseUrl, model: { providerID: "t", modelID: "m" } },
+    openCode: { baseUrl, model: { providerID: "t", modelID: "m" }, source: "default" },
     idleTimeoutMs: 10000,
   });
 }

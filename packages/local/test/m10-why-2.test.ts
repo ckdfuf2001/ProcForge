@@ -163,7 +163,7 @@ describe("M10-why-2 editWhy", () => {
         procforgeDir: pfdir,
         procedure: "m10-rd",
         request: "이유를 바꿔라",
-        openCode: { baseUrl: `http://127.0.0.1:${addr.port}`, model: { providerID: "t", modelID: "m" } },
+        openCode: { baseUrl: `http://127.0.0.1:${addr.port}`, model: { providerID: "t", modelID: "m" }, source: "default" },
         idleTimeoutMs: 10000,
       });
       expect(r.status).toBe("ready");
