@@ -1,7 +1,7 @@
-# M9-3-spec 초안 — 교훈 집계 (메모리 4층)
+# M9-3-spec — 교훈 집계 (메모리 4층)
 
-> 상태: 초안 (판정待ち). M9-2 §5 판정 4 (B 확정)의 구체화.
-> 본 문서는 코드 읽기만으로 작성. 테스트 실행 없음.
+> 상태: 확정 (판정자 [M9-3-spec-fix]).
+> M9-2 §5 판정 4 (B 확정)의 구체화. 반려된 초안(`a5a2445`)을 판정 5건으로 재작성.
 
 ## §0 현황 5항목 (위치 / 사실 / 빈틈)
 
@@ -10,9 +10,8 @@
   (SIDECAR_KEEP에 `lessons.md` 포함), `:329-332` (재finalize 시 보존 복사).
 - 사실: lessons.md를 쓰는 생산 코드는 없다 (사용자 수기).
   `m11-sidecar.test.ts:47-52`는 수기 작성 후 재finalize 바이트동일만 검증한다.
-  형식 규약 없음 (테스트는 `"# 교훈\n- 밤 집계를 먼저 한다.\n"` 예시일 뿐).
-- 빈틈: 수집 스키마(1줄 형식·길이·run 연결)가 없어 집계가 파싱할 기준이 없음
-  (§2에서 정의).
+- 빈틈: 자동 구획과 수기 구획의 구분이 없어 집계가 갱신할 자리가 없음
+  (§2c에서 정의).
 
 ### 2. history/는 적용 전 판본 보관 — 교훈 텍스트 아님
 - 위치: `packages/local/src/app/app.ts:4111-4115`
@@ -20,19 +19,20 @@
 - 사실: 재사용 메모리(판본 복원용). 교훈 문장 저장소가 아니다.
 - 빈틈: 없음 (M9-3 집계 입력이 아님 — 판본과 교훈을 혼동하지 않는다).
 
-### 3. 소비자 없음 — 유사분석은 lessons를 보지 않음
-- 위치: `packages/local/src/services/similar.ts:65-122`
-  (`listProceduresWithLatest`: goals + latest + metrics만 반환).
-- 사실: M10-1 유사분석 입력은 이름·목표·최근상태·규모뿐이다.
-  lessons 참조 코드는 없다.
-- 빈틈: 집계 후 M10-1 연동 여부 (§5 판정 3).
+### 3. 재승인 빈틈 확정 — approvals.json은 덮어쓴다
+- 위치: `packages/local/src/services/approvals.ts:566-576`
+  (`saveApproval`: 같은 nodeId면 교체, 이력 남지 않음).
+- 사실: M11-pre-0에서 확정된 유일한 빈틈. 재승인 횟수는 어디에도 기록되지 않는다.
+- 빈틈: `approve` 줄로 별도 기록한다 (§2a).
 
-### 4. 교훈 재료 (events/calls/attempts), 집계 저장소·쿼리 없음
-- 위치: M9-2-spec §0-5 (events.jsonl, cassettes, attempts, node hash).
-- 사실: 재료는 있으나 attempt에 node hash가 기록되지 않아 조인 시 재계산 필요.
-  집계 저장소·쿼리 코드는 없다.
-- 빈틈: M9-3 집계는 lessons.md(수기)만 대상으로 한다.
-  자동 추출(LLM 요약)은 범위 밖 (M10 불변: Proof가 직접 LLM을 호출하지 않음,
+### 4. 소비자·재료 현황
+- 유사분석: `packages/local/src/services/similar.ts:65-122`
+  (`listProceduresWithLatest`: goals + latest + metrics만 반환, lessons 미참조).
+- 재료: M9-2-spec §0-5 (events.jsonl, cassettes, attempts, node hash).
+  attempt에 node hash가 기록되지 않아 조인 시 재계산 필요.
+- 집계 저장소·쿼리 코드: 없음.
+- 범위: M9-3 집계는 사실 기록(`events.ndjson`) + `lessons.md`를 대상으로 한다.
+  문장 요약·자동 추출은 범위 밖 (M10 불변: Proof가 직접 LLM을 호출하지 않음,
   `docs/M10-spec.md:27-31`).
 
 ### 5. latest/metrics 인덱스 현행
@@ -40,35 +40,60 @@
   (종료 상태일 때만 `runs/by-procedure/<name>/latest.json` 원자 갱신),
   `similar.ts:43-63` (metricsSummary: 파일 수·행 합, 순위 미사용).
 - 사실: 집계가 참조할 절차서별 최신 실행 포인터는 이미 있다.
-- 빈틈: lessons용 인덱스는 없음 (§2 집계 방식 판정과 연결).
+- 빈틈: lessons용 인덱스는 만들지 않는다 (읽을 때 계산, §5 판정 2).
 
 ## §1 목표
-- 절차서별 수기 교훈(`lessons.md`)을 정해진 형식으로 모으고,
-  다음 유사분석·재분석이 참조할 수 있게 읽는다.
-- 범위: ① 수집 스키마 (§2), ② 집계 읽기 (§2),
-  ③ M10-1 연동 여부 판정 (§5 판정 3). 문서화는 M9-2-4 방식 준용.
-- 범위 밖: 자동 생성·요약 (수기만), history/ 판본의 교훈 전용화,
-  MCP 표면 변경 (신규 도구 없음).
+- 실행 사실(run 종료·승인·승인리셋)을 절차서별로 append-only로 쌓고,
+  읽을 때 집계(노드별 실패 수·평균 소요 시간·재승인 수)한다.
+- `lessons.md`는 자동 구획(집계 숫자만)과 수기 구획(바이트 보존)으로 나눈다.
+- 유사분석 응답에 `lessons` 최대 5줄과 `stats`를 넣는다 (순위·MCP 표면 불변).
+- 범위 밖: 문장 요약·자동 추출, history/ 판본의 교훈 전용화, MCP 표면 변경.
 
-## §2 수집 스키마 + 집계 (B안)
-- 위치 (불변): `procedures/<name>/lessons.md` (경로 유지).
-  재finalize 보존 현행 유지 (`procedureWriter.ts:241-247`).
-- 항목 형식: `# 교훈` 헤더 아래 `- ` 불릿 1줄 = 1교훈.
-  선택 접두 `[run:<runId>]`가 있으면 latest/report로 대조 가능.
-  예: `- [run:8f463c…] 밤 집계를 먼저 한다.`
-- 관용: 헤더·불릿 밖 줄은 무시한다 (기존 자유형식 호환 — 파싱 실패가
-  집계 전체를 깨뜨리지 않음). 파일 없음은 빈 목록 (정상).
-- 줄 길이: 1줄 500자 상한 제안 (`why` 1~500자 선례, `app.ts:4099-4108`).
-  초과 처리 (절단 vs 거부)는 판정 필요 (§5 판정 4).
-- 집계 방식 (권고): 읽기 시점 집계 — 새 파일·쓰기 경로 없음.
-  이유: 쓰기 경로 추가 시 동시성·원자성·stale 문제가 생기며,
-  참조용 latest.json도 읽기 시점 조립(`similar.ts`)이 선례다.
-  확정은 판정 필요 (§5 판정 2).
-- 집계 출력: `{ procedure, lessons: [{ text, runId? }] }[]` (메모리 내,
-  저장 안 함 — 권고안 기준).
+## §2a 사실 기록 `events.ndjson` 줄 형식
+
+- 위치: `runs/by-procedure/<name>/events.ndjson` (새 파일, 이 이름과
+  `procedures/<name>/history/`가 겹치지 않게 한다).
+- 공통 필드: `{v:1, ts, kind, procedure}`. kind는 다음 3가지뿐이다.
+  - `run_end`: `runId, status, nodes:[{nodeId, status, durationMs}]`.
+    쓰는 위치: `packages/local/src/runner/run.ts:663`
+    (report.json 기록 지점 — run 종료).
+  - `approve`: `nodeId, hash12` (hash12 = 승인 노드 hash 앞 12자,
+    `cli-main.ts:249` 관례). 쓰는 위치:
+    `packages/local/src/services/approvals.ts:566` (`saveApproval` —
+    `commitApproval`도 이 길로만 적는다, `:584-595`).
+  - `approval_reset`: `nodeIds, cause` (`cause`는 `"apply"|"goal"`뿐).
+    쓰는 위치: `packages/local/src/app/app.ts:4126`
+    (`applyDraft`의 `changedNodes.filter` — `approvalReset` 확정 지점).
+- 쓰기 규칙: append 1줄 (줄바꿈 구분). 쓰기는 best-effort —
+  실패해도 실행 결과를 바꾸지 않는다 (M9-2-2 metrics 선례).
+- 실행 종료 시 1줄, approve·approval_reset 시 1줄씩만 쓴다.
+
+## §2b 집계 정의 (읽을 때 계산, 인덱스 없음)
+
+- 노드별 실패 수: `run_end`의 `nodes[]`에서 `status==="fail"`인 줄의
+  nodeId별 개수.
+- 평균 소요 시간: `status==="done"`인 `run_end`의 `nodes[]`에서
+  nodeId별 `durationMs` 산술평균 (성공한 run만).
+- 재승인 수: `approve` 줄에서 같은 nodeId의 두 번째부터 1씩 센다
+  (첫 승인은 제외 — approvals.json 덮어쓰기로 사라지는 정보가 이것이다).
+- 파일 없음·빈 파일: 빈 목록 (정상).
+- 깨진 줄: 건너뛰고 건너뛴 줄 수를 센다 (집계 결과에 `skipped`로 포함).
+- 500자 상한: 집계 텍스트 1줄이 넘으면 잘라내고 `truncated:true`를 붙인다.
+  거부하지 않는다 (수기 파일 하나 때문에 집계 전체가 깨지면 안 됨).
+
+## §2c `lessons.md` 형식 (자동 구획 + 수기 구획)
+
+- 자동 구획: `<!-- proof:auto -->` 부터 `<!-- /proof:auto -->` 까지.
+  안은 Proof만 다시 생성하고, 집계 숫자만 담고 문장 요약은 넣지 않는다.
+  예: `- 노드 1.1 실패 3회, 평균 42s, 재승인 1회`.
+- 구획 밖 수기 내용은 바이트 단위로 보존한다 (자동 갱신이 건드리지 않음).
+- 생성 경로: HTTP `POST /api/procedures/:name/lessons/refresh`와 UI 버튼으로만
+  하고 MCP는 바꾸지 않는다 (신규 MCP 도구 없음).
+- 재finalize 보존 현행 유지 (`procedureWriter.ts:241-247`).
 
 ## §3 저장 위치·파일 형식 (`.procforge/` 아래, 불변 목록 준수)
-- `procedures/<name>/lessons.md` — 현행 유지 (형식 규약만 추가).
+- `runs/by-procedure/<name>/events.ndjson` — 신규 (append-only).
+- `procedures/<name>/lessons.md` — 현행 유지 (구획 규약만 추가).
 - `procedures/<name>/history/` — 현행 유지 (판본 보관, 교훈 아님).
 - `runs/by-procedure/<name>/latest.json` — 현행 유지 (대조용).
 - 불변 준수: `pf_*` 21종·`procforge_decompose`·`format`·
@@ -77,22 +102,35 @@
 
 ## §4 구현 커밋 분할안
 
-### M9-3-1 수집 파서+테스트
-- lessons.md 줄 파서 (헤더·불릿·`[run:]` 접두·500자·파일없음→빈 목록).
-- 테스트 5종: ① 정상 2줄 ② 자유형식 줄 무시 ③ 파일 없음 ④ 500자 초과
-  ⑤ `[run:]` runId 추출. 기존 테스트 파괴 0.
+### M9-3-1 events 쓰기+테스트
+- 3 kind 각 1건 (run 종료 줄·approve 줄·reset 줄) + 쓰기 실패 시
+  실행 결과 불변 1건. 기존 테스트 파괴 0.
 
-### M9-3-2 집계 읽기
-- §5 판정 2 확정 방식대로 구현 (권고: 읽기 시점).
-- M10-1 연동은 판정 3 확정 후 (연동 시 `SimilarProcedure` 확장 + 테스트).
+### M9-3-2 집계 읽기+파서
+- §2b 집계 3종 + §0-1 파서 5종(정상 2줄·자유형식 무시·파일 없음·
+  500자 초과·`[run:]` 추출)에 깨진 줄 건너뛰기 1건을 더한다.
 
-### M9-3-3 문서
+### M9-3-3 lessons 자동 구획 갱신
+- 수기 보존 바이트 동일 테스트 + 재finalize 후 보존 테스트
+  (m11-sidecar 확장).
+
+### M9-3-4 유사분석 연동
+- 응답에 `lessons` 최대 5줄과 `stats`(실행 수, 실패 상위 노드 3개)를 넣는다.
+  순위는 바꾸지 않고, MCP 표면도 그대로 둔다.
+
+### M9-3-5 문서
 - DEV-GUIDE lessons 작성법 1절 + PROCEDURE-FORMAT lessons.md 형식 +
-  DECISIONS [M9-3] 판정 기록 + M10-dogfood 주의문 (M9-2-4 방식 준용).
+  DECISIONS [M9-3] 판정 기록.
 
-## §5 판정 요청 (판정자)
-1. B 범위 확정 (수집 스키마 있음 vs A 파일목록만).
-2. 집계 방식 확정 (읽기 시점 권고 vs 인덱스 파일).
-3. M10-1 연동 여부 (유사분석 결과에 lessons 포함 여부·순위 반영 여부).
-4. 줄 길이 상한 (500자 제안) + 초과 처리 (절단 vs 거부).
-5. lessons.md 미존재 시 동작 (빈 목록 제안).
+## §5 판정 (판정자 [M9-3-spec-fix])
+1. 범위: B를 확장한다. 사실 기록(`events.ndjson`), 읽을 때 계산하는 집계,
+   `lessons.md`(자동 구획과 수기 구획)를 모두 포함한다.
+2. 집계 방식: 쓰기는 `events.ndjson` append 1종만 둔다. 실행 종료 시 1줄,
+   approve·approval_reset 시 1줄이다. 집계는 읽을 때 계산하고 인덱스 파일은
+   만들지 않는다. 쓰기는 best-effort로, 실패해도 실행 결과를 바꾸지 않는다.
+3. M10-1 연동: 유사분석 응답에 `lessons` 최대 5줄과 `stats`(실행 수,
+   실패 상위 노드 3개)를 넣는다. 순위는 바꾸지 않고, MCP 표면도 그대로 둔다.
+4. 줄 길이: 500자 상한이다. 넘으면 잘라내고 `truncated:true`를 붙이며,
+   거부하지 않는다. 수기 파일 하나 때문에 집계 전체가 깨지면 안 되기 때문이다.
+5. 파일이 없을 때: 빈 목록을 돌려주고 정상으로 처리한다. `events.ndjson`에서
+   깨진 줄은 건너뛰고 건너뛴 줄 수를 센다.
