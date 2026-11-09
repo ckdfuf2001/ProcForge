@@ -1221,3 +1221,18 @@ argv: [...]}` 고정. runner는 run fs에서 직접 실행해 stdout을 golden�
   잠금은 이행기 1개 마일스톤 동안 run 시작 시 함께 검사한다.
   `.procforge/` 아래 새 하위 폴더(`.locks/`)를 만드는 것은 불변 위반이 아니다.
 
+## M11-pre-fix2
+
+- [M11-draft-lock-fix] **draft 저장은 쓰기→해제 순서다** (해제→쓰기면 그 사이
+  타 프로세스가 pending+잠금없음을 고아로 오판해 failed로 덮는다).
+  수정 커밋 `2f8e4e2` (쓰기 후 `finally` 해제 + `onDraftSaved` 훅).
+  검증 테스트 `m11-draft-lock` ④ (훅 시점에 파일은 새 값·잠금은 살아 있음).
+- [M11-drive-alive] **drive 생존 하트비트는 run 잠금과 분리한
+  `procedures/.locks/<name>.drive.lock`에 둔다** (같은 경로를 쓰면 runner의
+  절차서 잠금과 충돌해 자신의 runStep이 `procedure run locked`로 죽는다).
+  `isRunAlive` 3단계: activeRuns → 디스크 waiting → drive 하트비트(fresh+pid
+  생존, 죽은 pid는 회수)/runner 잠금. `prepareRun`은 drive 하트비트가 살아
+  있으면 cross-process conflict (절차서당 동시 1개).
+  수정 커밋 `22bd89e`. 검증 테스트 `m11-drive-alive` 2종 (drive 중 conflict·
+  종료 후 통과 / 죽은 pid 회수) + 기존 `m11-guide-zombie` ① 3회 연속 통과.
+
