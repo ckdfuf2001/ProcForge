@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync, appendFileSync, mkdirSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, appendFileSync, mkdirSync, statSync, writeFileSync, utimesSync, unlinkSync } from "node:fs";
 import { randomUUID, createHash } from "node:crypto";
 import { join, resolve, basename } from "node:path";
 import type { CoreClient } from "@proof/shared/core-client.js";
@@ -379,6 +379,56 @@ export class ProcForgeApp {
   private readonly inflightRedrafts = new Set<string>();
   /** M7-5-c: 결정 대기(승인·생성값) 중 잠금 유지 중인 run */
   private waitingRuns = new Set<string>();
+  /**
+   * M11-drive-alive: 절차서별 drive 하트비트 타이머 (같은 절차서의 타 프로세스
+   * advance가 살아 있는 drive를 좀비로 오판하지 않게). 키=절차서명.
+   * 경로는 run 잠금(procRunLockPath)과 분리한 `.drive.lock`을 쓴다 —
+   * 같은 경로를 쓰면 runner의 절차서 잠금(FileStore)과 충돌해 자신의
+   * runStep까지 `procedure run locked`로 죽는다. 대기 중에도 유지된다.
+   */
+  private readonly procRunHeartbeats = new Map<string, { timer: NodeJS.Timeout; token: string }>();
+
+  /** drive 하트비트 파일 경로 (run 잠금과 분리). */
+  private procDriveLockPath(procedure: string): string {
+    return join(this.procforgeDir, "procedures", ".locks", `${procedure}.drive.lock`);
+  }
+
+  /**
+   * M11-drive-alive: drive 하트비트가 살아 있는지 (fresh mtime + pid 생존).
+   * pid가 죽어 있으면 stale 취급하고 파일을 치운다 (다음 실행이 60초를
+   * 기다리지 않게). pid를 알 수 없으면 mtime만 본다.
+   */
+  private isProcDriveAlive(procedure: string): boolean {
+    const p = this.procDriveLockPath(procedure);
+    let mtime: number;
+    try {
+      mtime = statSync(p).mtimeMs;
+    } catch {
+      return false;
+    }
+    if (Date.now() - mtime > PROC_RUN_LOCK_STALE_MS) return false;
+    let pid: unknown;
+    try {
+      pid = (JSON.parse(readFileSync(p, "utf8")) as { pid?: unknown } | null)?.pid;
+    } catch {
+      return true;
+    }
+    if (typeof pid !== "number" || !Number.isInteger(pid) || pid <= 0) return true;
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch (e) {
+      if ((e as { code?: string }).code === "ESRCH") {
+        try {
+          unlinkSync(p);
+        } catch {
+          // 무시
+        }
+        return false;
+      }
+      return true;
+    }
+  }
 
   /**
    * M7-5-b: **디스크**에 기록된 대기 실행 (재시작 후에도 잠금이 살아 있어야 한다).
@@ -3395,6 +3445,13 @@ private hasCurrentApproval(
     if (persisted) {
       throw pfError("conflict", `이미 실행 중입니다 (run ${persisted}).`);
     }
+    // M11-drive-alive: 타 프로세스의 drive 하트비트가 살아 있으면 같은 절차서 중복 실행 금지.
+    // (메모리 맵만 보면 프로세스를 둘 띄울 때 같은 절차서가 두 번 돈다)
+    // run 잠금(procRunLockPath)은 runner가 스텝 중에만 잡으므로 여기서는 보지 않는다.
+    // 죽은 pid의 하트비트는 isProcDriveAlive가 치우고 false를 돌려준다.
+    if (this.isProcDriveAlive(doc.name)) {
+      throw pfError("conflict", `이미 실행 중입니다 (절차서 잠금 ${doc.name}).`);
+    }
     const started = await this.runStart({ procedure: ref, params });
     this.activeRuns.set(doc.name, started.runId);
     appendRunLog(this.procforgeDir, started.runId, {
@@ -4106,6 +4163,8 @@ private hasCurrentApproval(
    * - 취소 플래그는 단계 사이 + 스크립트 실행 **중**에도 본다.
    */
   private async driveRun(runId: string, procedure: string): Promise<void> {
+    // M11-drive-alive: drive 진입 시 하트비트 시작 (대기 중에도 유지된다).
+    this.startProcRunHeartbeat(procedure);
     try {
       for (let i = 0; i < driveLoopTuning.maxIterations; i++) {
         if (readCancelFlag(this.procforgeDir, runId)) {
@@ -4217,16 +4276,87 @@ private hasCurrentApproval(
   private releaseRun(procedure: string, runId: string): void {
     this.waitingRuns.delete(runId);
     if (this.activeRuns.get(procedure) === runId) this.activeRuns.delete(procedure);
+    this.stopProcRunHeartbeat(procedure, true);
   }
 
   /**
-   * M11-guide-zombie: 실행 중(run/ready) run의 생존 판정.
-   * 같은 프로세스의 drive면 activeRuns에 있고, 다른 프로세스의 CLI 실행이면
-   * run 잠금 하트비트가 살아 있다. 둘 다 없으면 드라이버가 없는 좀비다.
-   * (가이드 run은 파일 잠금을 잡지 않으므로, 재시작 뒤에는 하트비트도 없다.)
+   * M11-drive-alive: drive 하트비트 시작 (멱등). driveRun 진입 시 호출한다.
+   * prepareRun에서는 시작하지 않는다 — prepare만 하고 drive를 띄우기 전 죽은
+   * 경우까지 살아 있다고 보면 좀비 판정이 60초 늦어진다 (M11-guide-zombie ①).
+   */
+  private startProcRunHeartbeat(procedure: string): void {
+    if (this.procRunHeartbeats.has(procedure)) return;
+    const p = this.procDriveLockPath(procedure);
+    try {
+      mkdirSync(join(this.procforgeDir, "procedures", ".locks"), { recursive: true });
+    } catch {
+      // 무시 (이미 있음)
+    }
+    const token = randomUUID();
+    try {
+      if (!existsSync(p)) {
+        writeFileSync(
+          p,
+          JSON.stringify({ pid: process.pid, token, at: new Date().toISOString() }),
+        );
+      } else {
+        // 다른 주체가 잡고 있으면 건드리지 않는다 (이 프로세스 판정은 activeRuns가 담당).
+        return;
+      }
+    } catch {
+      return;
+    }
+    const timer = setInterval(() => {
+      try {
+        const cur = JSON.parse(readFileSync(p, "utf8")) as { token?: unknown } | null;
+        if (cur?.token === token) utimesSync(p, new Date(), new Date());
+      } catch {
+        // 무시 (다음 틱에 재시도)
+      }
+    }, PROC_RUN_LOCK_STALE_MS / 3);
+    if (typeof (timer as unknown as { unref?: unknown }).unref === "function") {
+      (timer as unknown as { unref: () => void }).unref();
+    }
+    this.procRunHeartbeats.set(procedure, { timer, token });
+  }
+
+  /** drive 하트비트 중지. removeFile=true면 본인 토큰일 때만 파일을 지운다. */
+  private stopProcRunHeartbeat(procedure: string, removeFile: boolean): void {
+    const h = this.procRunHeartbeats.get(procedure);
+    if (!h) return;
+    this.procRunHeartbeats.delete(procedure);
+    clearInterval(h.timer);
+    if (removeFile) {
+      try {
+        const cur = JSON.parse(readFileSync(this.procDriveLockPath(procedure), "utf8")) as { token?: unknown } | null;
+        if (cur?.token === h.token) unlinkSync(this.procDriveLockPath(procedure));
+      } catch {
+        // 이미 없음 — 무시
+      }
+    }
+  }
+
+  /**
+   * M11-drive-alive: 실행 중(run/ready) run의 생존 판정 3단계.
+   * 1) 같은 프로세스의 drive면 activeRuns에 있다.
+   * 2) 디스크에 waiting으로 남아 있으면 (재시작 후에도) 살아 있다.
+   * 3) 다른 프로세스의 drive 하트비트(`.drive.lock`: fresh mtime + pid 생존)나
+   *    runner의 절차서 잠금(run 잠금 mtime)이 fresh하면 살아 있다.
+   * 셋 다 아니면 드라이버가 없는 좀비다.
    */
   private isRunAlive(procedure: string, runId: string): boolean {
     if (this.activeRuns.get(procedure) === runId) return true;
+    try {
+      const st = readRunState(this.procforgeDir, runId) as
+        | { waiting?: unknown; status?: string }
+        | undefined;
+      if (st?.waiting !== undefined && st?.waiting !== null) {
+        if (st.status !== "done" && st.status !== "failed" && st.status !== "cancelled") return true;
+      }
+    } catch {
+      // 상태 읽기 실패는 다음 단계로.
+    }
+    if (this.isProcDriveAlive(procedure)) return true;
     try {
       const mtime = statSync(procRunLockPath(this.procforgeDir, procedure)).mtimeMs;
       if (Date.now() - mtime <= PROC_RUN_LOCK_STALE_MS) return true;
