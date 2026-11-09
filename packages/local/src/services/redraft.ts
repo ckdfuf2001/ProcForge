@@ -303,6 +303,11 @@ export async function runRedraft(input: {
    * 지정 시 디렉터리는 그대로 쓰고 procedure.json 복사본을 덮어쓴다.
    */
   draftId?: string;
+  /**
+   * M11-draft-lock-fix 테스트 훅: draft.json 기록 직후·잠금 해제 직전 호출.
+   * 쓰기→해제 순서를 검증한다 (훅 시점에 잠금이 살아 있고 파일은 이미 새 값).
+   */
+  onDraftSaved?: (r: RedraftResult) => void;
 }): Promise<RedraftResult> {
   const baseUrl = input.openCode.baseUrl.replace(/\/$/, "");
   if (!baseUrl) throw pfError("bad_request", "OpenCode 서버 주소 없음 (PROOF_OPENCODE_URL)");
@@ -345,14 +350,19 @@ export async function runRedraft(input: {
     at: new Date().toISOString(),
   };
   const save = (r: RedraftResult): RedraftResult => {
-    // M11-draft-lock: 모든 종료 경로는 save를 거치므로 여기서 잠금을 푼다.
+    // M11-draft-lock-fix: 쓰기→해제 순서. 해제→쓰기면 그 사이 다른 프로세스가
+    // pending+잠금없음을 고아로 오판해 failed로 덮는다. 쓰기 실패해도 잠금은 푼다.
     try {
-      releaseDraftLock();
-    } catch {
-      // 무시 (이미 풀렸거나 없음)
+      // M10-entry-fix: UI가 2초마다 읽으므로 원자 쓰기 (반쯤 쓴 파일 파싱 실패 방지).
+      writeFileAtomic(join(draftDir, "draft.json"), JSON.stringify(r, null, 2));
+      input.onDraftSaved?.(r);
+    } finally {
+      try {
+        releaseDraftLock();
+      } catch {
+        // 무시 (이미 풀렸거나 없음)
+      }
     }
-    // M10-entry-fix: UI가 2초마다 읽으므로 원자 쓰기 (반쯤 쓴 파일 파싱 실패 방지).
-    writeFileAtomic(join(draftDir, "draft.json"), JSON.stringify(r, null, 2));
     return r;
   };
   const headers = authHeaders(input.openCode.password);

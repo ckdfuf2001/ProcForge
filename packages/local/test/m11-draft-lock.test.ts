@@ -3,6 +3,8 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { mkdirSync, readdirSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { ProcForgeApp } from "../src/app/app.js";
+import { runRedraft } from "../src/services/redraft.js";
+import { isDraftLockAlive } from "../src/services/draft-lock.js";
 import { testStack } from "./client-mode.js";
 import { makeTmp } from "@proof/shared/tmp.js";
 import { useTmpCleanup } from "./tmp-hooks.js";
@@ -185,6 +187,32 @@ describe("M11 draft lock (2 App, 동일 폴더)", () => {
     }
     const fin = await a.getDraft({ draftId });
     expect(fin.status).toBe("ready");
+    expect(lockFiles()).toHaveLength(0);
+  }, 60000);
+
+  it("④ save는 쓰기→해제 순서 (훅 시점에 파일은 새 값·잠금은 살아 있음)", async () => {
+    baseUrl = await startFake();
+    process.env.PROOF_OPENCODE_URL = baseUrl;
+    let hookSeen = 0;
+    const r = await runRedraft({
+      procforgeDir: pfdir,
+      procedure: "dl",
+      request: "바꿔",
+      openCode: { baseUrl, model: { providerID: "t", modelID: "m" }, source: "default" },
+      idleTimeoutMs: 10000,
+      onDraftSaved: (saved) => {
+        hookSeen++;
+        // 파일은 이미 새 값이어야 한다.
+        const onDisk = JSON.parse(
+          readFileSync(join(pfdir, "drafts", saved.draftId, "draft.json"), "utf8"),
+        ) as { status: string };
+        expect(onDisk.status).toBe(saved.status);
+        // 잠금은 아직 살아 있어야 한다 (해제 전).
+        expect(isDraftLockAlive(pfdir, saved.draftId)).toBe(true);
+      },
+    });
+    expect(r.status).toBe("ready");
+    expect(hookSeen).toBeGreaterThan(0);
     expect(lockFiles()).toHaveLength(0);
   }, 60000);
 });
