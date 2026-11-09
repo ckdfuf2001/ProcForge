@@ -399,6 +399,38 @@ export function matchApproval(
   return matchValue(normalizeScriptValue(entry.args), normalizeScriptValue(args));
 }
 
+function isScriptSpec(v: unknown): v is { kind: "script"; file: string } {
+  return (
+    typeof v === "object" &&
+    v !== null &&
+    (v as { kind?: unknown }).kind === "script" &&
+    typeof (v as { file?: unknown }).file === "string"
+  );
+}
+
+/**
+ * M10-gate-unify: 비교 인자 생성 단일 장치 (runner·가이드 공용).
+ * commitApproval+buildApprovalEntry가 저장하는 키 집합과 맞춘다:
+ * - literal "script" 키의 script-kind → {file} (entry의 {file, snapshot}은
+ *   normalizeScriptValue가 {file}로 걷어내므로 일치. snapshot 내용은
+ *   approvalHash 핀이 양측에서 보증).
+ * - 그 외 script-kind 키 → 제거 (entry에 없음; flat/acc 등).
+ * - 나머지 → logicalArgs 그대로 (resolveArgs 출력: script-kind는 파일 문자열,
+ *   단 runner는 제외済·가이드는 포함이므로 여기서 통일).
+ */
+export function gateArgsFor(
+  node: { args?: Record<string, unknown> },
+  logicalArgs: Record<string, unknown>,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...logicalArgs };
+  for (const [k, v] of Object.entries(node.args ?? {})) {
+    if (!isScriptSpec(v)) continue;
+    if (k === "script") out[k] = { file: v.file };
+    else delete out[k];
+  }
+  return out;
+}
+
 /**
  * script 값 정규화 (비교용). {file, snapshot?} → {file}.
  * 그 외 모양·$any/$prefix는 그대로 둔다 (양쪽에 똑같이 적용되므로

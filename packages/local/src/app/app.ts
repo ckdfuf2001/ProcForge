@@ -103,6 +103,7 @@ import {
   loadApprovals,
   approvalPins,
   checkApproval,
+  gateArgsFor,
   toHashableMap,
   commitApproval,
   saveApproval,
@@ -3034,8 +3035,11 @@ private hasCurrentApproval(
         logical = undefined;
       }
       if (logical !== undefined) {
-        const ok = mine.some((e) =>
-          checkApproval([e], pins, tool.server, tool.name, logical as Record<string, unknown>),
+        // M10-gate-unify: runner 게이트와 같은 비교 인자(gateArgsFor) +
+        // 같은 판정 (verdict === "ok"; truthy 문자열 판정 금지).
+        const gateArgs = gateArgsFor(n, logical);
+        const ok = mine.some(
+          (e) => checkApproval([e], pins, tool.server, tool.name, gateArgs) === "ok",
         );
         if (!ok) {
           return {
