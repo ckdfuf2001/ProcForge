@@ -4,6 +4,7 @@ import { readFileSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { runRedraft } from "../src/services/redraft.js";
+import { fakeProvidersBody } from "./fake-providers.js";
 import { makeTmp } from "@proof/shared/tmp.js";
 import { useTmpCleanup } from "./tmp-hooks.js";
 
@@ -84,7 +85,7 @@ async function startFake(): Promise<string> {
     requests.push({ method: req.method, url: req.url, body });
     if (req.url === "/config/providers") {
       res.writeHead(200, { "content-type": "application/json" });
-      res.end(JSON.stringify({ default: { t: "m" }, providers: [{ id: "t", models: { m: {} } }] }));
+      res.end(JSON.stringify(fakeProvidersBody()));
       return;
     }
     if (req.url === "/event") {

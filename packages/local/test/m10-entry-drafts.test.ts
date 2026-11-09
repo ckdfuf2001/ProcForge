@@ -6,6 +6,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { createUiServer, type UiServer } from "../src/app/ui-server.js";
 import { ProcForgeApp } from "../src/app/app.js";
 import { testStack } from "./client-mode.js";
+import { fakeProvidersBody } from "./fake-providers.js";
 import { makeTmp } from "@proof/shared/tmp.js";
 import { useTmpCleanup } from "./tmp-hooks.js";
 
@@ -66,7 +67,7 @@ async function startFake(): Promise<string> {
     }
     if (req.url === "/config/providers") {
       res.writeHead(200, { "content-type": "application/json" });
-      res.end(JSON.stringify({ default: { t: "m" }, providers: [{ id: "t", models: { m: {} } }] }));
+      res.end(JSON.stringify(fakeProvidersBody()));
       return;
     }
     if (req.url === "/session" && req.method === "POST") {

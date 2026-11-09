@@ -6,6 +6,7 @@ import { spawnSync } from "node:child_process";
 import { ProcForgeApp } from "../src/app/app.js";
 import { createUiServer, type UiServer } from "../src/app/ui-server.js";
 import { runRedraft } from "../src/services/redraft.js";
+import { fakeProvidersBody } from "./fake-providers.js";
 import { testStack } from "./client-mode.js";
 import { makeTmp } from "@proof/shared/tmp.js";
 import { useTmpCleanup } from "./tmp-hooks.js";
@@ -71,10 +72,7 @@ async function startFake(): Promise<string> {
         return;
       }
       res.writeHead(200, { "content-type": "application/json" });
-      res.end(JSON.stringify({
-        default: { t: "m" },
-        providers: [{ id: "t", models: { m: {}, other: {} } }, { id: "u", models: { x: {} } }],
-      }));
+      res.end(JSON.stringify(fakeProvidersBody()));
       return;
     }
     if (req.url === "/event") {

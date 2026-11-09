@@ -7,6 +7,7 @@ import { ProcForgeApp } from "../dist/app/app.js";
 import { createUiServer } from "../dist/app/ui-server.js";
 import { savePairing } from "../dist/services/pairings.js";
 import { makeTmp } from "@proof/shared/tmp.js";
+import { fakeProvidersBody } from "../test/fake-providers.js";
 // M9-tmp2: 정리는 각 spec 파일의 test.afterAll(cleanRegisteredTmp)이 담당한다.
 // (vitest afterAll과 달리 Playwright 훅은 spec 파일에서 건다.)
 
@@ -128,9 +129,10 @@ export async function startFakeOpenCode(
       return;
     }
     // M10-entry: 재분석 플로우 전용 (redraft 모드에서만).
+    // M10-model-fix: 실서버 형식(배열)으로 응답한다.
     if (mode === "redraft") {
       if (req.method === "GET" && url.pathname === "/config/providers") {
-        send(200, { default: { t: "m" }, providers: {} });
+        send(200, fakeProvidersBody());
         return;
       }
       if (req.method === "GET" && url.pathname === "/event") {
