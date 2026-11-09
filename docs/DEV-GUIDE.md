@@ -619,7 +619,7 @@ c·d·j는 하네스 과제로 DECISIONS에 기록만.
 | M10-why-2 | `editWhy` (의견 경로) + 재분석 `edit_why` | [ ] | | | 대상+하위만 stale, 이벤트 before/after |
 | M10-why-fix | contract rule | [ ] | | | wire method add -> update count assert and MCP inputSchema check together |
 | M10-3-0 | 화면 설계서 + 정적 목업 | [ ] | | | 설계+목업만, 구현은 M10-3에서 |
-| M10 1차 | 게이트 통일+seed+doc5+실측 2·3회차 | [x] | `5fca299` | https://github.com/ckdfuf2001/ProcForge/actions/runs/42616998353 | 실행자: 에이전트 대행 2·3회차, 결과 재현됨 |
+| M10 1차 | 게이트 통일+seed+doc5+실측 2·3회차 | [x] | `4243c18` | https://github.com/ckdfuf2001/ProcForge/actions/runs/42638263089 | 실행자: 에이전트 대행 2·3회차, 결과 재현됨 |
 
 > M8은 dogfood(`docs/M7-dogfood.md`) 결과를 반영해 정의했다. 완료 기준은 각 항목 비고에 따른다.
 
