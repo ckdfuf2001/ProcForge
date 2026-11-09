@@ -13,6 +13,7 @@ import { pfError } from "@proof/shared/errors.js";
 import type { ProcForgeApp } from "./app.js";
 import { NODE_HISTORY_MAX } from "./app.js";
 import { SessionEventHub, MAX_SUBS_PER_SESSION } from "./events-hub.js";
+import { startUiPresence } from "./ui-presence.js";
 
 // M7-1: `procforge ui` 로컬 서버 (어댑터. App 메서드만 호출).
 // M7-ui1: 보안·세션 목록·pairings·정적 서빙. M7-ui2: 세션 트리 + SSE.
@@ -296,6 +297,8 @@ export async function createUiServer(opts: {
   heartbeatMs?: number;
   /** M10-entry: 읽기 전용 모드 — POST /api/drafts를 거부한다. */
   readOnly?: boolean;
+  /** M11-ui-presence: 같은 저장소를 쓰는 다른 UI가 있으면 stderr 경고. 생략 시 검사 안 함. */
+  procforgeDir?: string;
 }): Promise<UiServer> {
   const token = randomBytes(32).toString("hex");
   // M8-ui4: 매 기동마다 다른 값. SPA 가 sessionStorage 의 이전 값과 비교해 재시작을 안다.
@@ -1055,6 +1058,8 @@ export async function createUiServer(opts: {
   );
   await listenWithRetry(server, opts.port ?? 0);
   const port = (server.address() as { port: number }).port;
+  // M11-ui-presence: 같은 저장소를 쓰는 다른 UI가 있으면 stderr 경고 1줄 (막지 않음).
+  const stopPresence = opts.procforgeDir !== undefined ? startUiPresence(opts.procforgeDir) : undefined;
     return {
       url: `http://127.0.0.1:${port}`,
       token,
@@ -1063,11 +1068,13 @@ export async function createUiServer(opts: {
     subscriberCount: (sid) => hub.count(sid),
     // M8-1-close2 b: 신호 감시 결과 배지 갱신 (같은 /api/events 스트림).
     pushSignal: (sid: string, payload: unknown) => hub.push(sid, "signal", payload),
-    close: () =>
-      new Promise<void>((r) => {
+    close: () => {
+      stopPresence?.();
+      return new Promise<void>((r) => {
         hub.stopAll();
         server.closeAllConnections();
         server.close(() => r());
-      }),
+      });
+    },
   };
 }
