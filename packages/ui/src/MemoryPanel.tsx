@@ -77,7 +77,8 @@ export function MemoryPanel({
     })();
   };
 
-  const requestRedraft = () => {    if (!picked) return;
+  const requestRedraft = () => {
+    if (!picked) return;
     const req = requestText.trim();
     if (req.length === 0) {
       setError("재분석 요청문을 입력하라");

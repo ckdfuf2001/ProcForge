@@ -1,7 +1,8 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { runScript } from "../src/runner/script-run.js";
+import { logger } from "../src/logger.js";
 import { makeTmp } from "@proof/shared/tmp.js";
 import { useTmpCleanup } from "./tmp-hooks.js";
 
@@ -28,6 +29,8 @@ describe("M9-3-epipe stdin EPIPE 무시", () => {
     const onUncaught = (e: unknown): void => {
       uncaught.push(e);
     };
+    // M9-3-fix2: 정상 경로에서는 경고가 0건이어야 한다 (EOF는 조용히 무시).
+    const warnSpy = vi.spyOn(logger, "warn");
     process.on("uncaughtException", onUncaught);
     try {
       for (let i = 0; i < 5; i++) {
@@ -37,7 +40,9 @@ describe("M9-3-epipe stdin EPIPE 무시", () => {
       }
     } finally {
       process.removeListener("uncaughtException", onUncaught);
+      warnSpy.mockRestore();
     }
     expect(uncaught).toHaveLength(0);
+    expect(warnSpy).not.toHaveBeenCalled();
   }, 120000);
 });

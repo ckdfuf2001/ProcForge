@@ -4,6 +4,8 @@ import { join } from "node:path";
 import { createUiServer, type UiServer } from "../src/app/ui-server.js";
 import { ProcForgeApp } from "../src/app/app.js";
 import { refreshLessons } from "../src/services/lessons-agg.js";
+import { FileStore } from "../src/filestore.js";
+import { acquireProcRunLock } from "../src/services/run-lock.js";
 import { testStack } from "./client-mode.js";
 import { makeTmp } from "@proof/shared/tmp.js";
 import { useTmpCleanup } from "./tmp-hooks.js";
@@ -71,7 +73,7 @@ describe("M9-3-3 lessons 자동 구획 갱신", () => {
     const manual = "# 교훈\n- 밤 집계를 먼저 한다.\n- 재시도는 한 번만.\n";
     writeFileSync(join(pfdir, "procedures", "rf1", "lessons.md"), manual, "utf8");
     const r = refreshLessons(pfdir, "rf1");
-    expect(r).toEqual({ procedure: "rf1", lines: 1 });
+    expect(r).toEqual({ procedure: "rf1", lines: 2 });
     const after = readFileSync(join(pfdir, "procedures", "rf1", "lessons.md"), "utf8");
     expect(stripAuto(after)).toBe(manual);
     expect(after).toContain(AUTO_OPEN);
@@ -129,7 +131,7 @@ describe("M9-3-3 lessons 자동 구획 갱신", () => {
       });
       expect(res.status).toBe(200);
       const body = (await res.json()) as { procedure: string; lines: number };
-      expect(body).toEqual({ procedure: "rf4", lines: 1 });
+      expect(body).toEqual({ procedure: "rf4", lines: 2 });
       const missing = await fetch(`${srv.url}/api/procedures/no-such-proc/lessons/refresh`, {
         method: "POST",
         headers: { "content-type": "application/json", "x-procforge-token": srv.token },
@@ -140,4 +142,61 @@ describe("M9-3-3 lessons 자동 구획 갱신", () => {
       await srv.close();
     }
   }, 120000);
+
+  it("⑤ 잠금을 잡은 상태에서 갱신하면 conflict가 나고 파일이 바뀌지 않음", async () => {
+    writeProc("rf5");
+    writeEvents("rf5");
+    const manual = "# 교훈\n- 밤 집계를 먼저 한다.\n";
+    const lp = join(pfdir, "procedures", "rf5", "lessons.md");
+    writeFileSync(lp, manual, "utf8");
+    const release = acquireProcRunLock(
+      new FileStore(pfdir),
+      pfdir,
+      "rf5",
+      "test lock: rf5",
+      60000,
+    );
+    try {
+      const app = newApp();
+      await expect(app.refreshProcedureLessons({ procedure: "rf5" })).rejects.toMatchObject({ code: "conflict" });
+      expect(readFileSync(lp, "utf8")).toBe(manual);
+    } finally {
+      release();
+    }
+  });
+
+  it("⑥ ../x, procedures/x는 400", async () => {
+    writeProc("rf6");
+    const app = newApp();
+    await expect(app.refreshProcedureLessons({ procedure: "../x" })).rejects.toMatchObject({ code: "bad_request" });
+    await expect(app.refreshProcedureLessons({ procedure: "procedures/x" })).rejects.toMatchObject({ code: "bad_request" });
+    const srv: UiServer = await createUiServer({ app, staticDir: makeTmp("pf-m93rf6-") });
+    try {
+      for (const bad of ["..%2Fx", "procedures%2Fx"]) {
+        const res = await fetch(`${srv.url}/api/procedures/${bad}/lessons/refresh`, {
+          method: "POST",
+          headers: { "content-type": "application/json", "x-procforge-token": srv.token },
+          body: "{}",
+        });
+        expect(res.status).toBe(400);
+      }
+    } finally {
+      await srv.close();
+    }
+  });
+
+  it("⑦ CRLF 파일을 파싱하면 텍스트에 \\r이 없고, 갱신 후 구획 밖 바이트가 같음", () => {
+    writeProc("rf7");
+    writeEvents("rf7");
+    const manual = "# 교훈\r\n- 밤 집계를 먼저 한다.\r\n- 재시도는 한 번만.\r\n";
+    const lp = join(pfdir, "procedures", "rf7", "lessons.md");
+    writeFileSync(lp, manual, "utf8");
+    refreshLessons(pfdir, "rf7");
+    const after = readFileSync(lp, "utf8");
+    expect(after).toContain("- 밤 집계를 먼저 한다.");
+    expect(after).not.toContain("\r- ");
+    expect(stripAuto(after)).toBe(manual);
+    refreshLessons(pfdir, "rf7");
+    expect(readFileSync(lp, "utf8")).toBe(after);
+  });
 });

@@ -4167,18 +4167,46 @@ private hasCurrentApproval(
 
   /**
    * M9-3-3: 교훈 자동 구획 갱신 (UI 버튼·HTTP 전용, MCP 없음).
-   * 존재하지 않는 절차서는 거부한다 (없는 폴더에 lessons.md를 만들지 않음).
+   * M9-3-fix2: 이름은 PROCEDURE_NAME_RE로 직접 검사한다 (loadProcedureDoc은
+   * 경로 형식 ref도 받아줘서 join이 다른 위치를 가리킬 수 있다).
+   * 갱신 중에는 procRunLock을 잡는다 (finalize 교체와 겹치면 procedure.json
+   * 소실 — M10-lock과 같은 유형). 이미 잡혀 있으면 conflict.
    */
   async refreshProcedureLessons(a: {
     procedure: unknown;
   }): Promise<{ procedure: string; lines: number }> {
     const ref = String(a.procedure ?? "");
+    if (!PROCEDURE_NAME_RE.test(ref)) {
+      throw pfError("bad_request", `절차서 이름 오류: ${ref}.`);
+    }
     try {
       loadProcedureDoc(this.procforgeDir, ref);
     } catch {
       throw pfError("bad_request", `등록되지 않은 절차서입니다: ${ref}.`);
     }
-    return refreshLessons(this.procforgeDir, ref);
+    let release: (() => void) | undefined;
+    try {
+      release = acquireProcRunLock(
+        new FileStore(this.procforgeDir),
+        this.procforgeDir,
+        ref,
+        `procedure lessons refresh locked: ${ref}`,
+        60000,
+      );
+    } catch (e) {
+      if ((e as { code?: string }).code === "conflict") {
+        throw pfError(
+          "conflict",
+          `실행 중인 절차서의 교훈은 갱신할 수 없습니다: ${ref} (실행 종료 후 다시 갱신하세요)`,
+        );
+      }
+      throw e;
+    }
+    try {
+      return refreshLessons(this.procforgeDir, ref);
+    } finally {
+      release?.();
+    }
   }
 
   /** M7 5-1: 백그라운드 진행 루프 (결정점까지 자동) */

@@ -1,5 +1,5 @@
-import { mkdirSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { writeAtomicFile } from "../fsutil.js";
 import { eventsLogPath } from "./events-log.js";
 
@@ -137,7 +137,9 @@ export function readManualLessons(path: string): ManualLesson[] {
   }
   const out: string[] = [];
   let inAuto = false;
-  for (const l of raw.split("\n")) {
+  for (const rawLine of raw.split("\n")) {
+    // CRLF로 손편집된 파일: 줄 끝 \r은 파싱에서 제외한다 (보존 바이트는 그대로).
+    const l = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
     if (l.includes(AUTO_OPEN)) {
       inAuto = true;
       continue;
@@ -166,16 +168,27 @@ export function refreshLessons(
   procedure: string,
 ): { procedure: string; lines: number } {
   const agg = aggregate(procforgeDir, procedure);
-  const body = agg.nodes.map(
-    (n) => `- ${n.nodeId}: 실패 ${n.fails}회, 평균 ${n.avgMs}ms, 재승인 ${n.reapprovals}회`,
-  );
+  // M9-3-fix2: 첫 줄은 실행 횟수, 노드 줄의 평균은 Math.round (소수 표기 방지).
+  const body = [
+    `- 실행 ${agg.runs}회 (live)`,
+    ...agg.nodes.map(
+      (n) => `- ${n.nodeId}: 실패 ${n.fails}회, 평균 ${Math.round(n.avgMs)}ms, 재승인 ${n.reapprovals}회`,
+    ),
+  ];
   const section = [AUTO_OPEN, ...body, AUTO_CLOSE].join("\n");
-  const p = join(procforgeDir, "procedures", procedure, "lessons.md");
+  const dir = join(procforgeDir, "procedures", procedure);
+  const p = join(dir, "lessons.md");
   let cur = "";
   try {
     cur = readFileSync(p, "utf8");
   } catch {
     cur = "";
+  }
+  // M9-3-fix2: 폴더가 없으면 실패한다 (mkdir로 되살리면 finalize 교체와
+  // 겹칠 때 procedure.json이 사라진다 — M10-lock과 같은 유형).
+  // 갱신 중에는 App층이 procRunLock을 잡으므로 finalize와 겹치지 않는다.
+  if (!existsSync(dir)) {
+    throw Object.assign(new Error(`절차서 없음: ${procedure}`), { code: "not_found" });
   }
   let next: string;
   // 구획 앞뒤로 개행을 덧붙이지 않는다 — 바이트 보존이 우선이다.
@@ -191,7 +204,6 @@ export function refreshLessons(
       next = cur + (cur.endsWith("\n") ? "" : "\n") + section;
     }
   }
-  mkdirSync(dirname(p), { recursive: true });
   writeAtomicFile(p, next);
   return { procedure, lines: body.length };
 }

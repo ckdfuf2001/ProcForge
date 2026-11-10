@@ -319,7 +319,8 @@ if (pid !== undefined) input.onChild?.(pid, child);
     // 종료 코드와 출력으로 close 경로가 그대로 처리한다).
     child.stdin?.on("error", (e: unknown) => {
       const code = (e as { code?: string }).code;
-      if (code === "EPIPE" || code === "ERR_STREAM_DESTROYED") return;
+      // Windows에서는 자식이 먼저 끝나면 EOF로 들어온다 (동일 경합).
+      if (code === "EPIPE" || code === "ERR_STREAM_DESTROYED" || code === "EOF") return;
       // stderr 접두어는 logger 형식과 통일 (M9-3-fix 선례).
       logger.warn(`script stdin 오류 무시: ${code ?? String(e)}`);
     });
