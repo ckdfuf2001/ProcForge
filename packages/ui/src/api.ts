@@ -217,6 +217,10 @@ export type SimilarProcedure = {
   goals: string[];
   latest: { runId: string; status: string; at: string } | null;
   metrics: { files: number; rows: number } | null;
+  /** M9-3-4: 수기 교훈 (최대 5개) */
+  lessons: { text: string; truncated: boolean }[];
+  /** M9-3-4: 집계 요약 (실행 수 + 실패 수 상위 노드) */
+  stats: { runs: number; topFails: { nodeId: string; fails: number }[] };
 };
 
 /** M10-3-ui: 재분석 초안 (draft.json 그대로) */

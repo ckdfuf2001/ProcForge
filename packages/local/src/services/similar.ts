@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { PROCEDURE_NAME_RE } from "@proof/shared/procedure.js";
+import { aggregate, readManualLessons, type ManualLesson } from "./lessons-agg.js";
 
 // M10-1: 유사 분석 조회 (읽기 전용, 로컬 전용).
 // procedures/<name>/procedure.json 목록 + by-procedure latest 요약.
@@ -17,6 +18,10 @@ export type SimilarProcedure = {
   latest: { runId: string; status: string; at: string } | null;
   /** metrics.json 요약 (파일 수·행 합). 순위에는 쓰지 않는다. */
   metrics: { files: number; rows: number } | null;
+  /** M9-3-4: 수기 교훈 (최대 5개, 자동 구획 제외). 순위에는 쓰지 않는다. */
+  lessons: ManualLesson[];
+  /** M9-3-4: 집계 요약 (실행 수 + 실패 수 상위 노드 3개). 순위에는 쓰지 않는다. */
+  stats: { runs: number; topFails: { nodeId: string; fails: number }[] };
 };
 
 function bigrams(s: string): string[] {
@@ -60,6 +65,17 @@ function metricsSummary(
   } catch {
     return null;
   }
+}
+
+/** M9-3-4: 집계 요약 (실행 수 + 실패 수 상위 노드 3개, 실패 없으면 빈 목록). */
+function statsSummary(procforgeDir: string, name: string): SimilarProcedure["stats"] {
+  const agg = aggregate(procforgeDir, name);
+  const topFails = agg.nodes
+    .filter((n) => n.fails > 0)
+    .sort((a, b) => (b.fails !== a.fails ? b.fails - a.fails : a.nodeId < b.nodeId ? -1 : 1))
+    .slice(0, 3)
+    .map((n) => ({ nodeId: n.nodeId, fails: n.fails }));
+  return { runs: agg.runs, topFails };
 }
 
 export function listProceduresWithLatest(
@@ -116,6 +132,10 @@ export function listProceduresWithLatest(
       goals,
       latest,
       metrics: latest ? metricsSummary(procforgeDir, latest.runId) : null,
+      // M9-3-4: lessons + stats는 표시용이다. 순위(filterProcedures)는
+      // 어휘 점수·상태·시간·이름만 보고 이 필드들을 읽지 않는다.
+      lessons: readManualLessons(join(procforgeDir, "procedures", name, "lessons.md")),
+      stats: statsSummary(procforgeDir, name),
     });
   }
   return out;

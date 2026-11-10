@@ -158,6 +158,22 @@ export function MemoryPanel({
               <li key={i}>{g}</li>
             ))}
           </ul>
+          {/* M9-3-4: 집계 요약 + 수기 교훈 (순위·동작 불변, 표시만) */}
+          <p className="muted">
+            실행 {picked.stats.runs}회
+            {picked.stats.topFails.length > 0 &&
+              ` · 실패 상위: ${picked.stats.topFails.map((t) => `${t.nodeId}(${t.fails})`).join(", ")}`}
+          </p>
+          {picked.lessons.length > 0 && (
+            <ul>
+              {picked.lessons.map((l, i) => (
+                <li key={i}>
+                  {l.text}
+                  {l.truncated ? "…" : ""}
+                </li>
+              ))}
+            </ul>
+          )}
           <label>
             재분석 요청문
             <textarea
