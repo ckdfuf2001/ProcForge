@@ -1,4 +1,6 @@
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { writeAtomicFile } from "../fsutil.js";
 import { eventsLogPath } from "./events-log.js";
 
 // M9-3-2: 읽을 때 계산하는 집계 (인덱스 파일 없음, M9-3-spec §2b).
@@ -152,4 +154,44 @@ export function readManualLessons(path: string): ManualLesson[] {
       ? { text: t.slice(0, LESSON_LINE_LIMIT), truncated: true }
       : { text: t, truncated: false },
   );
+}
+
+/**
+ * M9-3-3: 자동 구획만 다시 쓰고 수기 구획은 바이트 단위로 보존한다.
+ * 파일이 없으면 새로 만든다. 집계 숫자만 담고 문장 요약은 넣지 않는다.
+ * 쓰기는 원자 교체 (실패해도 기존 파일은 그대로).
+ */
+export function refreshLessons(
+  procforgeDir: string,
+  procedure: string,
+): { procedure: string; lines: number } {
+  const agg = aggregate(procforgeDir, procedure);
+  const body = agg.nodes.map(
+    (n) => `- ${n.nodeId}: 실패 ${n.fails}회, 평균 ${n.avgMs}ms, 재승인 ${n.reapprovals}회`,
+  );
+  const section = [AUTO_OPEN, ...body, AUTO_CLOSE].join("\n");
+  const p = join(procforgeDir, "procedures", procedure, "lessons.md");
+  let cur = "";
+  try {
+    cur = readFileSync(p, "utf8");
+  } catch {
+    cur = "";
+  }
+  let next: string;
+  // 구획 앞뒤로 개행을 덧붙이지 않는다 — 바이트 보존이 우선이다.
+  // (끝 개행이 있으면 다음 갱신 때 "구획 밖"으로 남아 어긋난다.)
+  if (cur === "") {
+    next = section;
+  } else {
+    const oi = cur.indexOf(AUTO_OPEN);
+    const ci = cur.indexOf(AUTO_CLOSE);
+    if (oi !== -1 && ci !== -1 && ci > oi) {
+      next = cur.slice(0, oi) + section + cur.slice(ci + AUTO_CLOSE.length);
+    } else {
+      next = cur + (cur.endsWith("\n") ? "" : "\n") + section;
+    }
+  }
+  mkdirSync(dirname(p), { recursive: true });
+  writeAtomicFile(p, next);
+  return { procedure, lines: body.length };
 }

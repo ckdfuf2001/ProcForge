@@ -445,6 +445,12 @@ export const api = {
       request,
       ...(sessionId !== undefined ? { sessionId } : {}),
     }),
+  // M9-3-3: 교훈 자동 구획 갱신 (UI 버튼 전용).
+  refreshLessons: (procedure: string) =>
+    post<{ procedure: string; lines: number }>(
+      `/api/procedures/${encodeURIComponent(procedure)}/lessons/refresh`,
+      {},
+    ),
   // M10-4: 순차 자동 실행 가이드 (사람 확인 → 단계 실행).
   startGuide: (steps: { procedure: string; params?: Record<string, string> }[], guideId?: string) =>
     post<GuideDetail>("/api/guides", {

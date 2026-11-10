@@ -53,6 +53,7 @@ export type UiApp = Pick<
   | "advanceGuide"
   | "cancelGuideStep"
   | "requestRedraft"
+  | "refreshProcedureLessons"
 >;
 
 export type UiServer = {
@@ -478,6 +479,15 @@ export async function createUiServer(opts: {
               ...(limit !== undefined ? { limit } : {}),
               ...(sessionId !== undefined ? { sessionId } : {}),
             }),
+          );
+          return;
+        }
+        // M9-3-3: 교훈 자동 구획 갱신 (쓰기 — UI 버튼 전용, MCP 없음).
+        const mLessonsRefresh = /^\/api\/procedures\/([^/]+)\/lessons\/refresh$/.exec(url.pathname);
+        if (req.method === "POST" && mLessonsRefresh) {
+          send(
+            res,
+            await opts.app.refreshProcedureLessons({ procedure: pathId(mLessonsRefresh[1], "procedure") }),
           );
           return;
         }

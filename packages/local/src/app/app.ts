@@ -112,6 +112,7 @@ import {
 } from "../services/approvals.js";
 import { isDraftLockAlive } from "../services/draft-lock.js";
 import { appendEvent } from "../services/events-log.js";
+import { refreshLessons } from "../services/lessons-agg.js";
 import { procRunLockPath, PROC_RUN_LOCK_STALE_MS } from "../services/run-lock.js";
 import { resolveArgs } from "../runner/resolve.js";
 import { copyImportFiles } from "../procedure.js";
@@ -4162,6 +4163,22 @@ private hasCurrentApproval(
     } finally {
       releaseRunLock?.();
     }
+  }
+
+  /**
+   * M9-3-3: 교훈 자동 구획 갱신 (UI 버튼·HTTP 전용, MCP 없음).
+   * 존재하지 않는 절차서는 거부한다 (없는 폴더에 lessons.md를 만들지 않음).
+   */
+  async refreshProcedureLessons(a: {
+    procedure: unknown;
+  }): Promise<{ procedure: string; lines: number }> {
+    const ref = String(a.procedure ?? "");
+    try {
+      loadProcedureDoc(this.procforgeDir, ref);
+    } catch {
+      throw pfError("bad_request", `등록되지 않은 절차서입니다: ${ref}.`);
+    }
+    return refreshLessons(this.procforgeDir, ref);
   }
 
   /** M7 5-1: 백그라운드 진행 루프 (결정점까지 자동) */

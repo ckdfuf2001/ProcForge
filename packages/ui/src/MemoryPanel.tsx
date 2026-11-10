@@ -28,6 +28,8 @@ export function MemoryPanel({
   >({ kind: "idle" });
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // M9-3-3: 교훈 갱신 결과 메시지.
+  const [lessonMsg, setLessonMsg] = useState<string | null>(null);
   // M10-entry-fix: 언마운트 시 폴링 중단 (끊긴 setState 방지).
   const aliveRef = useRef(true);
   useEffect(() => {
@@ -54,8 +56,28 @@ export function MemoryPanel({
     })();
   };
 
-  const requestRedraft = () => {
+  // M9-3-3: 교훈 자동 구획 갱신 (수기 구획은 서버가 보존).
+  const refreshLessons = () => {
     if (!picked) return;
+    setBusy(true);
+    setLessonMsg(null);
+    void (async () => {
+      try {
+        const r = await api.refreshLessons(picked.name);
+        if (!aliveRef.current) return;
+        setLessonMsg(`교훈 갱신됨: 자동 ${r.lines}줄`);
+      } catch (e) {
+        if (!aliveRef.current) return;
+        setLessonMsg(
+          `갱신 실패: ${e instanceof Error ? e.message : String(e)}`,
+        );
+      } finally {
+        if (aliveRef.current) setBusy(false);
+      }
+    })();
+  };
+
+  const requestRedraft = () => {    if (!picked) return;
     const req = requestText.trim();
     if (req.length === 0) {
       setError("재분석 요청문을 입력하라");
@@ -147,8 +169,12 @@ export function MemoryPanel({
           <div>
             <button className="btn" type="button" onClick={requestRedraft} disabled={busy}>
               재분석 요청
+            </button>{" "}
+            <button className="btn" type="button" onClick={refreshLessons} disabled={busy}>
+              교훈 갱신
             </button>
           </div>
+          {lessonMsg && <p role="status">{lessonMsg}</p>}
           {redraftState.kind === "waiting" && (
             <p role="status">초안 대기 중: {redraftState.draftId}</p>
           )}
