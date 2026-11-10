@@ -615,6 +615,7 @@ c·d·j는 하네스 과제로 DECISIONS에 기록만.
 | M9-1-2~4 | 이름 변경 구현 3개 | [x] | `dcfacc6` | https://github.com/ckdfuf2001/ProcForge/actions/runs/41976390256 | 순서: bin/패키지 → 화면 문구 → 문서. 문서 후속 커밋 제외한 코드 head 기록 |
 | M9-tmp-2 | tmp 누적 해소 + 실행 수습 | [x] | `f4395f7` | https://github.com/ckdfuf2001/ProcForge/actions/runs/42123793077 | 제품 temp 누수 0, L3 INCREASED_TOTAL 0. M9-tmp-2-fix: settleRun+afterEach, m75-cancel 조용통과 제거 |
 | M9-2 | 실행 기록 재사용 메모리 | [x] | `4c7fca5` | https://github.com/ckdfuf2001/ProcForge/actions/runs/42160479008 | 재finalize 안전(lock 검사+sidecar 보존) · metrics.json · by-procedure latest · accumulate 수동 선언 문서 |
+| M9-3 | 교훈 집계 (events.ndjson+읽기 집계+자동 구획) | [x] | `dc7b358` | https://github.com/ckdfuf2001/ProcForge/actions/runs/42851318925 | 사실 기록 3종(run_end/approve/approval_reset, best-effort) · live만 집계(AGG_MODES) · lessons 자동 구획+수기 보존 · 유사분석 lessons 5줄+stats (순위·MCP 불변) |
 | M10-why-1 | 분해 사유 `why` (`pf_split` 선택 필드) | [ ] | | | MCP 표면 유일 예외. 기존 호출 호환, 노드·procedure.json 왕복 |
 | M10-why-2 | `editWhy` (의견 경로) + 재분석 `edit_why` | [ ] | | | 대상+하위만 stale, 이벤트 before/after |
 | M10-why-fix | contract rule | [ ] | | | wire method add -> update count assert and MCP inputSchema check together |
