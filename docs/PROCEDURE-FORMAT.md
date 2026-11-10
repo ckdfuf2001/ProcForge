@@ -63,3 +63,9 @@ run 결과에 영향 없음.
 ```jsonc
 { "runId": "<uuid>", "status": "done|failed|cancelled", "at": "<iso>" }
 ```
+
+## procedures/&lt;name&gt;/lessons.md (M9-3)
+교훈 1줄 목록. 수기 구획(`- `로 시작하는 줄, 앞에서부터 최대 5개,
+500자 초과분 절단)과 자동 구획(`<!-- proof:auto -->`부터
+`<!-- /proof:auto -->`까지 — 집계 숫자만, Proof가 다시 씀)으로 나뉜다.
+자동 구획 밖은 바이트 단위로 보존된다. 파일이 없어도 정상이다.

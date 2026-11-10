@@ -1239,3 +1239,11 @@ argv: [...]}` 고정. runner는 run fs에서 직접 실행해 stdout을 golden�
   보존한다** (`SIDECAR_KEEP`, `procedureWriter.ts:241-247`).
   검증 테스트 `m11-sidecar` (보존 후 바이트 동일).
 
+## M9-3
+
+- [M9-3] **교훈 집계: 사실 기록(`runs/by-procedure/<name>/events.ndjson`,
+  append-only) + 읽을 때 계산하는 집계(live run만) +
+  `lessons.md`(자동 구획 `<!-- proof:auto -->` + 수기 구획 바이트 보존).**
+  재승인은 같은 nodeId에서 직전과 `hash12`가 다를 때만 센다.
+  유사분석 응답에 `lessons` 최대 5줄과 `stats`를 넣고 순위·MCP 표면은 그대로 둔다.
+
