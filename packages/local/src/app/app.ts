@@ -111,6 +111,7 @@ import {
   toHashable,
 } from "../services/approvals.js";
 import { isDraftLockAlive } from "../services/draft-lock.js";
+import { appendEvent } from "../services/events-log.js";
 import { procRunLockPath, PROC_RUN_LOCK_STALE_MS } from "../services/run-lock.js";
 import { resolveArgs } from "../runner/resolve.js";
 import { copyImportFiles } from "../procedure.js";
@@ -4140,6 +4141,16 @@ private hasCurrentApproval(
       } catch {
         // approvals.json 파싱 실패는 적용을 막지 않는다 — 다음 실행에서 판정된다.
         approvalReset = [];
+      }
+      // M9-3-1: 사실 기록 approval_reset 1줄 (best-effort).
+      // nodeIds가 비면 쓰지 않는다. cause는 "apply"로 고정 —
+      // goal 변경의 stale은 검사 시점 판정이지 이벤트가 아니다 (M9-3-spec §2a).
+      if (approvalReset.length > 0) {
+        appendEvent(this.procforgeDir, draft.procedure, {
+          kind: "approval_reset",
+          nodeIds: approvalReset,
+          cause: "apply",
+        });
       }
       return {
         draftId: draft.draftId,

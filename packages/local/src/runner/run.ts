@@ -9,6 +9,7 @@ import {
 } from "@proof/shared/deps.js";
 import type { Node } from "@proof/shared/schema.js";
 import { FileStore } from "../filestore.js";
+import { appendEvent } from "../services/events-log.js";
 import { evaluateAll } from "../checker.js";
 import { logger } from "../logger.js";
 import { writeAtomicFile } from "../fsutil.js";
@@ -665,6 +666,24 @@ export async function runSession(opts: RunOptions): Promise<RunReport> {
       join(runDir, "report.json"),
       JSON.stringify(report, null, 2),
     );
+    // M9-3-1: 사실 기록 run 종료 1줄 (best-effort — 실패해도 실행 결과 불변).
+    // replay도 이 지점을 지나므로 mode를 함께 적고 집계는 live만 대상으로 한다.
+    // 상태 판정은 latest 인덱스와 같은 공식 (아래 :745-751) + suspended 폴백.
+    if (opts.procedure) {
+      appendEvent(opts.procforgeDir, opts.procedure, {
+        kind: "run_end",
+        runId,
+        status: existsSync(join(runDir, "cancel.json"))
+          ? "cancelled"
+          : summary.fail > 0
+            ? "failed"
+            : summary.suspended > 0
+              ? "suspended"
+              : "done",
+        mode,
+        nodes: results.map((r) => ({ nodeId: r.nodeId, status: r.status, durationMs: r.durationMs })),
+      });
+    }
     // M9-2-2: 노드 산출 CSV 행 수 기록 (실패해도 run에 영향 없음).
     const metricsNodes = [...store.getNodes(opts.sessionId).values()].map((n) => ({
       id: n.id,

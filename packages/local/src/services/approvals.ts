@@ -1,10 +1,11 @@
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { createHash } from "node:crypto";
 import { pfError } from "@proof/shared/errors.js";
 import { computeNodeHash, type ArgSpec, type Constraint } from "@proof/shared/schema.js";
 import type { AccumulateSpec } from "@proof/shared/procedure.js";
 import { writeAtomicFile } from "../fsutil.js";
+import { appendEvent } from "./events-log.js";
 import { logger } from "../logger.js";
 import { collectRefNodeIds } from "../runner/resolve.js";
 import { saveApprovedSnapshot } from "./approval-scripts.js";
@@ -572,6 +573,17 @@ export function saveApproval(procedureDir: string, entry: ApprovalEntry): { path
   else list.push(entry);
   // M5.5-4.3-1: v2 단일 파일.
   writeAtomicFile(path, JSON.stringify({ version: 2, entries: list }, null, 2));
+  // M9-3-1: 사실 기록 approve 1줄 (best-effort).
+  // commitApproval도 이 길로만 적는다 (:584-595) — 승인 경로는 전부 여기를 지난다.
+  // procedureDir은 보통 <pfdir>/procedures/<name>이다. 다른 레이아웃이면
+  // 잘못된 곳에 파일을 만들지 않게 건너뛴다 (appendEvent 자체도 throw 없음).
+  if (basename(dirname(procedureDir)) === "procedures") {
+    appendEvent(
+      dirname(dirname(procedureDir)),
+      basename(procedureDir),
+      { kind: "approve", nodeId: entry.node.id, hash12: entry.node.hash.slice(0, 12) },
+    );
+  }
   return { path, replaced };
 }
 
