@@ -3,6 +3,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { ProcForgeApp } from "../src/app/app.js";
+import { readRunState } from "../src/services/run-state.js";
 import { runProcedureTest } from "../src/runner/procedure-run.js";
 import { testStack } from "./client-mode.js";
 import { makeTmp } from "@proof/shared/tmp.js";
@@ -203,16 +204,12 @@ describe("M9-3-1 events 쓰기", () => {
     const app = newApp();
     await app.approveProcedureNode({ procedure: "ev4", nodeId: "1", allowWildcard: [] });
     const { draftId } = await app.requestRedraft({ procedure: "ev4", request: "바꿔" });
-    let ready = false;
     for (let i = 0; i < 40; i++) {
       const d = await app.getDraft({ draftId });
       if (d.status !== "pending") break;
       await new Promise((r) => setTimeout(r, 500));
     }
-    const fin = await app.getDraft({ draftId });
-    expect(fin.status).toBe("ready");
-    ready = fin.status === "ready";
-    expect(ready).toBe(true);
+    expect((await app.getDraft({ draftId })).status).toBe("ready");
     const applied = await app.applyDraft({ draftId, opIds: [0] });
     expect(applied.approvalReset).toEqual(["1"]);
     const lines = eventsLines("ev4").filter((l) => l.kind === "approval_reset");
@@ -232,6 +229,7 @@ describe("M9-3-1 events 쓰기", () => {
     mkdirSync(blockPath, { recursive: true });
     const started = await app.uiRun({ procedure: "ev5", params: {} });
     expect(await waitDone(app, started.runId)).toBe("done");
+    expect(readRunState(pfdir, started.runId)?.status).toBe("done");
     expect(existsSync(join(pfdir, "runs", started.runId, "report.json"))).toBe(true);
   }, 120000);
 });

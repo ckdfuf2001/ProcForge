@@ -1,5 +1,6 @@
 import { appendFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { logger } from "../logger.js";
 
 // M9-3-1: 교훈 사실 기록 append-only 로그.
 // 경로: runs/by-procedure/<name>/events.ndjson (M9-3-spec §2a).
@@ -28,7 +29,8 @@ export function appendEvent(
     appendFileSync(p, line + "\n", "utf8");
   } catch (e) {
     try {
-      process.stderr.write(`[procforge:warn] events append 실패: ${e instanceof Error ? e.message : String(e)}\n`);
+      // stderr 접두어는 logger 형식과 통일 (`[procforge:warn]`, shared/logger.ts).
+      logger.warn(`events append 실패: ${e instanceof Error ? e.message : String(e)}`);
     } catch {
       // stderr마저 막히면 조용히 포기 (실행 결과는 바꾸지 않는다)
     }

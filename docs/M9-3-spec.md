@@ -85,8 +85,8 @@
   nodeId별 개수.
 - 평균 소요 시간: `status==="done"`인 `run_end`의 `nodes[]`에서
   nodeId별 `durationMs` 산술평균 (성공한 run만).
-- 재승인 수: `approve` 줄에서 같은 nodeId의 두 번째부터 1씩 센다
-  (첫 승인은 제외 — approvals.json 덮어쓰기로 사라지는 정보가 이것이다).
+- 재승인 수: `approve` 줄에서 같은 nodeId의 바로 직전 줄과 `hash12`가 다를 때만
+  1씩 센다 (같은 해시의 반복 승인은 재승인이 아니다). 첫 승인은 제외한다.
 - 파일 없음·빈 파일: 빈 목록 (정상).
 - 깨진 줄: 건너뛰고 건너뛴 줄 수를 센다 (집계 결과에 `skipped`로 포함).
 

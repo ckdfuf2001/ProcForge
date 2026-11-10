@@ -227,6 +227,19 @@ export function startRunHeartbeat(
   return () => clearInterval(beat);
 }
 
+// M9-3-fix: run 종료 상태 판정 단일화 (run_end 사실 기록 + latest 인덱스 공용).
+// latest는 suspended를 끝으로 보지 않아 건너뛴다 (호출자가 "suspended"를
+// undefined로 바꿔 스킵 — 동작 변경 없음).
+export function finalRunStatus(
+  runDir: string,
+  summary: { fail: number; suspended: number },
+): "done" | "failed" | "cancelled" | "suspended" {
+  if (existsSync(join(runDir, "cancel.json"))) return "cancelled";
+  if (summary.fail > 0) return "failed";
+  if (summary.suspended > 0) return "suspended";
+  return "done";
+}
+
 export async function runSession(opts: RunOptions): Promise<RunReport> {
   const mode: RunMode = opts.mode ?? "replay";
   if (mode === "replay" && opts.updateGolden) {
@@ -668,18 +681,11 @@ export async function runSession(opts: RunOptions): Promise<RunReport> {
     );
     // M9-3-1: 사실 기록 run 종료 1줄 (best-effort — 실패해도 실행 결과 불변).
     // replay도 이 지점을 지나므로 mode를 함께 적고 집계는 live만 대상으로 한다.
-    // 상태 판정은 latest 인덱스와 같은 공식 (아래 :745-751) + suspended 폴백.
     if (opts.procedure) {
       appendEvent(opts.procforgeDir, opts.procedure, {
         kind: "run_end",
         runId,
-        status: existsSync(join(runDir, "cancel.json"))
-          ? "cancelled"
-          : summary.fail > 0
-            ? "failed"
-            : summary.suspended > 0
-              ? "suspended"
-              : "done",
+        status: finalRunStatus(runDir, summary),
         mode,
         nodes: results.map((r) => ({ nodeId: r.nodeId, status: r.status, durationMs: r.durationMs })),
       });
@@ -761,13 +767,8 @@ export async function runSession(opts: RunOptions): Promise<RunReport> {
     // M9-2-3: 절차서별 latest 인덱스. 종료 상태일 때만 갱신.
     // 취소는 cancel.json 존재로 판정 (runState cancelled은 App층이 굳힌다).
     // suspended/needs_reverify만으로는 끝이 아니라서 건너뛴다.
-    const endStatus = existsSync(join(runDir, "cancel.json"))
-      ? ("cancelled" as const)
-      : summary.fail > 0
-        ? ("failed" as const)
-        : summary.suspended > 0
-          ? undefined
-          : ("done" as const);
+    const latestStatus = finalRunStatus(runDir, summary);
+    const endStatus = latestStatus === "suspended" ? undefined : latestStatus;
     if (endStatus && opts.procedure) {
       writeProcedureLatest({
         procforgeDir: opts.procforgeDir,
