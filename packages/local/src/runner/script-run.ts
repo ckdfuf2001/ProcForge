@@ -2,6 +2,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync, readFileSync, readdirSync, statSync, type Dirent } from "node:fs";
 import { createHash } from "node:crypto";
 import { delimiter, join, resolve } from "node:path";
+import { logger } from "../logger.js";
 
 // 스크립트 leaf 실행 (M5.2-2). runner가 run fs에서 호스트 스크립트를 실행.
 // - stdin: 해석된 인자 JSON (script-kind 항목 제외).
@@ -312,10 +313,20 @@ if (pid !== undefined) input.onChild?.(pid, child);
         }
       });
     });
+    // M9-3-epipe: stdin 비동기 오류 리스너. EPIPE/ERR_STREAM_DESTROYED는
+    // 자식이 stdin을 읽기 전에 끝난 정상 경합이라 조용히 무시한다.
+    // 다른 코드는 stderr에 1줄만 남긴다 (throw 없음 — 실행 결과 판정은
+    // 종료 코드와 출력으로 close 경로가 그대로 처리한다).
+    child.stdin?.on("error", (e: unknown) => {
+      const code = (e as { code?: string }).code;
+      if (code === "EPIPE" || code === "ERR_STREAM_DESTROYED") return;
+      // stderr 접두어는 logger 형식과 통일 (M9-3-fix 선례).
+      logger.warn(`script stdin 오류 무시: ${code ?? String(e)}`);
+    });
     try {
       child.stdin?.end(JSON.stringify(input.args));
     } catch {
-      // 이미 종료된 경우 무시
+      // 동기 오류는 이미 종료된 경우 — 무시 (비동기 EPIPE는 위 리스너 담당)
     }
   });
 }
