@@ -77,14 +77,16 @@
 
 ## §2b 집계 정의 (읽을 때 계산, 인덱스 없음)
 
-- 대상: `mode==="live"`인 `run_end`만 집계한다 (replay는 제외).
+- 대상: `mode==="live"`인 `run_end`만 집계한다 (판정 [M9-3-1] — record/replay/
+  passthrough는 테스트 경로). 대상 모드는 상수 하나(`AGG_MODES = ["live"]` —
+  `services/lessons-agg.ts`)로 두고, 나중에 바꾸면 한 곳만 고친다.
   상태값 근거: 노드 `status==="fail"`은 `NodeResultStatus`
   (`runner/types.ts:52-60` — `"fail"`), run `status==="done"`은
   `RunState.status` (`services/run-state.ts:39`)와 일치한다.
 - 노드별 실패 수: `run_end`의 `nodes[]`에서 `status==="fail"`인 줄의
   nodeId별 개수.
-- 평균 소요 시간: `status==="done"`인 `run_end`의 `nodes[]`에서
-  nodeId별 `durationMs` 산술평균 (성공한 run만).
+- 평균 소요 시간: `status==="done"`인 run의 `pass` 노드만으로 nodeId별
+  `durationMs` 산술평균을 낸다 (해당 노드가 없으면 0).
 - 재승인 수: `approve` 줄에서 같은 nodeId의 바로 직전 줄과 `hash12`가 다를 때만
   1씩 센다 (같은 해시의 반복 승인은 재승인이 아니다). 첫 승인은 제외한다.
 - 파일 없음·빈 파일: 빈 목록 (정상).
