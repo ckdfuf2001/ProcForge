@@ -114,8 +114,27 @@ jobs:
           python-version: "3.12"
       - run: pip install openpyxl python-pptx
       - run: pnpm install --frozen-lockfile
+      # M11-ci-browsers: 브라우저 캐시. 키의 버전은 lockfile의
+      # @playwright/test와 함께 올린다 (현재 1.64.1).
+      - name: playwright browsers cache
+        id: pw-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-1.64.1
       - name: playwright browsers (chromium)
-        run: pnpm --filter @proof/local exec playwright install --with-deps chromium
+        timeout-minutes: 8
+        run: |
+          for i in 1 2 3; do
+            echo "[pw-install] attempt $i"
+            if [ "${{ steps.pw-cache.outputs.cache-hit }}" = "true" ]; then
+              if pnpm --filter @proof/local exec playwright install-deps chromium; then exit 0; fi
+            else
+              if pnpm --filter @proof/local exec playwright install --with-deps chromium; then exit 0; fi
+            fi
+            sleep 10
+          done
+          exit 1
       - name: build (시나리오는 dist만 import)
         run: pnpm build
       - name: playwright e2e
