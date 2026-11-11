@@ -131,4 +131,16 @@ describe("M9-3-2 수기 구획 파서", () => {
     writeFileSync(p, "<!-- proof:auto -->\n- 자동1\n<!-- /proof:auto -->\n- 수기1\n", "utf8");
     expect(readManualLessons(p)).toEqual([{ text: "수기1", truncated: false }]);
   });
+
+  it("⑥ - 줄 6개면 앞에서 5개만", () => {
+    const p = join(root, "lessons.md");
+    writeFileSync(p, ["# 교훈", "- a", "- b", "- c", "- d", "- e", "- f"].join("\n") + "\n", "utf8");
+    expect(readManualLessons(p)).toEqual([
+      { text: "a", truncated: false },
+      { text: "b", truncated: false },
+      { text: "c", truncated: false },
+      { text: "d", truncated: false },
+      { text: "e", truncated: false },
+    ]);
+  });
 });

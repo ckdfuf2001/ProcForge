@@ -3,7 +3,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createUiServer, type UiServer } from "../src/app/ui-server.js";
 import { ProcForgeApp } from "../src/app/app.js";
-import { refreshLessons } from "../src/services/lessons-agg.js";
+import { refreshLessons, readManualLessons } from "../src/services/lessons-agg.js";
 import { FileStore } from "../src/filestore.js";
 import { acquireProcRunLock } from "../src/services/run-lock.js";
 import { testStack } from "./client-mode.js";
@@ -193,8 +193,12 @@ describe("M9-3-3 lessons 자동 구획 갱신", () => {
     writeFileSync(lp, manual, "utf8");
     refreshLessons(pfdir, "rf7");
     const after = readFileSync(lp, "utf8");
+    // M9-3-fix3: 파서를 직접 단언한다 (줄 끝 \r 없음).
+    expect(readManualLessons(lp)).toEqual([
+      { text: "밤 집계를 먼저 한다.", truncated: false },
+      { text: "재시도는 한 번만.", truncated: false },
+    ]);
     expect(after).toContain("- 밤 집계를 먼저 한다.");
-    expect(after).not.toContain("\r- ");
     expect(stripAuto(after)).toBe(manual);
     refreshLessons(pfdir, "rf7");
     expect(readFileSync(lp, "utf8")).toBe(after);
