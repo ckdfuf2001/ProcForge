@@ -122,16 +122,27 @@ jobs:
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-1.64.1
+      # M11-ci-browsers2: 설치를 apt와 다운로드로 나눈다.
+      # 어느 쪽이 멈추는지 가리기 위해 분리 + 각 시도에 시간 제한.
+      - name: playwright system deps (chromium)
+        timeout-minutes: 4
+        run: pnpm --filter @proof/local exec playwright install-deps chromium
       - name: playwright browsers (chromium)
-        timeout-minutes: 8
+        timeout-minutes: 9
+        env:
+          DEBUG: pw:install
         run: |
           for i in 1 2 3; do
-            echo "[pw-install] attempt $i"
-            if [ "${{ steps.pw-cache.outputs.cache-hit }}" = "true" ]; then
-              if pnpm --filter @proof/local exec playwright install-deps chromium; then exit 0; fi
+            start=$(date +%s)
+            if pnpm --filter @proof/local exec timeout 150 playwright install chromium; then
+              echo "[pw-install] attempt $i rc=0 $(( $(date +%s) - start ))s"
+              exit 0
             else
-              if pnpm --filter @proof/local exec playwright install --with-deps chromium; then exit 0; fi
+              rc=$?
+              echo "[pw-install] attempt $i rc=$rc $(( $(date +%s) - start ))s"
             fi
+            pkill -f "oopDownload|playwright install" 2>/dev/null || true
+            rm -rf ~/.cache/ms-playwright/__dirlock
             sleep 10
           done
           exit 1
