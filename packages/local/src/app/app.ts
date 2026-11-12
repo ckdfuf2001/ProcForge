@@ -3946,6 +3946,11 @@ private hasCurrentApproval(
     ) {
       throw pfError("bad_request", `draft.json 형식 오류: ${id}`);
     }
+    // M11-1-fix: 구 draft.json에는 lessonsUsed가 없다 — 기본값 0을 채운다.
+    const withLessons = {
+      lessonsUsed: 0,
+      ...(parsed as Record<string, unknown>),
+    } as unknown as RedraftResult & { lessonsUsed: number };
     // M11-draft-lock: pending 판정 3단계. 1) 메모리에 있으면 진행 중.
     // 2) 메모리에 없어도 잠금이 살아 있으면 다른 프로세스가 진행 중이니
     // 덮어쓰지 않고 pending을 그대로 돌려준다.
@@ -3953,21 +3958,21 @@ private hasCurrentApproval(
     // (읽기 전용이면 파일은 그대로 두고 메모리상의 failed 뷰만 돌려준다.)
     if (d.status === "pending" && !this.inflightRedrafts.has(id)) {
       if (isDraftLockAlive(this.procforgeDir, id)) {
-        return parsed as RedraftResult;
+        return withLessons;
       }
       const failed = {
-        ...(parsed as Record<string, unknown>),
+        ...withLessons,
         status: "failed",
         ops: [],
         diff: [],
         reason: "프로세스 재시작으로 중단",
-      } as unknown as RedraftResult;
+      } as unknown as RedraftResult & { lessonsUsed: number };
       if (!this.readOnly) {
         writeFileAtomic(file, JSON.stringify(failed, null, 2));
       }
       return failed;
     }
-    return parsed as RedraftResult;
+    return withLessons;
   }
 
   /** M10-3-api: 재분석 diff 적용.

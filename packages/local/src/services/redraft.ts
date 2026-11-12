@@ -98,8 +98,8 @@ export type RedraftResult = {
   openCodeSessionId: string | null;
   /** M10-model: 실제 사용 모델과 출처. */
   model: { providerID: string; modelID: string; source: RedraftModelSource };
-  /** M11-1: 프롬프트에 넣은 수기 교훈 줄 수 (draft.json 최상위). */
-  lessonsUsed: number;
+  /** M11-1: 프롬프트에 넣은 수기 교훈 줄 수 (구 draft.json에는 없어 0 기본값). */
+  lessonsUsed?: number;
   status: DraftStatus;
   ops: DraftOp[];
   diff: DraftDiffEntry[];

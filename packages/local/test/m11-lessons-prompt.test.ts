@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { ProcForgeApp } from "../src/app/app.js";
@@ -222,13 +222,14 @@ describe("M11-1 재분석 프롬프트 교훈", () => {
     expect(t).toContain("참고 교훈");
     const saved = JSON.parse(readFileSync(join(pfdir, "drafts", draftId, "draft.json"), "utf8")) as { lessonsUsed: unknown; status: string };
     expect(saved.status).toBe("ready");
-    expect(typeof saved.lessonsUsed).toBe("number");
-    expect(saved.lessonsUsed as number).toBeLessThan(5);
-    expect(saved.lessonsUsed as number).toBeGreaterThanOrEqual(1);
-    // 구획 안 실제 줄 수와 draft.json 값이 같다 (노드 목록 앞까지만 센다).
+    // 정확히 앞 3줄(L, M, N)만 남고 뒤 2줄(O, P)이 잘린다.
+    expect(saved.lessonsUsed).toBe(3);
     const section = t.slice(t.indexOf("참고 교훈:"), t.indexOf("절차서 노드:"));
-    const sectionLines = section.split("\n").filter((l) => l.startsWith("- "));
-    expect(sectionLines).toHaveLength(saved.lessonsUsed as number);
+    expect(section.split("\n").filter((l) => l.startsWith("- "))).toEqual([
+      `- ${"L".repeat(480)}`,
+      `- ${"M".repeat(480)}`,
+      `- ${"N".repeat(480)}`,
+    ]);
   }, 180000);
 
   it("⑥ 교훈이 있어도 없어도 원본 hash와 approvals.json이 변하지 않는다", async () => {
@@ -248,4 +249,19 @@ describe("M11-1 재분석 프롬프트 교훈", () => {
       .toBe(createHash("sha256").update(beforeProc).digest("hex"));
     expect(readFileSync(join(pfdir, "procedures", "lp6", "approvals.json"), "utf8")).toBe(beforeApprovals);
   }, 120000);
+
+  it("⑦ 옛 draft.json(lessonsUsed 없음)을 읽으면 0", async () => {
+    writeProc("lp7", "1", "밤 집계");
+    const dir = join(pfdir, "drafts", "old1");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "draft.json"), JSON.stringify({
+      draftId: "old1", procedure: "lp7", request: "x", sourceHash: "s",
+      openCodeSessionId: null, model: { providerID: "t", modelID: "m", source: "default" },
+      status: "ready", ops: [], diff: [],
+    }), "utf8");
+    const app = newApp();
+    const d = await app.getDraft({ draftId: "old1" });
+    expect(d.status).toBe("ready");
+    expect((d as unknown as { lessonsUsed: unknown }).lessonsUsed).toBe(0);
+  }, 60000);
 });
