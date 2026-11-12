@@ -56,6 +56,7 @@ proof --version
 
 - `PROOF_DIR`와 `PROCFORGE_DIR`는 같은 값을 씁니다.
 - 등록·수정 뒤에는 OpenCode를 재시작합니다 (MCP는 시작할 때 연결됩니다).
+- 동작 확인 버전: OpenCode 1.18.32 (Basic auth 포함, 1.18.18은 미검증).
 
 ## 3. 첫 절차서 만들기
 
