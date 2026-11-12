@@ -7,61 +7,31 @@ import { join } from "node:path";
 //       node scripts/tmp-delta.mjs diff <파일>   (현재와 비교, 증가분 출력)
 //       node scripts/tmp-delta.mjs now           (현재 접두어별 개수 출력)
 // 접두어: 이름 앞 두 토막 (pf-remote-suite-xxx → pf-remote).
-// M11-tmp-watch: TEMP 바로 아래 항목 전체 개수·바이트 증감을 TEMP_TOTAL 1줄로
-// 추가 보고한다 (판정 없음 — INCREASED_TOTAL만 게이트).
+// M11-tmp-watch: TEMP 바로 아래 항목 개수는 항상 출력한다 (readdir 1회).
+// 바이트만 시간 예산 안에서 재고, 넘기면 `?`로 표시한다.
+// 출력: TEMP_TOTAL before=<n>/<bytes|?> after=<n>/<bytes|?> delta=<n>/<bytes|?>.
 
-// TEMP 전체 측정 상한 (파일이 274만 개였던 때를 대비).
+// TEMP 전체 바이트 측정 상한 (파일이 274만 개였던 때를 대비).
 const TEMP_TOTAL_TIMEOUT_MS = 30000;
 
-function prefixOf(name) {
-  const parts = name.split("-");
-  return parts.length >= 2 ? `${parts[0]}-${parts[1]}` : name;
-}
-
-function snapshot() {
-  const counts = new Map();
-  let entries;
+/** 바로 아래 항목 개수 (빠름 — 재귀 없음). */
+function measureTempCount() {
   try {
-    entries = readdirSync(tmpdir(), { withFileTypes: true });
-  } catch (e) {
-    throw new Error(`tmpdir 읽기 실패: ${e instanceof Error ? e.message : String(e)}`);
-  }
-  for (const e of entries) {
-    if (!e.isDirectory() || !e.name.startsWith("pf-")) continue;
-    const p = prefixOf(e.name);
-    counts.set(p, (counts.get(p) ?? 0) + 1);
-  }
-  return { counts, tempTotal: measureTempTotal() };
-}
-
-/**
- * M11-tmp-watch: %TEMP% 바로 아래 항목 전체 개수·바이트 합.
- * 시간 상한을 넘기면 null (호출자가 skipped(timeout) 출력).
- */
-function measureTempTotal() {
-  const deadline = Date.now() + TEMP_TOTAL_TIMEOUT_MS;
-  let n = 0;
-  let bytes = 0;
-  let checked = 0;
-  const stack = [];
-  let top;
-  try {
-    top = readdirSync(tmpdir(), { withFileTypes: true });
+    return readdirSync(tmpdir(), { withFileTypes: true }).length;
   } catch {
     return null;
   }
-  for (const e of top) {
-    n++;
-    if (e.isDirectory()) stack.push(join(tmpdir(), e.name));
-    else {
-      try {
-        bytes += statSync(join(tmpdir(), e.name)).size;
-      } catch {
-        // 사라진 파일 무시
-      }
-    }
-    if (++checked % 256 === 0 && Date.now() > deadline) return null;
-  }
+}
+
+/**
+ * 바로 아래 항목 바이트 합 (재귀). 상한을 넘기면 null.
+ * 파일 stat 실패(사라짐·권한)는 건너뛴다.
+ */
+function measureTempBytes() {
+  const deadline = Date.now() + TEMP_TOTAL_TIMEOUT_MS;
+  let bytes = 0;
+  let checked = 0;
+  const stack = [tmpdir()];
   while (stack.length > 0) {
     const dir = stack.pop();
     let kids;
@@ -83,7 +53,44 @@ function measureTempTotal() {
       if (++checked % 1024 === 0 && Date.now() > deadline) return null;
     }
   }
-  return { n, bytes };
+  return bytes;
+}
+
+function prefixOf(name) {
+  const parts = name.split("-");
+  return parts.length >= 2 ? `${parts[0]}-${parts[1]}` : name;
+}
+
+function snapshot() {
+  const counts = new Map();
+  let entries;
+  try {
+    entries = readdirSync(tmpdir(), { withFileTypes: true });
+  } catch (e) {
+    throw new Error(`tmpdir 읽기 실패: ${e instanceof Error ? e.message : String(e)}`);
+  }
+  for (const e of entries) {
+    if (!e.isDirectory() || !e.name.startsWith("pf-")) continue;
+    const p = prefixOf(e.name);
+    counts.set(p, (counts.get(p) ?? 0) + 1);
+  }
+  return { counts, tempN: measureTempCount(), tempBytes: measureTempBytes() };
+}
+
+/** 구 스냅샷 호환: tempTotal {n, bytes} | tempN/tempBytes | 없음 → 정규화. */
+function normTempTotal(saved, cur) {
+  const norm = (v) => {
+    if (v == null) return null;
+    if (typeof v === "object" && v !== null && ("n" in v || "bytes" in v)) {
+      return {
+        n: typeof v.n === "number" ? v.n : null,
+        bytes: typeof v.bytes === "number" ? v.bytes : null,
+      };
+    }
+    return null;
+  };
+  const fromCounts = (c) => (c && typeof c.tempN === "number" ? { n: c.tempN, bytes: typeof c.tempBytes === "number" ? c.tempBytes : null } : norm(c.tempTotal));
+  return { before: fromCounts(saved), after: { n: cur.tempN, bytes: cur.tempBytes } };
 }
 
 function printCounts(snapshot) {
@@ -91,9 +98,12 @@ function printCounts(snapshot) {
   const total = rows.reduce((n, [, c]) => n + c, 0);
   for (const [p, c] of rows) console.log(`${p} ${c}`);
   console.log(`TOTAL ${total}`);
-  const t = snapshot.tempTotal;
-  if (t) console.log(`TEMP_TOTAL ${t.n}/${t.bytes}`);
-  else console.log(`TEMP_TOTAL skipped(timeout)`);
+  console.log(`TEMP_TOTAL ${numOrQ(snapshot.tempN)}/${numOrQ(snapshot.tempBytes)}`);
+}
+
+/** 숫자 아니면 "?" (M11-tmp-watch: 바이트 시간 초과 시). */
+function numOrQ(v) {
+  return typeof v === "number" ? String(v) : "?";
 }
 
 async function main() {
@@ -106,7 +116,7 @@ async function main() {
   if (cmd === "snap") {
     if (!file) throw new Error("usage: tmp-delta.mjs snap <파일> | diff <파일> | now");
     const snap = snapshot();
-    await writeFile(file, JSON.stringify({ at: new Date().toISOString(), counts: Object.fromEntries(snap.counts), tempTotal: snap.tempTotal }, null, 2));
+    await writeFile(file, JSON.stringify({ at: new Date().toISOString(), counts: Object.fromEntries(snap.counts), tempN: snap.tempN, tempBytes: snap.tempBytes }, null, 2));
     console.log(`snapshot 저장: ${file}`);
     return;
   }
@@ -126,13 +136,21 @@ async function main() {
     }
     console.log(`INCREASED_TOTAL ${total}`);
     // M11-tmp-watch: 보고만 하고 판정하지 않는다 (게이트는 INCREASED_TOTAL).
-    const b = saved.tempTotal ?? null;
-    const a = cur.tempTotal;
-    if (b && a) {
-      console.log(`TEMP_TOTAL before=${b.n}/${b.bytes} after=${a.n}/${a.bytes} delta=${a.n - b.n}/${a.bytes - b.bytes}`);
-    } else {
-      console.log(`TEMP_TOTAL skipped(timeout)`);
-    }
+    // 바이트가 ?면 delta 바이트도 ?다.
+    const t = normTempTotal(saved, cur);
+    const dn =
+      t.before && t.after && typeof t.before.n === "number" && typeof t.after.n === "number"
+        ? String(t.after.n - t.before.n)
+        : "?";
+    const db =
+      t.before && t.after && typeof t.before.bytes === "number" && typeof t.after.bytes === "number"
+        ? String(t.after.bytes - t.before.bytes)
+        : "?";
+    const bn = t.before && typeof t.before.n === "number" ? String(t.before.n) : "?";
+    const bb = t.before && typeof t.before.bytes === "number" ? String(t.before.bytes) : "?";
+    const an = t.after && typeof t.after.n === "number" ? String(t.after.n) : "?";
+    const ab = t.after && typeof t.after.bytes === "number" ? String(t.after.bytes) : "?";
+    console.log(`TEMP_TOTAL before=${bn}/${bb} after=${an}/${ab} delta=${dn}/${db}`);
     return;
   }
   throw new Error("usage: tmp-delta.mjs snap <파일> | diff <파일> | now");
