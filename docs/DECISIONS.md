@@ -1247,3 +1247,11 @@ argv: [...]}` 고정. runner는 run fs에서 직접 실행해 stdout을 golden�
   재승인은 같은 nodeId에서 직전과 `hash12`가 다를 때만 센다.
   유사분석 응답에 `lessons` 최대 5줄과 `stats`를 넣고 순위·MCP 표면은 그대로 둔다.
 
+## M11-ci
+
+- [M11-ci-browsers] **e2e 브라우저 설치를 2스텝으로 나눈다**
+  (`install-deps`, timeout 4분 + `install chromium`, 시도별 timeout 150초×3회·
+  `[pw-install] attempt` 로그·실패 시 `__dirlock` 정리, 스텝 9분).
+  브라우저 캐시(`~/.cache/ms-playwright`, 키 `playwright-<os>-<버전>`)로
+  warm run을 빠르게 한다.
+
