@@ -6,14 +6,14 @@
 ## 1. 보류 목록
 
 ### permissions `remember`
-- 현황: `once/always/reject` 동작은 확인됐고 `remember`는 미사용으로 잔여다.
-- 작업: `remember:true` 동작 실측 1회 (`scripts/m10-probe.mjs`) 후 반영 여부 결정.
-- 근거: `docs/M10-0-opencode-api.md:80` (`remember`는 미사용), `:118-119` (보류 ① 해소 — remember 잔여).
+- 현황: 해소 — `remember:true`면 같은 세션·같은 도구 재호출 시 asked 미등장 (asked 1회차 1건, 2회차 0건. 실측 2026-11-12 1.18.32, 비용 0).
+- 작업: 없음 (반영 여부는 M11 사양에서 결정).
+- 근거: `docs/M10-0-opencode-api.md:80` (`remember`는 미사용), `:118-119` (보류 ① 해소).
 
 ### tools:false와 ask의 우선순위
-- 현황: 부분 해소 — 메시지 `tools:false`는 권한 흐름 없이 비활성, `permission:ask`는 실행 게이트+`asked` 이벤트. 둘 동시 설정 시는 미확인.
-- 작업: 동시 설정 실측 1회 후 우선순위 문서화.
-- 근거: `docs/M10-0-opencode-api.md:120-121` (보류 ② 부분 해소).
+- 현황: 해소 — `tools: {"*": false}` + 세션 ask 동시 설정 시 tool part 0건·asked 0건 (도구 완전 비활성, ask 미발동. 실측 2026-11-12 1.18.32, 비용 0).
+- 작업: 없음 (문서화 완료).
+- 근거: `docs/M10-0-opencode-api.md:120-121` (보류 ② 해소).
 
 ### Basic auth 1.18.18
 - 현황: 1.18.32에서 확인 (무인증 401·오답 401·정답 200). 1.18.18은 미확인.
@@ -51,8 +51,8 @@
 - 근거: 이번 조사 실측값 (임시 벤치, 커밋 없음).
 
 ## 권장 순서
-1. 재분석 프롬프트 lessons 포함 여부 결정 (M11 본류·저비용).
-2. ask/tools 동시 + `remember` 실측 (1회씩 종결).
+1. 재분석 프롬프트 lessons 포함 여부 결정 (M11 본류·저비용). → 완료 (M11-spec·M11-1-impl).
+2. ask/tools 동시 + `remember` 실측 (1회씩 종결). → 완료 (실측 2026-11-12, 비용 0).
 3. Basic auth 지원 버전 명시 (실측 또는 문서).
 4. 128개 초과 방안 (M11-2와 함께).
 5. `events.ndjson` 회전 (파일이 커진 뒤).

@@ -135,7 +135,121 @@ async function cleanup() {
   }
 }
 
+// M11-probe: 단일 실측 모드 (--only remember|toolsask). 기본 전체 실행은 그대로.
+// remember: permission 응답에 remember:true를 넣고 같은 세션에서 같은 도구를
+//   다시 부를 때 asked가 다시 나오는지 본다.
+// toolsask: tools {"*": false}와 서버의 ask 설정을 동시에 걸고
+//   tool part 수와 asked 수를 센다.
+const ONLY = opt("--only", "");
+
+async function runRemember() {
+  const events = [];
+  const ctl = new AbortController();
+  const sub = subscribeEvents((t, p) => { events.push({ t, p, at: Date.now() }); noteCost(p); }, ctl.signal).catch(() => {});
+  try {
+    // 세션 단위로 ask를 건다 (서버 기본값이 allow라도 실측 가능).
+    // PermissionRuleset은 배열 [{permission, pattern, action}] 형식 (1.18.x /doc 기준).
+    const c = await api("/session", { method: "POST", body: JSON.stringify({ title: "m11-probe-remember", permission: [{ permission: "bash", pattern: "*", action: "ask" }] }) });
+    const sid = c.json?.id;
+    if (!sid) throw new Error(`세션 생성 실패: ${c.status}`);
+    createdSessions.push(sid);
+    await api(`/session/${sid}/prompt_async`, {
+      method: "POST",
+      body: JSON.stringify({
+        model: { providerID, modelID },
+        parts: [{ type: "text", text: "You MUST call the bash tool with command \"echo probe-remember-1\" right now. Do nothing else first." }],
+      }),
+    });
+    const first = await waitFor(
+      events, (e) => e.t === "permission.asked" && e.p?.sessionID === sid, 150000, "permission.asked",
+    ).catch(() => null);
+    if (!first) {
+      record("remember 재등장", "실패", "asked 없음 (모델이 bash를 안 쓰거나 서버가 허용)");
+      return;
+    }
+    await api(`/session/${sid}/permissions/${first.p?.id}`, {
+      method: "POST",
+      body: JSON.stringify({ response: "once", remember: true }),
+    });
+    await waitFor(events, (e) => e.t === "session.idle" && e.p?.sessionID === sid, 120000, "idle").catch(() => {});
+    const n1 = events.filter((e) => e.t === "permission.asked" && e.p?.sessionID === sid).length;
+    const mark = Date.now();
+    await api(`/session/${sid}/prompt_async`, {
+      method: "POST",
+      body: JSON.stringify({
+        model: { providerID, modelID },
+        parts: [{ type: "text", text: "You MUST call the bash tool with command \"echo probe-remember-2\" right now. Do nothing else first." }],
+      }),
+    });
+    await waitFor(events, (e) => e.t === "session.idle" && e.p?.sessionID === sid, 180000, "idle").catch(() => {});
+    const n2 = events.filter((e) => e.t === "permission.asked" && e.p?.sessionID === sid && e.at >= mark).length;
+    record("remember 재등장", "확인", `asked 1회차=${n1} 2회차=${n2}`);
+  } catch (e) {
+    record("remember 재등장", "실패", String(e && e.message ? e.message : e));
+  } finally {
+    ctl.abort();
+    try {
+      await sub;
+    } catch {
+      // 무시
+    }
+  }
+  await cleanup();
+}
+
+async function runToolsAsk() {
+  const events = [];
+  const ctl = new AbortController();
+  const sub = subscribeEvents((t, p) => { events.push({ t, p, at: Date.now() }); noteCost(p); }, ctl.signal).catch(() => {});
+  try {
+    // 세션 단위로 ask를 건다 (서버 기본값이 allow라도 실측 가능).
+    const c = await api("/session", { method: "POST", body: JSON.stringify({ title: "m11-probe-toolsask", permission: [{ permission: "bash", pattern: "*", action: "ask" }] }) });
+    const sid = c.json?.id;
+    if (!sid) throw new Error(`세션 생성 실패: ${c.status}`);
+    createdSessions.push(sid);
+    await api(`/session/${sid}/prompt_async`, {
+      method: "POST",
+      body: JSON.stringify({
+        model: { providerID, modelID },
+        tools: { "*": false },
+        parts: [{ type: "text", text: "You MUST call the bash tool with command \"echo probe-toolsask\" right now. Do nothing else first." }],
+      }),
+    });
+    // idle까지 기다리되, 타임아웃해도 그때까지 온 것으로 판정한다.
+    await waitFor(events, (e) => e.t === "session.idle" && e.p?.sessionID === sid, 120000, "idle").catch(() => {});
+    const tools = events.filter((e) => e.t === "message.part.updated" && e.p?.part?.type === "tool" && e.p?.part?.sessionID === sid).length;
+    const asked = events.filter((e) => e.t === "permission.asked" && e.p?.sessionID === sid).length;
+    record("tools:false+ask", "확인", `tool part ${tools}건, asked ${asked}건`);
+  } catch (e) {
+    record("tools:false+ask", "실패", String(e && e.message ? e.message : e));
+  } finally {
+    ctl.abort();
+    try {
+      await sub;
+    } catch {
+      // 무시
+    }
+  }
+  await cleanup();
+}
+
+async function writeReport() {
+  const stamp = new Date().toISOString().slice(0, 19).replace(/[-:]/g, "").replace("T", "-");
+  const { writeFileSync } = await import("node:fs");
+  writeFileSync(`m10-probe-${stamp}.json`, JSON.stringify({ at: new Date().toISOString(), url: BASE, model: MODEL, totalCostUsd: totalCost, results }, null, 2));
+  console.log(`[m10-probe] 저장: m10-probe-${stamp}.json`);
+  console.log(`[m10-probe] 총 비용(USD 합산): ${totalCost}`);
+}
+
 async function main() {
+  if (ONLY === "remember" || ONLY === "toolsask") {
+    if (ONLY === "remember") await runRemember();
+    else await runToolsAsk();
+    await writeReport();
+    const bad = results.filter((r) => r.status !== "확인").length;
+    if (bad > 0) process.exitCode = 1;
+    return;
+  }
   // 0. 비용 상한 안내
   console.log("[m10-probe] 비용: 짧은 프롬프트 수건. 장문·반복 실행 금지.");
 
