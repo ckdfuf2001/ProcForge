@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // M10-0 실측 스크립트 (사용자 PC에서 1회 실행).
-// 사용: node scripts/m10-probe.mjs --model <provider/model> [--url http://127.0.0.1:4096] [--password <pw>] [--concurrency 2|4]
+// 사용: node scripts/m10-probe.mjs --model <provider/model> [--url http://127.0.0.1:4096] [--password <pw>] [--concurrency 2|4] [--only remember|remember-off|toolsask]
 // 전제: `opencode serve`가 떠 있어야 한다. 이 스크립트는 serve를 띄우지 않는다.
 // 안전: 임시 세션만 만들고 끝나면 삭제한다. 비용 상한 안내를 먼저 출력한다.
 
@@ -135,24 +135,34 @@ async function cleanup() {
   }
 }
 
-// M11-probe: 단일 실측 모드 (--only remember|toolsask). 기본 전체 실행은 그대로.
-// remember: permission 응답에 remember:true를 넣고 같은 세션에서 같은 도구를
-//   다시 부를 때 asked가 다시 나오는지 본다.
-// toolsask: tools {"*": false}와 서버의 ask 설정을 동시에 걸고
+// M11-probe: 단일 실측 모드 (--only remember|remember-off|toolsask). 기본 전체 실행은 그대로.
+// remember: 1회차 asked에 {response:"once", remember:true}로 답하고,
+//   같은 세션에서 같은 도구를 다시 부를 때 회차별 tool part 수·asked 수를 센다.
+// remember-off: 대조군. remember 없이 once로만 답한다. 2회차 asked>=1이면
+//   remember 효과를 인정하는 근거가 된다. 2회차 tool part가 0이면 판정 불가.
+// toolsask: tools {"*": false}와 세션 ask 설정을 동시에 걸고
 //   tool part 수와 asked 수를 센다.
 const ONLY = opt("--only", "");
 
-async function runRemember() {
+async function runRemember(useRemember) {
+  const tag = useRemember ? "remember 재등장" : "remember-off 대조";
+  const title = useRemember ? "m11-probe-remember" : "m11-probe-remember-off";
   const events = [];
   const ctl = new AbortController();
   const sub = subscribeEvents((t, p) => { events.push({ t, p, at: Date.now() }); noteCost(p); }, ctl.signal).catch(() => {});
+  const countTools = (sid, from, to) => events.filter((e) =>
+    e.t === "message.part.updated" && e.p?.part?.type === "tool" &&
+    e.p?.part?.sessionID === sid && e.at >= from && (to === undefined || e.at < to)).length;
+  const countAsked = (sid, from, to) => events.filter((e) =>
+    e.t === "permission.asked" && e.p?.sessionID === sid && e.at >= from && (to === undefined || e.at < to)).length;
   try {
     // 세션 단위로 ask를 건다 (서버 기본값이 allow라도 실측 가능).
     // PermissionRuleset은 배열 [{permission, pattern, action}] 형식 (1.18.x /doc 기준).
-    const c = await api("/session", { method: "POST", body: JSON.stringify({ title: "m11-probe-remember", permission: [{ permission: "bash", pattern: "*", action: "ask" }] }) });
+    const c = await api("/session", { method: "POST", body: JSON.stringify({ title, permission: [{ permission: "bash", pattern: "*", action: "ask" }] }) });
     const sid = c.json?.id;
     if (!sid) throw new Error(`세션 생성 실패: ${c.status}`);
     createdSessions.push(sid);
+    const mark0 = Date.now();
     await api(`/session/${sid}/prompt_async`, {
       method: "POST",
       body: JSON.stringify({
@@ -164,16 +174,19 @@ async function runRemember() {
       events, (e) => e.t === "permission.asked" && e.p?.sessionID === sid, 150000, "permission.asked",
     ).catch(() => null);
     if (!first) {
-      record("remember 재등장", "실패", "asked 없음 (모델이 bash를 안 쓰거나 서버가 허용)");
+      record(tag, "실패", "asked 없음 (모델이 bash를 안 쓰거나 서버가 허용)");
       return;
     }
+    const answer = { response: "once" };
+    if (useRemember) answer.remember = true;
     await api(`/session/${sid}/permissions/${first.p?.id}`, {
       method: "POST",
-      body: JSON.stringify({ response: "once", remember: true }),
+      body: JSON.stringify(answer),
     });
     await waitFor(events, (e) => e.t === "session.idle" && e.p?.sessionID === sid, 120000, "idle").catch(() => {});
-    const n1 = events.filter((e) => e.t === "permission.asked" && e.p?.sessionID === sid).length;
-    const mark = Date.now();
+    const mark1 = Date.now();
+    const asked1 = countAsked(sid, mark0, mark1);
+    const tools1 = countTools(sid, mark0, mark1);
     await api(`/session/${sid}/prompt_async`, {
       method: "POST",
       body: JSON.stringify({
@@ -182,10 +195,15 @@ async function runRemember() {
       }),
     });
     await waitFor(events, (e) => e.t === "session.idle" && e.p?.sessionID === sid, 180000, "idle").catch(() => {});
-    const n2 = events.filter((e) => e.t === "permission.asked" && e.p?.sessionID === sid && e.at >= mark).length;
-    record("remember 재등장", "확인", `asked 1회차=${n1} 2회차=${n2}`);
+    const asked2 = countAsked(sid, mark1);
+    const tools2 = countTools(sid, mark1);
+    if (tools2 === 0) {
+      record(tag, "판정 불가", `asked 1회차=${asked1} 2회차=${asked2}, tool 1회차=${tools1} 2회차=0 (모델이 2회차에 bash를 안 씀) — 재시도 없음`);
+      return;
+    }
+    record(tag, "확인", `asked 1회차=${asked1} 2회차=${asked2}, tool 1회차=${tools1} 2회차=${tools2}`);
   } catch (e) {
-    record("remember 재등장", "실패", String(e && e.message ? e.message : e));
+    record(tag, "실패", String(e && e.message ? e.message : e));
   } finally {
     ctl.abort();
     try {
@@ -242,8 +260,9 @@ async function writeReport() {
 }
 
 async function main() {
-  if (ONLY === "remember" || ONLY === "toolsask") {
-    if (ONLY === "remember") await runRemember();
+  if (ONLY === "remember" || ONLY === "remember-off" || ONLY === "toolsask") {
+    if (ONLY === "remember") await runRemember(true);
+    else if (ONLY === "remember-off") await runRemember(false);
     else await runToolsAsk();
     await writeReport();
     const bad = results.filter((r) => r.status !== "확인").length;
