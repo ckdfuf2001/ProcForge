@@ -3846,6 +3846,8 @@ private hasCurrentApproval(
       openCodeSessionId: null,
       model: { ...target.model, source: target.source },
       status: "pending",
+      // M11-1: 프롬프트를 만들기 전이라 아직 0줄. 완성은 runRedraft가 덮어쓴다.
+      lessonsUsed: 0,
       ops: [],
       diff: [],
       at: new Date().toISOString(),

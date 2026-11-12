@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { writeAtomicFile } from "../fsutil.js";
+import { logger } from "../logger.js";
 import { eventsLogPath } from "./events-log.js";
 
 // M9-3-2: 읽을 때 계산하는 집계 (인덱스 파일 없음, M9-3-spec §2b).
@@ -132,7 +133,16 @@ export function readManualLessons(path: string): ManualLesson[] {
   let raw: string;
   try {
     raw = readFileSync(path, "utf8");
-  } catch {
+  } catch (e) {
+    // M11-spec 보정: 읽기 실패는 교훈 0줄로 처리하고 재분석은 계속한다.
+    // 파일 없음(ENOENT)은 정상이라 조용히 넘긴다.
+    if ((e as { code?: string }).code !== "ENOENT") {
+      try {
+        logger.warn(`lessons 읽기 실패: ${path}: ${e instanceof Error ? e.message : String(e)}`);
+      } catch {
+        // 무시
+      }
+    }
     return [];
   }
   const out: string[] = [];

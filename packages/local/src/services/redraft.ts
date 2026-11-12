@@ -4,6 +4,8 @@ import { writeFileAtomic } from "./procedureWriter.js";
 import { acquireDraftLock } from "./draft-lock.js";
 import { join } from "node:path";
 import { pfError } from "@proof/shared/errors.js";
+import { PROCEDURE_NAME_RE } from "@proof/shared/procedure.js";
+import { readManualLessons } from "./lessons-agg.js";
 
 // M10-2: 재분석 초안 생성 (App 메서드 경유, MCP 표면 불변).
 // 입력 절차서를 .procforge/drafts/<draftId>/에 복사하고,
@@ -96,6 +98,8 @@ export type RedraftResult = {
   openCodeSessionId: string | null;
   /** M10-model: 실제 사용 모델과 출처. */
   model: { providerID: string; modelID: string; source: RedraftModelSource };
+  /** M11-1: 프롬프트에 넣은 수기 교훈 줄 수 (draft.json 최상위). */
+  lessonsUsed: number;
   status: DraftStatus;
   ops: DraftOp[];
   diff: DraftDiffEntry[];
@@ -347,6 +351,8 @@ export async function runRedraft(input: {
     request: input.request,
     sourceHash,
     model,
+    // M11-1: 프롬프트를 만들기 전이라 아직 0줄. 실제 값은 base3에 싣는다.
+    lessonsUsed: 0,
     at: new Date().toISOString(),
   };
   const save = (r: RedraftResult): RedraftResult => {
@@ -401,14 +407,31 @@ export async function runRedraft(input: {
     }
     // M10-2-fix: 모델에게 절차서 내용을 보낸다. 없으면 nodeId를 알 수 없다.
     const nodeList = describeNodesForPrompt(nodes);
-    const promptText =
+    // M11-1: 수기 교훈 구획 (최대 5개, lessons-agg 파서 재사용).
+    // 요청문 뒤·노드 목록 앞에 넣는다. 파일 없음·줄 없음·읽기 실패면 구획 생략.
+    // 한도를 넘기면 뒤쪽 줄부터 하나씩 빼서 맞춘다 (교훈 때문에 실패 금지).
+    let lessonLines = PROCEDURE_NAME_RE.test(input.procedure)
+      ? readManualLessons(join(input.procforgeDir, "procedures", input.procedure, "lessons.md"))
+      : [];
+    const renderLessons = (ls: typeof lessonLines): string =>
+      ls.length === 0
+        ? ""
+        : `참고 교훈:\n${ls.map((m) => `- ${m.text}${m.truncated ? "…" : ""}`).join("\n")}\n`;
+    const lessonHead =
       `다음 요청을 반영한 절차서 변경분을 JSON ops로만 답해라 (설명 금지).\n` +
-      `요청: ${input.request}\n` +
+      `요청: ${input.request}\n`;
+    const lessonTail =
       `절차서 노드:\n${nodeList}\n` +
       `허용 op (reason 필수): {"op":"edit_goal","nodeId":"...","goal":"...","reason":"..."}, ` +
       `{"op":"edit_arg","nodeId":"...","arg":"...","value":...,"reason":"..."}, ` +
       `{"op":"edit_why","nodeId":"...","why":"...","reason":"..."}.\n` +
       `형식: {"ops":[...]}`;
+    let usedLessons = lessonLines;
+    let promptText = lessonHead + renderLessons(usedLessons) + lessonTail;
+    while (promptText.length > REDRAFT_PROMPT_MAX_CHARS && usedLessons.length > 0) {
+      usedLessons = usedLessons.slice(0, -1);
+      promptText = lessonHead + renderLessons(usedLessons) + lessonTail;
+    }
     if (promptText.length > REDRAFT_PROMPT_MAX_CHARS) {
       return save({
         ...base2,
@@ -418,6 +441,8 @@ export async function runRedraft(input: {
         reason: `프롬프트 상한 초과(${promptText.length} > ${REDRAFT_PROMPT_MAX_CHARS})`,
       });
     }
+    // M11-1: 이후 종료 경로는 실제 넣은 줄 수를 싣는다.
+    const base3 = { ...base2, lessonsUsed: usedLessons.length };
     const p = await api(baseUrl, headers, `/session/${sessionId}/prompt_async`, {
       method: "POST",
       body: JSON.stringify({
@@ -427,7 +452,7 @@ export async function runRedraft(input: {
       }),
     });
     if (p.status !== 204) {
-      return save({ ...base2, status: "failed", ops: [], diff: [], reason: `prompt_async 실패: ${p.status}` });
+      return save({ ...base3, status: "failed", ops: [], diff: [], reason: `prompt_async 실패: ${p.status}` });
     }
     // 3. idle 대기 (같은 세션의 session.error만 즉시 실패 — 재시도 없음).
     const t0 = Date.now();
@@ -437,7 +462,7 @@ export async function runRedraft(input: {
         ? ((err.p.error as { message?: unknown } | undefined)?.message ?? JSON.stringify(err.p.error ?? err.p).slice(0, 200))
         : null;
       if (err && typeof errMsg === "string") {
-        return save({ ...base2, status: "failed", ops: [], diff: [], reason: `session.error: ${String(errMsg).slice(0, 200)}` });
+        return save({ ...base3, status: "failed", ops: [], diff: [], reason: `session.error: ${String(errMsg).slice(0, 200)}` });
       }
       if (events.some((e) => e.t === "session.idle" && e.p.sessionID === sessionId)) break;
       if (Date.now() - t0 > timeoutMs) {
@@ -445,7 +470,7 @@ export async function runRedraft(input: {
         const modelId = `${input.openCode.model.providerID}/${input.openCode.model.modelID}`;
         const src = input.openCode.source === "env" ? "env" : "기본값";
         const hint = input.openCode.source === "env" ? "" : ` — ${REDRAFT_MODEL_ENV} 지정 권장`;
-        return save({ ...base2, status: "failed", ops: [], diff: [], reason: `idle 대기 초과(${timeoutMs}ms) model=${modelId} (${src})${hint}` });
+        return save({ ...base3, status: "failed", ops: [], diff: [], reason: `idle 대기 초과(${timeoutMs}ms) model=${modelId} (${src})${hint}` });
       }
       await new Promise((r) => setTimeout(r, 200));
     }
@@ -461,20 +486,20 @@ export async function runRedraft(input: {
       .filter((x) => x.type === "text" && typeof x.text === "string" && x.text.length > 0)
       .map((x) => (x as { text: string }).text);
     if (texts.length === 0) {
-      return save({ ...base2, status: "rejected", ops: [], diff: [], reason: "assistant 텍스트 없음" });
+      return save({ ...base3, status: "rejected", ops: [], diff: [], reason: "assistant 텍스트 없음" });
     }
     let parsed: unknown;
     try {
       // M10-2-fix: 코드 블록 1개로 감싼 JSON은 벗겨서 읽는다.
       parsed = JSON.parse(unwrapCodeFence(texts[texts.length - 1]));
     } catch {
-      return save({ ...base2, status: "rejected", ops: [], diff: [], reason: "응답이 JSON 아님" });
+      return save({ ...base3, status: "rejected", ops: [], diff: [], reason: "응답이 JSON 아님" });
     }
     const v = validateOps(parsed, nodes);
     if ("error" in v) {
-      return save({ ...base2, status: "rejected", ops: [], diff: [], reason: v.error });
+      return save({ ...base3, status: "rejected", ops: [], diff: [], reason: v.error });
     }
-    return save({ ...base2, status: "ready", ops: v.ops, diff: v.diff });
+    return save({ ...base3, status: "ready", ops: v.ops, diff: v.diff });
   } finally {
     ctl.abort();
     try {
