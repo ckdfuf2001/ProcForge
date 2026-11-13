@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { execFileSync, ExecFileSyncException } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { makeTmp } from "@proof/shared/tmp.js";
@@ -25,8 +25,8 @@ function run(args: string[]): { stdout: string; status: number } {
     });
     return { stdout: out, status: 0 };
   } catch (e) {
-    const err = e as ExecFileSyncException & { stdout?: string; status?: number | null };
-    return { stdout: typeof err.stdout === "string" ? err.stdout : "", status: err.status ?? 1 };
+    const err = e as { stdout?: unknown; status?: unknown };
+    return { stdout: typeof err.stdout === "string" ? err.stdout : "", status: typeof err.status === "number" ? err.status : 1 };
   }
 }
 

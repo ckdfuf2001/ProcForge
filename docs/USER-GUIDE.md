@@ -75,6 +75,12 @@ OpenCode 대화창에서 프롬프트 `procforge_decompose`를 실행하고 요�
 `pf_edit_node`, `pf_refresh_catalog`, `pf_test`, `pf_finalize`,
 `pf_run_start`, `pf_run_next`, `pf_run_supply`.
 
+### MCP 도구 합계 128 초과 시 대처
+일부 모델 제공자는 한 번에 받는 도구를 128개로 제한합니다. Proof는
+21개를 쓰므로, 다른 MCP와 합친 합계가 128을 넘는지 확인하십시오.
+넘으면 쓰지 않는 MCP를 `opencode.json`에서 비활성화하십시오
+(`"enabled": false`).
+
 ## 4. 다시 실행
 
 확정된 절차서는 대화 없이 CLI로 다시 실행합니다.
