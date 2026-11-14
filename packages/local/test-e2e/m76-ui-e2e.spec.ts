@@ -259,6 +259,7 @@ test("(e) 실행: 승인 대기 → 화면 승인 → done / 다른 실행 취�
   await expect(
     panel.locator("tr").filter({ hasText: "1.1" }),
   ).toContainText("pass");
+  await expect(panel.getByRole("region", { name: "진행률" }).getByText("100%")).toBeVisible({ timeout: 60000 });
 
   // 2) 다른 실행(slow): 실행 중 취소 → 재실행 버튼이 활성화된다.
   await panel.getByLabel("절차서").selectOption(slow);

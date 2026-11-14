@@ -158,7 +158,7 @@ export function RunPanel({
   return (
     <section className="panel run-panel">
       <h2>실행</h2>
-      <ProcedureProgressList />
+      <ProcedureProgressList refreshSignal={runId ? `${runId}:${info?.status ?? ""}` : null} />
       <label>
         절차서
         <select value={procName} onChange={(e) => setProcName(e.target.value)}>

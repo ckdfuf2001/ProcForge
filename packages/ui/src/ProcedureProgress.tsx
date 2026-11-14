@@ -4,7 +4,7 @@ import { api, ApiError, type ProcedureProgress } from "./api.js";
 // M11-1: 절차서별 실행 결과 기반 진행률 (읽기 전용).
 // 기존 RemainingList는 바꾸지 않는다 (현재 세션 트리 표시 그대로).
 
-export function ProcedureProgressList() {
+export function ProcedureProgressList({ refreshSignal }: { refreshSignal?: string | null }) {
   const [rows, setRows] = useState<ProcedureProgress[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -17,7 +17,7 @@ export function ProcedureProgressList() {
         setError(e instanceof ApiError ? e.message : String(e));
       }
     })();
-  }, []);
+  }, [refreshSignal]);
 
   if (error) return <p role="alert">오류: {error}</p>;
   if (!rows) return <p>진행률 불러오는 중…</p>;

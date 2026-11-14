@@ -175,7 +175,8 @@ export type ProcedureParam = {
   default?: string;
   description: string;
 };
-export type ProcedureRow = { name: string; params: ProcedureParam[] }; export type ProcedureProgress = { name: string; leaves: number; done: number; remaining: string[]; needsReapproval: string[]; progress: number | null; runId: string | null };
+export type ProcedureRow = { name: string; params: ProcedureParam[] };
+export type ProcedureProgress = { name: string; leaves: number; done: number; remaining: string[]; needsReapproval: string[]; progress: number | null; runId: string | null };
 
 /** 노드별 결과 — status 는 runner 가 준 문자열 그대로 (UI 해석 금지) */
 export type RunNodeResult = { nodeId: string; status: string };
