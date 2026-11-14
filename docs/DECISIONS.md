@@ -1254,4 +1254,6 @@ argv: [...]}` 고정. runner는 run fs에서 직접 실행해 stdout을 golden�
   `[pw-install] attempt` 로그·실패 시 `__dirlock` 정리, 스텝 9분).
   브라우저 캐시(`~/.cache/ms-playwright`, 키 `playwright-<os>-<버전>`)로
   warm run을 빠르게 한다.
+## M11-1
 
+- [M11-1-progress] 진행률은 실행 결과 기반 읽기 전용 집계다 (leaf 전체 대상, 완료는 최신 live run report.json results[] pass, 미완료는 그 밖 leaf + 승인 hash 무효 노드, live 0회면 progress null). 이름은 App listProcedureProgress() + UI GET /api/procedures/progress, 신규 pf_ 없음.
