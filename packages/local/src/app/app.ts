@@ -101,6 +101,7 @@ import {
 import {
   buildApprovalEntry,
   loadApprovals,
+  isApprovalCurrent,
   approvalPins,
   checkApproval,
   gateArgsFor,
@@ -149,7 +150,8 @@ import {
   listProceduresWithLatest,
   filterProcedures,
   type SimilarProcedure,
-} from "../services/similar.js";import {
+} from "../services/similar.js";
+import {
   listProcedureProgress,
   type ProcedureProgress,
 } from "../services/procedure-progress.js";
@@ -2914,28 +2916,15 @@ private hasAnyApproval(sessionId: string, nodeId: string): boolean {
   return loadApprovals(st.procedureDir).some((e) => e.node.id === nodeId);
 }
 
-private hasCurrentApproval(
-  sessionId: string,
-  nodeId: string,
-  pins: { id: string; hash: string; approvalHash: string }[],
+  private hasCurrentApproval(
+    sessionId: string,
+    nodeId: string,
+    pins: { id: string; hash: string; approvalHash: string }[],
 ): boolean {
-  const st = readRunStateBySession(this.procforgeDir, sessionId);
-  if (!st?.procedureDir) return false;
-  const list = loadApprovals(st.procedureDir);
-  // 화면 판단은 **approvalHash 일치**만 본다 (node.hash는 실행 시 runner가 판정한다 —
-  // 승인 직후 노드 hash는 바뀌므로 화면에서 재확인하면 거짓말이 된다).
-  return list.some((e) =>
-    pins.some(
-      (p) =>
-        p.id === e.node.id &&
-        // M7-5-f: 해시 없는 이력(v1)은 **미승인**으로 본다. 예외를 두면
-        // "스크립트가 바뀌면 무효" 원칙에 구멍이 된다.
-        typeof e.approvalHash === "string" &&
-        e.approvalHash.length > 0 &&
-        e.approvalHash === p.approvalHash,
-    ),
-  );
-}
+    const st = readRunStateBySession(this.procforgeDir, sessionId);
+    if (!st?.procedureDir) return false;
+    return isApprovalCurrent(loadApprovals(st.procedureDir), pins);
+  }
 
   /**
    * M10-4: 순차 자동 실행 가이드.

@@ -18,6 +18,7 @@ useTmpCleanup();
 // m11p-3 승인 무효 노드가 needsReapproval에 포함되고 미완료로 집계.
 // m11p-4 호출 전후 procedure.json/approvals.json/runs 바이트와 파일 수 그대로.
 // m11p-5 HTTP GET 200, 응답 이름순.
+// m11p-6 map 자식 leaf 승인 후 needsReapproval 빈값.
 
 const CAT = [
   { server: "t", name: "echo", inputSchema: {}, schemaHash: "h" },
@@ -182,5 +183,28 @@ describe("M11-1 절차서별 진행률", () => {
     } finally {
       await srv.close();
     }
+  }, 120000);
+  it("m11p-6 map 자식 leaf 승인 후 needsReapproval 빈값", async () => {
+    const dir = join(pfdir, "procedures", "m11pm");
+    mkdirSync(join(dir, "scripts"), { recursive: true });
+    writeFileSync(join(dir, "scripts", "job.py"), "print('{\"ok\": true}')\n", "utf8");
+    writeFileSync(join(dir, "procedure.json"), JSON.stringify({
+      format: "procforge-procedure", version: 1, name: "m11pm", sourceSession: "s",
+      createdAt: new Date(0).toISOString(), params: {}, toolCatalog: CAT,
+      tree: { rootId: "1", nodes: [] },
+      nodes: [
+        { id: "1", parentId: null, goal: "묶음", depth: 0, children: ["1.1", "1.2"], kind: "map", map: {}, sideEffect: "none", dependsOn: [], constraints: [] },
+        { id: "1.1", parentId: "1", goal: "첫째", depth: 1, children: [], tool: { server: "t", name: "echo", schemaHash: "h" }, args: { script: { kind: "script", file: "scripts/job.py", runtime: "python" } }, sideEffect: "external", dependsOn: [], constraints: [] },
+        { id: "1.2", parentId: "1", goal: "둘째", depth: 1, children: [], tool: { server: "t", name: "echo", schemaHash: "h" }, args: { script: { kind: "script", file: "scripts/job.py", runtime: "python" } }, sideEffect: "external", dependsOn: [], constraints: [] },
+      ],
+    }));
+    const app = newApp();
+    await app.approveProcedureNode({ procedure: "m11pm", nodeId: "1.1", allowWildcard: [] });
+    await app.approveProcedureNode({ procedure: "m11pm", nodeId: "1.2", allowWildcard: [] });
+    const rows = await app.listProcedureProgress();
+    const r = rows.find((x) => x.name === "m11pm");
+    expect(r?.needsReapproval).toEqual([]);
+    expect(r?.remaining).toEqual(["1.1", "1.2"]);
+    expect(r?.progress).toBeNull();
   }, 120000);
 });

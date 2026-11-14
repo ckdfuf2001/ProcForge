@@ -669,3 +669,22 @@ export function checkApproval(
   }
   return "denied";
 }
+
+// M11-1: 승인 유효 판정 공용 (approvalHash 일치 — node.hash 직접 비교 없음).
+// pin.hash가 비어 있으면 검증 불가로 미승인 취급한다 (fail-closed).
+// App.hasCurrentApproval과 procedure-progress가 같은 함수를 쓴다.
+export function isApprovalCurrent(
+  approvals: ApprovalEntry[],
+  pins: ApprovalPin[],
+): boolean {
+  if (pins.some((p) => p.hash === "")) return false;
+  return approvals.some((e) =>
+    pins.some(
+      (p) =>
+        p.id === e.node.id &&
+        typeof e.approvalHash === "string" &&
+        e.approvalHash.length > 0 &&
+        e.approvalHash === p.approvalHash,
+    ),
+  );
+}

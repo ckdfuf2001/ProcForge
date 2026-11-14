@@ -8,7 +8,7 @@
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { PROCEDURE_NAME_RE } from "@proof/shared/procedure.js";
+import { PROCEDURE_NAME_RE, type ProcedureDoc } from "@proof/shared/procedure.js";
 import { logger } from "../logger.js";
 import { eventsLogPath } from "./events-log.js";
 import { loadProcedureDoc } from "../runner/procedure-run.js";
@@ -17,7 +17,9 @@ import {
   approvalPins,
   loadApprovals,
   toHashable,
+  isApprovalCurrent,
 } from "./approvals.js";
+import { computeNodeHash, type ArgSpec, type Constraint } from "@proof/shared/schema.js";
 import { loadAccumulateFromProcedure } from "./accumulate.js";
 import { readSandboxed } from "./approval-scripts.js";
 
@@ -100,14 +102,16 @@ function liveRunIdsFromScan(procforgeDir: string, procedure: string): string[] {
   return cands.map((c) => c.runId);
 }
 
-// 승인 hash 무효 leaf (approvalHash 일치 기준 — App.hasCurrentApproval 과 같은 판정).
-function staleApprovalLeaves(procDir: string, doc: { nodes: { id: string; parentId: string | null; goal: string; tool?: { server: string; name: string }; args?: Record<string, unknown>; constraints?: unknown[]; sideEffect?: unknown; map?: unknown; until?: unknown; kind?: string; children: string[] }[] }): string[] {
+// 승인 hash 무효 leaf (판정은 approvals.isApprovalCurrent 공용 함수 — App과 동일).
+// 기록 자체가 없으면 무효가 아니라 미판정으로 유효 취급한다 (실행 중 승인 등 runs 기록에만 남는 승인).
+function staleApprovalLeaves(procDir: string, doc: ProcedureDoc): string[] {
   let approvals: ReturnType<typeof loadApprovals>;
   try {
     approvals = loadApprovals(procDir);
   } catch {
     approvals = [];
   }
+  const byId = new Map(doc.nodes.map((n) => [n.id, n]));
   const hashable = new Map(doc.nodes.map((n) => [n.id, toHashable(n)] as const));
   let accumulate: ReturnType<typeof loadAccumulateFromProcedure> | undefined;
   try {
@@ -122,37 +126,36 @@ function staleApprovalLeaves(procDir: string, doc: { nodes: { id: string; parent
       return undefined;
     }
   };
+  // buildApprovalEntry와 같은 내용 해시 (doc에는 세션 hash가 없다).
+  const contentHash = (x: { goal?: unknown; args?: unknown; constraints?: unknown }): string =>
+    computeNodeHash({
+      goal: typeof x.goal === "string" ? x.goal : "",
+      args: (x.args ?? {}) as Record<string, ArgSpec>,
+      constraints: (x.constraints ?? []) as Constraint[],
+      dependsOn: [],
+    });
   const out: string[] = [];
   for (const n of doc.nodes) {
     if ((n.children ?? []).length > 0) continue;
-    // 승인 불필요 노드(external·script 아님)는 유효로 취급 (checkGuideApproval 과 같은 기준).
     const args = (n.args ?? {}) as Record<string, unknown>;
     const isExternal = n.sideEffect === "external";
     const hasScript = Object.values(args).some(
       (a) => typeof a === "object" && a !== null && (a as { kind?: unknown }).kind === "script",
     );
     if (!n.tool || (!isExternal && !hasScript)) continue;
-    const byId = new Map(doc.nodes.map((x) => [x.id, x]));
+    const mine = approvals.filter((e) => e.node.id === n.id);
+    if (mine.length === 0) continue;
     const parent = n.parentId ? byId.get(n.parentId) : undefined;
     const pins = approvalPins(
-      { id: n.id, parentId: n.parentId },
+      { id: n.id, hash: contentHash(n), parentId: n.parentId },
       parent && (parent.kind === "map" || parent.kind === "until")
-        ? { id: parent.id, hash: "", kind: parent.kind }
+        ? { id: parent.id, hash: contentHash(parent), kind: parent.kind }
         : undefined,
       hashable,
       readScript,
       accumulate,
     );
-    const ok = approvals.some((e) =>
-      pins.some(
-        (p) =>
-          p.id === e.node.id &&
-          typeof e.approvalHash === "string" &&
-          e.approvalHash.length > 0 &&
-          e.approvalHash === p.approvalHash,
-      ),
-    );
-    if (!ok) out.push(n.id);
+    if (!isApprovalCurrent(mine, pins)) out.push(n.id);
   }
   return out;
 }
@@ -170,9 +173,9 @@ export function listProcedureProgress(procforgeDir: string): ProcedureProgress[]
   for (const name of names.sort()) {
     if (name.startsWith(".")) continue;
     if (!PROCEDURE_NAME_RE.test(name)) continue;
-    let doc: { nodes: { id: string; parentId: string | null; goal: string; tool?: { server: string; name: string }; args?: Record<string, unknown>; constraints?: unknown[]; sideEffect?: unknown; map?: unknown; until?: unknown; kind?: string; children: string[] }[] };
+    let doc: ProcedureDoc;
     try {
-      doc = loadProcedureDoc(procforgeDir, name).doc as typeof doc;
+      doc = loadProcedureDoc(procforgeDir, name).doc;
     } catch {
       continue;
     }
@@ -181,27 +184,38 @@ export function listProcedureProgress(procforgeDir: string): ProcedureProgress[]
       .filter((n) => (n.children ?? []).length === 0)
       .map((n) => n.id);
     const invalid = new Set(staleApprovalLeaves(procDir, doc));
-    // 최신 live run 확정 (events 우선, runs 스캔 보조, report.json 으로 검증).
-    const seen = new Set<string>();
-    const candidates: string[] = [];
-    for (const id of [...liveRunIdsFromEvents(procforgeDir, name), ...liveRunIdsFromScan(procforgeDir, name)]) {
-      if (seen.has(id)) continue;
-      seen.add(id);
-      candidates.push(id);
-    }
+    // 최신 live run 확정: events에서 유효 report를 찾으면 스캔은 생략한다.
     let report: RunReport | undefined;
     let liveRunId: string | null = null;
     let warned = false;
-    for (const id of candidates) {
+    const tried = new Set<string>();
+    const noteBad = (id: string) => {
+      if (!warned) {
+        warned = true;
+        logger.warn(`progress: live report 사용 불가 (${name}/${id}) — 다음 후보 확인`);
+      }
+    };
+    for (const id of liveRunIdsFromEvents(procforgeDir, name)) {
+      tried.add(id);
       const r = readLiveReport(procforgeDir, id);
       if (r) {
         report = r;
         liveRunId = id;
         break;
       }
-      if (!warned) {
-        warned = true;
-        logger.warn(`progress: live report 읽기 실패 (${name}/${id}) — progress null`);
+      noteBad(id);
+    }
+    if (!report) {
+      for (const id of liveRunIdsFromScan(procforgeDir, name)) {
+        if (tried.has(id)) continue;
+        tried.add(id);
+        const r = readLiveReport(procforgeDir, id);
+        if (r) {
+          report = r;
+          liveRunId = id;
+          break;
+        }
+        noteBad(id);
       }
     }
     const statusOf = new Map((report?.results ?? []).map((r) => [r.nodeId, r.status]));
