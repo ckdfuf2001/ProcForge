@@ -24,7 +24,7 @@ export function ProcedureProgressList() {
   if (rows.length === 0) return <p className="muted">등록된 절차서가 없습니다.</p>;
 
   return (
-    <section className="panel" aria-label="절차서별 진행률">
+    <section className="panel" aria-label="진행률">
       <h4>절차서별 진행률</h4>
       <ul>
         {rows.map((r) => (
