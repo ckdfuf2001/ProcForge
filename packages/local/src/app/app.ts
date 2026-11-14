@@ -149,7 +149,10 @@ import {
   listProceduresWithLatest,
   filterProcedures,
   type SimilarProcedure,
-} from "../services/similar.js";
+} from "../services/similar.js";import {
+  listProcedureProgress,
+  type ProcedureProgress,
+} from "../services/procedure-progress.js";
 import {
   runRedraft,
   openCodeAuthHeaders,
@@ -3679,6 +3682,12 @@ private hasCurrentApproval(
       }
     }
     return { procedures: out };
+  }
+
+  
+  /** M11-1: 절차서별 실행 결과 기반 진행률 (읽기 전용 집계, MCP 없음). */
+  async listProcedureProgress(): Promise<ProcedureProgress[]> {
+    return listProcedureProgress(this.procforgeDir);
   }
 
   /** M10-1: 유사 분석 조회 (읽기 전용, 로컬 전용). MCP 표면 불변. */

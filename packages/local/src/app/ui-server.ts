@@ -40,7 +40,7 @@ export type UiApp = Pick<
   | "uiRunLog"
   | "uiRunInfo"
   | "uiLatestRun"
-  | "listProcedures"
+  | "listProcedures"  | "listProcedureProgress"
   | "uiApprovalInfo"
   | "uiApprove"
   | "uiRunApprove"
@@ -450,6 +450,11 @@ export async function createUiServer(opts: {
           return;
         }
         // M10-3-api: 불러온 메모리 — 유사 분석 조회 (읽기 전용, 로컬 전용).
+        // M11-1: 절차서별 진행률 (읽기 전용 집계).
+        if (req.method === "GET" && url.pathname === "/api/procedures/progress") {
+          send(res, await opts.app.listProcedureProgress());
+          return;
+        }
         if (req.method === "GET" && url.pathname === "/api/procedures/similar") {
           const q = url.searchParams.get("query") ?? undefined;
           const limRaw = url.searchParams.get("limit");

@@ -9,6 +9,7 @@ import {
 } from "./api.js";
 import { compareNodeIds } from "./TreeView.js";
 import { ApprovalPanel } from "./ApprovalPanel.js";
+import { ProcedureProgressList } from "./ProcedureProgress.js";
 
 // M7-5-4: 실행 화면.
 // - 절차서 목록 → params 입력(required/default, @today:utc 안내) → 실행.
@@ -157,6 +158,7 @@ export function RunPanel({
   return (
     <section className="panel run-panel">
       <h2>실행</h2>
+      <ProcedureProgressList />
       <label>
         절차서
         <select value={procName} onChange={(e) => setProcName(e.target.value)}>
