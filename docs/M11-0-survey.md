@@ -6,7 +6,7 @@
 ## 1. 보류 목록
 
 ### permissions `remember`
-- 현황: Proof 미사용, 동작 미확정(관측 1회) — asked 1회차 1건·2회차 0건, tool part 1회차 5건·2회차 0건 (실측 2026-11-12 1.18.32, 비용 0).
+- 현황: Proof 미사용, 판정 불가(remember·대조군 2회 모두 2회차 도구 미사용) — asked 1회차 1건·2회차 0건, tool part 1회차 5건·2회차 0건 (실측 2026-11-12 1.18.32, 비용 0).
 - 작업: 없음 (추가 실측 없이 닫음).
 - 근거: `docs/M10-0-opencode-api.md:80`, `:118` (보류 ①: once/always/reject 해결, remember 미확정).
 

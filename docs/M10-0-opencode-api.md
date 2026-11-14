@@ -116,7 +116,7 @@
 - 동시 4개는 참고 기록만 (time-to-idle 2326·5023·3893·6758ms, RSS 641MB —
   당시 소유권 미검증 실행분). free 메모리 9.0→8.2GB.
 - 보류 ①(응답값): once/always/reject는 모두 api 200 + 기대 동작 (해결).
-  remember는 Proof 미사용, 동작 미확정(관측 1회) — asked 1회차 1건·2회차 0건, tool part 1회차 5건·2회차 0건 (실측 2026-11-12 1.18.32).
+  remember는 Proof 미사용, 판정 불가(remember·대조군 2회 모두 2회차 도구 미사용) — asked 1회차 1건·2회차 0건, tool part 1회차 5건·2회차 0건 (실측 2026-11-12 1.18.32).
 - 보류 ②(우선순위): 해소. 메시지 `tools:false`는 권한 흐름 없이 비활성,
   `permission:ask`는 실행 게이트+`asked` 이벤트.
   실측 2026-11-12 1.18.32: `tools: {"*": false}` + 세션 ask 동시 설정 시
