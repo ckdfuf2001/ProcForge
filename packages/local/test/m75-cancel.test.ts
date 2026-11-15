@@ -1,13 +1,13 @@
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, afterAll } from "vitest";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { execSync } from "node:child_process";
 import { ProcForgeApp } from "../src/app/app.js";
 import { createUiServer } from "../src/app/ui-server.js";
 import { testStack } from "./client-mode.js";
-import { isAlive, listChildren } from "../src/app/run-control.js";
+import { isAlive, listChildren, killProcessTree } from "../src/app/run-control.js";
 import { readRunState } from "../src/services/run-state.js";
-import { makeTmp } from "@proof/shared/tmp.js";
+import { makeTmp, cleanRegisteredTmp } from "@proof/shared/tmp.js";
 import { useTmpCleanup, settleRun } from "./tmp-hooks.js";
 
 // M9-tmp2: tmp 정리는 등록 역순으로 가장 나중에 돈다.
@@ -16,10 +16,30 @@ useTmpCleanup();
 // M9-tmp2-fix: 만든 실행은 테스트가 끝나기 전에 수습한다 (취소+종료대기).
 // afterAll rmSync와 살아 있는 자식·열린 로그 핸들의 경쟁(EBUSY 부분 정리)을 막는다.
 const liveRuns: { app: ProcForgeApp; pfdir: string; runId: string }[] = [];
+// M11-e2e-tmp-leak: afterEach가 splice로 비워도 afterAll 2중망용으로 전수 보관한다.
+const auditRuns: { app: ProcForgeApp; pfdir: string; runId: string }[] = [];
 // 예산: hook 30s > settle 20s (SETTLE_BUDGET_MS). hook이 먼저 끊기면
-// afterAll rmSync와 살아 있는 자식이 경쟁해 EBUSY 고아가 남는다.
+// afterAll rmSync와 살아 있는 자식·열린 로그 핸들의 경쟁(EBUSY 부분 정리)을 막는다.
 afterEach(async () => {
   for (const t of liveRuns.splice(0)) await settleRun(t.app, t.pfdir, t.runId);
+}, 30000);
+
+// M11-e2e-tmp-leak: L3 뒤 pf-cancel-e2e-* 잔재(+1) 방지 2중망.
+// afterEach settle로도 자식이 늦게 죽으면 afterAll rmSync가 Windows 잠금에
+// 막혀 폴더가 남는다. 여기서 잔존 트리를 직접 죽이고 등록 정리를 재시도한다.
+afterAll(async () => {
+  for (const t of auditRuns) {
+    try {
+      await settleRun(t.app, t.pfdir, t.runId);
+      for (const pid of listChildren(t.pfdir, t.runId)) {
+        if (isAlive(pid)) await killProcessTree(pid);
+      }
+    } catch { /* 정리 베스트 에퍼트 */ }
+  }
+  for (let i = 0; i < 20; i++) {
+    if (cleanRegisteredTmp().length === 0) break;
+    await new Promise((r) => setTimeout(r, 500));
+  }
 }, 30000);
 
 
@@ -77,6 +97,7 @@ async function running() {
   await app.finalize({ sessionId: s.sessionId, name: "slow" });
   const run = await app.uiRun({ procedure: "slow" });
   liveRuns.push({ app, pfdir, runId: run.runId });
+  auditRuns.push({ app, pfdir, runId: run.runId });
   let kids: number[] = [];
   for (let i = 0; i < 100 && kids.length === 0; i++) {
     kids = listChildren(pfdir, run.runId);
