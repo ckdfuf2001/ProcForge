@@ -200,6 +200,12 @@ export const DEFAULT_SESSION_TTL_MS = 30 * 24 * 3600 * 1000;
  */
 export const driveLoopTuning = { maxIterations: 500 };
 
+/**
+ * M11-2-cap: 동시 실행 상한 (이 프로세스 activeRuns + 다른 프로세스의 생존
+ * .drive.lock 합산). 상수 하나로 둔다 (새 env 없음).
+ */
+export const MAX_CONCURRENT_RUNS = 3;
+
 /** 분해 루프 안내 (prompt + pf_start 첫 응답 공유, 정책 세부 없음) */
 export const PROMPT_TEXT = [
   "ProcForge 분해 루프:",
@@ -435,6 +441,27 @@ export class ProcForgeApp {
       }
       return true;
     }
+  }
+
+  /**
+   * M11-2-cap: 다른 프로세스(own activeRuns에 없는 절차서)의 생존 drive.lock 개수.
+   * isProcDriveAlive가 절차서별 판정이므로 .locks 스캔으로 합산한다.
+   */
+  private countForeignLiveDrives(): number {
+    let entries: string[];
+    try {
+      entries = readdirSync(join(this.procforgeDir, "procedures", ".locks"));
+    } catch {
+      return 0;
+    }
+    let n = 0;
+    for (const e of entries) {
+      if (!e.endsWith(".drive.lock")) continue;
+      const name = e.slice(0, -".drive.lock".length);
+      if (this.activeRuns.has(name)) continue;
+      if (this.isProcDriveAlive(name)) n++;
+    }
+    return n;
   }
 
   /**
@@ -3445,6 +3472,12 @@ private hasAnyApproval(sessionId: string, nodeId: string): boolean {
     // 죽은 pid의 하트비트는 isProcDriveAlive가 치우고 false를 돌려준다.
     if (this.isProcDriveAlive(doc.name)) {
       throw pfError("conflict", `이미 실행 중입니다 (절차서 잠금 ${doc.name}).`);
+    }
+    // M11-2-cap: 동시 실행 상한 3 (같은 절차서 conflict 다음). 이 프로세스
+    // activeRuns(승인 대기 포함 — waiting이면 releaseRun을 건너뛴다) +
+    // 다른 프로세스의 생존 .drive.lock 합산.
+    if (this.activeRuns.size + this.countForeignLiveDrives() >= MAX_CONCURRENT_RUNS) {
+      throw pfError("conflict", "동시 실행 상한(3) 초과");
     }
     const started = await this.runStart({ procedure: ref, params });
     this.activeRuns.set(doc.name, started.runId);
