@@ -139,6 +139,7 @@ $env:PROOF_OPENCODE_TOOL_PREFIX="proof"
 - `stateWrites`는 작은 상태값을 저장하고 `${state.lastId}`로 읽습니다.
 - 재확정해도 `state.json`·`approvals.json`·`approved/`는 유지됩니다.
   실행 중인 절차서를 확정하면 거부됩니다 (끝나고 다시 확정하세요).
+- 서로 다른 절차서를 동시에 실행할 때는 같은 파일을 동시에 고치지 않게 하세요 (Proof는 파일 동시 수정을 감지하지 않습니다).
 
 ## 7. 실행 기록 보기
 
