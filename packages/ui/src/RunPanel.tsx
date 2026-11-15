@@ -6,6 +6,7 @@ import {
   type ProcedureRow,
   type RunInfo,
   type RunLogEntry,
+  type ActiveRun,
 } from "./api.js";
 import { compareNodeIds } from "./TreeView.js";
 import { ApprovalPanel } from "./ApprovalPanel.js";
@@ -35,6 +36,7 @@ export function RunPanel({
   const [procName, setProcName] = useState("");
   const [paramValues, setParamValues] = useState<Record<string, string>>({});
   const [runId, setRunId] = useState<string | null>(null);
+  const [active, setActive] = useState<ActiveRun[] | null>(null);
   const [info, setInfo] = useState<RunInfo | null>(null);
   const [log, setLog] = useState<RunLogEntry[]>([]);
   const [live, setLive] = useState<"open" | "closed" | "error" | "connecting">(
@@ -88,8 +90,7 @@ export function RunPanel({
 
   useEffect(() => {
     if (!runId) return;
-    const refresh = () => {
-      void (async () => {
+    const refresh = () => {      void (async () => {
         try {
           setInfo(await api.runInfo(runId));
         } catch {
@@ -122,6 +123,7 @@ export function RunPanel({
         setLog([]);
         setRunId(started.runId);
         setInfo(await api.runInfo(started.runId));
+        refreshActive();
       } catch (e) {
         setError(e instanceof ApiError ? e.message : String(e));
       } finally {
@@ -130,6 +132,24 @@ export function RunPanel({
     })();
   };
 
+  // M11-2-ui: 실행 중 run 목록 (이 프로세스만). 선택 run과 무관하게 보여준다.
+  const refreshActive = () => {
+    void (async () => {
+      try {
+        setActive(await api.activeRuns());
+      } catch {
+        // 목록 실패는 조용히 무시 (선택 run 표시는 유지)
+      }
+    })();
+  };
+
+  useEffect(() => {
+    refreshActive();
+    const t = setInterval(refreshActive, 5000);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [runId]);
+
   const cancel = () => {
     void (async () => {
       if (!runId) return;
@@ -137,6 +157,7 @@ export function RunPanel({
       try {
         await api.runCancel(runId);
         setInfo(await api.runInfo(runId));
+        refreshActive();
       } catch (e) {
         setError(e instanceof ApiError ? e.message : String(e));
       } finally {
@@ -159,6 +180,31 @@ export function RunPanel({
     <section className="panel run-panel">
       <h2>실행</h2>
       <ProcedureProgressList refreshSignal={runId ? `${runId}:${info?.status ?? ""}` : null} />
+      {active && active.length > 0 && (
+        <ul aria-label="실행 중 목록">
+          {active.map((r) => (
+            <li key={r.runId}>
+              <button
+                type="button"
+                disabled={r.runId === runId}
+                onClick={() => {
+                  setRunId(r.runId);
+                  setLog([]);
+                  void (async () => {
+                    try {
+                      setInfo(await api.runInfo(r.runId));
+                    } catch {
+                      // 전환 실패는 조용히 무시
+                    }
+                  })();
+                }}
+              >
+                {r.procedure} · {r.waiting ? "승인 대기" : "실행 중"}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
       <label>
         절차서
         <select value={procName} onChange={(e) => setProcName(e.target.value)}>

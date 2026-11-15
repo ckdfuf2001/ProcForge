@@ -178,6 +178,9 @@ export type ProcedureParam = {
 export type ProcedureRow = { name: string; params: ProcedureParam[] };
 export type ProcedureProgress = { name: string; leaves: number; done: number; remaining: string[]; needsReapproval: string[]; progress: number | null; runId: string | null };
 
+/** M11-2-ui: 실행 중 run 1건 (이 프로세스만). waiting이 true면 "승인 대기"로 표시한다. */
+export type ActiveRun = { procedure: string; runId: string; status: string; waiting: boolean };
+
 /** 노드별 결과 — status 는 runner 가 준 문자열 그대로 (UI 해석 금지) */
 export type RunNodeResult = { nodeId: string; status: string };
 
@@ -350,6 +353,8 @@ export const api = {
   // M7-5-4: 실행 화면
   procedures: () => get<{ procedures: ProcedureRow[] }>("/api/procedures"),
   procedureProgress: () => get<ProcedureProgress[]>("/api/procedures/progress"),
+  // M11-2-ui: 실행 중 run 목록 (이 프로세스만, 절차서 이름순).
+  activeRuns: () => get<ActiveRun[]>("/api/runs/active"),
   runStart: (procedure: string, params: Record<string, string>) =>
     post<{ runId: string; sessionId: string; procedure: string; params: Record<string, string> }>(
       "/api/runs",

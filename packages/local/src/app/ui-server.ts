@@ -42,6 +42,7 @@ export type UiApp = Pick<
   | "uiLatestRun"
   | "listProcedures"
   | "listProcedureProgress"
+  | "listActiveRuns"
   | "uiApprovalInfo"
   | "uiApprove"
   | "uiRunApprove"
@@ -454,6 +455,11 @@ export async function createUiServer(opts: {
         // M11-1: 절차서별 진행률 (읽기 전용 집계).
         if (req.method === "GET" && url.pathname === "/api/procedures/progress") {
           send(res, await opts.app.listProcedureProgress());
+          return;
+        }
+        // M11-2-ui: 실행 중 run 목록 (읽기 전용, 이 프로세스만).
+        if (req.method === "GET" && url.pathname === "/api/runs/active") {
+          send(res, await opts.app.listActiveRuns());
           return;
         }
         if (req.method === "GET" && url.pathname === "/api/procedures/similar") {
