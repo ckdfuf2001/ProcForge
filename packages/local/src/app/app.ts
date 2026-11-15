@@ -2920,7 +2920,7 @@ private hasAnyApproval(sessionId: string, nodeId: string): boolean {
     sessionId: string,
     nodeId: string,
     pins: { id: string; hash: string; approvalHash: string }[],
-): boolean {
+  ): boolean {
     const st = readRunStateBySession(this.procforgeDir, sessionId);
     if (!st?.procedureDir) return false;
     return isApprovalCurrent(loadApprovals(st.procedureDir), pins);

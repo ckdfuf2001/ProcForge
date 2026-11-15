@@ -22,6 +22,7 @@
 - 재finalize 시 동작: 영향 없음. 쓰는 상태가 없어 유실이 없고 `SIDECAR_KEEP` (`packages/local/src/services/procedureWriter.ts:241-247`) 추가가 필요 없다.
 - 재분석 시 동작: `procedure.json`·`report.json`·`approvals.json`을 다시 읽는 집계라 저장 상태가 없어 엉뚱한 노드에 체크가 남는 문제가 없다.
 - "미완료" 정의 (판정 확정): 대상은 절차서의 leaf 노드 전체다 (기존 `RemainingList` 셈은 폐기). 완료는 최신 live run `runs/<runId>/report.json`의 `results[]`에서 결과가 `pass`인 leaf다. 미완료는 그 밖의 leaf(`fail`, `skip`, 미도달) + 현재 승인 hash가 무효인 노드다 (승인 판정은 `packages/local/src/services/approvals.ts:612` `approvalPins` + `packages/local/src/app/app.ts:2914` `hasCurrentApproval`의 approvalHash 일치 기준을 재사용). 진행률은 완료 leaf 수 / 전체 leaf 수다. live run이 0회면 "실행 기록 없음"(`progress` null)으로 두고 0%로 표시하지 않는다.
+- "재승인 필요"(`needsReapproval`)는 승인 기록이 0건인 노드가 아니라 한 번 승인했다가 무효가 된 경우만 뜻한다 (`packages/local/src/services/procedure-progress.ts:146-147` `mine.length === 0 → continue`).
 - 이름 (판정 확정): App `listProcedureProgress()`, UI `GET /api/procedures/progress`. 신규 `pf_*` 없음. MCP 도구는 21개 그대로다 (`packages/local/src/server.ts:58-80` `TOOL_NAMES`).
 
 ### 안 b (참고): 체크형 (사람이 완료 표시)
