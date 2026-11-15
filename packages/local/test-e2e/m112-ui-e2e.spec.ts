@@ -83,7 +83,59 @@ test("M11-2-ui: 실행 중 목록 2줄 + 전환 + 상한(3) 초과", async ({ pa
 
     await expectNoCspViolation(page);
   } finally {
-    // 자는 실행을 깨워야 tmp 정리가 된다.
+    // 자는 실행을 깨야 tmp 정리가 된다.
+    for (const r of h.app.listActiveRuns()) {
+      try {
+        await h.app.uiRunCancel({ runId: r.runId });
+      } catch {
+        // 정리 베스트 에퍼트
+      }
+    }
+  }
+});
+
+test("M11-2-ui-fix: stale 응답이 clear를 덮지 않는다", async ({ page }) => {
+  h = await setup({ fakeMode: "ok" });
+  const p1 = await seedSlowProcedure(h, "ui-wait-1");
+  const p2 = await seedSlowProcedure(h, "ui-wait-2");
+  const p3 = await seedSlowProcedure(h, "ui-wait-3");
+  await visitRunTab(page);
+  const panel = runPanel(page);
+  const list = () => panel.getByRole("list", { name: "실행 중 목록" });
+  try {
+    await panel.getByLabel("절차서").selectOption(p1);
+    await panel.getByRole("button", { name: "실행", exact: true }).click();
+    await expect(list().getByRole("listitem")).toHaveCount(1, { timeout: 15000 });
+    await panel.getByLabel("절차서").selectOption(p2);
+    await panel.getByRole("button", { name: "실행", exact: true }).click();
+    await expect(list().getByRole("listitem")).toHaveCount(2, { timeout: 15000 });
+    // runInfo 응답을 늦춰 stale 응답을 만든다 (clear보다 늦게 도착).
+    await page.route("**/api/runs/*", async (route) => {
+      const url = route.request().url();
+      if (
+        url.includes("/api/runs/active") ||
+        url.includes("/stream") ||
+        route.request().method() !== "GET"
+      ) {
+        await route.continue();
+        return;
+      }
+      await new Promise((r) => setTimeout(r, 3000));
+      await route.continue();
+    });
+    // p1 목록 클릭으로 runInfo 요청을 띄운 뒤 곧바로 p3로 전환한다.
+    // (선택 중은 p2라 p1 버튼이 활성화돼 있다.)
+    await list().getByRole("button", { name: new RegExp(p1) }).click();
+    await panel.getByLabel("절차서").selectOption(p3);
+    // clear가 먼저 적용되고, 3초 뒤 stale 응답이 와도 화면은 비어 있어야 한다.
+    await page.waitForTimeout(4500);
+    await expect(panel.getByText(/run .* · 절차서/)).toBeHidden({ timeout: 5000 });
+    await expect(
+      panel.getByRole("button", { name: "실행", exact: true }),
+    ).toBeEnabled({ timeout: 5000 });
+    await page.unrouteAll({ behavior: "wait" });
+    await expectNoCspViolation(page);
+  } finally {
     for (const r of h.app.listActiveRuns()) {
       try {
         await h.app.uiRunCancel({ runId: r.runId });

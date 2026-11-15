@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   api,
   subscribeRunLog,
@@ -33,9 +33,22 @@ export function RunPanel({
   onOpenNode: (sessionId: string, nodeId: string) => void;
 }) {
   const [procedures, setProcedures] = useState<ProcedureRow[] | null>(null);
-  const [procName, setProcName] = useState("");
+  const [procName, setProcNameState] = useState("");
   const [paramValues, setParamValues] = useState<Record<string, string>>({});
-  const [runId, setRunId] = useState<string | null>(null);
+  const [runId, setRunIdState] = useState<string | null>(null);
+  // M11-2-ui-fix: 비동기 응답 경합 방지. 응답이 도착했을 때 이미 다른 run/절차서를
+  // 보고 있으면 버린다 (오래된 setInfo가 최신 clear를 덮어 버튼이 영구 disabled되는 문제).
+  const runIdRef = useRef<string | null>(null);
+  const procRef = useRef<string>("");
+  const setProcName = (s: string | ((p: string) => string)) => {
+    const v = typeof s === "function" ? s(procRef.current) : s;
+    procRef.current = v;
+    setProcNameState(v);
+  };
+  const setRunId = (id: string | null) => {
+    runIdRef.current = id;
+    setRunIdState(id);
+  };
   const [active, setActive] = useState<ActiveRun[] | null>(null);
   const [info, setInfo] = useState<RunInfo | null>(null);
   const [log, setLog] = useState<RunLogEntry[]>([]);
@@ -71,11 +84,15 @@ export function RunPanel({
       setParamValues(Object.fromEntries(p.params.map((q) => [q.name, q.default ?? ""])));
     }
     void (async () => {
+      const want = procName;
       try {
         const { runId: id } = await api.latestRun(procName);
+        if (procRef.current !== want) return;
         if (id) {
           setRunId(id);
-          setInfo(await api.runInfo(id));
+          const info = await api.runInfo(id);
+          if (runIdRef.current !== id) return;
+          setInfo(info);
         } else {
           setRunId(null);
           setInfo(null);
@@ -90,9 +107,13 @@ export function RunPanel({
 
   useEffect(() => {
     if (!runId) return;
-    const refresh = () => {      void (async () => {
+    const refresh = () => {
+      const id = runId;
+      void (async () => {
         try {
-          setInfo(await api.runInfo(runId));
+          const info = await api.runInfo(id);
+          if (runIdRef.current !== id) return;
+          setInfo(info);
         } catch {
           // 폴링 실패는 다음 이벤트에서 만회
         }
@@ -122,7 +143,9 @@ export function RunPanel({
         const started = await api.runStart(selected.name, paramValues);
         setLog([]);
         setRunId(started.runId);
-        setInfo(await api.runInfo(started.runId));
+        const info = await api.runInfo(started.runId);
+        if (runIdRef.current !== started.runId) return;
+        setInfo(info);
         refreshActive();
       } catch (e) {
         setError(e instanceof ApiError ? e.message : String(e));
@@ -156,7 +179,10 @@ export function RunPanel({
       setBusy(true);
       try {
         await api.runCancel(runId);
-        setInfo(await api.runInfo(runId));
+        const id = runId;
+        const info = await api.runInfo(id);
+        if (runIdRef.current !== id) return;
+        setInfo(info);
         refreshActive();
       } catch (e) {
         setError(e instanceof ApiError ? e.message : String(e));
@@ -188,11 +214,14 @@ export function RunPanel({
                 type="button"
                 disabled={r.runId === runId}
                 onClick={() => {
-                  setRunId(r.runId);
+                  const id = r.runId;
+                  setRunId(id);
                   setLog([]);
                   void (async () => {
                     try {
-                      setInfo(await api.runInfo(r.runId));
+                      const info = await api.runInfo(id);
+                      if (runIdRef.current !== id) return;
+                      setInfo(info);
                     } catch {
                       // 전환 실패는 조용히 무시
                     }
@@ -323,7 +352,15 @@ export function RunPanel({
               onDone={() => {
                 setApproval(null);
                 void (async () => {
-                  if (runId) setInfo(await api.runInfo(runId));
+                  if (!runId) return;
+                  const id = runId;
+                  try {
+                    const info = await api.runInfo(id);
+                    if (runIdRef.current !== id) return;
+                    setInfo(info);
+                  } catch {
+                    // 승인 후 갱신 실패는 조용히 무시
+                  }
                 })();
               }}
             />
