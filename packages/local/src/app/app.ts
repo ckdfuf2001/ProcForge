@@ -384,6 +384,12 @@ export class ProcForgeApp {
   private readonly signal: SignalTarget;
   /** M7 5-1: 실행 중 절차서 → runId (동시 1개 강제). 취소되면 반납. */
   private activeRuns = new Map<string, string>();
+  /**
+   * M11-2-cap-fix: 상한 검사 통과 후 첫 await 전 동기 예약 집합.
+   * 검사와 activeRuns.set 사이에 await runStart가 있어 동시 요청이 둘 다
+   * 통과하는 경합을 막는다. 실패하면 finally에서 풀고, 성공하면 activeRuns로 옮긴다.
+   */
+  private startingRuns = new Set<string>();
   /** M8-1-close2 b: 신호 감시 결과 배지 갱신 (UI 서버가 주입. 없으면 기록만) */
   private signalNotifier: ((sessionId: string, payload: unknown) => void) | undefined;
   /** M10-entry-fix: 백그라운드 재분석 진행 중 draftId 집합.
@@ -3476,10 +3482,21 @@ private hasAnyApproval(sessionId: string, nodeId: string): boolean {
     // M11-2-cap: 동시 실행 상한 3 (같은 절차서 conflict 다음). 이 프로세스
     // activeRuns(승인 대기 포함 — waiting이면 releaseRun을 건너뛴다) +
     // 다른 프로세스의 생존 .drive.lock 합산.
-    if (this.activeRuns.size + this.countForeignLiveDrives() >= MAX_CONCURRENT_RUNS) {
+    // M11-2-cap-fix: 검사 통과 즉시, 첫 await보다 먼저 동기 예약.
+    // (await runStart 뒤에 activeRuns.set을 하면 동시 요청이 둘 다 통과한다)
+    if (
+      this.activeRuns.size + this.startingRuns.size + this.countForeignLiveDrives() >=
+      MAX_CONCURRENT_RUNS
+    ) {
       throw pfError("conflict", "동시 실행 상한(3) 초과");
     }
-    const started = await this.runStart({ procedure: ref, params });
+    this.startingRuns.add(doc.name);
+    let started: { runId: string; sessionId: string; procedure: string; params: Record<string, string> };
+    try {
+      started = await this.runStart({ procedure: ref, params });
+    } finally {
+      this.startingRuns.delete(doc.name);
+    }
     this.activeRuns.set(doc.name, started.runId);
     appendRunLog(this.procforgeDir, started.runId, {
       level: "info",

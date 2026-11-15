@@ -131,13 +131,18 @@ describe("M11-2-cap 동시 실행 상한 3", () => {
     // App2의 drive 하트비트가 뜰 때까지 대기 (없으면 셈이 어긋난다).
     const lockDir = join(pfdir, "procedures", ".locks");
     const t0 = Date.now();
+    let lockFiles: string[] = [];
     for (;;) {
       let files: string[] = [];
       try { files = readdirSync(lockDir); } catch { files = []; }
+      lockFiles = files;
       if (files.includes("cap-e.drive.lock") && files.includes("cap-f.drive.lock")) break;
       if (Date.now() - t0 > 15000) break;
       await sleep(500);
     }
+    // M11-2-cap-fix: lock 2개 단언 (대기 실패와 상한 실패를 구분한다).
+    expect(lockFiles).toContain("cap-e.drive.lock");
+    expect(lockFiles).toContain("cap-f.drive.lock");
     const rg = await app1.uiRun({ procedure: "cap-g" });
     try {
       const r = await codeOf(app1.uiRun({ procedure: "cap-h" }));
@@ -146,6 +151,33 @@ describe("M11-2-cap 동시 실행 상한 3", () => {
     } finally {
       for (const [a, r] of [[app2, re], [app2, rf], [app1, rg]] as const) {
         try { await settleRun(a, pfdir, r.runId); } catch { /* 정리 베스트 에퍼트 */ }
+      }
+    }
+  }, 180000);
+
+  it("⑤ 2개 실행 중 서로 다른 2개를 동시에 요청하면 정확히 1개만 conflict", async () => {
+    const { pfdir, app } = setup(["cap-a", "cap-b", "cap-c", "cap-d"]);
+    const ra = await app.uiRun({ procedure: "cap-a" });
+    const rb = await app.uiRun({ procedure: "cap-b" });
+    const done: string[] = [];
+    try {
+      const [rc, rd] = await Promise.allSettled([
+        app.uiRun({ procedure: "cap-c" }),
+        app.uiRun({ procedure: "cap-d" }),
+      ]);
+      const ok = [rc, rd].filter((r) => r.status === "fulfilled");
+      const ng = [rc, rd].filter((r) => r.status === "rejected");
+      expect(ok.length).toBe(1);
+      expect(ng.length).toBe(1);
+      const err = (ng[0] as PromiseRejectedResult).reason as { code?: unknown; message?: string };
+      expect(err.code).toBe("conflict");
+      expect(err.message).toBe("동시 실행 상한(3) 초과");
+      for (const r of ok) {
+        done.push((r as PromiseFulfilledResult<{ runId: string }>).value.runId);
+      }
+    } finally {
+      for (const runId of [...done, ra.runId, rb.runId]) {
+        try { await settleRun(app, pfdir, runId); } catch { /* 정리 베스트 에퍼트 */ }
       }
     }
   }, 180000);
