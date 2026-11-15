@@ -1257,3 +1257,6 @@ argv: [...]}` 고정. runner는 run fs에서 직접 실행해 stdout을 golden�
 ## M11-1
 
 - [M11-1-progress] 진행률은 실행 결과 기반 읽기 전용 집계다 (leaf 전체 대상, 완료는 최신 live run report.json results[] pass, 미완료는 그 밖 leaf + 승인 hash 무효 노드, live 0회면 progress null). 이름은 App listProcedureProgress() + UI GET /api/procedures/progress, 신규 pf_ 없음. `isApprovalCurrent`의 `pin.hash === ""` → false(fail-closed) 판정은 App 화면 경로(`hasCurrentApproval`)에도 똑같이 적용된다.
+## M11-2
+
+- [M11-2-cap] 동시 실행 상한 3 (`MAX_CONCURRENT_RUNS`, `prepareRun`의 같은 절차서 conflict 다음 검사, 초과 시 `동시 실행 상한(3) 초과`). 같은 프로세스 안은 `startingRuns` 동기 예약으로 정확하고, 프로세스 간은 생존 `.drive.lock` 합산이라 근사치다.

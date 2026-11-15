@@ -34,6 +34,9 @@
 - 실측 결론: 상한이 없으면 runner·App 변경 없이 지금도 된다. 동시 실행 상한(3)을 두려면 App `prepareRun`에 상한 검사 1곳을 추가한다.
 - 바뀌는 곳: UI (`RunPanel.tsx:37` 단일 `runId` 상태 → 다중 run 표시, [M11-2-ui]) + App 상한 검사 (`prepareRun`, 같은 절차서 conflict 다음). runner 변경 없음. 상한 3 — 4번째 실행 요청은 `conflict`("동시 실행 상한(3) 초과").
 - 상한 대상: 이 프로세스 `activeRuns`(승인 대기 포함 — `waitingRuns`에 있으면 `releaseRun`을 건너뛰어 `activeRuns`에 남는다, `app.ts:4270,4332,4339`) + 다른 프로세스의 생존 `.drive.lock`(`isProcDriveAlive`, `app.ts:408`, `.locks/*.drive.lock` 스캔).
+- 대기 run의 프로세스 간 셈: 승인 대기 중에도 하트비트가 유지돼(`releaseRun` 건너뜀) `.drive.lock`이 살아 있으므로, 다른 프로세스에서도 `isProcDriveAlive`로 센다 (실측: 대기 중 `wait-a.drive.lock` 존재 확인).
+- 프로세스 간 상한은 근사치다 (동시 검사 경합 허용 — 정확히는 보장하지 않는다).
+- 같은 프로세스 안에서는 예약(`startingRuns`, 첫 `await` 전 동기 등록·`finally` 해제)으로 정확하다.
 - 위험: 프로세스 공유 자원(CPU/메모리, MCP 연결은 run마다 별도 생성이라 공유 상한 없음 `run.ts:364`); UI 동시 표시·runState 세션 분리; `driveRun` 루프 2개가 같은 `activeRuns` Map을 건드림(절차서 키 분리라 경합은 키 단위); 서로 다른 절차서의 script 노드가 같은 사용자 파일·작업 폴더를 동시에 고칠 수 있음(Proof는 감지하지 못함). 승인·golden·`results[]` 순서에는 영향 없음(절차서별 독립 파일).
 
 ## §2 불변 조건
