@@ -181,4 +181,29 @@ describe("M11-2-cap 동시 실행 상한 3", () => {
       }
     }
   }, 180000);
+
+  it("⑥ 같은 절차서를 동시에 2번 요청하면 정확히 1개만 기존 메시지로 conflict", async () => {
+    const { pfdir, app } = setup(["cap-a"]);
+    const done: string[] = [];
+    try {
+      const [r1, r2] = await Promise.allSettled([
+        app.uiRun({ procedure: "cap-a" }),
+        app.uiRun({ procedure: "cap-a" }),
+      ]);
+      const ok = [r1, r2].filter((r) => r.status === "fulfilled");
+      const ng = [r1, r2].filter((r) => r.status === "rejected");
+      expect(ok.length).toBe(1);
+      expect(ng.length).toBe(1);
+      const err = (ng[0] as PromiseRejectedResult).reason as { code?: unknown; message?: string };
+      expect(err.code).toBe("conflict");
+      expect(err.message?.startsWith("이미 실행 중입니다")).toBe(true);
+      for (const r of ok) {
+        done.push((r as PromiseFulfilledResult<{ runId: string }>).value.runId);
+      }
+    } finally {
+      for (const runId of done) {
+        try { await settleRun(app, pfdir, runId); } catch { /* 정리 베스트 에퍼트 */ }
+      }
+    }
+  }, 180000);
 });

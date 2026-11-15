@@ -3466,6 +3466,11 @@ private hasAnyApproval(sessionId: string, nodeId: string): boolean {
     if (running) {
       throw pfError("conflict", `이미 실행 중입니다 (run ${running}).`);
     }
+    // M11-2-cap-same: 상한 예약 중인 같은 절차서도 중복으로 본다.
+    // activeRuns만 보면 예약과 runStart 사이로 같은 요청 2개가 들어간다.
+    if (this.startingRuns.has(doc.name)) {
+      throw pfError("conflict", `이미 실행 중입니다 (${doc.name} 시작 중).`);
+    }
     // M7-5-b: **재시작 후에도** 대기 중인 실행이 잠금을 쥔다.
     // (메모리 맵만 보면 서버를 다시 켤 때 조용히 사라져 같은 절차서가 두 번 돈다)
     const persisted = this.waitingRunFor(doc.name);
@@ -3727,6 +3732,30 @@ private hasAnyApproval(sessionId: string, nodeId: string): boolean {
   /** M11-1: 절차서별 실행 결과 기반 진행률 (읽기 전용 집계, MCP 없음). */
   async listProcedureProgress(): Promise<ProcedureProgress[]> {
     return listProcedureProgress(this.procforgeDir);
+  }
+
+  /**
+   * M11-2-ui: 이 프로세스의 실행 중 run 목록 (읽기 전용, UI 다중 표시용).
+   * 절차서 이름순. status는 표시용 원문, waiting은 승인 대기 여부다.
+   */
+  listActiveRuns(): { procedure: string; runId: string; status: string; waiting: boolean }[] {
+    const out: { procedure: string; runId: string; status: string; waiting: boolean }[] = [];
+    for (const [procedure, runId] of this.activeRuns) {
+      let status = "running";
+      let waiting = this.waitingRuns.has(runId);
+      try {
+        const st = readRunState(this.procforgeDir, runId) as RunState | undefined;
+        if (st) {
+          status = this.runStatus(st);
+          waiting = waiting || st.waiting !== undefined;
+        }
+      } catch {
+        // 상태 읽기 실패는 기본값 유지
+      }
+      out.push({ procedure, runId, status, waiting });
+    }
+    out.sort((a, b) => (a.procedure < b.procedure ? -1 : a.procedure > b.procedure ? 1 : 0));
+    return out;
   }
 
   /** M10-1: 유사 분석 조회 (읽기 전용, 로컬 전용). MCP 표면 불변. */
