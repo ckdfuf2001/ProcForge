@@ -1260,3 +1260,7 @@ argv: [...]}` 고정. runner는 run fs에서 직접 실행해 stdout을 golden�
 ## M11-2
 
 - [M11-2-cap] 동시 실행 상한 3 (`MAX_CONCURRENT_RUNS`, `prepareRun`의 같은 절차서 conflict 다음 검사, 초과 시 `동시 실행 상한(3) 초과`). 같은 프로세스 안은 `startingRuns` 동기 예약으로 정확하고, 프로세스 간은 생존 `.drive.lock` 합산이라 근사치다.
+
+## M11
+
+- [M11-close] M11-1(a) 절차서별 진행률 읽기 전용 집계와 M11-2(c) 동시 실행 상한 3 + 실행 중 목록 UI(stale setInfo epoch 가드 포함)로 M11을 닫는다. 남은 보류는 events 로그 회전과 Basic auth 1.18.18 미검증 2건이다.

@@ -128,6 +128,7 @@ test("M11-2-ui-fix: stale 응답이 clear를 덮지 않는다", async ({ page })
     await list().getByRole("button", { name: new RegExp(p1) }).click();
     await panel.getByLabel("절차서").selectOption(p3);
     // clear가 먼저 적용되고, 3초 뒤 stale 응답이 와도 화면은 비어 있어야 한다.
+    // 고정 대기: route 지연(3s)이 끝난 뒤에야 stale이 도착하므로 4.5초를 기다린다.
     await page.waitForTimeout(4500);
     await expect(panel.getByText(/run .* · 절차서/)).toBeHidden({ timeout: 5000 });
     await expect(
