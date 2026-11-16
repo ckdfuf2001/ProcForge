@@ -1263,4 +1263,4 @@ argv: [...]}` 고정. runner는 run fs에서 직접 실행해 stdout을 golden�
 
 ## M11
 
-- [M11-close] M11-1(a) 절차서별 진행률 읽기 전용 집계와 M11-2(c) 동시 실행 상한 3 + 실행 중 목록 UI(stale setInfo epoch 가드 포함)로 M11을 닫는다. 남은 보류는 events 로그 회전과 Basic auth 1.18.18 미검증 2건이다.
+- [M11-close] 재분석 프롬프트 교훈(M11-1-impl), M11-1(a) 절차서별 진행률 읽기 전용 집계, M11-2(c) 동시 실행 상한 3 + 실행 중 목록 UI(stale setInfo epoch 가드 포함)로 M11을 닫는다. 남은 보류는 events 로그 회전, Basic auth 1.18.18 미검증, m75 잔재 단독 재현 불가(L3 첫 diff 감시) 3건이다.
