@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { writeAtomicFile } from "../fsutil.js";
 import { logger } from "../logger.js";
-import { eventsLogPath } from "./events-log.js";
+import { readEventsText } from "./events-log.js";
 
 // M9-3-2: 읽을 때 계산하는 집계 (인덱스 파일 없음, M9-3-spec §2b).
 // 집계 대상 모드 (판정 [M9-3-1] — record/replay/passthrough는 테스트 경로라
@@ -43,7 +43,7 @@ function isRecord(v: unknown): v is Record<string, unknown> {
 export function aggregate(procforgeDir: string, procedure: string): AggResult {
   let raw: string;
   try {
-    raw = readFileSync(eventsLogPath(procforgeDir, procedure), "utf8");
+    raw = readEventsText(procforgeDir, procedure);
   } catch {
     return { runs: 0, nodes: [], skipped: 0 };
   }

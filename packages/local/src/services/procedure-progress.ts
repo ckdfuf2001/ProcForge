@@ -10,7 +10,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { PROCEDURE_NAME_RE, type ProcedureDoc } from "@proof/shared/procedure.js";
 import { logger } from "../logger.js";
-import { eventsLogPath } from "./events-log.js";
+import { readEventsText } from "./events-log.js";
 import { loadProcedureDoc } from "../runner/procedure-run.js";
 import type { RunReport } from "../runner/types.js";
 import {
@@ -46,7 +46,7 @@ function readJson(path: string): unknown {
 function liveRunIdsFromEvents(procforgeDir: string, procedure: string): string[] {
   let text: string;
   try {
-    text = readFileSync(eventsLogPath(procforgeDir, procedure), "utf8");
+    text = readEventsText(procforgeDir, procedure);
   } catch {
     return [];
   }
