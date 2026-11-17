@@ -97,6 +97,9 @@ test("M11-2-ui: 실행 중 목록 2줄 + 전환 + 상한(3) 초과", async ({ pa
       while (h.app.listActiveRuns().length > 0 && Date.now() - t0 < 30000) {
         await new Promise((r) => setTimeout(r, 500));
       }
+      if (h.app.listActiveRuns().length > 0) {
+        console.warn(`[m112-ui-e2e] 30s 대기 초과, 남은 run: ${h.app.listActiveRuns().map((r) => r.procedure).join(",")}`);
+      }
     }
   }
 });
@@ -156,6 +159,9 @@ test("M11-2-ui-fix: stale 응답이 clear를 덮지 않는다", async ({ page })
       const t0 = Date.now();
       while (h.app.listActiveRuns().length > 0 && Date.now() - t0 < 30000) {
         await new Promise((r) => setTimeout(r, 500));
+      }
+      if (h.app.listActiveRuns().length > 0) {
+        console.warn(`[m112-ui-e2e] 30s 대기 초과, 남은 run: ${h.app.listActiveRuns().map((r) => r.procedure).join(",")}`);
       }
     }
   }
