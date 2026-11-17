@@ -16,20 +16,29 @@ export function makeTmp(prefix: string): string {
   return dir;
 }
 
+/** rm 구현 교체용 (테스트 주입; 기본값은 node:fs rmSync). 신규 env 금지. */
+export type RmFn = (dir: string) => void;
+const defaultRm: RmFn = (dir: string) =>
+  rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+
 /** 등록된 폴더를 전부 정리한다. 실패한 경로 목록을 돌려준다. */
-export function cleanRegisteredTmp(): string[] {
+export function cleanRegisteredTmp(rm: RmFn = defaultRm): string[] {
   const failed: string[] = [];
-  for (const dir of registry) {
-    registry.delete(dir);
+  // M14-1: rm에 성공했을 때만 registry에서 지운다.
+  for (const dir of [...registry]) {
     if (process.env.PROOF_KEEP_TMP === "1") {
+      registry.delete(dir);
       console.error(`[tmp] KEEP(삭제 안 함): ${dir}`);
       continue;
     }
     try {
-      rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
-    } catch {
+      rm(dir);
+      registry.delete(dir);
+    } catch (e) {
       failed.push(dir);
-      console.error(`[tmp] 정리 실패(남김): ${dir}`);
+      console.error(
+        `[tmp] 정리 실패(남김): ${dir} code=${(e as { code?: unknown })?.code ?? "?"}`,
+      );
     }
   }
   return failed;
