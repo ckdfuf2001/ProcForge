@@ -1271,4 +1271,4 @@ argv: [...]}` 고정. runner는 run fs에서 직접 실행해 stdout을 golden�
 
 ## M13
 
-- [M13-1] 사용자 취소로 중단된 노드를 `cancelled`로 기록한다(실패가 아니다). 타입에 값 추가 허용, detail "취소됨" 유지, waiting 중 취소는 현행(`markCancelled`) 유지. 취소 판정은 `isCancelReject` 공용 함수 하나로 수행한다. JUnit에서는 skipped로 매핑하고 UI에는 "취소됨"으로 표시한다. 교훈 집계는 `fail`만 세고 진행률은 `pass`만 완료로 세므로 cancelled는 양쪽 모두에서 제외된다.
+- [M13-1] 사용자 취소로 중단된 노드를 `cancelled`로 기록한다(실패가 아니다). 타입에 값 추가 허용, detail "취소됨" 유지, waiting 중 취소는 현행(`markCancelled`) 유지. 취소 판정은 `isCancelReject` 공용 함수 하나로 수행한다. JUnit에서는 skipped로 매핑하고 UI에는 "취소됨"으로 표시한다. 교훈 집계에서는 제외하고(`fail`만 셈), 진행률에서는 미완료로 둔다(`pass`만 완료).

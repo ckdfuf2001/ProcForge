@@ -5,7 +5,7 @@
 - 취소 경로 순서 (코드 원문 위치):
   1. 자식 kill + 플래그: `cancelRun` (`packages/local/src/app/run-control.ts:117`), `writeCancelFlag` (`:122`) 후 등록된 자식마다 `killProcessTree` (`:126-130`). 호출자는 `uiRunCancel` (`packages/local/src/app/app.ts:3553`, 호출 `:3572`).
   2. `markCancelled` (`app.ts:4522`): `status: "cancelled"` 기록 + `finishRun` (`:4547`). 호출 지점: uiRunCancel의 대기 분기 (`:3575-3577`), driveRun의 취소 플래그 확인 (`:4311`, `:4316`, `:4361`), 재개 경로의 취소 확인 (`:4576-4578`).
-  3. 노드 결과 기록: 스크립트 취소는 `close`에서 `reject("취소됨", {code:"cancelled"})` (`packages/local/src/runner/script-run.ts:257-260`). 이 reject는 runSession 메인 루프의 catch (`packages/local/src/runner/run.ts:575-587`)에 걸려 노드가 `status: "fail"`로 기록된다. 이것이 결함이다.
+  3. 노드 결과 기록: 스크립트 취소는 `close`에서 `reject("취소됨", {code:"cancelled"})` (`packages/local/src/runner/script-run.ts:257-260`). 이 reject는 runSession 메인 루프의 catch (`packages/local/src/runner/run.ts:575-587`)에 걸려 노드가 `status: "fail"`로 기록된다. 이것이 결함이다. M13-1 (`f1674a0`)에서 `isCancelReject` 공용 판정과 catch 3곳 수정으로 고쳤다.
   4. `finishRun` (`app.ts:4547`)과 `finalRunStatus` (`run.ts:236-244`, `cancel.json` 있으면 `"cancelled"`).
 - 실측 (단계 0, 임시 테스트 1회, 실측 후 삭제): 시작 직후 취소 1회 — 취소 시점 `children.json`은 비어 있었고(`[]`), 취소 응답은 `cancelled:true`·`killed:[]`·`failed:[]`, 최종 상태는 `cancelled`였다. 그러나 노드 `1.1`은 `status: "fail"`(`detail`은 "취소됨")로 기록됐다. run은 cancelled, 중단 노드는 fail — 불일치(결함).
 - 잔재 `pf-cancel-e2e-ROL7dH`(os.tmpdir())는 단계 0에서 경로·mtime 확인 후 삭제했다.
@@ -22,7 +22,7 @@
 
 ## §2 불변 조건
 
-- 취소하지 않은 run의 기록은 바뀌지 않는다 (바이트 단위 동일).
+- 취소하지 않은 run의 기록은 바뀌지 않는다 (정규화 비교: runId·at·durationMs 제외).
 - `cancel.json`이 있으면 최종 상태는 `cancelled`다 (`run.ts:236-244` 현행 유지).
 - MCP 도구 21개와 events 스키마(`{v:1, ts, ...}`)는 그대로 둔다. MCP 도구 21개 (`server.ts:58-80`)는 노드 상태를 직접 다루지 않으므로 변경 없다. 읽는 쪽은 모르는 status를 실패로 세지 않는다 (`aggregate`는 `status === "fail"`만 셈, `lessons-agg.ts:83`; 진행률은 `pass`만 완료로 셈, `procedure-progress.ts:225`).
 - `NodeResultStatus` 사용처 전체: 정의 `packages/local/src/runner/types.ts:52-62` (상태 필드 `:66`, 판정 함수 `isCancelReject` `:79-85`); 기록·집계 `packages/local/src/runner/run.ts:157-166` (toJUnit), `:575-587` (catch), `:662-670` (summary), `:695` (run_end nodes), `:751-763` (승인 병합); 누적 `packages/local/src/app/app.ts:4724-4737` (pass/failed 판정), `:4800` (미완료 필터); 집계 `packages/local/src/services/lessons-agg.ts:83,85`; 진행률 `packages/local/src/services/procedure-progress.ts:221,225`; 상태 `packages/local/src/services/run-state.ts:27` (string); UI `packages/ui/src/api.ts:185,196`, `packages/ui/src/RunPanel.tsx:23,301,378-391`; 공유 `packages/shared/src/report.ts:84` (selfVerdict, 노드 상태와 무관).
