@@ -36,6 +36,33 @@ function mkProc(pfdir: string, root: string, name: string, script: string): void
   }));
 }
 
+function mkUntilProc(pfdir: string, name: string, script: string): void {
+  const dir = join(pfdir, "procedures", name);
+  mkdirSync(join(dir, "scripts"), { recursive: true });
+  writeFileSync(join(dir, "scripts", "job.py"), script, "utf8");
+  writeFileSync(join(dir, "procedure.json"), JSON.stringify({
+    format: "procforge-procedure", version: 1, name, sourceSession: "s",
+    createdAt: new Date(0).toISOString(), params: {}, toolCatalog: CAT,
+    tree: { rootId: "1", nodes: [] },
+    nodes: [{
+      id: "1", parentId: null, goal: "g", depth: 0, children: [],
+      kind: "until",
+      tool: { server: "t", name: "echo", schemaHash: "h" },
+      args: {},
+      until: {
+        maxIterations: 5,
+        until: { id: "c-done", kind: "equals", spec: { path: "ok", expected: null }, source: "human" },
+        template: {
+          tool: { server: "t", name: "echo" },
+          args: { script: { kind: "script", file: "scripts/job.py", runtime: "python" } },
+          constraints: [],
+        },
+      },
+      sideEffect: "none", dependsOn: [], constraints: [],
+    }],
+  }));
+}
+
 async function waitEnd(app: ProcForgeApp, runId: string, timeoutMs = 90000): Promise<string> {
   const t0 = Date.now();
   for (;;) {
@@ -100,16 +127,16 @@ describe("M13-1 취소 기록", () => {
     const st = await waitEnd(app, r.runId);
     expect(st).toBe("cancelled");
     const repPath = join(pfdir, "runs", r.runId, "report.json");
-    if (existsSync(repPath)) {
-      const rep = readJson(repPath) as {
-        results: { nodeId: string; status: string }[];
-      };
-      expect(rep.results.filter((x) => x.status === "fail").length).toBe(0);
-      const n1 = rep.results.find((x) => x.nodeId === "1");
-      if (n1) expect(n1.status).toBe("cancelled");
-    }
+    // M13-1-fix: report 부재 시 통과 금지 — 존재를 무조건 단언한다.
+    expect(existsSync(repPath)).toBe(true);
+    const rep = readJson(repPath) as {
+      results: { nodeId: string; status: string }[];
+    };
+    expect(rep.results.filter((x) => x.status === "fail").length).toBe(0);
+    const n1 = rep.results.find((x) => x.nodeId === "1");
+    expect(n1?.status).toBe("cancelled");
     expect(existsSync(join(pfdir, "runs", r.runId, "cancel.json"))).toBe(true);
-    console.log(`M13-1-② run=${r.runId} final=${st} report=${existsSync(repPath) ? "exists" : "absent"}`);
+    console.log(`M13-1-② run=${r.runId} final=${st} report=exists`);
   }, 120000);
 
   it("③ 취소 없는 run은 기존 기록과 바이트 단위로 동일(회귀)", async () => {
@@ -156,11 +183,48 @@ describe("M13-1 취소 기록", () => {
     expect(await waitEnd(app, r.runId)).toBe("cancelled");
     const agg = aggregate(pfdir, "slow");
     expect(agg.runs).toBeGreaterThanOrEqual(1);
-    for (const n of agg.nodes) expect(n.fails).toBe(0);
-    // events 원문에도 취소 run_end가 있고, cancelled 노드가 fail로 세어지지 않는다.
+    // M13-1-fix: cancelled는 fail도 pass도 아니라 집계 노드 목록에 들지 않는다
+    // (lessons-agg.ts:83 fail만 셈, :85 done+pass만 평균, :109 셋의 합집합).
+    // 빈 배열 자체를 단언해야 루프 무실행 통과를 막는다.
+    expect(agg.nodes.length).toBe(0);
+    // events 원문 대조: 취소 run_end가 있고, 노드 1은 cancelled이며 fail은 없다.
     const lines = readEventsText(pfdir, "slow").split("\n").filter((l) => l.length > 0);
-    const ends = lines.map((l) => JSON.parse(l) as { kind?: string; status?: string });
-    expect(ends.some((e) => e.kind === "run_end" && e.status === "cancelled")).toBe(true);
-    console.log(`M13-1-④ run=${r.runId} runs=${agg.runs} fails=${agg.nodes.map((n) => n.fails).join(",")}`);
+    const ends = lines.map((l) => JSON.parse(l) as {
+      kind?: string; status?: string; runId?: string;
+      nodes?: { nodeId?: string; status?: string }[];
+    });
+    const end = ends.find((e) => e.kind === "run_end" && e.runId === r.runId);
+    expect(end?.status).toBe("cancelled");
+    expect(end?.nodes?.find((n) => n.nodeId === "1")?.status).toBe("cancelled");
+    expect((end?.nodes ?? []).filter((n) => n.status === "fail").length).toBe(0);
+    console.log(`M13-1-④ run=${r.runId} runs=${agg.runs} aggnodes=${agg.nodes.length}`);
+  }, 120000);
+
+  it("⑤ until 자식 취소: until 노드가 cancelled이고 failedItems 없음", async () => {
+    const root = makeTmp("pf-m13-cancel-");
+    const pfdir = join(root, ".procforge");
+    mkdirSync(pfdir, { recursive: true });
+    mkUntilProc(pfdir, "uw", SLOW);
+    const { client } = testStack(pfdir);
+    const app = new ProcForgeApp({ core: client, procforgeDir: pfdir, projectRoot: root });
+    const r = await app.uiRun({ procedure: "uw" });
+    for (let i = 0; i < 100 && listChildren(pfdir, r.runId).length === 0; i++) {
+      await sleep(100);
+    }
+    // 조용 통과 금지 — 취소 대상(실행 중 자식)이 없으면 검증이 아니다.
+    expect(listChildren(pfdir, r.runId).length).toBeGreaterThan(0);
+    const cres = await app.uiRunCancel({ runId: r.runId });
+    expect(cres.cancelled).toBe(true);
+    const st = await waitEnd(app, r.runId);
+    expect(st).toBe("cancelled");
+    const rep = readJson(join(pfdir, "runs", r.runId, "report.json")) as {
+      results: { nodeId: string; status: string; detail?: string; failedItems?: number[] }[];
+    };
+    const n1 = rep.results.find((x) => x.nodeId === "1");
+    expect(n1?.status).toBe("cancelled");
+    expect(n1?.detail).toBe("취소됨");
+    expect("failedItems" in (n1 ?? {})).toBe(false);
+    expect(rep.results.filter((x) => x.status === "fail").length).toBe(0);
+    console.log(`M13-1-⑤ run=${r.runId} node=1 status=${n1?.status} final=${st}`);
   }, 120000);
 });

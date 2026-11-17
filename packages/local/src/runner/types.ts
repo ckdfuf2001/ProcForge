@@ -72,6 +72,18 @@ export type NodeResult = {
   durationMs: number;
 };
 
+/**
+ * M13-1-fix: 취소 reject 판정 (3개 catch 공용).
+ * `throw null` 같은 비객체 throw에도 안전하다 (catch 안에서 다시 던지지 않는다).
+ */
+export function isCancelReject(e: unknown): boolean {
+  return (
+    typeof e === "object" &&
+    e !== null &&
+    (e as { code?: unknown }).code === "cancelled"
+  );
+}
+
 export type RunReport = {
   runId: string;
   sessionId: string;

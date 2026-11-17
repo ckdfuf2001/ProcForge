@@ -81,6 +81,7 @@ import type {
   RunReport,
   ToolResponse,
 } from "./types.js";
+import { isCancelReject } from "./types.js";
 
 function orderNodes(nodes: Node[]): Node[] {
   const byId = new Map(nodes.map((n) => [n.id, n]));
@@ -573,9 +574,7 @@ export async function runSession(opts: RunOptions): Promise<RunReport> {
         }
       } catch (e) {
         // M13-1: 취소 reject는 실패가 아니라 중단으로 기록한다.
-        const cancelled =
-          typeof (e as { code?: unknown }).code === "string" &&
-          (e as { code?: string }).code === "cancelled";
+        const cancelled = isCancelReject(e);
         const r: NodeResult = {
           nodeId: n.id,
           status: cancelled ? "cancelled" : "fail",
@@ -1734,15 +1733,16 @@ async function execMap(
       // M13-1: 취소 reject는 실패가 아니라 중단으로 기록한다.
       r = {
         nodeId: instanceId,
-        status:
-          (e as { code?: string }).code === "cancelled" ? "cancelled" : "fail",
+        status: isCancelReject(e) ? "cancelled" : "fail",
         failedConstraints: [],
         detail: e instanceof Error ? e.message : String(e),
         durationMs: 0,
       };
     }
     // M13-1: 항목 취소는 map 전체를 중단으로 기록한다 (failedItems에 넣지 않는다).
+    // suspended와 같이 항목 출력을 정리한다 — 취소된 항목 출력은 남기지 않는다.
     if (r.status === "cancelled") {
+      for (let j = 0; j < items.length; j++) outputs.delete(`${n.id}.${j + 1}`);
       return done({
         nodeId: n.id,
         status: "cancelled",
@@ -2019,10 +2019,18 @@ async function execUntil(
       );
     } catch (e) {
       // M13-1: 취소 reject는 실패가 아니라 중단으로 기록한다.
-      const untilCancelled = (e as { code?: string }).code === "cancelled";
+      // map과 같이 failedItems에 넣지 않고 detail도 있는 그대로 둔다.
+      if (isCancelReject(e)) {
+        return done({
+          nodeId: n.id,
+          status: "cancelled",
+          failedConstraints: [],
+          detail: e instanceof Error ? e.message : String(e),
+        });
+      }
       return done({
         nodeId: n.id,
-        status: untilCancelled ? "cancelled" : "fail",
+        status: "fail",
         failedConstraints: [],
         failedItems: [i],
         detail: `until 반복 ${i} 실패: ${e instanceof Error ? e.message : String(e)}`,
@@ -2040,12 +2048,12 @@ async function execUntil(
     const out = outputs.get(instanceId);
     outputs.delete(instanceId);
     // M13-1: 하위 취소는 until 전체를 중단으로 기록한다 (실패가 아니다).
+    // map과 같이 failedItems에 넣지 않는다.
     if (r.status === "cancelled") {
       return done({
         nodeId: n.id,
         status: "cancelled",
         failedConstraints: [],
-        failedItems: [i],
         detail: r.detail,
       });
     }
