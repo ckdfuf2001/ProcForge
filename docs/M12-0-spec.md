@@ -7,7 +7,7 @@ M11-2까지 2차 범위를 닫고, 보류였던 events 회전을 조사한다.
 - 쓰기 경로는 1곳뿐: `packages/local/src/services/events-log.ts:20` `appendEvent` (주석 `:7` "이 파일의 appendEvent가 유일한 쓰기 경로"). append-only이며 회전이 없다 (`appendFileSync`, `:29`). 경로는 `eventsLogPath` (`events-log.ts:10-11`): `runs/by-procedure/<name>/events.ndjson`. 1줄 형식은 `{v:1, ts, ...}` (`:28`).
 - 읽는 쪽은 2곳이며 둘 다 파일 전체를 읽는다: `lessons-agg.ts:46` `readFileSync(...)` 후 `:56` 줄 단위 순회, `procedure-progress.ts:49` `readFileSync(...)` 후 `:54` 줄 단위 순회. 스트리밍·뒤에서 읽기가 아니다.
 - 실파일: 이 PC에 `events.ndjson`은 0건이다 (검색: repo 전체, `F:/pf-dogfood*`·`F:/pf-m8-*` 7곳, `F:/pf-tmp`, workspace, home·Documents·Desktop). `by-procedure` 디렉터리는 3곳에 있으나 `latest.json`만 있고(M9-3 이전 실행분), 가장 비슷한 실파일은 run `log.ndjson` 226B ×6 (`F:/pf-dogfood2/3`)이다.
-- run당 바이트 실측 ([M12-1] 단계 0, 가짜 서버 live run 1회·노드 2개): `events.ndjson` 260B, 1줄, 종류별 `{"run_end":1}`. 즉 승인 없는 run은 약 260B/회이며, 1 MiB ≈ live run 약 4000회분이다 (1,000회분을 넘으므로 상한 재판정 불필요).
+- run당 바이트 실측 ([M12-1] 단계 0, 가짜 서버 live run 1회·노드 2개): `events.ndjson` 260B, 1줄, 종류별 `{"run_end":1}`. 즉 승인 없는 run은 약 260B/회이며, 1 MiB ≈ live run 약 4000회분이다 (승인 이벤트가 있으면 회분이 줄어든다).
 
 ## §1 회전 방식 2안
 
@@ -16,7 +16,7 @@ M11-2까지 2차 범위를 닫고, 보류였던 events 회전을 조사한다.
 - 상한: 1 MiB(1,048,576B) 잠정 (상수 1개, 새 env 없음; 테스트는 내부 함수 인자로 주입).
 - 회전 형태: rename 1세대 보존 (`events.ndjson` → `events.ndjson.1`, 기존 `.1`은 덮어씀) 후 새로 쓰기. 앞부분 잘라내기는 원자적이지 않아 후보에서 뺀다.
 - rename 실패 시: 회전을 건너뛰고 append를 계속하며 stderr에 `[procforge:warn]` 1줄을 남긴다 (읽기·다른 프로세스 잠금으로 EPERM/EBUSY가 날 수 있다).
-- 위험: 읽는 쪽이 회전된 파일을 모르면 집계 범위가 달라진다 — 이어 읽기(§2)로 해결한다. 진행률은 `liveRunIdsFromEvents`가 runId를 못 찾으면 runs 스캔으로 보완하므로(`procedure-progress.ts` 폴백) 참조 끊김에 강하다.
+- 위험: 읽는 쪽이 회전된 파일을 모르면 집계 범위가 달라진다 — 이어 읽기(§2)로 해결한다. 진행률은 `liveRunIdsFromEvents`가 runId를 못 찾으면 runs 스캔으로 보완하므로(`procedure-progress.ts` 폴백) 참조 끊김에 강하다. 프로세스 간에 같은 파일을 동시에 회전하면 뒤에 회전한 쪽이 방금 회전된 세대를 덮어써 1세대가 손실될 수 있다(허용 — 같은 절차서 동시 실행은 막혀 있어 실제 위험은 승인 이벤트 정도).
 
 ### 안 (b) run 수 기준 (보류)
 - (a)가 stat 1회로 가볍고 승인 이벤트 귀속 문제를 피할 수 있어 (b)는 보류한다 (run당 바이트 실측으로 (a) 상한 근거 확보).

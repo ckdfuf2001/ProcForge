@@ -91,6 +91,13 @@ test("M11-2-ui: 실행 중 목록 2줄 + 전환 + 상한(3) 초과", async ({ pa
         // 정리 베스트 에퍼트
       }
     }
+    // M12-e2e-leak: 취소한 run이 끝나기를 최대 30초 기다린다 (정리 중 잠금 경합 방지).
+    {
+      const t0 = Date.now();
+      while (h.app.listActiveRuns().length > 0 && Date.now() - t0 < 30000) {
+        await new Promise((r) => setTimeout(r, 500));
+      }
+    }
   }
 });
 
@@ -142,6 +149,13 @@ test("M11-2-ui-fix: stale 응답이 clear를 덮지 않는다", async ({ page })
         await h.app.uiRunCancel({ runId: r.runId });
       } catch {
         // 정리 베스트 에퍼트
+      }
+    }
+    // M12-e2e-leak: 취소한 run이 끝나기를 최대 30초 기다린다 (정리 중 잠금 경합 방지).
+    {
+      const t0 = Date.now();
+      while (h.app.listActiveRuns().length > 0 && Date.now() - t0 < 30000) {
+        await new Promise((r) => setTimeout(r, 500));
       }
     }
   }
