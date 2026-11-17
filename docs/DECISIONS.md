@@ -1264,3 +1264,11 @@ argv: [...]}` 고정. runner는 run fs에서 직접 실행해 stdout을 golden�
 ## M11
 
 - [M11-close] 재분석 프롬프트 교훈(M11-1-impl), M11-1(a) 절차서별 진행률 읽기 전용 집계, M11-2(c) 동시 실행 상한 3 + 실행 중 목록 UI(stale setInfo epoch 가드 포함)로 M11을 닫는다. 남은 보류는 events 로그 회전, Basic auth 1.18.18 미검증, m75 잔재 단독 재현 불가(L3 첫 diff 감시) 3건이다.
+
+## M12
+
+- [M12-close] events 로그 회전(1 MiB 초과 시 `.1`로 rename해 1세대만 보관, unlink 없이 1회만, 읽을 때는 `.1`부터 이어 읽음; 상수 `EVENTS_ROTATE_BYTES=1048576`)으로 M12를 닫는다. m12-events-rotate 6 tests를 3모드로 통과했다.
+
+## M13
+
+- [M13-1] 사용자 취소로 중단된 노드를 `cancelled`로 기록한다(실패가 아니다). 타입에 값 추가 허용, detail "취소됨" 유지, waiting 중 취소는 현행(`markCancelled`) 유지. 취소 판정은 `isCancelReject` 공용 함수 하나로 수행한다. JUnit에서는 skipped로 매핑하고 UI에는 "취소됨"으로 표시한다. 교훈 집계는 `fail`만 세고 진행률은 `pass`만 완료로 세므로 cancelled는 양쪽 모두에서 제외된다.
