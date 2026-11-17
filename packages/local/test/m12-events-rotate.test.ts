@@ -141,4 +141,19 @@ describe("M12-1 events 회전", () => {
     const got = nonEmptyLines(pfdir, "p");
     expect(got.some((l) => l.includes("g-1"))).toBe(true);
   });
+
+  it("⑥ 기존 .1이 있을 때 rename 실패를 주입해도 .1이 바이트 단위로 그대로다", () => {
+    const root = makeTmp("pf-m12-rot-");
+    const pfdir = join(root, ".procforge");
+    appendEvent(pfdir, "p", runEnd("a-0", "gen-A"));
+    appendEventWithLimit(pfdir, "p", runEnd("a-1", "gen-A"), 10);
+    const bak = eventsLogBackupPath(pfdir, "p");
+    const before = readFileSync(bak, "utf8");
+    expect(before.length).toBeGreaterThan(0);
+    const boom = () => { throw new Error("inject-fail"); };
+    appendEventWithLimit(pfdir, "p", runEnd("b-0", "gen-B"), 10, boom);
+    expect(readFileSync(bak, "utf8")).toBe(before);
+    const got = nonEmptyLines(pfdir, "p");
+    expect(got.some((l) => l.includes("gen-B"))).toBe(true);
+  });
 });

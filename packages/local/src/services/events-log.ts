@@ -1,4 +1,4 @@
-import { appendFileSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync } from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync, renameSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { logger } from "../logger.js";
 
@@ -68,6 +68,7 @@ export function appendEventWithLimit(
   procedure: string,
   obj: Record<string, unknown>,
   limitBytes: number,
+  renameFn: (oldPath: string, newPath: string) => void = renameSync,
 ): void {
   try {
     const p = eventsLogPath(procforgeDir, procedure);
@@ -81,12 +82,10 @@ export function appendEventWithLimit(
     if (size >= limitBytes) {
       const bak = eventsLogBackupPath(procforgeDir, procedure);
       try {
-        try {
-          unlinkSync(bak);
-        } catch {
-          // 기존 보관본이 없으면 무시
-        }
-        renameSync(p, bak);
+        // M12-1-fix: rename 1회만 쓴다 (대상 파일이면 POSIX·Windows 모두 덮어씀 —
+        // Windows는 libuv가 MOVEFILE_REPLACE_EXISTING 사용). 기존 `.1`을
+        // 먼저 지우면 rename 실패 시 보관본이 사라지므로 unlink는 쓰지 않는다.
+        renameFn(p, bak);
       } catch (e) {
         logger.warn(`events rotate 실패(건너뜀): ${e instanceof Error ? e.message : String(e)}`);
       }
