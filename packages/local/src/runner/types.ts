@@ -57,7 +57,9 @@ export type NodeResultStatus =
   | "blocked"
   | "suspended"
   /** M8-1-0 보정: 재검증 대기 — 실행하지 않고 별도 보고(pass 미포함) */
-  | "needs_reverify";
+  | "needs_reverify"
+  /** M13-1: 사용자 취소로 중단 — 실패가 아니다 */
+  | "cancelled";
 
 export type NodeResult = {
   nodeId: string;

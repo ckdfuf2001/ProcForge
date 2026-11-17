@@ -388,7 +388,7 @@ export function RunPanel({
                       r.nodeId
                     )}
                   </td>
-                  <td>{r.status}</td>
+                  <td>{r.status === "cancelled" ? "취소됨" : r.status}</td>
                 </tr>
               ))}
             </tbody>
