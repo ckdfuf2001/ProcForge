@@ -69,8 +69,9 @@
 
 - Basic auth 1.18.18 미검증은 별도 건으로 둔다.
 - TEMP 안의 `opencode*`와 `node-compile-cache`는 기존대로 삭제하지 않는다.
+- 스크립트 타임아웃 경로(`timedOut` → `terminate()`)에는 grace가 없다. 같은 H1/H4 조건이면 타임아웃 run도 멈출 수 있다.
 
-## §5 판정 확정 (M14-0 판정 반영)
+## §5 판정 확정 (M14-2 판정 반영)
 
 1. M14-3은 H1과 H4를 함께 막는 방어 수정으로 진행한다. terminate를 시작한 뒤 `CANCEL_SETTLE_GRACE_MS = 5000`(상수 1개, 신규 env 금지)이 지나도 settle되지 않으면 `cancelled`로 강제 reject하고, `close` 미도래와 terminate 미완료를 로그 2종으로 판별한다.
 2. await 사슬 전체에 상한을 두는 것(H3 대응)은 이번에 하지 않는다. 수정 후에도 `취소됨` 없이 멈춘 run이 나오면 그때 H3를 확정한다.
