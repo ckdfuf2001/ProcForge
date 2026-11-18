@@ -2,9 +2,9 @@
 
 ## §0 현황 (단계 0 실측, 파일:행)
 
-- 기준: HEAD `d058c8f` = origin/master, C: 여유 29,911,478,272B (측정 `2026-11-18T06:33:55.1592663+09:00`, M14-1-impl 단계 0 실측), `git status --porcelain` 출력 없음, 쓰기 확인 `write-check-ok M14-1-impl` 통과.
+- 기준: HEAD `cab58bd` = origin/master, C: 여유 29,911,478,272B (측정 `2026-11-18T06:33:55.1592663+09:00`, M14-1-impl 단계 0 실측 — M14-0 단계 0의 C: 값은 철회되어 같은 단계 0 실측값 하나로 맞춘다), `git status --porcelain` 출력 없음, 쓰기 확인 `write-check-ok M14-1-impl` 통과.
 - 관측한 누출 2종: `StIFxC` (state.json이 `ready`에서 멈춤, `procedures/slow/`가 통째로 사라지고 runs/·sessions/만 남은 부분 삭제), ui-wait-2 (`failed` 상태, cancel.json 없음, 120초 sleep 노드가 5.79초 만에 fail). `ROL7dH`은 누출이 아니라 M13 세션에서 `PROOF_KEEP_TMP=1`로 일부러 남긴 KEEP 잔재이므로 (`tmp.ts:24-27`이면 삭제를 건너뜀) 목록에서 뺀다.
-- `UKKUDS` (M14-1 L3 누출, ready 고착 + procedures 부분 삭제, settle timeout 2회 + EPERM 재시도 약 20회 뒤 afterAll hook 30초 초과).
+- `UKKUDS` (M14-1 L3 누출, ready 고착 + procedures 부분 삭제, settle timeout 2회 + EPERM 재시도 약 20회 뒤 afterAll hook 30초 초과, cancel.json·report.json 없음은 rm 이후 관측이라 근거가 아니다).
 - `ccaGwP` (M14-1-fix L3 누출, run `1ba98636`: 12:14:31 시작 후 12:14:32/33/57 취소 요청 3회에도 31초 이상 `ready` 유지, report.json·cancel.json 없음, `procedures/` 소실). 부분 삭제 폴더에서 report.json·cancel.json이 없다는 것은 근거가 아니다 (rm이 지웠을 수 있으므로 cancelJson 계측은 rm 이전 시점인 settle 안에서 찍는다).
 - 정리 함수 정의:
   - `cleanRegisteredTmp` (`packages/shared/src/tmp.ts:20-36`): `rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })` (`:29`). 실패하면 `failed`에 담고 stderr 1줄 후 삼킨다 (`:30-33`). 호출자는 반환값을 검사하지 않는다.
