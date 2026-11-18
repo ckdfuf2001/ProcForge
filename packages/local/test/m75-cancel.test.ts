@@ -27,6 +27,10 @@ afterEach(async () => {
 // M11-e2e-tmp-leak: L3 뒤 pf-cancel-e2e-* 잔재(+1) 방지 2중망.
 // afterEach settle로도 자식이 늦게 죽으면 afterAll rmSync가 Windows 잠금에
 // 막혀 폴더가 남는다. 여기서 잔존 트리를 직접 죽이고 등록 정리를 재시도한다.
+// M14-1-fix: afterAll 정리 예산. settle 최대 20초×런 수 + 잔존 kill + 재시도
+// 8초 마감을 60초 hook 안에 둔다 (dev-verify의 --hookTimeout=20000보다 파일
+// 인자가 우선하므로 여기서 60000을 박는다). 마감을 넘겨도 FAIL하지 않는다.
+const CLEANUP_DEADLINE_MS = 8000;
 afterAll(async () => {
   for (const t of auditRuns) {
     try {
@@ -36,11 +40,16 @@ afterAll(async () => {
       }
     } catch { /* 정리 베스트 에퍼트 */ }
   }
+  const deadline = Date.now() + CLEANUP_DEADLINE_MS;
   for (let i = 0; i < 20; i++) {
     if (cleanRegisteredTmp().length === 0) break;
+    if (Date.now() >= deadline) {
+      process.stderr.write("[tmp] 정리 마감(8초) 초과, 잔재 남김 (best-effort, FAIL 아님)\n");
+      break;
+    }
     await new Promise((r) => setTimeout(r, 500));
   }
-}, 30000);
+}, 60000);
 
 
 // M7-5-a/b: 취소가 **실제 runner가 띄운 자식**을 멈추는지.
