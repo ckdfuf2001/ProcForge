@@ -18,6 +18,12 @@ import { logger } from "../logger.js";
 export const DEFAULT_SCRIPT_TIMEOUT_MS = 60000;
 
 /**
+ * M14-3: 취소 terminate 뒤 settle 유예. 지나도 settle되지 않으면
+ * cancelled로 강제 reject한다 (판별 로그 2종과 함께).
+ */
+export const CANCEL_SETTLE_GRACE_MS = 5000;
+
+/**
  * M7-5-c: 트리 종료는 **run-control 의 killProcessTree 하나**만 쓴다.
  * (이전에 여기 따로 두었다가 SIGTERM 만 보내, SIGTERM 을 무시하는 스크립트가
  *  영원히 안 끝났다 — 유예 후 SIGKILL 은 run-control 이 그룹 기준으로 처리)
@@ -194,13 +200,25 @@ export function runScript(input: {
   onChild?: (pid: number, proc: ChildProcess) => void;
   /** M7-5-a: 취소 확인. 참이면 트리를 죽이고 cancelled로 끝낸다. */
   isCancelled?: () => boolean;
+  /**
+   * M14-3: 취소 terminate 뒤 강제 reject 유예 (테스트 주입용).
+   * 기본값은 CANCEL_SETTLE_GRACE_MS (지금 동작과 동일).
+   */
+  graceMs?: number;
+  /** M14-3: spawn 대체 (테스트 주입용, 기본값은 node:child_process spawn). */
+  spawnImpl?: typeof spawn;
+  /** M14-3: 종료 대체 (테스트 주입용, 기본값은 killScriptTree). */
+  terminateImpl?: (pid: number) => Promise<unknown>;
 }): Promise<ScriptResult> {
   const timeout = input.timeoutMs ?? DEFAULT_SCRIPT_TIMEOUT_MS;
+  const graceMs = input.graceMs ?? CANCEL_SETTLE_GRACE_MS;
+  const spawnImpl = input.spawnImpl ?? spawn;
+  const terminateImpl = input.terminateImpl ?? killScriptTree;
   const cmd = input.runtime === "node" ? process.execPath : findPython();
   const before = input.projectRoot ? snapshotProject(input.projectRoot) : null;
   // M7-5-b: POSIX 는 detached 로 띄워 프로세스 **그룹 리더**로 만든다.
   // 그래야 그룹 시그널이 손자까지 닿는다.
-  const child = spawn(cmd, [input.scriptAbs], {
+  const child = spawnImpl(cmd, [input.scriptAbs], {
     cwd: input.cwd,
     env: childEnv(),
     detached: process.platform !== "win32",
@@ -213,11 +231,30 @@ if (pid !== undefined) input.onChild?.(pid, child);
   let terminating: Promise<unknown> | null = null;
   const terminate = (): void => {
     if (pid === undefined) return;
-    terminating ??= killScriptTree(pid).catch(() => undefined);
+    terminating ??= terminateImpl(pid).catch(() => undefined);
+  };
+  // M14-3: 취소 terminate 뒤 grace 유예. close 미도래(H1)나 terminate
+  // 미완료(H4)로 settle이 안 되면 cancelled로 강제 reject한다.
+  // 비취소 경로에서는 시작하지 않으므로 동작이 바뀌지 않는다.
+  let closeSeen = false;
+  let graceTimer: ReturnType<typeof setTimeout> | undefined;
+  // done()이 terminating 대기 중에 멈춘 fn (grace 만료 시 직접 실행한다).
+  let pendingFn: (() => void) | null = null;
+  let forceCancel: (() => void) | null = null;
+  const ensureCancelGrace = (): void => {
+    if (graceTimer !== undefined) return;
+    graceTimer = setTimeout(() => {
+      const reason = closeSeen ? "terminate 미완료" : "close 미도래";
+      process.stderr.write(`취소 강제 종료: ${reason} (phase:cancelled)\n`);
+      forceCancel?.();
+    }, graceMs);
   };
   const cancelWatch = input.isCancelled
     ? setInterval(() => {
-        if (input.isCancelled?.()) terminate();
+        if (input.isCancelled?.()) {
+          ensureCancelGrace();
+          terminate();
+        }
       }, 200)
     : undefined;
   let timedOut = false;
@@ -227,6 +264,23 @@ if (pid !== undefined) input.onChild?.(pid, child);
   }, timeout);
 
   return new Promise<ScriptResult>((resolve, reject) => {
+    // M14-3: grace 만료 시 강제 reject.
+    // fn이 terminating 대기 중이면 직접 실행하고, 아직 settle 전이면
+    // terminating을 기다리지 않고 바로 끝낸다.
+    forceCancel = () => {
+      if (pendingFn !== null) {
+        const fn = pendingFn;
+        pendingFn = null;
+        fn();
+        return;
+      }
+      if (!settled) {
+        settled = true;
+        clearTimeout(timer);
+        if (cancelWatch) clearInterval(cancelWatch);
+        reject(Object.assign(new Error("취소됨"), { code: "cancelled" }));
+      }
+    };
     const out: Buffer[] = [];
     const err: Buffer[] = [];
     let outLen = 0;
@@ -236,9 +290,20 @@ if (pid !== undefined) input.onChild?.(pid, child);
       settled = true;
       clearTimeout(timer);
       if (cancelWatch) clearInterval(cancelWatch);
+      // M14-3: grace 타이머는 fn이 실제로 돌 때까지 유지한다 (terminating
+      // 대기 중에 강제 reject가 필요할 수 있다). fn 실행 시점에 지운다.
       // close 가 왔는데 종료가 아직 진행 중일 수 있다 (SIGTERM 유예 대기).
       // 그대로 끝내면 프로세스가 아직 살아 있다.
-      void Promise.resolve(terminating).then(fn);
+      pendingFn = fn;
+      void Promise.resolve(terminating).then(() => {
+        if (pendingFn !== fn) return;
+        pendingFn = null;
+        if (graceTimer !== undefined) {
+          clearTimeout(graceTimer);
+          graceTimer = undefined;
+        }
+        fn();
+      });
     };
     child.stdout?.on("data", (b: Buffer) => {
       outLen += b.length;
@@ -255,6 +320,7 @@ if (pid !== undefined) input.onChild?.(pid, child);
       ),
     );
     child.on("close", (code, signal) => {
+      closeSeen = true;
       done(() => {
         if (input.isCancelled?.()) {
           reject(Object.assign(new Error("취소됨"), { code: "cancelled" }));
