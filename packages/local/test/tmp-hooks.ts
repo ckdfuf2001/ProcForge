@@ -1,5 +1,5 @@
 import { afterAll } from "vitest";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { isAlive, listChildren } from "../src/app/run-control.js";
 import { readRunState } from "../src/services/run-state.js";
@@ -20,7 +20,10 @@ export function useTmpCleanup(): void {
 // (hook 30s > settle 20s). 시간 초과해도 throw하지 않는다.
 export const SETTLE_BUDGET_MS = 20000;
 export async function settleRun(
-  app: { uiRunCancel(input: { runId: string }): Promise<unknown> },
+  app: {
+    uiRunCancel(input: { runId: string }): Promise<unknown>;
+    listActiveRuns?(): { procedure: string; runId: string; status: string; waiting: boolean }[];
+  },
   procforgeDir: string,
   runId: string,
 ): Promise<void> {
@@ -49,6 +52,53 @@ export async function settleRun(
       process.stderr.write(
         `[settle] timeout runId=${info.runId} status=${info.status} alivePids=${info.alivePids.join(",")} cancelJson=${cancelJson}\n`,
       );
+      // M14-2-diag: 같은 runId로 stderr 1줄 덤프 (throw 없음, 신규 env 금지).
+      try {
+        const runDir = join(procforgeDir, "runs", runId);
+        let report = "없음";
+        try {
+          if (existsSync(join(runDir, "report.json"))) report = "있음";
+        } catch {
+          // 무시
+        }
+        let children = "없음";
+        try {
+          children = readFileSync(join(runDir, "children.json"), "utf8").trim();
+        } catch {
+          // 없음
+        }
+        let active = "?";
+        try {
+          const list = app.listActiveRuns?.() ?? [];
+          active = list.some((r) => r.runId === runId) ? "있음" : "없음";
+        } catch {
+          // 무시
+        }
+        let phases = "없음";
+        try {
+          const lines = readFileSync(join(runDir, "log.ndjson"), "utf8").trim().split("\n");
+          phases = lines
+            .slice(-2)
+            .map((l) => {
+              try {
+                const m = /\(phase:([^)]+)\)/.exec(
+                  (JSON.parse(l) as { message?: unknown }).message ?? "",
+                );
+                return m ? m[1] : "?";
+              } catch {
+                return "?";
+              }
+            })
+            .join(",");
+        } catch {
+          // 없음
+        }
+        process.stderr.write(
+          `[settle] dump runId=${runId} report=${report} children=${children} active=${active} log=${phases}\n`,
+        );
+      } catch {
+        // 기록 베스트 에퍼트
+      }
       return;
     }
     await new Promise((r) => setTimeout(r, 100));
