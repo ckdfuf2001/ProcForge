@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, afterAll } from "vitest";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { execSync } from "node:child_process";
 import { ProcForgeApp } from "../src/app/app.js";
@@ -32,9 +32,12 @@ afterEach(async () => {
 // 인자가 우선하므로 여기서 60000을 박는다). 마감을 넘겨도 FAIL하지 않는다.
 const CLEANUP_DEADLINE_MS = 8000;
 afterAll(async () => {
+  const stuck: { runId: string; status: string; alivePids: number[] }[] = [];
   for (const t of auditRuns) {
     try {
-      await settleRun(t.app, t.pfdir, t.runId);
+      await settleRun(t.app, t.pfdir, t.runId, (info) => {
+        stuck.push(info);
+      });
       for (const pid of listChildren(t.pfdir, t.runId)) {
         if (isAlive(pid)) await killProcessTree(pid);
       }
@@ -48,6 +51,17 @@ afterAll(async () => {
       break;
     }
     await new Promise((r) => setTimeout(r, 500));
+  }
+  // M14-1-fix 계측: 멈춘 원인 확정을 위해 남은 잔재마다 run 상태를 정리 실패
+  // 기록에 남긴다 (FAIL 아님 — stderr 1줄씩).
+  for (const t of auditRuns) {
+    try {
+      if (!existsSync(join(t.pfdir, "runs", t.runId))) continue;
+      const st = readRunState(t.pfdir, t.runId);
+      process.stderr.write(
+        `[tmp] 잔재 runId=${t.runId} status=${st?.status ?? "none"} pending=${(st?.pending ?? []).join(",")} done=${(st?.done ?? []).join(",")} waiting=${st?.waiting ? `${st.waiting.nodeId}:${st.waiting.kind}` : "-"} children=${listChildren(t.pfdir, t.runId).join(",")}\n`,
+      );
+    } catch { /* 기록 베스트 에퍼트 */ }
   }
 }, 60000);
 

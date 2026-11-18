@@ -21,6 +21,8 @@ export async function settleRun(
   app: { uiRunCancel(input: { runId: string }): Promise<unknown> },
   procforgeDir: string,
   runId: string,
+  // M14-1-fix 계측: timeout 시 호출자가 run 상태를 정리 실패 기록에 남긴다.
+  onTimeout?: (info: { runId: string; status: string; alivePids: number[] }) => void,
 ): Promise<void> {
   try {
     await app.uiRunCancel({ runId });
@@ -35,9 +37,15 @@ export async function settleRun(
     const active = !!st && (st.status === "running" || st.status === "ready");
     if (alive.length === 0 && !active) return;
     if (Date.now() >= deadline) {
+      const info = { runId, status: st?.status ?? "none", alivePids: alive };
       process.stderr.write(
-        `[settle] timeout runId=${runId} status=${st?.status ?? "none"} alivePids=${alive.join(",")}\n`,
+        `[settle] timeout runId=${info.runId} status=${info.status} alivePids=${info.alivePids.join(",")}\n`,
       );
+      try {
+        onTimeout?.(info);
+      } catch {
+        // 기록 베스트 에퍼트
+      }
       return;
     }
     await new Promise((r) => setTimeout(r, 100));
