@@ -64,6 +64,8 @@ import {
   acquireProcRunLock,
 } from "../services/run-lock.js";
 import { runScript, describeRunError } from "./script-run.js";
+import type { CancelForceReason } from "./script-run.js";
+import { appendRunLog } from "../services/run-log.js";
 import {
   inferPathRole,
   rewritePaths,
@@ -1034,6 +1036,31 @@ function requireUnattendedApproval(
   return null;
 }
 
+/**
+ * M14-3-fix: 강제 종료 판별 기록 + 자식 등록 해제.
+ * 테스트에서 직접 호출할 수 있도록 분리했다 (run.ts의 onCancelForced 본체).
+ * 강제 경로에서는 close가 오지 않아 unregister가 안 되므로 여기서 푼다.
+ */
+export function recordCancelForced(
+  procforgeDir: string,
+  runId: string,
+  nodeId: string | undefined,
+  childPid: number | undefined,
+  onChildEnd: ((pid: number) => void) | undefined,
+  reason: CancelForceReason,
+): void {
+  try {
+    appendRunLog(procforgeDir, runId, {
+      level: "info",
+      ...(nodeId !== undefined ? { nodeId } : {}),
+      message: `취소 강제 종료: ${reason} (phase:cancelled)`,
+    });
+  } catch {
+    // 기록 실패 무시 (stderr 줄은 이미 남음)
+  }
+  if (childPid !== undefined) onChildEnd?.(childPid);
+}
+
 async function execNode(
   opts: RunOptions,
   params: Record<string, string>,
@@ -1244,6 +1271,8 @@ async function execNode(
       return Math.min(10, Math.max(1, a as number));
     })();
     let scriptTries = 0;
+    // M14-3-fix: 강제 종료 시 unregister할 pid (close 미도래면 children.json에 남는다).
+    let childPid: number | undefined;
     for (;;) {
       scriptTries += 1;
       try {
@@ -1259,12 +1288,16 @@ async function execNode(
           ...(opts.onScriptChild
             ? {
                 onChild: (pid: number, proc: { on: (e: string, f: () => void) => void }) => {
+                  childPid = pid;
                   opts.onScriptChild?.(pid);
                   proc.on("close", () => opts.onScriptChildEnd?.(pid));
                 },
               }
             : {}),
           ...(opts.isRunCancelled ? { isCancelled: opts.isRunCancelled } : {}),
+          // M14-3-fix: 강제 종료 판별을 run 로그에 남긴다 (stderr 1줄은 유지).
+          onCancelForced: (reason: CancelForceReason) =>
+            recordCancelForced(opts.procforgeDir, runId, n.id, childPid, opts.onScriptChildEnd, reason),
         });
         resp = { resultText: o.summary, resultJson: o.json };
         break;

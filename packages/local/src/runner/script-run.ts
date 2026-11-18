@@ -23,6 +23,9 @@ export const DEFAULT_SCRIPT_TIMEOUT_MS = 60000;
  */
 export const CANCEL_SETTLE_GRACE_MS = 5000;
 
+/** M14-3-fix: 강제 reject 판별 (run 로그 기록용 콜백). */
+export type CancelForceReason = "close 미도래" | "terminate 미완료";
+
 /**
  * M7-5-c: 트리 종료는 **run-control 의 killProcessTree 하나**만 쓴다.
  * (이전에 여기 따로 두었다가 SIGTERM 만 보내, SIGTERM 을 무시하는 스크립트가
@@ -209,6 +212,8 @@ export function runScript(input: {
   spawnImpl?: typeof spawn;
   /** M14-3: 종료 대체 (테스트 주입용, 기본값은 killScriptTree). */
   terminateImpl?: (pid: number) => Promise<unknown>;
+  /** M14-3-fix: 강제 reject 시 run 로그 기록용 콜백 (run.ts가 연결, stderr 1줄은 유지). */
+  onCancelForced?: (reason: CancelForceReason) => void;
 }): Promise<ScriptResult> {
   const timeout = input.timeoutMs ?? DEFAULT_SCRIPT_TIMEOUT_MS;
   const graceMs = input.graceMs ?? CANCEL_SETTLE_GRACE_MS;
@@ -244,8 +249,13 @@ if (pid !== undefined) input.onChild?.(pid, child);
   const ensureCancelGrace = (): void => {
     if (graceTimer !== undefined) return;
     graceTimer = setTimeout(() => {
-      const reason = closeSeen ? "terminate 미완료" : "close 미도래";
+      const reason: CancelForceReason = closeSeen ? "terminate 미완료" : "close 미도래";
       process.stderr.write(`취소 강제 종료: ${reason} (phase:cancelled)\n`);
+      try {
+        input.onCancelForced?.(reason);
+      } catch {
+        // 기록 실패 무시
+      }
       forceCancel?.();
     }, graceMs);
   };

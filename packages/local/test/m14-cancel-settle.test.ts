@@ -3,9 +3,10 @@ import { EventEmitter } from "node:events";
 import { mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { runScript } from "../src/runner/script-run.js";
+import { recordCancelForced } from "../src/runner/run.js";
+import { registerChild, unregisterChild, listChildren } from "../src/app/run-control.js";
 import { ProcForgeApp } from "../src/app/app.js";
 import { testStack } from "./client-mode.js";
-import { listChildren } from "../src/app/run-control.js";
 import { makeTmp } from "@proof/shared/tmp.js";
 import { useTmpCleanup } from "./tmp-hooks.js";
 
@@ -76,8 +77,9 @@ async function waitEnd(app: ProcForgeApp, runId: string): Promise<string> {
 }
 
 describe("M14-3 취소 grace 강제 reject", () => {
-  it("① close 미도래: grace+1초 안에 cancelled reject + 판별 로그", async () => {
+  it("① close 미도래: grace+1초 안에 cancelled reject + 판별 로그 + 판별 콜백", async () => {
     const cap = captureStderr();
+    const reasons: string[] = [];
     try {
       const t0 = Date.now();
       const err = await runScript({
@@ -88,6 +90,11 @@ describe("M14-3 취소 grace 강제 reject", () => {
         isCancelled: () => true,
         graceMs: 300,
         spawnImpl: (() => fakeChild()) as never,
+        // M14-3-fix 결함 3: 기본 killScriptTree(실제 taskkill) 대신 no-op 주입.
+        terminateImpl: () => Promise.resolve(),
+        onCancelForced: (r) => {
+          reasons.push(r);
+        },
       }).then(
         () => null,
         (e: unknown) => e,
@@ -97,14 +104,16 @@ describe("M14-3 취소 grace 강제 reject", () => {
       expect((err as Error | null)?.message).toBe("취소됨");
       expect(elapsed).toBeLessThanOrEqual(1300);
       expect(cap.lines.some((l) => l.includes("취소 강제 종료: close 미도래"))).toBe(true);
+      expect(reasons).toEqual(["close 미도래"]);
       console.log(`M14-3-① elapsed=${elapsed}`);
     } finally {
       cap.restore();
     }
   }, 15000);
 
-  it("② terminate 미완료: close는 왔는데 끝나지 않으면 같은 결과 + 판별 로그", async () => {
+  it("② terminate 미완료: close는 왔는데 끝나지 않으면 같은 결과 + 판별 로그 + 판별 콜백", async () => {
     const cap = captureStderr();
+    const reasons: string[] = [];
     try {
       const em = fakeChild();
       const t0 = Date.now();
@@ -120,6 +129,9 @@ describe("M14-3 취소 grace 강제 reject", () => {
           setTimeout(() => em.emit("close", 1, null), 50);
           return new Promise(() => {});
         },
+        onCancelForced: (r) => {
+          reasons.push(r);
+        },
       }).then(
         () => null,
         (e: unknown) => e,
@@ -129,6 +141,7 @@ describe("M14-3 취소 grace 강제 reject", () => {
       expect((err as Error | null)?.message).toBe("취소됨");
       expect(elapsed).toBeLessThanOrEqual(1300);
       expect(cap.lines.some((l) => l.includes("취소 강제 종료: terminate 미완료"))).toBe(true);
+      expect(reasons).toEqual(["terminate 미완료"]);
       console.log(`M14-3-② elapsed=${elapsed}`);
     } finally {
       cap.restore();
@@ -194,4 +207,85 @@ describe("M14-3 취소 grace 강제 reject", () => {
     expect(raw1.includes("취소 강제 종료")).toBe(false);
     console.log(`M14-3-④ identical=${norm(raw1) === norm(raw2)}`);
   }, 120000);
+
+  // ⑤⑥: 타이머→콜백→run 로그·등록 해제의 전체 사슬을 검증한다.
+  // run 레벨 강제 재현은 vi.mock으로 spawn을 가로챌 수 없어 결정적으로 불가하므로,
+  // runScript에 가짜 자식을 물리고 실제 recordCancelForced 콜백을 연결한다.
+  function mkForcedFiles(runId: string): { pfdir: string } {
+    const root = makeTmp("pf-m14-settle-");
+    const pfdir = join(root, ".procforge");
+    mkdirSync(join(pfdir, "runs", runId), { recursive: true });
+    registerChild(pfdir, runId, 424242);
+    return { pfdir };
+  }
+
+  it("⑤ 강제 종료 시 log.ndjson에 판별 줄 1줄 (close 미도래)", async () => {
+    const { pfdir } = mkForcedFiles("rid-forced-close");
+    const runId = "rid-forced-close";
+    const reasons: string[] = [];
+    const t0 = Date.now();
+    const err = await runScript({
+      runtime: "node",
+      scriptAbs: "dummy.js",
+      args: {},
+      cwd: "dummy",
+      isCancelled: () => true,
+      graceMs: 300,
+      spawnImpl: (() => fakeChild()) as never,
+      terminateImpl: () => Promise.resolve(),
+      onCancelForced: (r) => {
+        reasons.push(r);
+        recordCancelForced(pfdir, runId, "1", 424242, (pid) => unregisterChild(pfdir, runId, pid), r);
+      },
+    }).then(
+      () => null,
+      (e: unknown) => e,
+    );
+    const elapsed = Date.now() - t0;
+    expect((err as { code?: string } | null)?.code).toBe("cancelled");
+    expect(reasons).toEqual(["close 미도래"]);
+    expect(elapsed).toBeLessThanOrEqual(1300);
+    const lines = readFileSync(join(pfdir, "runs", runId, "log.ndjson"), "utf8").trim().split("\n");
+    expect(lines.length).toBe(1);
+    expect(lines[0]).toContain("취소 강제 종료: close 미도래 (phase:cancelled)");
+    expect(JSON.parse(readFileSync(join(pfdir, "runs", runId, "children.json"), "utf8"))).toEqual([]);
+    console.log(`M14-3-⑤ forced-logged elapsed=${elapsed}`);
+  }, 15000);
+
+  it("⑥ terminate 미완료 경로도 run 로그에 1줄 남기고 children을 비움", async () => {
+    const { pfdir } = mkForcedFiles("rid-forced-term");
+    const runId = "rid-forced-term";
+    const em = fakeChild();
+    const reasons: string[] = [];
+    const t0 = Date.now();
+    const err = await runScript({
+      runtime: "node",
+      scriptAbs: "dummy.js",
+      args: {},
+      cwd: "dummy",
+      isCancelled: () => true,
+      graceMs: 300,
+      spawnImpl: (() => em) as never,
+      terminateImpl: () => {
+        setTimeout(() => em.emit("close", 1, null), 50);
+        return new Promise(() => {});
+      },
+      onCancelForced: (r) => {
+        reasons.push(r);
+        recordCancelForced(pfdir, runId, "1", 424242, (pid) => unregisterChild(pfdir, runId, pid), r);
+      },
+    }).then(
+      () => null,
+      (e: unknown) => e,
+    );
+    const elapsed = Date.now() - t0;
+    expect((err as { code?: string } | null)?.code).toBe("cancelled");
+    expect(reasons).toEqual(["terminate 미완료"]);
+    expect(elapsed).toBeLessThanOrEqual(1300);
+    const lines = readFileSync(join(pfdir, "runs", runId, "log.ndjson"), "utf8").trim().split("\n");
+    expect(lines.length).toBe(1);
+    expect(lines[0]).toContain("취소 강제 종료: terminate 미완료 (phase:cancelled)");
+    expect(JSON.parse(readFileSync(join(pfdir, "runs", runId, "children.json"), "utf8"))).toEqual([]);
+    console.log(`M14-3-⑥ forced-logged elapsed=${elapsed}`);
+  }, 15000);
 });
