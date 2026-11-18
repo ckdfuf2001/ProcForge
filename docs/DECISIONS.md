@@ -1272,3 +1272,8 @@ argv: [...]}` 고정. runner는 run fs에서 직접 실행해 stdout을 golden�
 ## M13
 
 - [M13-1] 사용자 취소로 중단된 노드를 `cancelled`로 기록한다(실패가 아니다). 타입에 값 추가 허용, detail "취소됨" 유지, waiting 중 취소는 현행(`markCancelled`) 유지. 취소 판정은 `isCancelReject` 공용 함수 하나로 수행한다. JUnit에서는 skipped로 매핑하고 UI에는 "취소됨"으로 표시한다. 교훈 집계에서는 제외하고(`fail`만 셈), 진행률에서는 미완료로 둔다(`pass`만 완료).
+
+## M14
+
+- [M14-0] m75 잔재(ready 고착 run + 부분 삭제) 근본 조사 사양. 원인 후보 3개 중 후보 1(`cleanRegisteredTmp`가 rm 전에 registry에서 지워 afterAll 재시도가 공회전함)을 M14-1 대상으로 확정.
+- [M14-1] rm 성공했을 때만 registry에서 지우고, 실패 시 stderr에 오류 코드(`code=`)를 기록한다. m75 afterAll은 hook 60초·재시도 8초 마감(`cleanRegisteredTmpUntil`)으로 묶고, 마감 초과·settle timeout도 FAIL하지 않고 `[tmp] 잔재`·`[settle]` 줄로 기록한다.

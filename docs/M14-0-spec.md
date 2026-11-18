@@ -4,6 +4,8 @@
 
 - 기준: HEAD `d058c8f` = origin/master, C: 여유 29,911,478,272B (측정 `2026-11-18T06:33:55.1592663+09:00`, M14-1-impl 단계 0 실측), `git status --porcelain` 출력 없음, 쓰기 확인 `write-check-ok M14-1-impl` 통과.
 - 관측한 누출 2종: `StIFxC` (state.json이 `ready`에서 멈춤, `procedures/slow/`가 통째로 사라지고 runs/·sessions/만 남은 부분 삭제), ui-wait-2 (`failed` 상태, cancel.json 없음, 120초 sleep 노드가 5.79초 만에 fail). `ROL7dH`은 누출이 아니라 M13 세션에서 `PROOF_KEEP_TMP=1`로 일부러 남긴 KEEP 잔재이므로 (`tmp.ts:24-27`이면 삭제를 건너뜀) 목록에서 뺀다.
+- `UKKUDS` (M14-1 L3 누출, ready 고착 + procedures 부분 삭제, settle timeout 2회 + EPERM 재시도 약 20회 뒤 afterAll hook 30초 초과).
+- `ccaGwP` (M14-1-fix L3 누출, run `1ba98636`: 12:14:31 시작 후 12:14:32/33/57 취소 요청 3회에도 31초 이상 `ready` 유지, report.json·cancel.json 없음, `procedures/` 소실). 부분 삭제 폴더에서 report.json·cancel.json이 없다는 것은 근거가 아니다 (rm이 지웠을 수 있으므로 cancelJson 계측은 rm 이전 시점인 settle 안에서 찍는다).
 - 정리 함수 정의:
   - `cleanRegisteredTmp` (`packages/shared/src/tmp.ts:20-36`): `rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })` (`:29`). 실패하면 `failed`에 담고 stderr 1줄 후 삼킨다 (`:30-33`). 호출자는 반환값을 검사하지 않는다.
   - `settleRun` (`packages/local/test/tmp-hooks.ts:20-45`): `uiRunCancel` 실패는 삼키고 (`:25-29`), 자식 0 + state가 running/ready 아님을 예산 20초 (`:19`)까지 폴링한다 (`:32-36`). 초과해도 throw하지 않고 stderr 1줄 후 리턴한다 (`:37-42`).
@@ -17,7 +19,7 @@
 
 1. afterAll 재시도 루프가 공회전한다. `cleanRegisteredTmp`는 `registry.delete(dir)` (`tmp.ts:23`)를 rm 시도 (`:29`)보다 먼저 수행하므로, 1회 호출 뒤 registry가 빈다. m75 afterAll의 최대 20회 재시도 (`m75-cancel.test.ts:39-42`)는 2회째부터 빈 registry에 대해 `[]`을 받아 즉시 break한다. 즉 EBUSY로 1회 실패한 폴더는 재시도 없이 영구 잔재가 된다.
 2. (약함) settle이 waiting 중인 drive를 종료로 보지 않는다 — 다만 `settleRun`은 맨 처음 `uiRunCancel`을 부르므로 (`tmp-hooks.ts:25-29`), waiting 중인 run은 `markCancelled`로 `cancelled`가 되어 active 판정 (`:35`)에서 벗어난다. m75의 slow 절차서에는 승인 대기도 없고, StIFxC의 `ready` 고착은 settle 조건에서 active이므로 settle은 20초 대기 후 timeout을 stderr에 찍고 넘어간다. 따라서 단독 원인이라기보다 "settle timeout을 삼킨 뒤 rm 1회 실패"(후보 1과 3의 결합)로 본다.
-3. Windows 잠금에 막힌 rm이 조용히 삼켜진다. `cleanRegisteredTmp`는 maxRetries 5회 (`tmp.ts:29`)를 다 써도 실패를 `failed` 반환으로만 남기고 (`:30-33`), 호출자(`useTmpCleanup`, m75 afterEach/afterAll)는 반환값을 검사하지 않는다. 자식 프로세스·열린 로그 핸들이 살아 있으면(`settle` 예산 초과도 throw 없음, `:37-42`) 그 폴더는 통보 없이 남는다.
+3. Windows 잠금에 막힌 rm이 조용히 삼켜진다. `cleanRegisteredTmp`는 maxRetries 5회 (`tmp.ts:22`)를 다 써도 실패를 `failed` 반환으로만 남기고 (`:37-44`), 호출자(`useTmpCleanup`, m75 afterEach/afterAll)는 반환값을 검사하지 않는다. 자식 프로세스·열린 로그 핸들이 살아 있으면(`settle` 예산 초과도 throw 없음, `tmp-hooks.ts:37-42`) 그 폴더는 통보 없이 남는다. 구체화(M14-1·M14-1-fix2에서 구현): 실패 dir은 registry에 유지하고 (`tmp.ts:25-44`), 실패 시 stderr에 `code=`를 기록하며 (`:40`), settle cancel 실패는 `[settle] cancel 실패` (`tmp-hooks.ts:32`), timeout 시점 cancelJson 유무는 `cancelJson=있음|없음` (`tmp-hooks.ts:46-50`), 잔재 run 상태는 `[tmp] 잔재` (`m75-cancel.test.ts:57-65`)로 남긴다. 재시도는 8초 마감 `cleanRegisteredTmpUntil` (`tmp.ts:51-62`, m75 `:33,45`)로 묶고 마감 초과도 FAIL하지 않는다.
 
 ## §2 수정안 (후보별 1안)
 
