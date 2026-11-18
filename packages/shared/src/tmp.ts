@@ -43,3 +43,21 @@ export function cleanRegisteredTmp(rm: RmFn = defaultRm): string[] {
   }
   return failed;
 }
+
+/**
+ * M14-1-fix2: 마감까지 cleanRegisteredTmp를 반복한다 (m75 afterAll용).
+ * 남은 dir 목록을 돌려준다. 마감을 넘겨도 throw하지 않는다. 신규 env 금지.
+ */
+export async function cleanRegisteredTmpUntil(
+  deadlineMs: number,
+  intervalMs: number,
+  rm: RmFn = defaultRm,
+): Promise<string[]> {
+  const deadline = Date.now() + deadlineMs;
+  for (;;) {
+    const failed = cleanRegisteredTmp(rm);
+    if (failed.length === 0) return [];
+    if (Date.now() >= deadline) return failed;
+    await new Promise((r) => setTimeout(r, intervalMs));
+  }
+}

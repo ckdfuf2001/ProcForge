@@ -1,4 +1,6 @@
 import { afterAll } from "vitest";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { isAlive, listChildren } from "../src/app/run-control.js";
 import { readRunState } from "../src/services/run-state.js";
 import { cleanRegisteredTmp } from "@proof/shared/tmp.js";
@@ -21,13 +23,14 @@ export async function settleRun(
   app: { uiRunCancel(input: { runId: string }): Promise<unknown> },
   procforgeDir: string,
   runId: string,
-  // M14-1-fix 계측: timeout 시 호출자가 run 상태를 정리 실패 기록에 남긴다.
-  onTimeout?: (info: { runId: string; status: string; alivePids: number[] }) => void,
 ): Promise<void> {
   try {
     await app.uiRunCancel({ runId });
-  } catch {
-    // 이미 끝났거나 기록 없음 — 아래 대기로 확인한다
+  } catch (e) {
+    // M14-1-fix2(a): 삼키지 않고 기록한다 (호출자는 그대로 대기 확인을 계속한다).
+    process.stderr.write(
+      `[settle] cancel 실패 runId=${runId} err=${e instanceof Error ? e.message : String(e)}\n`,
+    );
   }
   const deadline = Date.now() + SETTLE_BUDGET_MS;
   for (;;) {
@@ -38,14 +41,14 @@ export async function settleRun(
     if (alive.length === 0 && !active) return;
     if (Date.now() >= deadline) {
       const info = { runId, status: st?.status ?? "none", alivePids: alive };
+      // M14-1-fix2(b): cancel.json 유무를 rm 이전 시점(settle 안)에서 기록한다.
+      // 부분 삭제 폴더에서는 파일 부재가 근거가 되지 않으므로 여기서 찍는다.
+      const cancelJson = existsSync(join(procforgeDir, "runs", runId, "cancel.json"))
+        ? "있음"
+        : "없음";
       process.stderr.write(
-        `[settle] timeout runId=${info.runId} status=${info.status} alivePids=${info.alivePids.join(",")}\n`,
+        `[settle] timeout runId=${info.runId} status=${info.status} alivePids=${info.alivePids.join(",")} cancelJson=${cancelJson}\n`,
       );
-      try {
-        onTimeout?.(info);
-      } catch {
-        // 기록 베스트 에퍼트
-      }
       return;
     }
     await new Promise((r) => setTimeout(r, 100));

@@ -7,7 +7,7 @@ import { createUiServer } from "../src/app/ui-server.js";
 import { testStack } from "./client-mode.js";
 import { isAlive, listChildren, killProcessTree } from "../src/app/run-control.js";
 import { readRunState } from "../src/services/run-state.js";
-import { makeTmp, cleanRegisteredTmp } from "@proof/shared/tmp.js";
+import { makeTmp, cleanRegisteredTmp, cleanRegisteredTmpUntil } from "@proof/shared/tmp.js";
 import { useTmpCleanup, settleRun } from "./tmp-hooks.js";
 
 // M9-tmp2: tmp 정리는 등록 역순으로 가장 나중에 돈다.
@@ -32,25 +32,19 @@ afterEach(async () => {
 // 인자가 우선하므로 여기서 60000을 박는다). 마감을 넘겨도 FAIL하지 않는다.
 const CLEANUP_DEADLINE_MS = 8000;
 afterAll(async () => {
-  const stuck: { runId: string; status: string; alivePids: number[] }[] = [];
   for (const t of auditRuns) {
     try {
-      await settleRun(t.app, t.pfdir, t.runId, (info) => {
-        stuck.push(info);
-      });
+      await settleRun(t.app, t.pfdir, t.runId);
       for (const pid of listChildren(t.pfdir, t.runId)) {
         if (isAlive(pid)) await killProcessTree(pid);
       }
     } catch { /* 정리 베스트 에퍼트 */ }
   }
-  const deadline = Date.now() + CLEANUP_DEADLINE_MS;
-  for (let i = 0; i < 20; i++) {
-    if (cleanRegisteredTmp().length === 0) break;
-    if (Date.now() >= deadline) {
-      process.stderr.write("[tmp] 정리 마감(8초) 초과, 잔재 남김 (best-effort, FAIL 아님)\n");
-      break;
-    }
-    await new Promise((r) => setTimeout(r, 500));
+  // M14-1-fix2: 재시도 루프를 shared로 추출 (마감·간격 인자, 무한 재시도 금지).
+  // 마감을 넘겨도 FAIL하지 않고 남은 dir을 돌려준다.
+  const remain = await cleanRegisteredTmpUntil(CLEANUP_DEADLINE_MS, 500);
+  if (remain.length > 0) {
+    process.stderr.write("[tmp] 정리 마감(8초) 초과, 잔재 남김 (best-effort, FAIL 아님)\n");
   }
   // M14-1-fix 계측: 멈춘 원인 확정을 위해 남은 잔재마다 run 상태를 정리 실패
   // 기록에 남긴다 (FAIL 아님 — stderr 1줄씩).

@@ -1,6 +1,6 @@
 import { describe, it, expect, afterAll, vi } from "vitest";
 import { existsSync, rmSync } from "node:fs";
-import { makeTmp, cleanRegisteredTmp } from "../src/tmp.js";
+import { makeTmp, cleanRegisteredTmp, cleanRegisteredTmpUntil } from "../src/tmp.js";
 
 // M14-1: registry 유지 회귀 (rm 실패 dir은 다음 호출이 다시 시도한다).
 // shared는 모드 없음 (testStack 미사용) — 1줄 보고.
@@ -88,4 +88,18 @@ describe("tmp registry 유지", () => {
     rmSync(dir, { recursive: true, force: true });
     console.log(`M14-1-reg-④ stderr-code-ok`);
   });
+
+  it("⑤ 항상 실패하면 마감 안에 돌아오고 남은 dir을 반환함", async () => {
+    const dir = makeTmp("pf-reg-");
+    const t0 = Date.now();
+    const remain = await cleanRegisteredTmpUntil(2000, 100, () => {
+      throw Object.assign(new Error("locked"), { code: "EBUSY" });
+    });
+    const elapsed = Date.now() - t0;
+    expect(remain).toContain(dir);
+    expect(elapsed).toBeLessThanOrEqual(3000);
+    // 잔재 직접 정리 (레지스트리 항목은 afterAll 정리에서 제거됨)
+    rmSync(dir, { recursive: true, force: true });
+    console.log(`M14-1-reg-⑤ elapsed=${elapsed} remain=1`);
+  }, 15000);
 });
