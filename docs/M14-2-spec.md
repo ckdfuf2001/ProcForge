@@ -46,6 +46,7 @@
 - 빠진 phase 1줄: 정상 run의 `취소됨 (phase:cancelled)` (markCancelled→finishRun) 3번째 줄이 47YWVB에는 없고 `취소 요청`만 3회 있다.
 - 비고: loopback/remote 모드에서도 app은 로컬 ProcForgeApp이라 `listActiveRuns`가 있어 `active=있음/없음`이 찍힌다. `active=?`는 예외 시 미측정 표시이다.
 - 47YWVB (`C:\Users\oh\AppData\Local\Temp\pf-cancel-e2e-47YWVB`, mtime `2026-11-18T21:46:01.5010938+09:00`)는 경로·mtime 1줄 보고 후 삭제했다.
+- 47YWVB 마지막 취소(시작 후 25초) 시점에도 `자식 1개` = children.json 등록 잔존 = close 미도래 정황(H1).
 
 ## §1 H1·H3·H4 (근거·반증)
 
@@ -61,6 +62,7 @@
 ## §3 테스트 후보
 
 - [settle] dump 발화 시 run 상태·report 유무·children·active·log phase 확인 (M14-1-fix2 committed 계측).
+- run.ts의 `onCancelForced` → `recordCancelForced` 연결은 테스트 공백(⑤⑥은 콜백에서 직접 호출).
 - L3 로그 집계는 `pf-reg-*`(tmp-registry 주입)를 제외하고 세고, 제외한 수는 1줄로 따로 보고한다.
 - 정상 취소와 stuck 취소의 log phase 대조 (phase `취소됨` 유무).
 - 단독 실행과 L3 부하 실행의 재현율 비교 (타이밍 의존 확인용).
