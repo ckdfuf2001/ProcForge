@@ -72,6 +72,7 @@
 - Basic auth 1.18.18 미검증은 별도 건으로 둔다.
 - TEMP 안의 `opencode*`와 `node-compile-cache`는 기존대로 삭제하지 않는다.
 - 스크립트 타임아웃 경로(`timedOut` → `terminate()`)에는 grace가 없다. 같은 H1/H4 조건이면 타임아웃 run도 멈출 수 있다.
+- run.ts의 `onCancelForced` → `recordCancelForced` 연결은 테스트 공백이다(⑤⑥은 콜백에서 직접 호출).
 
 ## §5 판정 확정 (M14-2 판정 반영)
 
